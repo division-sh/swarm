@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -26,7 +27,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 )
 
 type firstTurnWorkflowToolExec struct {
@@ -176,7 +179,7 @@ func testClaudeCLIManagedRequestInventory(t *testing.T, rejectAt int, inventory 
 		},
 	}
 	tools := []ToolDefinition{
-		{Name: "emit_category_assessed"},
+		{Name: "emit_category_assessed", Schema: map[string]any{"type": "object"}},
 		{Name: "read_file"},
 	}
 	conv := newTestManagedConversation(
@@ -378,6 +381,44 @@ func TestClaudeCLIFirstTurnFakeDockerHelper(t *testing.T) {
 }
 
 func runFirstTurnFakeDockerHelper() int {
+	if i := slices.Index(os.Args, "inspect"); i >= 0 && len(os.Args[i:]) == 4 && os.Args[i+1] == "--format" && os.Args[i+2] == "{{.Id}}" {
+		fmt.Fprintln(os.Stdout, strings.Repeat("a", 64))
+		return 0
+	}
+	if i := slices.Index(os.Args, "top"); i >= 0 && len(os.Args[i:]) == 4 && os.Args[i+2] == "-eo" && os.Args[i+3] == "pid,args" {
+		fmt.Fprintln(os.Stdout, "PID COMMAND\n1 sleep infinity")
+		return 0
+	}
+	if len(os.Args) >= 2 && strings.HasPrefix(os.Args[len(os.Args)-1], worker.Argument+"=") {
+		// This is a CLI framing fixture, not native-Docker transport evidence.
+		invocation := strings.TrimPrefix(os.Args[len(os.Args)-1], worker.Argument+"=")
+		if _, err := worker.InvocationArgument(invocation); err != nil {
+			return 2
+		}
+		reader := bufio.NewReader(os.Stdin)
+		raw, err := worker.ReadFrame(reader)
+		var request worker.Request
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if err != nil || decoder.Decode(&request) != nil || request.Mode != "probe" || request.Gateway.Headers["X-SWARM-Context-Token"] != "ctx-token-368" || request.Gateway.Headers["Authorization"] != "Bearer gateway-token" {
+			fmt.Fprintln(os.Stderr, "CLI fixture received invalid workspace observation")
+			return 2
+		}
+		if json.NewEncoder(os.Stdout).Encode(worker.Ready{Invocation: invocation, Identity: request.Expected}) != nil {
+			return 2
+		}
+		raw, err = worker.ReadFrame(reader)
+		var acknowledgement worker.Acknowledgement
+		decoder = json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if err != nil || decoder.Decode(&acknowledgement) != nil || !acknowledgement.Execute || acknowledgement.Invocation != invocation {
+			return 2
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(worker.Result{Identity: request.Expected, Definitions: []toolgateway.ListedDefinition{{Name: "emit_category_assessed", InputSchema: json.RawMessage(`{"type":"object"}`)}}}); err != nil {
+			return 2
+		}
+		return 0
+	}
 	captureDir := strings.TrimSpace(os.Getenv("FAKE_DOCKER_CAPTURE_DIR"))
 	if captureDir == "" {
 		fmt.Fprintln(os.Stderr, "FAKE_DOCKER_CAPTURE_DIR is required")

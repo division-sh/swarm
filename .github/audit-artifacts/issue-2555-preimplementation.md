@@ -1,9 +1,25 @@
 # Pre-Implementation Coverage Audit: #2555
 
-Agent: agent-g. Phase: pre-audit only; independent coding gate requested.
+Agent: agent-g. Phase: implementation under the approved independent gate.
 Audited origin/master: `76fbddd6dacec435e7807de14562be03b2a47e1d`.
-No production implementation, paid provider invocation, or Telegram call is
-claimed. All new tests below are planned, not passing repair evidence.
+The production implementation is in uncommitted work in this branch; no runtime
+closure, paid provider invocation, or Telegram call is claimed. The original
+matrix below remains a proof plan, not a completed proof audit. The implementation
+stop-condition addendum at the end retains the counterexamples and their
+superseding bounded dispositions. Fork-chat coding is approved; compensation
+and final closure remain dependent on E's #2525 merge and crossed proof.
+The M09 lost-client proof subsequently exposed an unjoined native Docker
+worker; reviewer-g approved its bounded existing-owner repair in
+https://github.com/division-sh/swarm/issues/2555#issuecomment-5978927926.
+Its counterexample remains recorded below; approval is not repair proof.
+
+Independent gate: **approved**, complete chosen class, one PR, not a first
+slice. Binding conditions and full/full qualification:
+https://github.com/division-sh/swarm/issues/2555#issuecomment-5976477595
+The gate ratifies the workspace-only test selector, target-native artifact
+provisioning, and provenance-controlled Linux Docker listener default. It
+requires exact definition mismatches to remain distinct from transport/auth
+unavailability and forbids parent redispatch of mock child effects.
 
 ## Binding governing context
 
@@ -182,6 +198,8 @@ production callers and existing tests that construct a runtime directly.
 | `toolgateway.Binding` + actual listener projection | `serveapp.createServeToolGatewayBinding`, private test, cold boot, retained reconstruction and dev reset | Moved in this work: target-correct projection and reachable conditional default, N01-N07/L03/Q01. Seal and per-boot token remain authoritative. |
 | Same | `runforkexecution.startSelectedContractAgentRuntimeGateway` and prepared selected catalog | Already consumes dedicated fork owner; moved target observation/mock execution, L06. No borrowing normal gateway or predecessor plan. |
 | Same | Fork-chat runtime construction and sandbox MCP transport | Moved in this work: target-local launch and mock HTTP execution; L07/M08. Preserve sandbox versus executable-fork distinctions. |
+| Existing workspace resolution + fork-chat sandbox authority | Mock model/tool targets and `DockerManager.ResolveClaudeWorkspace` fork-state base | Moved in this work under ruling 5978140439: consume `ResolveForkChatWorkspace`, selected-store current-authority validation and exact disposable sandbox projection. Snapshot actor remains provenance; no source container/data/provider backing is inherited. Host-only proof does not qualify Docker. L07/M08 require both-store host and real-Docker continuation, noninterference and refusal/cleanup. |
+| Existing workspace backend decision + selected provider contract | `cliapp.workspaceAdmittedForkChatExecutor.ExecuteForkChat` | Moved in this work: consume exact live-Claude provider identity rather than equating all CLI transports with Claude. M12/L07 require host mock public chat on both stores plus unchanged live-Claude host/none refusal. This is the already-gated fork-chat entrance, not a new class or permission for live host Claude. |
 | Same | Secondary runtime contexts | Current live-Claude multi-context refusal remains; any mock runtime construction must get an exact owned private endpoint, not primary fallback; L05. Framework requirement stops coding. |
 | Same | Retired `SWARM_TOOL_GATEWAY_*`, `SWARM_CLAUDE_USE_MCP` | Already fail closed for live Claude; M05/A04 prove no mock reintroduction or transport-disable/local fallback. |
 | Existing workspace lifecycle/`ExecutionTarget` | `DockerManager.EnsureContainerRunningWithIdentity`, source/system/flow/agent scoped containers, reused identity inspection | Moved in this work: Linux add-host and worker admission at shared create/adopt boundary; N01/N02/N07/M11. Foreign/partial containers never silently adopted. |
@@ -189,6 +207,7 @@ production callers and existing tests that construct a runtime directly.
 | Same | `CheckWorkspaceCLICommandAvailable` and `workspace build` | Moved in this work for explicit target-native mock artifact proof; installation is not network evidence, M11/D03. Existing CLI version checks retained. |
 | `selection.ResolveAgentExecutionSelection`, `AgentRuntimeSet`, `RuntimeFactory` | Normal actors, dynamically spawned/reconfigured actors, templates and persisted executable adoption | Moved in this work: one mock subprocess descriptor and mandatory workspace/binding dependencies, M01/L01-L04. No second selector or credential-as-mock heuristic. |
 | Same | Selected-fork catalog/preparation/materialization and fork-chat | Moved in this work: consume frozen descriptor and exact target; L06/L07. No reselection of persisted work. |
+| `runfork.SelectedForkPreparedActor.RequiresProbe` and preparation/surface validators | Prepared selected actor receipt census, `SurfaceIDs`, binding validation and materialization | Moved in this work: consume the selected descriptor's subprocess transport for live Claude and mock, retaining exact preparation receipt and integrity checks; L06 positive public fork on both stores plus missing/foreign-receipt controls. This is the existing selected preparation consumer, not a new owner or authority. |
 | Same | Direct `NewMockRuntime` test constructors and injected execution fault seams | Moved in this work: tests inject the same bounded process/transport dependencies or test only pre-launch lifecycle operations. No production default local executor retained; M13/Q05 deletion census. |
 | `MockRuntime`, captured `mockperformance`, `pythonmodule` | First completion, tool-result round, frame validation, fuel/memory/output limits | Moved in this work: evaluate immutable captured bytes inside target-native swarm child; M02/M03/M06/M10/M11. Pinned interpreter remains the same owner. |
 | Same + existing completion/conversation owner | `executeMockCompletionWithExecutor`, `Conversation.executeToolResponse` and output/continuation consumption | Moved in this work: remove mock direct dispatch while preserving consumed continuation, logical call identity and terminal output; M04/M06/M07/M09. No parent double execution. |
@@ -259,7 +278,7 @@ PostgreSQL; skips cannot earn either store's credit.
 | M06 | Child tool call is executed again by Conversation | `TestMockGatewayToolRoundCommitBothStores`: terminal emit and nonterminal result/next frame; exactly one call/effect/output, exact consumed continuation and usage, no parent redispatch. |
 | M07 | Retry/restart repeats a committed child effect | `TestMockGatewayOccurrenceRecoveryBothStores`: lose response after committed tools/call, reopen/restore and continue via existing receipt/occurrence; one durable effect, no minted second call authority. |
 | M08 | Mock token crosses sibling run/fork/sandbox | `TestMockGatewayAuthorityIsolationBothStores`: same slug foreign run, selected fork/source and fork-chat sandbox cross-use refused before executor; exact legitimate origins succeed. |
-| M09 | Target cancellation/leak or missing gateway triggers fallback | `TestMockChildFailureAndJoin`: prelaunch unavailable typed/no model, cancellation during interpreter/HTTP joins child and request, post-effect failure preserves committed evidence; no detached cleanup or synthetic success. |
+| M09 | Target cancellation/leak or missing gateway triggers fallback | `TestMockChildFailureAndJoin`: prelaunch unavailable typed/no model, cancellation during interpreter/HTTP joins child and request, post-effect failure preserves committed evidence; no detached cleanup or synthetic success. `TestWorkerRealDockerHTTPDeadlineJoinsGatewayRequest` passes, but `TestWorkerRealDockerLostClientJoinsGatewayRequest` fails 3/3: loss of the local Docker client returns while the exact native child and HTTP request remain live. Approved repair must prove request/process absence before return, exact sibling/source noninterference, no replay and retention of both client and cleanup failures. A deadline-only control cannot close this row. |
 | M10 | Mock child framing permits unbounded/ambiguous input/results | `TestMockAgentProtocolBounds`: missing/unknown/trailing/duplicate fields, oversized stdout/stderr/input, structured error, malformed results refuse under existing bounds; no secrets logged. |
 | M11 | Wrong-OS/stale worker binary is counted as transport proof | `TestWorkspaceMockWorkerArtifactAdmission`: current Linux executable positive; Darwin/missing/wrong ABI/digest/version negative; warm artifact remains exact; no runtime download/build/fallback. |
 | M12 | Agent-free/native/exec consumers lose prerequisite safety | Workspace classifier/preflight matrices: agent-free no child, host mock, mixed live Claude, native bash/file IO, exec tools retain their separate permissions/dependencies; no blanket mock waiver. |
@@ -387,6 +406,405 @@ pre-dispatch check cannot run before model without business effects;
 mock tool/output identity cannot use existing effect/continuation owners.
 Escalate any such condition, do not narrow claims or preserve a bypass.
 
-Independent gate outcome: **requested, not yet recorded**. The user-ratified
-architecture answers are not substituted for reviewer-g's coverage approval.
-Runtime implementation remains frozen until the issue thread records it.
+Historical pre-audit outcome above: requested at audit-only head baadec1e4.
+The independent coding gate was subsequently **approved** in comment 5976477595.
+That approval remains the original boundary; the following newly exposed
+contradictions require a bounded disposition before their implementation.
+
+## Implementation stop-condition addendum: compensation and sandbox target
+
+Recorded 2026-10-04 against audit-only HEAD baadec1e4 plus uncommitted #2555
+implementation. No production commit, final qualification or PR is claimed.
+The existing 48-row class and one-PR ceiling are unchanged; L01/L04/L07/M08
+cannot be called closed from host-only or in-memory controls.
+
+1. **Persisted activation compensation, L01/L04.**
+   `agentLifecycleCoordinator.abortUnlaunchedLoopLocked` writes
+   `OperationKind: "start_failed"`. Both selected-store schemas exclude that
+   literal from the lifecycle operation union. A compiled lifecycle control
+   reached the SQLite CHECK refusal when target-local admission failed. The
+   bad literal is already present on the audited master. The existing
+   `agent_lifecycle_authority.transitions.prepared_execution_publication`
+   contract requires joined fail-closed compensation, not a surviving running
+   durable cell. Requested repair: use the existing canonical compensation
+   operation with exact generation and non-executable disposition, then prove
+   persisted refusal, no publication, settled completion and legitimate fresh
+   retry on both stores. No new operation kind, schema, ledger or lifecycle
+   framework. The canonical operation choice is not yet ruled; production
+   compensation remains unchanged and frozen. Disposition requested at
+   https://github.com/division-sh/swarm/issues/2555#issuecomment-5977855287.
+
+2. **Docker fork-chat source-target interference, L07/M08.**
+   `conversationForkChatActor` retains the immutable snapshot's exact concrete
+   source identity. Both `MockRuntime` and `ResolveClaudeWorkspace` fork state
+   consume `ResolveWorkspaceForCapabilityAdmission`; its concrete-identity
+   branch calls `resolveWorkspace(..., false)`. That branch addresses the source
+   actor's existing execution container without its data-projection identity,
+   so the identity-checked workspace owner removes and replaces the source
+   container. `TestForkChatWorkspaceAdmissionCannotRetireSourceExecution`
+   reproduced this **3/3**: one source-container removal, no returned error.
+   This is an injected Docker-state owner counterexample, not real native-Docker
+   transport proof. Host public fork-chat passes do not cover this mismatch.
+   The governing sandbox and provider-private-state contracts require source
+   noninterference and isolated fork execution, while preserving snapshot actor
+   identity. Requested repair: project the exact existing fork-chat authority
+   through the workspace target owner without choosing the ordinary source
+   actor target; no identity erasure, fabricated normal-run authority, live-data
+   materialization, new workspace framework or shared provider state. Production
+   target changes on this path remain frozen pending disposition. Required proof:
+   source target/labels/files/loop unchanged, exact sandbox tool restrictions,
+   host and real Docker public fork-chat/continuation, refusal before model, and
+   cleanup of only the sandbox resources, on SQLite and PostgreSQL.
+
+Systematic-consumption delta: ordinary concrete activation, runless startup
+admission, ordinary live data projection, selected-fork execution and fork-chat
+must remain distinct exact authorities inside the existing workspace owner.
+The two fork-chat consumers named above share the defective target entrance;
+neither may retain it after the repair. Existing lifecycle compensation is the
+only observed owner for refused activation; no duplicate owner was found.
+
+Tracker/watchlist action: keep #2555 as the complete class tracker and refine
+`transport_policy_and_surface_parity` with these counterexamples. E #2496
+coordination remains required for compensation; #1779's paid half and F #2319
+remain separate. No new issue, POTENTIAL_ISSUES entry or staged closure claim.
+Independent transport and resource-cleanup proof may continue, but no final
+qualification or merge-ready claim is appropriate while these paths are frozen.
+
+### Independent proof delta after the stop-condition report
+
+All receipts below exercised audit-only HEAD baadec1e4 plus the uncommitted
+implementation, not a final committed head. They earn only the named partial
+credit. Evidence is retained outside the worktree in
+`worktrees/agent-g-2555-evidence/`; no paid provider or Telegram invocation ran.
+
+| Receipt | Exact executed proof and scope |
+| --- | --- |
+| `forkchat-source-interference.log` | `TestForkChatWorkspaceAdmissionCannotRetireSourceExecution`, count 3: FAIL 3/3, one source-container removal with nil error. Workspace owner counterexample using injected Docker state, not real Docker transport credit. |
+| `cli-transport-consumer-delta.log` | Managed and sandbox definition-admission matrix, native child recheck after successful observation and gateway shutdown, existing CLI fresh/resumed inventory settlement and startup UUID framing: PASS. The CLI fake-Docker fixture now understands bounded probe messages; its assertions are preserved and it earns no native-Docker credit. |
+| `transport-race-controls.log` | Focused planned/disabled/empty MCP admission, exact definition matrix, native HTTP child auth/occurrence/recheck, worker outcome/identity/bounds/protocol and HTTP observation/refusal/lost-reply controls: PASS under race, count 3 in llm, mcp, toolgateway and workspace/worker. No selected-store restart or lost Docker-client join credit from these tests. |
+| `compiled-host-and-lifecycle-controls.log` | `TestWorkspaceMCPCompiledHostConformance`, `TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults`, duplicate-closure negative controls and release-package public-boundary guard: PASS. Host journey crosses the real gateway and native worker; the legacy Docker emulator is not a real-container proof. |
+| `doctor-listener-private-controls.log` | Free doctor gateway resource cleanup/concurrency/cancellation, explicit listener provenance, workspace-build identity and private-test controls: PASS. Partial Docker-creation fault injection is owner compensation proof, not default Linux gateway reachability. |
+
+`git diff --check` passed. Watchlist refinement is published at swarm-docs
+df97076, and E coordination update is comment 5978069634. Full/full clean-head
+server2 qualification, hosted Ubuntu default Docker positive/negative, all
+remaining both-store retained/lifecycle rows, lost-client join and final proof
+audit remain pending. The canonical compensation and sandbox target repairs are
+still unchanged pending the requested bounded disposition.
+
+### Binding stop-condition dispositions, 5978140439
+
+Independent ruling: https://github.com/division-sh/swarm/issues/2555#issuecomment-5978140439.
+Fork-chat target repair is approved inside this one PR through the existing
+workspace/container owner. Mock and Claude fork-state consume the same exact
+current-authority projection; source identity stays provenance. No persistent
+sandbox state or new execution contract is authorized. Existing selected-store
+effect authority currency rejects a retired/foreign fork-turn group before any container
+mutation; exact target cleanup cannot retire the source. The original L07/M08
+host/Docker/both-store rows remain obligations, not closure claims.
+
+Pre-model target admission uses the existing selected-store fork authority
+reader through `effects.ForkChatWorkspaceCurrent`, accepting only the exact
+owned prepared/executing group with a live lease. `IsExternalEffectAuthorityCurrent`
+remains executing-only; no provider attempt is minted by workspace observation.
+Both stores share the existing fork-field comparator, with an explicit
+workspace-only phase allowance. Ordinary startup/selected/normal readers do
+not gain this permission. The workspace owner then preserves source actor
+provenance and derives only disposable target identity. The both-store authority
+matrix proves prepared observation is not execution, all identity/fence
+dimensions reject foreign input, and terminal groups refuse.
+
+E's #2525 alone owns `self_release` compensation with `start_failed` trigger.
+No duplicate edit or cherry-pick in #2555. L01/L04 and final closure depend on
+the actual merge, integration and G's target-local refusal/retry proof on both
+stores: exact generation, durable stopped/non-executable state, joined cleanup,
+retained refusal cause and clean later retry. Independent transport work may
+continue without waiting. If E changes/drops the hunk, re-gate that dependency.
+
+### Fork-chat implementation and partial proof progress
+
+The bounded target repair is implemented in the uncommitted #2555 worktree;
+audit-only HEAD remains baadec1e4. These are WIP receipts, not exact final-head
+qualification or closure of the complete 48-row class.
+
+- Canonical target entrance: `workspace.ResolveForkChatWorkspace`, consumed by
+  mock model/tool execution and Claude fork-state resolution. Source actor
+  identity remains frozen provenance; exact fork turn, request, owner, fence,
+  bundle and process projection select isolated disposable resources.
+- Canonical currency: the existing selected-store effect owner exposes
+  read-only `IsForkChatWorkspaceAuthorityCurrent` over the same fork-field
+  comparator. Only current prepared/executing groups admit target observation;
+  ordinary executable currency remains executing-only. Terminal cleared
+  leases produce clean refusal rather than a nullable-boolean scan error.
+- Container creation delegates to the existing owner without ordinary stale
+  identity replacement for sandbox targets. Foreign targets refuse; partial
+  start failures join exact identity-checked cleanup. Host roots and Docker
+  tmpfs never inherit live source data or provider backing.
+- Gateway dependency failure retains its existing classification; the failed
+  fork occurrence is terminal. Reusing its request key cannot launch another
+  completion. A new request consumes a distinct exact sandbox authority.
+
+| Receipt | Executed proof, credit and limits |
+| --- | --- |
+| `forkchat-exact-target-race.log` | `TestForkChatWorkspaceAdmissionCannotRetireSourceExecution`, `TestForkChatWorkspaceRejectsBadAuthorityBeforeMutation` and `TestClaudeStateNamespace`, race x3: PASS. Includes malformed/missing/expired/foreign authority, source/mode mismatch, foreign named container and partial-start cleanup. Injected Docker is owner fault proof only. |
+| `forkchat-consumer-crossed-controls.log` | Mock supported-surface retained restart on both stores, canonical sandbox descriptor, immutable HTTP dispatch authority, no-dispatch/observed/lost-response settlement, exact selected-store workspace currency and owned startup-evidence controls: PASS. Store-bearing leaves exercised both databases; this is not the complete retained crash matrix. |
+| `forkchat-host-public-typed-refusal.log` | Public fork/chat/continuation/replay and stale-target refusal on SQLite and PostgreSQL through native host worker and real MCP HTTP: PASS. Durable and RPC envelopes match; refused occurrence has zero completions, keyed retry cannot redispatch, new occurrence succeeds. Source files and session survive, and a later public directive completes through MCP. Internal H composition, not public mock serve or paid provider credit. |
+| `forkchat-server2-docker-public-typed-refusal.log` | Public Docker fork/chat/continuation/replay, stale-target and actual network-disconnect refusal on both stores: PASS. Source immutable container ID, labels, running state, sentinel file and session survive admission, execution, refusal, joined cleanup and later source directive. Frozen snapshot reads and stubbed emits remain isolated; no live fact changes or duplicate effect. Explicit bridge topology on server2 is hardened-host proof, not implicit default-Linux or hosted Ubuntu acceptance. |
+| `forkchat-host-exact-lifecycle.log`, `forkchat-server2-exact-lifecycle.log` | Strengthened final WIP journeys: PASS on both stores, respectively host and real Docker. In addition to the above oracles, the exact source lifecycle identity/epoch/generation/phase/config/topology/process binding stays unchanged. The Docker H composition explicitly selects the Docker backend, not a host-config presentation with only an injected target. |
+| `forkchat-server2-claude-state-offline.log` | `TestClaudeStateDockerRetentionAndRefusal`: PASS with real Docker, synthetic transcripts and network none. Claude fork-state uses the same isolated target; continuation recognizes its private head, never inherits source/provider files, removes only its tmpfs, and leaves the normal conversation readable. No successful paid Claude turn or Telegram delivery. |
+| `worker-server2-interpreter-http-join.log` | `TestWorkerRealDockerIdentityReuseAndCancellationJoin` and `TestWorkerRealDockerHTTPDeadlineJoinsGatewayRequest`: PASS. Real immutable worker reuse and bounded interpreter cancellation leave no native worker; the HTTP case first reaches a deliberately held list request, then deadline refusal retains observed pre-model facts, cancels the actual request and joins the worker. This does not prove an externally killed Docker client or every retained interruption branch. Both leaves are added to the existing hosted workspace-image proof command. |
+| `forkchat-spec-current.log` | Complete API specification package: PASS; governing spec includes shared exact sandbox projection, prepared observation versus execution, foreign-container refusal and joined cleanup. |
+
+Earlier failed receipts remain evidence: the one-time create handler and the
+directive's intentionally narrowed tool surface exposed fixture mistakes, not
+new runtime obligations. The later source directive now uses its explicitly
+delivered notice tool in an isolated harness with no external delivery channel.
+No real Telegram message was sent.
+
+Remaining: original A/M/L/Q temporal, multi-context and complete retained crash
+proof not yet credited; hosted implicit-Linux Docker positive/negative; final
+clean-head full/full qualification and PR proof audit. L01/L04 additionally
+require #2525's actual merge and G's both-store exact activation-refusal/retry
+proof. No compensation hunk was duplicated or cherry-picked. The current
+receipts do not justify claiming only #2525 remains.
+
+### Claude caller and temporal launch delta
+
+`resolveSessionClaudeState` runs before `prepareCompletionContext`. The public
+fork executor supplies the exact fork authority, but not the selected-store
+controller. The Claude consumer now attaches its existing controller to that
+read-only workspace observation, just as the mock consumer does; no authority
+is fabricated and no completion attempt is created. The new regression fails
+before the handoff repair and passes after it. The opaque provider backing
+request remains the exact fork-private request on first and continued-head
+resolution; a changed fence fails before binding.
+
+| Receipt | Executed proof and limits |
+| --- | --- |
+| `claude-fork-controller-before.log` | `TestClaudeForkWorkspaceReceivesExistingControllerBeforeBackingMutation`: FAIL before the caller handoff repair; no current controller reaches the workspace owner. |
+| `claude-fork-controller-after-race.log` | Above regression plus existing fork continuation, acknowledged cleanup, release/readback and admission-precedence controls: PASS race x3. This is caller/protocol-owner proof, not paid-provider or durable-store backing credit; the independent both-store public mock and real-Docker state rows retain their separate credit. |
+| `claude-temporal-gateway-launch-race.log` | `TestClaudeEveryLaunchRechecksGatewayBeforeModelInvocation`: PASS race x3 across first/resumed/tool-result calls and stream-json/json formats. Each real native-child probe first succeeds, then the endpoint is closed. The actual launch owner refuses with observed pre-model `workspace_gateway_unreachable`, zero provider attempts, no model sentinel, unchanged session outcome and joined context-token cleanup. The protocol backing and inventory server are fixtures, not live Claude or store-settlement proof. |
+
+### M09 counterexample: remote worker survives attached-client loss
+
+Independent bounded disposition requested:
+https://github.com/division-sh/swarm/issues/2555#issuecomment-5978888837.
+
+The approved M09 census includes child/request join, not only loss-of-response
+classification. A discriminating real-Docker test now first reaches a held
+HTTP `tools/list` from the native worker, kills **only its own attached local
+Docker client**, then observes `RunWorker` return. The worker and its actual HTTP
+request remain live after return. The normal request-deadline control joins both.
+
+- `worker-server2-lost-client-join-x3.log`: lost-client FAIL 3/3; request-deadline
+  control PASS 3/3. `docker top` retains the exact
+  `/opt/swarm/bin/swarm --internal-workspace-worker` process in every failure.
+- Owner/consumer census: `workspace.RunWorker -> workerCommand -> exec.Cmd.Wait`
+  currently joins the attached local client, not remote execution after that
+  client's failure. Mock model, gateway probe and gateway tool-call consumers
+  all share this owner. No second remote worker interpreter was found.
+- Class model remains the chosen complete #2555 transport/lifetime class;
+  M09 is refined, not split or credited as fixed. Tracker decision: repair
+  the issue and existing transport watchlist before more remote-cleanup code.
+- Requested bounded architecture: retain exact remote child ownership and join
+  or dispose it through the existing worker/workspace owner even after client
+  loss. Do not remove a live source/ordinary container, infer completion from
+  elapsed time, turn a lost response into known pre-model success, retry a
+  committed tool or introduce a process/attempt ledger, generic supervisor,
+  compatibility path or new framework. Proposed spec delta binds remote
+  execution cleanup separately from attached-client completion.
+- Superseding independent disposition: bounded repair approved in comment
+  5978927926. The existing owner may use a worker-local disconnect signal only
+  with real-Docker proof of cancellation and join. The proposed ephemeral launch
+  coordinate is carried in the exact child argument/handshake for read-only
+  process observation, never persisted as a PID/attempt ledger. A child cannot
+  execute without the parent's exact launch acknowledgement. Loss of stdin
+  cancels joined work; the parent must observe the admitted worker gone or retain
+  a cleanup-unproven outcome alongside the original client failure. No container
+  retirement, retry, supervisor or new persistent owner is authorized. If that
+  bounded mechanism cannot be proven, stop for LEAD rather than detach work.
+  #2525's separate E-owned
+  compensation dependency remains unchanged; neither final class closure nor
+  a review-ready/full-qualification claim is made.
+
+### M09 bounded repair and WIP proof under 5978927926
+
+The shared `RunWorker` now binds Docker execution to an immutable container ID
+and an ephemeral exact launch coordinate. The native worker sends its exact
+identity/coordinate before execution and requires the matching acknowledgement.
+The parent keeps stdin open; attachment loss cancels the native execution and
+joins its input observer and HTTP/interpreter work. Inherited Linux stdin is
+duplicated into Go's poller so closing the owned descriptor actually interrupts
+its read. No PID is retained, no execution ledger/supervisor or dependency is
+added, and no source/sibling container is retired.
+
+Read-only Docker process observation checks the exact admitted binary/argument
+in the exact immutable container before cleanup is claimed. Docker requires a
+PID column for that observation, but its value is never execution authority or
+a kill target. A failed/malformed observation or unacknowledged launch retains
+cleanup-unproven uncertainty. The original client failure and independent
+cleanup failure remain in the error chain. All model/probe/tool consumers get
+an uncertain error on a lost launched response, not a retryable call failure;
+mock settlement additionally refuses to classify unproven cleanup as no dispatch.
+Cancellation has a closed native result field so logical cancellation/deadline
+does not become an unclassified internal failure or hide an independent failure.
+
+| Receipt | Executed proof and exact limits |
+| --- | --- |
+| `worker-server2-disconnect-final-race-x3.log` | All six `TestWorkerRealDocker*` leaves PASS race x3 (79.300s): immutable reuse/interpreter cancellation; held HTTP deadline; externally killed attached client; a committed HTTP call with lost reply and exactly one dispatch; both original killed-client and injected cleanup exit retained; held sibling request survives and completes, exact source container ID survives and can execute later. Successful joins assert actual request/process absence before return. The injected observer-failure case requires an uncertain outcome, then the proof separately owns exact eventual disposal; it never fabricates a successful join. Explicit bridge, not hosted default credit. |
+| `worker-m09-owner-and-consumers-race.log` | Remote launch-acknowledgement/framing/cancellation controls, exact process-argument/header corruption, cleanup failure, native host refusal, mock observed/lost/unproven settlement and real MCP native-child authority/auth/recheck controls PASS race x3. No store-credit from the in-memory settlement fixture; the zero selected toolgateway leaves in this command earn no credit. |
+| `worker-cli-framing-race-adequate-timeout.log` | Existing canonical first-turn frame and fresh/resumed malformed/missing/null/native-inventory controls PASS race x1 (59.444s). An earlier race x3 receipt exceeded its two-minute test budget and remains recorded; isolated non-race and adequately bounded race proof pass. No live Claude or native-Docker credit from the CLI framing fixture. |
+| `worker-protocol-public-fork-both-stores.log` | Public host and real-Docker fork/chat, continuation, exact keyed replay/refusal/new-key retry, snapshot-only tools, source container/files/exact lifecycle/session noninterference and later source directive PASS on SQLite and PostgreSQL (113.898s). Internal H composition, explicit bridge; no public mock serve or paid-provider claim. |
+| `worker-m09-authoritative-spec.log` | Complete API specification package PASS after the remote-lifetime/spec delta. |
+| `worker-m09-host-call-cancellation-race.log` | Real native-host call reaches a committed/held HTTP checkpoint, is canceled, and returns only after the request retires. It retains started/unobserved uncertainty and `context.Canceled`, exactly one call, and subsequent workspace continuity: PASS race x3 (11.033s including host refusal controls). No durable-store credit from the counted test server. |
+| `worker-crossed-authority-and-cleanup-race.log` | Normal/selected-fork MCP chronology, exact sibling provider-coordinate isolation/replay fencing and prepared-gateway accepted-handler retirement PASS race x3. Existing owners are preserved; no additional settlement or gateway owner. |
+| `worker-m09-compiled-host-doctor-live-negative.log` | Compiled private worker entry and public host `swarm test` read/emit/store assertion, doctor static/no-credit versus actual in-container initialize, explicit-loopback refusal, and live `serve --dev` pre-model/ready refusal PASS (45.694s). Doctor Docker positive is explicit authored bridge; the paid/provider-launch sentinel remains untouched. No public Docker test/default-Linux credit from this receipt. |
+| `worker-m09-retained-restart-both-stores.log` | Existing public-RPC internal-H mock emission, follow-up, exact effective frame and retained graceful restart PASS on SQLite/PostgreSQL (15.867s). This is not the complete forced interruption/retained crash matrix. |
+
+The real-Docker matrix exposed and repaired the non-pollable input observer;
+its earlier failed receipt is retained. A compiled command delta first exposed
+an invalid source sync: an unanchored rsync exclusion of `swarm` also omitted
+`cmd/swarm`. Corrected syncing excludes only `/swarm`, validates the source
+copy by checksum, and includes a compiled private-entry regression. The real
+Docker observer also forwards the exact handshake and joins its own forwarding
+reader; it never simulates worker execution or tool responses. Its previous
+compiled failures earn no proof credit. Hosted implicit-default and final
+same-head full/full qualification remain required.
+
+The later compiled Docker attempt correctly refused the server2 default
+`mas_default` network (known host firewall restriction). `swarm test` deliberately
+accepts only its private workspace backend selector, not deployment network
+settings; passing a deployment `workspace.network` config cannot override that
+contract. No runtime flag or topology inheritance was added. The public Docker
+positive/successor-refusal proof remains unchanged and required on hosted Ubuntu,
+without an override. Explicit-network doctor and internal-H Docker credit stay
+separate. A test-quarantined network env accidentally forwarded to a public
+command was removed, not admitted by weakening env validation.
+
+The original 48-row gate remains complete-class/one-PR, not a new slice.
+M09 has named partial WIP evidence, not final-head closure. #2525 compensation
+is still E-owned and unmerged; L01/L04 need integration and both-store crossed
+proof. Other original temporal/multi-context/retained-crash/hosted/qualification
+and final-audit obligations remain uncredited until actually executed.
+
+### M09 downstream consumption correction
+
+The existing audited `Conversation.executeToolResponse` consumer converted a
+typed uncertain transported call into ordinary tool feedback with a nil error.
+That permits a successor model round, despite the call possibly having committed.
+This is within M07/M09 and ruling 5978927926's no-replay requirement, not a new
+owner or class expansion. `TestMockConversationTransportUncertaintyCannotBecomeToolFeedback`
+crosses an actual native host child and HTTP call: the server counts a call then
+closes its response socket. The uncertain branch failed 3/3 before correction;
+the known observed-tool-failure control passed. After correction, both branches
+and existing ordinary failed-emit/model-outcome controls passed race x3 (8.073s).
+
+The Conversation now consumes the existing failure class to stop uncertain mock
+transport outcomes immediately, leaving the existing completion continuation
+unconsumed. It does not create a successor model frame, deliver a successful tool
+result, or authorize another call. Known observed tool failures retain normal
+feedback. The canonical HTTP/worker failure owners and original error causes
+remain unchanged. This native-HTTP proof is store-neutral; durable recovery and
+public both-store paths still require their separate matrix credit.
+
+`TestGatewayTurnContextEffectStoryScopeSelectedStoreParity` now also includes
+`native_worker_committed_lost_reply` on SQLite and PostgreSQL. The native host
+worker calls the real MCP gateway and existing authored-HTTP effect owner; a
+test transport drops the reply only after a successful gateway result. The
+same exact occurrence is refused on replay. Durable settled effects and launched
+activity remain exactly two (the original success plus the lost-reply call),
+and the actual authored-HTTP server receives exactly two dispatches. Original
+scope-refusal assertions remain unchanged. This and the native auth/occurrence/
+temporal controls passed race x3 (60.724s), with both stores executed rather
+than skipped. This is selected-store/real-HTTP integration credit, not public
+CLI restart or a complete M07 recovery claim.
+
+The original forced-restart H journey passed both backend subtests but its
+aggregate failed removing sealed data projections (51.769s). That red receipt
+is retained; it is not a green qualification. The parent-owned golden root
+now restores only directory-removal permission after later child cleanups join.
+It never changes live projection access or follows an outside symlink. The
+new cleanup ordering/noninterference control passes race x3 (1.020s); the
+unchanged dual-store forced-restart journey must pass as an aggregate before
+receiving credit. No production lifecycle cleanup contract was changed.
+
+### M09/M10 cancellation and response-identity delta
+
+The native result writer checked cancellation before its typed failure owner.
+A tools/call that reached a held HTTP endpoint could therefore lose possible-
+commit evidence and return bare `canceled`. The corrected, bounded fixture
+consumes its request body so it can actually observe the connection closing;
+the first fixture timeout is retained and earns no counterexample credit.
+The corrected native counterexample fails three times with exactly one call
+and no typed uncertainty. The writer now preserves an existing failure envelope
+first; bare cancellation keeps the existing closed cancellation field. The
+parent join retains its own cancellation cause alongside an observed typed
+failure, without turning observed success into failure due to later cancellation.
+No result union, lifecycle owner, recovery state or schema is added.
+
+The Conversation's inner result parser also now distinguishes malformed
+post-call content/value from pre-dispatch definition mismatch. Both new
+malformed-result cases failed three times before correction; possible commit
+now stops the conversation, while a valid observed tool error keeps feedback.
+
+| Receipt | Current executed evidence and limits |
+| --- | --- |
+| `worker-cancel-uncertainty-before-corrected.log` | Native held-call cancellation loses its typed possible-commit result: FAIL 3/3 before repair. The original unbounded/unread-body fixture timeout is retained separately and is not production attribution. |
+| `worker-cancel-uncertainty-after-race.log` | Full native protocol/remote framing/launch-ack/cancellation package PASS race x3 (3.501s), preserving typed uncertainty and bare cancellation as distinct outcomes. |
+| `worker-m09-docker-final-joined-race-x3.log` | All seven actual Linux Docker leaves PASS race x3 (99.207s), no skips. Adds committed-call deadline uncertainty to the original lost-client/deadline/identity/interpreter/sibling/source/error-retention controls. Ordinary successful joins still require request/process absence before return. The injected observer-failure leaf retains uncertainty and both failures, then separately owns eventual disposal. Its previous aggregate RED is retained: it incorrectly applied successful-join assertions to an intentionally unproven join. Explicit bridge, not hosted default proof. |
+| `worker-m09-native-host-final-race.log` | Actual native-host held committed call cancellation, exactly one call, truthful uncertainty/cause, request join and subsequent continuity PASS race x3 (11.139s). |
+| `worker-m09-conversation-final-race.log` | Native child + actual HTTP lost/malformed content/malformed value and observed-error controls PASS race x3 (14.041s), one call/token, no parent redispatch or successor call. |
+| `worker-m09-settlement-classification-final-race.log` | Existing completion outcome owner preserves never-started/observed pre-model/observed-model/lost-response/cleanup-unproven dispositions PASS race x3 (1.060s); fixture is not durable-store evidence. |
+| `mock-committed-tool-reopen-both-stores-race.log` | Real gateway/native child/authored HTTP call, acknowledged commit with deliberately lost reply, replay refusal before and after native-store reopen with a fresh registry/Gateway PASS race x3 on both stores (39.997s). Existing scope negatives and exact effect/activity/HTTP cardinality retained. Native selected-store reopen, not public process crash credit. |
+| `worker-m09-forced-restart-both-stores-fixed.log` | Unchanged retained H forced-interruption aggregate now PASS on both stores (37.388s), including the parent-owned cleanup-order/noninterference control. The earlier cleanup RED remains recorded. No public mock serve or paid-provider credit. |
+| `mock-context-preparation-native-race.log` | Two actual prepared MockRuntime factories, independent runtime bindings/Gateways/registries and native target-local initialize/list PASS race x3 (22.219s). Foreign registry and boot tokens refuse; closed primary cannot fall back to secondary; secondary remains usable; zero business calls and no leaked registration. The injected target fixture is not workspace-owner isolation or public multi-context serving proof. |
+| `worker-doctor-resource-lifetime-final-race.log` | Free host probe/concurrent cleanup, occupied foreign listener preservation, partial Docker construction/cleanup faults and canceled probe PASS race x3 (7.968s). Fault Docker is a cleanup fixture, not actual container network credit. |
+| `worker-m09-spec-cancellation.log` | Complete API-spec package PASS after the typed cancellation/spec delta. |
+
+All results still bind audit-only `baadec1e4` plus captured uncommitted WIP,
+not a final clean head. The original complete-class one-PR gate, E-owned #2525
+dependency, hosted default-Linux proof, remaining original matrix, full/full
+qualification, exact-head CI and final proof audit are unchanged. No new ruling
+or reduced closure is requested for these existing-owner consumption fixes.
+
+### Exact durable-refusal and retained consumer proof
+
+The replay proof now requires the existing durable effect owner's exact
+`external_effect_replay_refused` envelope both before and after store reopen.
+Generic `isError` membership cannot earn no-replay credit: a foreign/stale
+authority error would be nondiscriminating. Both stores pass this stronger
+oracle with a fresh gateway/registry after reopen and unchanged effect,
+activity and actual dispatch cardinality. No production path changed for
+this proof refinement.
+
+| Receipt | Executed evidence and limits |
+| --- | --- |
+| `worker-durable-replay-exact-reason-both-stores-race.log` | Real native-child/gateway/authored HTTP acknowledged commit, deliberately lost response, exact durable replay-refusal reason before/after native-store reopen PASS race x3 on SQLite/PostgreSQL (38.006s). Native reopen, not public process-death proof. |
+| `worker-selected-fork-retained-matrix.log` | `swarm-test` PASS: `TestSelectedForkPublicChangedTargetExecutionBothStores` through the public-RPC H mock path (serveapp 11.163s), plus selected operation-replacement fault cuts, retained-source selected execution, committed-process-death recovery and selected-input execution-evidence matrices (runforkexecution 24.068s). Both stores execute; no skips. The agent-free retained-source and lower-level fault matrices retain their own credit, not mock transport or complete interrupted-effect closure. |
+| `worker-reset-binding-and-context-matrix.log` | `swarm-test` PASS (16.561s): public changed-target fork after reset, successor reconciliation before execution build, retained/clear/historical served-reset controls on both stores, and unchanged multi-context live-Claude refusal. No paid-provider or public multi-context mock-serving claim. |
+| `worker-toolgateway-closed-result-final-race.log` | Complete toolgateway package PASS race x3 (1.083s), preserving exact authentication, closed response shape, listener ownership and deadline controls. Store-neutral boundary proof. |
+
+### Independent provider/worker package qualification
+
+The broader first aggregate `worker-provider-independent-package-matrix.log`
+was RED. It exposed missing workspace/probe phases in older provider fixtures,
+an obsolete disconnected-MCP acceptance assertion and mock constructors lacking
+their now-required native workspace. These are G-owned corrections, not the
+master-red jobs attributed to #2557. The RED receipt remains retained.
+
+The first retirement-fixture migration also incorrectly fed a workflow executor
+into forensic fork chat. That is not the supported fork policy: public fork chat
+validates the exact `ConversationForkChatPrepared.ValidateSandboxPolicy` union
+before construction. The original selected-workflow retirement assertion now
+uses its actual managed catalogue and runless startup authority, and still
+requires all three retired names to disappear. No lexical retirement owner,
+host-Claude permission or fallback was added to make the fixture pass.
+
+| Receipt | Exact scope and credit |
+| --- | --- |
+| `worker-independent-fixture-final-race.log` | Claude fresh/resumed native/MCP/mixed/empty, process/child-identity/timeout characterization and startup missing-CLI/auth failures PASS race x3 (203.117s); selected-workflow retirement projection PASS race x3 (1.033s). Simulated Docker process selection runs the native worker and real HTTP probe but earns no real-container credit. Original outcomes, argument ordering and token-lifetime assertions remain. |
+| `worker-provider-independent-package-final-matrix.log` | `swarm-test` complete llm/MCP/workspace/toolgateway/runfork packages PASS (58.035s/2.559s/21.829s/0.014s/0.014s). Original seven real-Docker M09 leaves run without skips under explicit bridge; opt-in Claude backing/reset leaves are skipped and uncredited. No whole-suite or hosted default-Linux credit. |
+| `worker-native-model-captured-input-bounds-race.log` | Native host captured model bytes/digest, conflicting and changed on-target source, exact interpreter/engine/snapshot identities, wrong digest, denied import, actual output cap and rejected fuel/memory/output/entry overrides PASS race (17.878s); earlier x3 also passes. Empty PATH excludes ambient Python/Claude/Docker. Interpreter fuel/memory exhaustion remain separately owned controls, not inferred from override refusal. |
+
+The complete 48-row gate and all remaining final-head/hosted/dependency
+conditions above remain unchanged.

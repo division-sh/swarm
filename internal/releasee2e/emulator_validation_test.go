@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -498,8 +499,7 @@ func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string, startup bool)
 
 func validReleaseScaffoldCreateArgs(sourceProjection string) []string {
 	name := "swarm-" + releaseE2EFixtureScope + "-scaffold"
-	return []string{
-		"create",
+	return append(releaseWorkerCreateArgs(), []string{
 		"--name", name,
 		"--network", releaseE2ENetwork,
 		"--label", "dev.swarm.bundle_hash=bundle-v2:sha256:" + strings.Repeat("a", 64),
@@ -514,12 +514,11 @@ func validReleaseScaffoldCreateArgs(sourceProjection string) []string {
 		"-v", mustReleaseE2EDurableBackingKey(releaseE2EDurableScaffold, "") + ":/opt/swarm/scaffold",
 		"-w", "/opt/swarm/scaffold",
 		releaseE2EWorkspaceImage, "sleep", "infinity",
-	}
+	}...)
 }
 
 func validReleaseAgentCreateArgs(sourceProjection string, runBound bool) []string {
-	args := []string{
-		"create",
+	args := append(releaseWorkerCreateArgs(), []string{
 		"--name", releaseE2EFixtureAgent,
 		"--network", releaseE2ENetwork,
 		"--label", "dev.swarm.bundle_hash=bundle-v2:sha256:" + strings.Repeat("a", 64),
@@ -537,7 +536,7 @@ func validReleaseAgentCreateArgs(sourceProjection string, runBound bool) []strin
 		"--label", "dev.swarm.reset.eligible=true",
 		"--label", "dev.swarm.source_projection=" + releaseE2EProjectionID,
 		"--label", "dev.swarm.workspace.scope=per-agent",
-	}
+	}...)
 	if runBound {
 		digest := strings.Repeat("b", 64)
 		args = append(args,
@@ -556,6 +555,18 @@ func validReleaseAgentCreateArgs(sourceProjection string, runBound bool) []strin
 		"-w", releaseE2EAgentWorkdir,
 		releaseE2EWorkspaceImage, "sleep", "infinity",
 	)
+}
+
+func releaseWorkerCreateArgs() []string {
+	args := []string{"create"}
+	if runtime.GOOS != "linux" {
+		return args
+	}
+	path, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	return append(args, "--add-host", "host.docker.internal:host-gateway", "--mount", "type=bind,source="+path+",destination=/opt/swarm/bin/swarm,readonly")
 }
 
 func validReleaseEvidence() []fakeDockerRecord {

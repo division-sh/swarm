@@ -115,6 +115,40 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	}
 }
 
+func TestHostManagerCapabilityAdmissionCreatesOnlyWorkspaceRoot(t *testing.T) {
+	sourceProjection, _ := testRuntimeSourceProjection(t)
+	manager := NewHostManager()
+	manager.SetConfig(HostConfig{
+		WorkspaceRoot:    filepath.Join(t.TempDir(), "host-workspaces"),
+		SourceProjection: sourceProjection,
+		SourceMountPoint: LogicalSourceMount,
+	})
+	bindTestHostProjection(t, manager, sourceProjection)
+	root, err := manager.hostRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("unprepared root: %v, want absent", err)
+	}
+	target, err := manager.ResolveWorkspaceForCapabilityAdmission(context.Background(), models.AgentConfig{
+		ID:            "observer",
+		ExecutionMode: "live",
+		Identity:      runtimeagentidentitytest.RootDeclared(t, "observer", "test/agents.yaml"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(target.Workdir)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatalf("admitted workspace root: info=%v error=%v", info, err)
+	}
+	children, err := os.ReadDir(root)
+	if err != nil || len(children) != 0 {
+		t.Fatalf("admission created execution/data children: %v, %v", children, err)
+	}
+}
+
 func TestHostManagerSameBundleProcessReplacementReusesDurableWorkspaceRoot(t *testing.T) {
 	first, _ := testRuntimeSourceProjectionNamed(t, "same-host-source")
 	second, _ := testRuntimeSourceProjectionNamed(t, "same-host-source")
