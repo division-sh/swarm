@@ -19,6 +19,7 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 		"internal/channelonboarding/model.go",
 		"internal/channelonboarding/publication.go",
 		"internal/cliapp/verify_deployment.go",
+		"internal/runtime/channel_activation_admission.go",
 		"internal/runtime/channelactivation/owner.go",
 		"internal/runtime/context_manager.go",
 		"internal/runtime/engine/types.go",
@@ -29,6 +30,7 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 		"internal/runtime/runtime.go",
 		"internal/runtime/tools/channel_runtime.go",
 		"internal/runtime/workflow_validation.go",
+		"internal/serveapp/channel_onboarding.go",
 		"internal/serveapp/main.go",
 		"internal/serveapp/public_ingress.go",
 	}
