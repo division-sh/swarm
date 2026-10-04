@@ -101,24 +101,12 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 		}
 		obligations[identity] = true
 	}
-	for _, finding := range r.Errors() {
+	for _, finding := range r.admissionBlockingFindings(policy) {
 		class := finding.FailureClass
 		if class == "" {
 			class = failures.ClassSchemaInvalid
 		}
 		block(class)
-	}
-	if policy.FatalWarnings {
-		for _, finding := range r.Warnings() {
-			if admissionExcludedWarning(finding.CheckID, policy.ExcludedFatalWarningChecks) {
-				continue
-			}
-			class := finding.FailureClass
-			if class == "" {
-				class = failures.ClassSchemaInvalid
-			}
-			block(class)
-		}
 	}
 	if r.Interrupted {
 		d.Complete, d.Interrupted = false, true
@@ -127,6 +115,19 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 		d.Complete = false
 	}
 	return d
+}
+
+func (r Report) admissionBlockingFindings(policy AdmissionFindingPolicy) []Finding {
+	findings := r.Errors()
+	if !policy.FatalWarnings {
+		return findings
+	}
+	for _, finding := range r.Warnings() {
+		if !admissionExcludedWarning(finding.CheckID, policy.ExcludedFatalWarningChecks) {
+			findings = append(findings, finding)
+		}
+	}
+	return findings
 }
 
 func (o AdmissionObservation) validIdentity() bool {

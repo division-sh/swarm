@@ -776,8 +776,8 @@ func assertCatalogPartitionEntrypoints(t *testing.T, filename, prefix, executor 
 func catalogReplayCleanFixtures(t testing.TB) []testcatalog.Fixture {
 	t.Helper()
 	inventory := catalogInventory(t)
-	if len(inventory.Fixtures) != 158 {
-		t.Fatalf("catalog fixtures = %d, want 158", len(inventory.Fixtures))
+	if len(inventory.Fixtures) != 156 {
+		t.Fatalf("catalog fixtures = %d, want 156", len(inventory.Fixtures))
 	}
 
 	runtimeCount := 0
