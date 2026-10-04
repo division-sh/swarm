@@ -8223,6 +8223,180 @@
     ]
   },
   {
+    "file": "internal/serveapp/channel_delivery_anchor_supported_surface_test.go",
+    "before_hash": "b55820d29d7355b0c831bbe219d6e15e7b66b6f9a5c18b8fb56361cc63108ccb",
+    "after_hash": "a00a6b152604748ff476d0317b3a834df409cb7964e984b909c1e2212bd68f28",
+    "edits": [
+      {
+        "start": 15,
+        "add": [
+          "\t\"github.com/division-sh/swarm/internal/packadmission\"",
+          "\truntimepkg \"github.com/division-sh/swarm/internal/runtime\"",
+          "\t\"github.com/division-sh/swarm/internal/runtime/bootverify\"",
+          "\t\"github.com/division-sh/swarm/internal/runtime/contracts\""
+        ]
+      },
+      {
+        "start": 16,
+        "add": [
+          "\t\"github.com/division-sh/swarm/internal/runtime/correlation\""
+        ]
+      },
+      {
+        "start": 19,
+        "add": [
+          "\t\"github.com/division-sh/swarm/internal/runtime/semanticview\""
+        ]
+      },
+      {
+        "start": 303,
+        "remove": [
+          "\t\t\tvar schema map[string]any",
+          "\t\t\tif err := yaml.Unmarshal(body, \u0026schema); err != nil {",
+          "\t\t\t\treturn err"
+        ],
+        "add": [
+          "\t\t\tpins := \"pins:\\n  inputs:\\n    - work.requested\\n    - effect.requested\\n    - observer.requested\\n\"",
+          "\t\t\toutputs := \"  outputs: [observer.requested]\\nconnect:\\n  - {event: observer.requested, from: ., to: observers}\\n\"",
+          "\t\t\tif withNotice {",
+          "\t\t\t\tpins += \"    - notice.requested\\n\"",
+          "\t\t\t\toutputs = \"  outputs: [observer.requested, notice.requested]\\nconnect:\\n  - {event: observer.requested, from: ., to: observers}\\n  - {event: notice.requested, from: ., to: observers}\\n\""
+        ]
+      },
+      {
+        "start": 307,
+        "remove": [
+          "\t\t\tschema[\"pins\"] = map[string]any{\"inputs\": []string{\"work.requested\", \"effect.requested\"}}",
+          "\t\t\tdelete(schema, \"connect\")",
+          "\t\t\tbody, err = yaml.Marshal(schema)",
+          "\t\t\tif err != nil {",
+          "\t\t\t\treturn err"
+        ],
+        "add": [
+          "\t\t\t// Keep the executable gate's scalar styles intact while relocating its pins.",
+          "\t\t\told := pins + outputs",
+          "\t\t\tif strings.Count(string(body), old) != 1 {",
+          "\t\t\t\treturn fmt.Errorf(\"channel anchor fixture changed its exact pins/connect declaration\")"
+        ]
+      },
+      {
+        "start": 313,
+        "add": [
+          "\t\t\tbody = []byte(strings.Replace(string(body), old, \"pins:\\n  inputs:\\n    - work.requested\\n    - effect.requested\\n\", 1))"
+        ]
+      },
+      {
+        "start": 323,
+        "remove": [
+          "\tvar schema map[string]any",
+          "\tif err := yaml.Unmarshal(body, \u0026schema); err != nil {",
+          "\t\tt.Fatal(err)"
+        ],
+        "add": [
+          "\tif string(body) != \"name: telegram-agent\\n\" {",
+          "\t\tt.Fatalf(\"channel anchor fixture requires the isolated root declaration, got:\\n%s\", body)"
+        ]
+      },
+      {
+        "start": 327,
+        "remove": [
+          "\tinputs, outputs := []any{}, []any{}",
+          "\tconnects := []any{}"
+        ],
+        "add": [
+          "\tvar pins, connects strings.Builder",
+          "\tpins.WriteString(\"pins:\\n  inputs:\\n\")"
+        ]
+      },
+      {
+        "start": 334,
+        "remove": [
+          "\t\tinputs = append(inputs, event)",
+          "\t\toutputs = append(outputs, event)"
+        ],
+        "add": [
+          "\t\tfmt.Fprintf(\u0026pins, \"    - %s\\n\", event)",
+          "\t}",
+          "\tpins.WriteString(\"  outputs:\\n\")",
+          "\tconnects.WriteString(\"connect:\\n\")",
+          "\tfor _, event := range events {",
+          "\t\tfmt.Fprintf(\u0026pins, \"    - %s\\n\", event)"
+        ]
+      },
+      {
+        "start": 340,
+        "remove": [
+          "\t\tconnects = append(connects, map[string]any{\"event\": event, \"from\": \".\", \"to\": target})",
+          "\t}",
+          "\tschema[\"pins\"] = map[string]any{\"inputs\": inputs, \"outputs\": outputs}",
+          "\tschema[\"connect\"] = connects",
+          "\tbody, err = yaml.Marshal(schema)",
+          "\tif err != nil {",
+          "\t\tt.Fatal(err)"
+        ],
+        "add": [
+          "\t\tfmt.Fprintf(\u0026connects, \"  - {event: %s, from: ., to: %s}\\n\", event, target)"
+        ]
+      },
+      {
+        "start": 348,
+        "add": [
+          "\tbody = append(body, []byte(pins.String()+connects.String())...)"
+        ]
+      },
+      {
+        "start": 360,
+        "add": [
+          "func TestScalar2556ChannelAnchorSourcePreservesGateText(t *testing.T) {",
+          "\tfor _, withNotice := range []bool{false, true} {",
+          "\t\tt.Run(fmt.Sprintf(\"notice_%t\", withNotice), func(t *testing.T) {",
+          "\t\t\troot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)",
+          "\t\t\tdisableChannelOnboardingBusinessConsumers(t, root)",
+          "\t\t\twriteChannelAnchorJourneySource(t, root, withNotice)",
+          "\t\t\traw, err := os.ReadFile(filepath.Join(root, \"reviews\", \"schema.yaml\"))",
+          "\t\t\tif err != nil {",
+          "\t\t\t\tt.Fatal(err)",
+          "\t\t\t}",
+          "\t\t\tfor _, text := range []string{`fields: {result: \"approved\"}`, `fields: {result: \"rejected\"}`} {",
+          "\t\t\t\tif strings.Count(string(raw), text) != 1 {",
+          "\t\t\t\t\tt.Fatalf(\"relocation lost exact quoted gate text %s:\\n%s\", text, raw)",
+          "\t\t\t\t}",
+          "\t\t\t}",
+          "\t\t\trepo := canonicalrouting.RepoRoot(t)",
+          "\t\t\tbundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})",
+          "\t\t\tif err != nil {",
+          "\t\t\t\tt.Fatal(err)",
+          "\t\t\t}",
+          "\t\t\thash, err := contracts.BundleHash(bundle)",
+          "\t\t\tif err != nil {",
+          "\t\t\t\tt.Fatal(err)",
+          "\t\t\t}",
+          "\t\t\tfact, err := correlation.NewSourceArtifactFact(hash)",
+          "\t\t\tif err != nil {",
+          "\t\t\t\tt.Fatal(err)",
+          "\t\t\t}",
+          "\t\t\tprojection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact})",
+          "\t\t\tif err != nil {",
+          "\t\t\t\tt.Fatal(err)",
+          "\t\t\t}",
+          "\t\t\tif findings := bootverify.Run(context.Background(), projection.Source(), bootverify.Options{Purpose: bootverify.StructuralValidation}).HardInvalidities(); len(findings) != 0 {",
+          "\t\t\t\tt.Fatalf(\"composed channel anchor source is invalid: %#v\", findings)",
+          "\t\t\t}",
+          "\t\t})",
+          "\t}",
+          "}",
+          ""
+        ]
+      }
+    ],
+    "slots": [
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change",
+      "writeChannelAnchorJourneySource: preserve quoted gate result fields during child relocation; replace the exact pin/connect source instead of losing scalar styles through map re-emission",
+      "writeChannelAnchorJourneySource: root pins/connects contain declarations, not expression values; original isolated root must match exactly",
+      "TestScalar2556ChannelAnchorSourcePreservesGateText: both notice variants use real pack admission and effective-source projection before structural verification"
+    ]
+  },
+  {
     "file": "internal/serveapp/expression_value_r2_record_test.go",
     "before_hash": "995e84435bcea07244f9587dd1b661cec06ada84ff1350fb531c0be6cc6f2620",
     "after_hash": "d338f4b1f7943a3a0801bc3fb843d7e3c12e3d7ee608e28fb386659fec2d966f",
