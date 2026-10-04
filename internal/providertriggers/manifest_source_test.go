@@ -166,6 +166,78 @@ func TestTriggerPatternConversionAdmissionAndExecution(t *testing.T) {
 	}
 }
 
+func TestTriggerPatternAdmissionRejectsNonStringCaptureProperties(t *testing.T) {
+	for _, optional := range []bool{false, true} {
+		for _, tc := range []struct{ kind, schema string }{
+			{"integer", "{type: integer}"},
+			{"number", "{type: number}"},
+			{"boolean", "{type: boolean}"},
+			{"object", "{type: object}"},
+			{"array", "{type: array, items: {type: string}}"},
+			{"null", "{type: 'null'}"},
+			{"any", "{type: any}"},
+		} {
+			t.Run(fmt.Sprintf("optional=%t/type=%s", optional, tc.kind), func(t *testing.T) {
+				body := fmt.Sprintf(triggerPatternFixture, `^(?P<reference>.+)$`, optional)
+				body = strings.Replace(body, "reference: {type: string}", "reference: "+tc.schema, 1)
+				manifest, err := parseManifestAt([]byte(body), "packs/acme/trigger.yaml")
+				if err == nil || !strings.Contains(err.Error(), "capture reference requires a string output property") || !strings.Contains(err.Error(), "packs/acme/trigger.yaml:") {
+					t.Fatalf("non-string capture schema admitted: %v", err)
+				}
+				if manifest.Validate() == nil {
+					t.Fatal("rejected source published a usable policy")
+				}
+			})
+		}
+	}
+}
+
+func TestTriggerPatternAdmissionRejectsRequiredPropertyWithoutCapture(t *testing.T) {
+	for _, optional := range []bool{false, true} {
+		t.Run(fmt.Sprintf("optional=%t", optional), func(t *testing.T) {
+			body := fmt.Sprintf(triggerPatternFixture, `^(?P<reference>.+)$`, optional)
+			body = strings.Replace(body, "required: [reference]", "required: [reference, address]", 1)
+			manifest, err := parseManifestAt([]byte(body), "packs/acme/trigger.yaml")
+			if err == nil || !strings.Contains(err.Error(), "required output property address has no named capture") || !strings.Contains(err.Error(), "packs/acme/trigger.yaml:") {
+				t.Fatalf("unsupplied required property admitted: %v", err)
+			}
+			if manifest.Validate() == nil {
+				t.Fatal("rejected source published a usable policy")
+			}
+		})
+	}
+}
+
+func TestTriggerPatternAdmissionPreservesCaptureParticipationAndValueValidation(t *testing.T) {
+	for _, optional := range []bool{false, true} {
+		t.Run(fmt.Sprintf("optional=%t", optional), func(t *testing.T) {
+			body := fmt.Sprintf(triggerPatternFixture, `^/(?P<reference>.*)(?:@(?P<address>[a-z]+))?$`, optional)
+			plan := compileTriggerTestPlan(t, parseTriggerTestBody(t, body))
+			delivery, err := plan.Accept(Request{Payload: map[string]any{"message": map[string]any{"text": "/"}}})
+			if err != nil || len(delivery.Events) != 2 || !reflect.DeepEqual(delivery.Events[1].Payload["command"], map[string]any{"reference": ""}) {
+				t.Fatalf("empty participating capture or absent optional capture changed: %+v, %v", delivery, err)
+			}
+
+			uncaptured := strings.Replace(body, "address: {type: string}", "address: {type: integer}", 1)
+			uncaptured = strings.Replace(uncaptured, `(?:@(?P<address>[a-z]+))?`, "", 1)
+			plan = compileTriggerTestPlan(t, parseTriggerTestBody(t, uncaptured))
+			if delivery, err := plan.Accept(Request{Payload: map[string]any{"message": map[string]any{"text": "/ok"}}}); err != nil || len(delivery.Events) != 2 {
+				t.Fatalf("uncaptured optional property rejected: %+v, %v", delivery, err)
+			}
+
+			for _, constrained := range []string{
+				strings.Replace(body, "reference: {type: string}", "reference: {type: string, minLength: 2}", 1),
+				strings.Replace(body, "required: [reference]", "required: [reference, address]", 1),
+			} {
+				plan = compileTriggerTestPlan(t, parseTriggerTestBody(t, constrained))
+				if delivery, err := plan.Accept(Request{Payload: map[string]any{"message": map[string]any{"text": "/x"}}}); err == nil || len(delivery.Events) != 0 {
+					t.Fatalf("per-delivery schema rejection weakened: %+v, %v", delivery, err)
+				}
+			}
+		})
+	}
+}
+
 func TestTriggerBodyProgrammaticAdmission(t *testing.T) {
 	var zero Manifest
 	if _, err := zero.Accept(Request{}); err == nil {

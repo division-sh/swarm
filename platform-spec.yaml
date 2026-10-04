@@ -11565,8 +11565,11 @@ tool_model:
           integer to canonical decimal text. `text_enum_map` requires a finite exact input/output map, accepts text only,
           and validates every mapped output against the declared post-conversion schema at pack admission.
           `pattern` is authored as `convert: {pattern: <RE2 regex>}` over text, emitting an object of matched named captures.
-          Compile it once at BODY admission. Every named capture must be a distinct property of the declared object schema;
-          unmatched optional captures are omitted. A nonmatching optional field is omitted; a nonmatching required field
+          Compile it once at BODY admission. Every named capture must be a distinct string property of the declared object schema,
+          and every required property must have a named capture. Reject incompatible property kinds or missing required captures
+          before publishing the policy. Unmatched optional captures are omitted; empty participating captures remain empty text.
+          Capture participation and value refinements are validated per delivery, not through regex satisfiability analysis.
+          A nonmatching optional field is omitted; a nonmatching required field
           fails normalization. Validate the complete result against the declared schema. Provider-specific regex knowledge
           lives in packs, not platform provider guards or constants. Source artifact
           presence is not conversion or backend selection. There is no implicit coercion, missing-key fallback, or unknown
