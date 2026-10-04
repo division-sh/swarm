@@ -1336,11 +1336,11 @@ func TestDataTextFile2456HostileGrammarNoMutationBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			const oldPins = "events: [root.ready]"
+			const oldPins = "    - root.ready\n"
 			if strings.Count(string(schema), oldPins) != 1 {
 				t.Fatalf("dotted fixture has changed output pin: %s", schema)
 			}
-			if err := os.WriteFile(schemaPath, []byte(strings.Replace(string(schema), oldPins, "events: [root.ready, root.ready.body]", 1)), 0o600); err != nil {
+			if err := os.WriteFile(schemaPath, []byte(strings.Replace(string(schema), oldPins, "    - root.ready\n    - root.ready.body\n", 1)), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(conformanceRepoRoot(t), root, contracts.DefaultPlatformSpecFile(conformanceRepoRoot(t)))

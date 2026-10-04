@@ -22,7 +22,7 @@ func PinRewriteSyntaxSource(t testing.TB, name string) string {
 	case "RewriteRejectsUnratifiedOrAmbiguousForms-5":
 		return "pins: {inputs: {events: [{event: work.start, resolution: {mode: fan-out}}]}}\n"
 	case "RewriteRejectsUnratifiedOrAmbiguousForms-6":
-		return "pins: {inputs: {events: [{event: work.start, resolution: {mode: fan-in, aggregation: sum}}]}}\n"
+		return RetiredFanInCoordinatorSchema()
 	default:
 		t.Fatalf("unknown pins rewrite specimen %q", name)
 		return ""

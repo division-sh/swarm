@@ -181,7 +181,7 @@ func TestRawProviderOutputUsesOnlyExplicitDeclaringFlowConnection(t *testing.T) 
 		schema["ingress"].(map[string]any)["alias"] = "other-chat"
 	})
 	mutateProviderAuthorityYAML(t, filepath.Join(root, "telegram-ingress", "schema.yaml"), func(schema map[string]any) {
-		schema["pins"].(map[string]any)["outputs"] = map[string]any{"events": []any{"inbound.telegram"}}
+		schema["pins"].(map[string]any)["outputs"] = []any{"inbound.telegram"}
 	})
 	mutateProviderAuthorityYAML(t, filepath.Join(root, "schema.yaml"), func(schema map[string]any) {
 		schema["connect"] = []any{map[string]any{"event": "inbound.telegram", "from": "telegram-ingress", "to": "other-ingress"}}
@@ -234,9 +234,10 @@ func TestProviderRootReceiverBindsImportedInputAtCanonicalCoordinate(t *testing.
 		schema["imports"] = map[string]any{"provider_trigger_events": []any{
 			map[string]any{"provider": "telegram", "event": eventName},
 		}}
-		schema["pins"] = map[string]any{"inputs": map[string]any{"events": []any{eventName}}}
+		schema["pins"] = map[string]any{"inputs": []any{eventName}}
 		schema["connect"] = []any{map[string]any{"event": eventName, "from": "telegram-ingress", "to": "."}}
 	})
+	canonicalrouting.AddProviderRootConsumer(t, root)
 	source := loadProviderAuthoritySource(t, root)
 	pin, ok := source.FlowInputEventPin(".", eventName)
 	if !ok {
@@ -258,6 +259,13 @@ func TestProviderRootReceiverBindsImportedInputAtCanonicalCoordinate(t *testing.
 	}
 	if plan := graph.Plans()[0]; plan.ProviderOutputAuthorization() == nil || plan.ReceiverEndpoint().Readback().FlowID != "." {
 		t.Fatalf("provider-to-root authority changed: %#v", plan.Readback())
+	}
+	if err := os.Remove(filepath.Join(root, "nodes.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	graph = pinrouting.CompileConnectGraph(loadProviderAuthoritySource(t, root))
+	if len(graph.Plans()) != 0 || len(graph.Issues()) != 1 || graph.Issues()[0].Failure != pinrouting.ConnectFailureDeliveryTopologyInvalid {
+		t.Fatalf("imported root schema became a consumer: plans=%#v issues=%#v", graph.Plans(), graph.Issues())
 	}
 }
 

@@ -176,7 +176,7 @@ func CopyForkReceiverRepeatedOwnership(t testing.TB, receivers []ForkReceiver) s
 	t.Helper()
 	root := CopyForkReceiverOwnership(t, receivers, false)
 	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "  active: {terminal: true}", "  active: {}\n  done: {terminal: true}")
-	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "    - work.requested", "    - work.requested\n    - producer.closed")
+	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "  inputs: [work.requested]", "  inputs: [work.requested, producer.closed]")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - start.closed\n", "    - start.closed\n    - producer.closed\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [work.requested", "outputs: [producer.closed, work.requested")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: producer.closed, from: ., to: producer}\n")
@@ -358,8 +358,7 @@ pins:
     - start.seeded
     - start.requested
     - start.closed
-`+receiptPins+closeInput+`  outputs:
-    [`+outputs+`]
+`+receiptPins+closeInput+`  outputs: [`+outputs+`]
 connect:
 `+rootEdges+seedEdges+closeEdges)
 	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  marker: text\n")

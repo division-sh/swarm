@@ -42,7 +42,7 @@ func CopyForkReceiverExecutionOwnership(t testing.TB, receivers []ForkReceiver, 
           owner: {literal: %s}
           token: "${payload.token}"
 `, receiver.Path), replacement)
-		applyClosedReplacement(t, filepath.Join(root, path, "schema.yaml"), "  outputs: [receiver.finished]\n", "")
+		applyClosedReplacement(t, filepath.Join(root, path, "schema.yaml"), "  outputs:\n    - receiver.finished\n", "")
 		removeClosedVariantFiles(t, root, path+"/events.yaml")
 		removeForkReceiverFinishedConnection(t, filepath.Join(root, prefix), receiver.Path)
 	}

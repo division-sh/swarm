@@ -50,12 +50,11 @@ const (
 
 func ApplyTemplateSelectOrCreateNegativeMutation(t testing.TB, root string, mutation TemplateSelectOrCreateNegativeMutation) {
 	t.Helper()
-	receiverSchema := filepath.Join(root, "account", "schema.yaml")
 	receiverNodes := filepath.Join(root, "account", "nodes.yaml")
 	producerNodes := filepath.Join(root, "producer", "nodes.yaml")
 	switch mutation {
 	case TemplateSelectOrCreateRetiredInstanceKey:
-		applyClosedReplacement(t, receiverSchema, "    - account.ready\n", "    - event: account.ready\n      resolution:\n        mode: select-or-create\n        instance_key: account_id\n")
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    resolution: select-or-create\n", "    resolution: select-or-create\n    instance_key: account_id\n")
 	case TemplateSelectOrCreateOptionalIdentitySource:
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
 			"account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: text?\n")

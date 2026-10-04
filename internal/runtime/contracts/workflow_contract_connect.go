@@ -77,7 +77,7 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 	storedContext := context
 	storedContext.EventSchema = CompiledEventSchema{}
 	return CompiledFlowInputPin{value: &compiledFlowInputPinValue{
-		event: pin.Event,
+		event:   pin.Event,
 		context: storedContext, producerEventSchema: context.EventSchema, receiverEventSchema: context.EventSchema,
 		provenance: provenance, digest: digest, initialization: initialization,
 	}}, nil
@@ -316,19 +316,19 @@ func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, 
 		initialize = initialization.semanticEvidence()
 	}
 	return canonicaljson.Hash(struct {
-		Direction            string                 `json:"direction"`
-		FlowPath             string                 `json:"flow_path"`
-		Event                string                 `json:"event"`
-		EventSchemaName      string                 `json:"event_schema_name,omitempty"`
-		EventSchemaDigest    string                 `json:"event_schema_digest,omitempty"`
-		BusinessKeyField     string                 `json:"business_key_field,omitempty"`
-		BusinessKeyType      string                 `json:"business_key_type,omitempty"`
-		HasEventBusinessKey  bool                   `json:"has_event_business_key"`
-		ReceiverSchemaDigest string                 `json:"receiver_schema_digest,omitempty"`
-		Initialization       any                    `json:"initialization,omitempty"`
+		Direction            string `json:"direction"`
+		FlowPath             string `json:"flow_path"`
+		Event                string `json:"event"`
+		EventSchemaName      string `json:"event_schema_name,omitempty"`
+		EventSchemaDigest    string `json:"event_schema_digest,omitempty"`
+		BusinessKeyField     string `json:"business_key_field,omitempty"`
+		BusinessKeyType      string `json:"business_key_type,omitempty"`
+		HasEventBusinessKey  bool   `json:"has_event_business_key"`
+		ReceiverSchemaDigest string `json:"receiver_schema_digest,omitempty"`
+		Initialization       any    `json:"initialization,omitempty"`
 	}{
 		Direction: direction, FlowPath: context.FlowPath, Event: event,
-		EventSchemaName: producerSchema.EventName(),
+		EventSchemaName:   producerSchema.EventName(),
 		EventSchemaDigest: producerSchema.AcceptanceSchemaDigest(),
 		BusinessKeyField:  key.Field, BusinessKeyType: key.SemanticType, HasEventBusinessKey: hasKey,
 		ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(),
@@ -366,16 +366,16 @@ func (c FlowConnect) AuthoredLocation() string {
 
 func (c FlowConnect) normalized() FlowConnect {
 	return FlowConnect{
-		OwnerFlowPath: strings.TrimSpace(c.OwnerFlowPath),
-		SourceFile:    strings.TrimSpace(c.SourceFile),
-		SourceLine:    c.SourceLine,
-		Event:         c.Event,
-		From:          c.From,
-		To:            c.To,
-		Rename:        c.Rename,
-		Resolution:    c.Resolution,
-		KeyFrom:       c.KeyFrom,
-		RepliesTo:     c.RepliesTo,
+		OwnerFlowPath:  strings.TrimSpace(c.OwnerFlowPath),
+		SourceFile:     strings.TrimSpace(c.SourceFile),
+		SourceLine:     c.SourceLine,
+		Event:          c.Event,
+		From:           c.From,
+		To:             c.To,
+		Rename:         c.Rename,
+		Resolution:     c.Resolution,
+		KeyFrom:        c.KeyFrom,
+		RepliesTo:      c.RepliesTo,
 		CorrelationKey: c.CorrelationKey,
 	}
 }

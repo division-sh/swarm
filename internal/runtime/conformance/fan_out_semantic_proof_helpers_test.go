@@ -90,8 +90,8 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 	modify("schema.yaml", func(raw string) string {
 		var inputs, outputs, connects strings.Builder
 		for _, name := range eventsToAdd {
-			fmt.Fprintf(&inputs, "      - %s\n", name)
-			fmt.Fprintf(&outputs, "      - %s\n", name)
+			fmt.Fprintf(&inputs, "    - %s\n", name)
+			fmt.Fprintf(&outputs, "    - %s\n", name)
 			fmt.Fprintf(&connects, "  - event: %s\n    from: .\n    to: portfolio\n", name)
 		}
 		raw = replace(raw, "  outputs:\n", inputs.String()+"  outputs:\n")
@@ -107,7 +107,7 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 	modify("portfolio/schema.yaml", func(raw string) string {
 		var added strings.Builder
 		for _, name := range eventsToAdd {
-			fmt.Fprintf(&added, "      - %s\n", name)
+			fmt.Fprintf(&added, "    - %s\n", name)
 		}
 		return replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
 	})

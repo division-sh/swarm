@@ -5367,12 +5367,14 @@ engine:
     canonical_owner: platform-spec.yaml#flow_model.composition_routing
     implementation_status: typed_composition_authority_complete_for_supported_surface
     activation:
-      rule: Pin routing activates when the emitter flow declares the emitted event in schema.yaml pins.outputs.
+      rule: Cross-flow routing requires an explicit compiled connection from the exact source declaration.
+        Child source endpoints require declared outputs; parent-local endpoints require exact compiled event schemas,
+        not artificial boundary pins.
         Private outputs require a typed same-flow consuming relation or explicit compiled connection. Selected-root
         outputs are persisted public exports without a fake recipient. ParentRoute and delivery addresses never prove
         consumption. Parent-local connection endpoints consume exact compiled event schema evidence without artificial public pins.
-      no_separate_flag: The output pin declaration is the activation switch.
-      ad_hoc_emits: Events not declared in the emitter flow's output pins remain ordinary event-loop emits.
+      no_separate_flag: Compiled connection authority needs no additional activation flag.
+      ad_hoc_emits: Events without a compiled connection remain flow-local event-loop emits, except declared root public exports.
       aggressive_day_one: Pin routing is the default for pin-declared outputs; implicit event-type broadcast is not a compatibility mode.
     auto_wiring:
       status: retired
@@ -5393,7 +5395,8 @@ engine:
       authoring:
         request_output:
           shape: 'A declared child output provider.requested, or an exact requester-local event when the requester owns the connection.'
-          correlation: The optional correlation_key must name one required scalar field in the producer event schema.
+          correlation: The optional correlation_key must name one required scalar field in both request and reply schemas.
+            The request type must be assignable to the reply type through the existing catalog type owner, including its integer-to-number widening.
         reply_input:
           shape: 'connect: [{event: provider.replied, from: provider, to: requester, replies_to: provider.requested, correlation_key: provider_request_id}]'
           replies_to: Names the exact request event on the originating requester. Child boundaries require their declared pins; parent-local endpoints require no artificial parent pins.
@@ -5403,7 +5406,7 @@ engine:
       lowering:
         owner: runtime/core/pinrouting.ConnectRoutePlan.ReplyResolution
         result: One typed request role and one typed response role share requester pins, provider pins, and optional correlation key.
-        ambiguity: Missing child pins or parent-local schemas, undeclared/non-scalar/optional correlation fields, multiple request counterparts, multiple response counterparts,
+        ambiguity: Missing child pins or parent-local schemas/consumers, undeclared/non-scalar/optional or incompatible correlation fields, multiple request counterparts, multiple response counterparts,
           or different provider counterparts are hard boot invalidities.
       delivery_context:
         type: 'events.DeliveryContext{Reply: *ReplyContextRef{ID string}}'
@@ -12995,7 +12998,7 @@ flow_model:
       a flow (e.g., spec.requested between two agents in the same flow) exist in events.yaml but are NOT listed in schema
       pins. They are implementation details, not part of the flow's public contract. Only events that cross flow boundaries
       or trigger/complete the flow appear in pins.
-    routing_authority: Child output/input pins declare the boundary crossed by an exact least-common-ancestor schema.yaml connect. Parent-local endpoints consume compiled local event schemas without artificial parent pins. Connections own topology, instance selection and paired reply facts; pins never own those policies. Runtime consumers use the compiled edge and its declared-pin or parent-local-schema evidence.
+    routing_authority: Child output/input pins declare the boundary crossed by an exact least-common-ancestor schema.yaml connect. Parent-local receivers require a genuine same-flow consumer or a selected-root output export, alongside compiled local event schemas without artificial parent pins. Schema presence and required-role metadata alone are not consuming relations. Connections own topology, instance selection and paired reply facts; pins never own those policies. Runtime consumers use the compiled edge and its declared-pin or parent-local-schema evidence.
   required_agents:
     description: 'Each flow has effective required-agent facts. If schema.required_agents is omitted, the platform derives
       those facts from same-scope agents.yaml map keys plus subscriptions and emit_events. If schema.required_agents is
@@ -13379,7 +13382,7 @@ flow_model:
           resolution: Exact scalar create, select or select-or-create for an ordinary template edge; explicit empty, null, mappings, lists, fan-in, reply and fan-out values are invalid here.
           key_from: Exact top-level payload.<different-field>, generated.uuid or event.id source; requires resolution, and intrinsic sources require create. Omit the same-name payload source rather than restating it.
           replies_to: Exact request event on the reverse connection, owned by this response edge.
-          correlation_key: Optional required scalar request/reply payload field; requires replies_to. Omission uses the original request event ID.
+          correlation_key: Optional field required to be scalar and non-optional in both the request and reply event schemas, with request type assignable to reply type; requires replies_to. Omission uses the original request event ID.
         admission_rule: |
           Connect rows admit only event, from, to, rename, resolution, key_from, replies_to and correlation_key. Unknown fields fail strict
           current-vocabulary admission on authored presence. Endpoints remain exact flow identities, not pin
@@ -13411,7 +13414,7 @@ flow_model:
       receiver_flow_exists: |
         The `to` flow must exist in the finite filesystem subtree rooted at the authoring FlowNode; `.` resolves to that authoring flow.
       receiver_input_pin_exists: |
-        A child `to` requires exactly one input pin exposing rename or event. The authoring flow's local `to: .` consumes the compiled receiver-event projection and a genuine local consumer without an artificial parent input pin. Local event presence never invents a connection or public interface.
+        A child `to` requires exactly one input pin exposing rename or event. The authoring flow's local `to: .` consumes the compiled receiver-event projection and a genuine local consumer or selected-root output export without an artificial parent input pin. Local event presence never invents a connection or public interface.
       event_rename_valid: |
         `rename` is the sole explicit receiver-event change. Bind projections may supply boundary-visible names without redundant rename authoring.
       adapter_retired: '`adapter` is invalid on presence; no transform owner is compiled.'
@@ -13916,7 +13919,8 @@ flow_model:
         rule: |
           Parent connect names the authoring flow with `from: .` or `to: .` and names the
           authoring-flow-visible event separately in `event` or `rename`. CompileConnectGraph resolves that event to exactly
-          one authoring-flow output or input pin and materializes the concrete private pin identity. Nested-flow connects
+          one exact compiled local event schema, with a genuine receiver consumer or selected-root output export.
+          Child endpoints instead require their declared boundary pins and materialize the concrete private pin identity. Nested-flow connects
           resolve `.` to their exact owning FlowNode; root connects resolve it to the root FlowNode. Contracts parsing,
           semanticview projections, boot verification, EventBus lowering, and delivery persistence consume this one
           compiled owner. Authored producer routing is retired independently and cannot repair or override it.
@@ -13927,12 +13931,12 @@ flow_model:
           closed; a UUID root instance remains valid root context. Runtime MUST
           NOT reconstruct source ownership from the event name or `flow_instance`.
         root_endpoint_syntax:
-          producer: '`from: .` selects the authoring flow; `event` must identify exactly one visible output pin there.'
-          receiver: '`to: .` selects the authoring flow; `rename` or `event` must identify exactly one visible input pin there.'
+          producer: '`from: .` selects the authoring flow; `event` must identify exactly one compiled local event schema there, without an artificial output pin.'
+          receiver: '`to: .` selects the authoring flow; `rename` or `event` must identify exactly one compiled local event schema with a genuine consuming relation or selected-root output export, without an artificial input pin.'
         consumes:
-          - root schema.yaml pins.outputs
+          - exact authoring-flow compiled event schemas and genuine local consumers or selected-root output exports
           - 'event-centric LCA-owned schema.yaml connect entries with `from: .` or `to: .`'
-          - receiver flow or exact authoring-flow input pin declarations and canonical route-plan lowering
+          - child boundary pin declarations and canonical route-plan lowering
         produces:
           - typed root ConnectRoutePlan producer endpoints
           - typed root ConnectRoutePlan receiver endpoints

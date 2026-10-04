@@ -45,7 +45,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		schema := "name: emit-proof\n" + modeDecl + "pins:\n  inputs:\n" + input
 		extraEvent, extraOutput, extraEmit := "", "", ""
 		if sibling {
-			extraEvent, extraOutput, extraEmit = "foreign.only:\n", "  outputs:\n    - work.ack\n    - foreign.only\n", ", foreign.only"
+			extraEvent, extraOutput, extraEmit = "foreign.only:\n", "  outputs:\n    - work.ack\n", ", foreign.only"
 		} else if scope != "." {
 			extraOutput = "  outputs: [work.ack]\n"
 		}
@@ -67,6 +67,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		nodes := "start:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested:\n" + create + "      emit: {event: work.started, fields: {case_id: \"${payload.case_id}\"}}\nfinal:\n  execution_type: system_node\n  subscribes_to: [work.result]\n  event_handlers:\n    work.result:\n      emit: {event: work.ack, fields: {value: \"${payload.value}\"}}\n"
 		if sibling {
 			nodes = strings.ReplaceAll(nodes, "work.requested", "sibling.requested")
+			nodes += "foreign-observer:\n  execution_type: system_node\n  subscribes_to: [foreign.only]\n  event_handlers:\n    foreign.only:\n      guard: {id: observe_foreign_scope, check: 'true'}\n"
 		}
 		writeClosedVariantFile(t, root, filepath.Join(flow, "nodes.yaml"), nodes)
 		writeClosedVariantFile(t, root, filepath.Join(flow, "agents.yaml"), "writer:\n  role: "+role+"\n  intent: {inline: 'Emit the exact scoped result in the required value field.'}\n  model: regular\n  subscriptions: [work.started]\n  emit_events: [work.result"+extraEmit+"]\n  mock:\n    kind: python\n    module: mocks/writer.py\n")

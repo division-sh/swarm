@@ -180,8 +180,8 @@ func localReadinessFixture(t *testing.T, declarations int, frontier string) stri
 	if err := yaml.Unmarshal(data, &schema); err != nil {
 		t.Fatal(err)
 	}
-	inputs := schema["pins"].(map[string]any)["inputs"].(map[string]any)
-	inputs["events"] = append(inputs["events"].([]any), "source.prepare")
+	pins := schema["pins"].(map[string]any)
+	pins["inputs"] = append(pins["inputs"].([]any), "source.prepare")
 	data, err = yaml.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)
@@ -230,27 +230,27 @@ func localReadinessFixture(t *testing.T, declarations int, frontier string) stri
 				}
 				doc["connect"] = connections
 				for _, direction := range []string{"inputs", "outputs"} {
-					boundary := doc["pins"].(map[string]any)[direction].(map[string]any)
+					boundary := doc["pins"].(map[string]any)
 					var pins []any
-					for _, pin := range boundary["events"].([]any) {
+					for _, pin := range boundary[direction].([]any) {
 						if pin != "worker.inspect" {
 							pins = append(pins, pin)
 						}
 					}
-					boundary["events"] = pins
+					boundary[direction] = pins
 				}
 			case "events.yaml":
 				delete(doc, "worker.inspect")
 			case "worker-flow/schema.yaml":
 				doc["auto_emit_on_create"] = map[string]any{"event": "worker.inspect"}
-				inputs := doc["pins"].(map[string]any)["inputs"].(map[string]any)
+				boundary := doc["pins"].(map[string]any)
 				var pins []any
-				for _, pin := range inputs["events"].([]any) {
+				for _, pin := range boundary["inputs"].([]any) {
 					if pin != "worker.inspect.requested" {
 						pins = append(pins, pin)
 					}
 				}
-				inputs["events"] = pins
+				boundary["inputs"] = pins
 			case "worker-flow/nodes.yaml":
 				delete(doc, "worker-inspect-entry")
 			}

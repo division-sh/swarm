@@ -40,29 +40,29 @@ const (
 )
 
 type AuthoredEventEndpoint struct {
-	ID             string                                   `json:"id"`
-	Direction      EventEndpointDirection                   `json:"direction"`
-	Kind           EventEndpointKind                        `json:"kind"`
-	FlowID         string                                   `json:"flow_id,omitempty"`
-	FlowPath       string                                   `json:"flow_path,omitempty"`
-	Event          FlowEventProof                           `json:"event"`
-	Pattern        bool                                     `json:"pattern,omitempty"`
-	NodeID         string                                   `json:"node_id,omitempty"`
-	Node           runtimeidentity.ExecutableNode           `json:"-"`
-	HandlerEvent   string                                   `json:"handler_event,omitempty"`
-	AgentLocalID   string                                   `json:"agent_local_id,omitempty"`
-	AgentID        string                                   `json:"agent_id,omitempty"`
-	Role           string                                   `json:"role,omitempty"`
-	TimerID        string                                   `json:"timer_id,omitempty"`
-	StageID        string                                   `json:"stage_id,omitempty"`
-	DecisionID     string                                   `json:"decision_id,omitempty"`
-	Verdict        string                                   `json:"verdict,omitempty"`
-	LoopID         string                                   `json:"loop_id,omitempty"`
-	PinName        string                                   `json:"pin_name,omitempty"`
-	Site           string                                   `json:"site,omitempty"`
-	SourceFile     string                                   `json:"source_file,omitempty"`
-	SourceLine     int                                      `json:"source_line,omitempty"`
-	SourceLocation string                                   `json:"source_location,omitempty"`
+	ID             string                         `json:"id"`
+	Direction      EventEndpointDirection         `json:"direction"`
+	Kind           EventEndpointKind              `json:"kind"`
+	FlowID         string                         `json:"flow_id,omitempty"`
+	FlowPath       string                         `json:"flow_path,omitempty"`
+	Event          FlowEventProof                 `json:"event"`
+	Pattern        bool                           `json:"pattern,omitempty"`
+	NodeID         string                         `json:"node_id,omitempty"`
+	Node           runtimeidentity.ExecutableNode `json:"-"`
+	HandlerEvent   string                         `json:"handler_event,omitempty"`
+	AgentLocalID   string                         `json:"agent_local_id,omitempty"`
+	AgentID        string                         `json:"agent_id,omitempty"`
+	Role           string                         `json:"role,omitempty"`
+	TimerID        string                         `json:"timer_id,omitempty"`
+	StageID        string                         `json:"stage_id,omitempty"`
+	DecisionID     string                         `json:"decision_id,omitempty"`
+	Verdict        string                         `json:"verdict,omitempty"`
+	LoopID         string                         `json:"loop_id,omitempty"`
+	PinName        string                         `json:"pin_name,omitempty"`
+	Site           string                         `json:"site,omitempty"`
+	SourceFile     string                         `json:"source_file,omitempty"`
+	SourceLine     int                            `json:"source_line,omitempty"`
+	SourceLocation string                         `json:"source_location,omitempty"`
 }
 
 type TypedPubSubMatchKind string
