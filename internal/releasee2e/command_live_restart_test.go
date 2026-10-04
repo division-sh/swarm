@@ -129,7 +129,7 @@ func prepareCommandLiveProject(t *testing.T, binary, project string, store golde
 	}
 	env = append(filtered, "PATH="+os.Getenv("PATH"))
 	verify := runReleaseCommand(t, fullLifecycleStartupLimit, project, env, "", binary,
-		"verify", "contracts", "--config", "live.yaml", "--json")
+		"verify", "contracts", "--config", "live.yaml", "--portable", "--json")
 	assertFullLifecycleVerifySuccess(t, verify)
 	secretEnv := slices.DeleteFunc(slices.Clone(env), func(entry string) bool { return strings.HasPrefix(entry, goldenPostgresPass+"=") })
 	for key, value := range map[string]string{

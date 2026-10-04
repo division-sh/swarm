@@ -23,9 +23,9 @@ func Test2376SourceVerificationBinaryExactMemberTable(t *testing.T) {
 		if invocation == "mutated" {
 			writeReleaseFile(t, filepath.Join(root, "README.md"), "Exact changed source evidence.\n")
 		}
-		args := []string{"verify", "--json"}
+		args := []string{"verify", "--portable", "--json"}
 		if invocation != "bare" {
-			args = []string{"verify", ".", "--json"}
+			args = []string{"verify", ".", "--portable", "--json"}
 		}
 		output := readProofCompiledCommand(t, executable, root, env, args...)
 		var evidence struct {

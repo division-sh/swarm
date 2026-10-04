@@ -36,7 +36,7 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 				token := filepath.Join(root, "api-token")
 				writeReleaseFile(t, token, goldenAPIToken+"\n")
 				env := goldenProcessEnv(t, root, store.passwordEnv, 0)
-				verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", contracts, "--config", config, "--json")
+				verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", contracts, "--config", config, "--portable", "--json")
 				var verified struct {
 					OK bool `json:"ok"`
 				}
@@ -104,6 +104,8 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 				if err := process.stopAndWait(10 * time.Second); err != nil {
 					t.Fatal(err)
 				}
+				assertReleaseDeploymentAdmission(t, runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
+					"verify", contracts, "--config", config, "--json"))
 				process = start()
 				if got := waitForPresenceEntity(t, process, runID, "done", completed); got != entityID {
 					t.Fatalf("completed restart changed owner: %s != %s", got, entityID)

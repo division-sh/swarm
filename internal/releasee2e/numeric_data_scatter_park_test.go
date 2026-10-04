@@ -50,7 +50,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				}
 			}
 			verified := runReleaseCommand(t, goldenStartupTimeout, project, env, "", binary,
-				"verify", "contracts", "--config", ".swarm/swarm.yaml", "--json")
+				"verify", "contracts", "--config", ".swarm/swarm.yaml", "--portable", "--json")
 			if verified.err != nil {
 				t.Fatalf("numeric verify: %v\n%s", verified.err, verified.output)
 			}

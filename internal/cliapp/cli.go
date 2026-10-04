@@ -105,12 +105,13 @@ func newRootCommandAtInvocation(ctx context.Context, root InvocationRoot, out, e
 		Short: "Run and inspect Swarm workflows.",
 		Long: `Swarm runs event-driven agent workflows defined by declarative contracts.
 
-The typical path: check your setup with 'swarm doctor', validate contracts
-with 'swarm verify', start the local runtime with 'swarm serve --dev', then
+The typical path: check your setup with 'swarm doctor', validate authored source
+with 'swarm verify --portable', start the local runtime with 'swarm serve --dev', then
 start work with 'swarm run start' or 'swarm event publish' and watch it
-with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
+with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.
+Use default 'swarm verify' to observe admission for an explicitly configured deployment.`,
 		Example: `  swarm doctor                                      # check local prerequisites
-  swarm verify ./contracts                           # validate authored source before boot
+  swarm verify ./contracts --portable                # validate source only, not deployment readiness
   swarm serve . --dev                               # start a local development runtime
   swarm run start --event <event-name> --payload payload.json
   swarm run trace <run-id>                          # see what a run did`,
