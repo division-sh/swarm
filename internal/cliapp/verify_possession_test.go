@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -50,6 +51,7 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				Close() error
 			}
 			var db *sql.DB
+			var openBootStore func() (startupownership.Store, func() error, error)
 			if backend == backendselection.BackendSQLite {
 				path := filepath.Join(t.TempDir(), "runtime.db")
 				selected, handle, err := construction.OpenSQLiteRuntimeWithOwnershipBinding(path)
@@ -57,6 +59,13 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				owner, db = selected, handle
+				openBootStore = func() (startupownership.Store, func() error, error) {
+					selected, _, err := construction.OpenSQLiteRuntimeWithOwnershipBinding(path)
+					if err != nil {
+						return nil, nil, err
+					}
+					return selected, selected.Close, nil
+				}
 				configText += fmt.Sprintf("store: {backend: sqlite, sqlite: {path: %q}}\n", path)
 			} else {
 				dsn, _, _ := testutil.StartEmptyPostgres(t)
@@ -65,6 +74,13 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				owner, db = selected, handle
+				openBootStore = func() (startupownership.Store, func() error, error) {
+					selected, _, err := construction.OpenPostgres(dsn)
+					if err != nil {
+						return nil, nil, err
+					}
+					return selected, selected.Close, nil
+				}
 				connection, err := testpostgres.ParseConnection(dsn)
 				if err != nil {
 					t.Fatal(err)
@@ -88,9 +104,12 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			released := false
 			t.Cleanup(func() {
-				if err := capability.Release(context.Background()); err != nil {
-					t.Error(err)
+				if !released {
+					if err := capability.Release(context.Background()); err != nil {
+						t.Error(err)
+					}
 				}
 			})
 			var before int
@@ -148,6 +167,79 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 			}
 			if _, err := capability.Evidence(); err != nil {
 				t.Fatalf("verification released the actual owner's capability: %v", err)
+			}
+			if err := capability.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
+			released = true
+			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			for _, mode := range []string{"json", "text", "quiet"} {
+				args := []string{"verify", root, "--config", configPath}
+				if mode != "text" {
+					args = append(args, "--"+mode)
+				}
+				out.Reset()
+				diagnostic.Reset()
+				if code := executeRootCommand(ctx, root, args, &out, &diagnostic); code != 0 {
+					t.Fatalf("%s free-store admission failed: %d %s %s", mode, code, &out, &diagnostic)
+				}
+				if mode != "json" {
+					if !strings.Contains(out.String(), "admission checks passed; startup execution not performed") || !strings.Contains(out.String(), "startup not performed: startup_process_acquisition") {
+						t.Fatalf("%s observation claimed boot or hid its future authority: %s", mode, &out)
+					}
+					continue
+				}
+				var ready verifyCommandResult
+				if err := json.Unmarshal(out.Bytes(), &ready); err != nil {
+					t.Fatal(err)
+				}
+				if !ready.OK || !ready.AdmissionComplete || ready.LiveReadiness != "not_evaluated" || ready.ValidationScope != "deployment" {
+					t.Fatalf("free-store evidence was incomplete or became readiness: %+v", ready)
+				}
+			}
+			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&after); err != nil || before != after {
+				t.Fatalf("successful public observation acquired authority: %d -> %d %v", before, after, err)
+			}
+			contender, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+				OwnerID: "contender-after-public-verification", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := contender.Release(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			bootStore, closeBootStore, err := openBootStore()
+			if err == nil {
+				t.Cleanup(func() {
+					if err := closeBootStore(); err != nil {
+						t.Error(err)
+					}
+				})
+				var unexpected startupownership.ProcessCapability
+				unexpected, err = bootStore.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+					OwnerID: "real-boot-must-reacquire", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+				})
+				if err == nil {
+					if err := unexpected.Release(ctx); err != nil {
+						t.Error(err)
+					}
+					t.Fatal("the real boot owner accepted a previous free observation over current contention")
+				}
+			}
+			var refusal *startupownership.AcquisitionError
+			if !errors.As(err, &refusal) || refusal.Failure != startupownership.AcquisitionTakeoverRequired {
+				t.Fatalf("actual boot refused for something other than current possession: %v", err)
+			}
+			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&after); err != nil || before != after {
+				t.Fatalf("refused boot wrote authority after verification: %d -> %d %v", before, after, err)
 			}
 		})
 	}

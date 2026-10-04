@@ -38,6 +38,7 @@ func TestVerifyHarnessInjectionLabelsNonProductionBundle(t *testing.T) {
 
 func TestVerifyHarnessInjectionJSONMarksNonProductionBundle(t *testing.T) {
 	opts := defaultVerifyCommandOptions()
+	opts.portable = true
 	opts.sourceRoot = canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true

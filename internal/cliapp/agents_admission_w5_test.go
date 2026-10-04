@@ -17,7 +17,7 @@ func TestW5AgentsVerifyAndDescribeSupportedSurface(t *testing.T) {
 	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  model: regular\n  intent: {inline: root business intent}\n  subscriptions: [account.requested]\n")
 	writeDescribeTestFile(t, filepath.Join(root, "account", "agents.yaml"), "worker:\n  model: regular\n  memory: true\n  intent: {inline: account business intent}\n  subscriptions: [account.ready]\n")
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
 		t.Fatalf("verify=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 	}
@@ -54,7 +54,7 @@ func TestW5AgentsVerifyAndDescribeSupportedSurface(t *testing.T) {
 			writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  model: regular\n  intent: {inline: business intent}\n  <<: {"+fields+"}\n")
 			stdout.Reset()
 			stderr.Reset()
-			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 			if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "agents.yaml") || !strings.Contains(stdout.String()+stderr.String(), strings.Split(fields, ":")[0]) {
 				t.Fatalf("invalid authored source accepted or lost evidence: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 			}

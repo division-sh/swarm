@@ -614,7 +614,7 @@ func TestVerifyCommandAcceptsJoinTransitionCarrierFixture(t *testing.T) {
 	sourceRoot := writeDescribeStageGraphContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"verify", sourceRoot,
+		"verify", sourceRoot, "--portable",
 		"--config", writeTestVerifyRuntimeConfig(t),
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
@@ -650,7 +650,7 @@ func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"verify", sourceRoot,
+		"verify", sourceRoot, "--portable",
 		"--config", writeTestVerifyRuntimeConfig(t),
 		"--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
@@ -702,7 +702,7 @@ types:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"verify", sourceRoot, "--config", writeTestVerifyRuntimeConfig(t), "--json",
+		"verify", sourceRoot, "--portable", "--config", writeTestVerifyRuntimeConfig(t), "--json",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code == 0 {
 		t.Fatalf("verify --json code = 0 stdout=%s stderr=%s", stdout.String(), stderr.String())
@@ -728,8 +728,9 @@ func TestVerifyCommandRejectsRetiredJoinGrammar(t *testing.T) {
 			}
 			writeDescribeTestFile(t, path, updated)
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
-			if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "join field \""+field+"\" is not supported") {
+			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+			output := decodeOutputJSON[verifyCommandResult](t, stdout.String())
+			if code == 0 || !reportContainsVerifyError(output.Errors, "source_loading", "join field \""+field+"\" is not supported") || !reportContainsVerifyError(output.Errors, "source_loading", "Valid options:") {
 				t.Fatalf("retired field %s accepted or misdiagnosed: code=%d stdout=%s stderr=%s", field, code, stdout.String(), stderr.String())
 			}
 		})
@@ -752,7 +753,7 @@ func TestVerifyCommandRejectsCountJoinWithoutBoundedClosure(t *testing.T) {
 			}
 			writeDescribeTestFile(t, path, updated)
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(t.Context(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+			code := executeRootCommandWithOptions(t.Context(), RepoRoot(), []string{"verify", root, "--portable", "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 			if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "count join requires deadline or until") {
 				t.Fatalf("unbounded count admitted or misdiagnosed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}

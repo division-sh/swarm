@@ -40,36 +40,11 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		})
 	}()
 	opened := verifyDeploymentObservation(ctx, result, "selected_store_access", "internal/store/selected.OpenAdmissionInspection", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
-		root, err := NewInvocationRoot(repo)
+		request, schema, err := prepareVerifySelectedStoreInspection(ctx, repo, paths, cfg, source)
 		if err != nil {
 			return err
 		}
-		swarmDir, err := resolveCLISwarmDirFromConfig(root, cliSwarmDirOptions{}, cfg.cli)
-		if err != nil {
-			return err
-		}
-		local, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
-			RepoRoot: repo, ResolvedPaths: paths, SwarmDir: swarmDir, Config: cfg.Config, EnforceLegacySQLite: true,
-		})
-		if err != nil {
-			return err
-		}
-		request, err := selectedAuthorityRequest(ctx, local.StoreSelection, cfg.Config)
-		if err != nil {
-			return err
-		}
-		bundle, ok := semanticview.Bundle(source)
-		if !ok || bundle == nil {
-			return fmt.Errorf("admitted selected source bundle is required")
-		}
-		plans, err := StateStoreSchemaPlans(bundle)
-		if err != nil {
-			return err
-		}
-		schemaRequest, err = SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
-		if err != nil {
-			return err
-		}
+		schemaRequest = schema
 		if request.Selection.Backend == storebackend.BackendPostgres {
 			storeBudget = verifyRemoteDeadline
 		}
@@ -139,6 +114,37 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	if retained != nil {
 		inspectVerifyRetainedDependencies(ctx, retained, schemaOK, cfg, source, opts, workspaces, workspaceOK, result)
 	}
+}
+
+func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source) (storeselected.AuthorityRequest, store.SchemaBootstrapRequest, error) {
+	root, err := NewInvocationRoot(repo)
+	if err != nil {
+		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
+	}
+	swarmDir, err := resolveCLISwarmDirFromConfig(root, cliSwarmDirOptions{}, cfg.cli)
+	if err != nil {
+		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
+	}
+	local, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
+		RepoRoot: repo, ResolvedPaths: paths, SwarmDir: swarmDir, Config: cfg.Config, EnforceLegacySQLite: true,
+	})
+	if err != nil {
+		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
+	}
+	request, err := selectedAuthorityRequest(ctx, local.StoreSelection, cfg.Config)
+	if err != nil {
+		return request, store.SchemaBootstrapRequest{}, err
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return request, store.SchemaBootstrapRequest{}, fmt.Errorf("admitted selected source bundle is required")
+	}
+	plans, err := StateStoreSchemaPlans(bundle)
+	if err != nil {
+		return request, store.SchemaBootstrapRequest{}, err
+	}
+	schema, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
+	return request, schema, err
 }
 
 type verifyRetainedAdmissionInventory struct {

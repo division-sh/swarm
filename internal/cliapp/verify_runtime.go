@@ -269,15 +269,25 @@ func verifyAdmissionTextLines(output verifyCommandResult) []string {
 		if observation.Status == runtimebootverify.AdmissionPassed || observation.Status == runtimebootverify.AdmissionNotApplicable {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("%s: %s @ %s (%s)", observation.Status, observation.CheckID, observation.Subject, observation.Reason))
+		lines = append(lines, fmt.Sprintf("%s: %s @ %s (%s)", observation.Status, observation.CheckID, verifyAdmissionTextSubject(output, observation.Subject), observation.Reason))
 	}
 	for _, obligation := range output.ExecutionObligations {
-		lines = append(lines, fmt.Sprintf("startup not performed: %s @ %s (%s)", obligation.ID, obligation.Subject, obligation.Reason))
+		lines = append(lines, fmt.Sprintf("startup not performed: %s @ %s (%s)", obligation.ID, verifyAdmissionTextSubject(output, obligation.Subject), obligation.Reason))
 	}
 	if output.HarnessInjectedInputs > 0 || output.HarnessObservedOutputs > 0 {
 		lines = append(lines, "not production-valid: source depends on validation-only harness declarations")
 	}
 	return lines
+}
+
+func verifyAdmissionTextSubject(output verifyCommandResult, subject string) string {
+	if output.BundleHash != "" && output.SourceLabel != "" {
+		exact := "source:" + output.BundleHash
+		if subject == exact || strings.HasSuffix(subject, "/"+exact) {
+			return strings.TrimSuffix(subject, exact) + "source:" + output.SourceLabel
+		}
+	}
+	return subject
 }
 
 func pluralSuffix(count int) string {

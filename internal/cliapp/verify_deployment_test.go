@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testpostgres"
@@ -343,8 +344,55 @@ func TestVerifyDeploymentOptionsPreserveFrozenConfigAfterFileRemoval(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Purpose != bootverify.ExecutionValidation || opts.Credentials == nil || opts.ProviderCredentials == nil || opts.ManagedCredentials == nil || opts.AllowHarnessInputs || opts.AllowHarnessOutputs || opts.MCPDiscoveryTimeout != verifyRemoteDeadline || !strings.EqualFold(opts.LLMProfile.ID, "anthropic") {
+	if opts.Purpose != bootverify.ExecutionValidation || !opts.ValidateLLMModelResolution || opts.Credentials == nil || opts.ProviderCredentials == nil || opts.ManagedCredentials == nil || opts.AllowHarnessInputs || opts.AllowHarnessOutputs || opts.MCPDiscoveryTimeout != verifyRemoteDeadline || !strings.EqualFold(opts.LLMProfile.ID, "anthropic") {
 		t.Fatalf("deployment intent changed after admission: %#v", opts)
+	}
+}
+
+func TestVerifyConcreteModelObservationUsesSelectedDeploymentProfile(t *testing.T) {
+	for _, backend := range []string{"anthropic", "openai_responses"} {
+		t.Run(backend, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			root := filepath.Join(RepoRoot(), "internal/store/selected/testdata/retained_actor_admission")
+			configPath := filepath.Join(t.TempDir(), "runtime.yaml")
+			writeRuntimeConfigText(t, configPath, "llm: {backend: "+backend+"}\n")
+			cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: configPath})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(root, CLISourcePlatformSpecPathOptions{SourceRoot: root}, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			opts, err := verifyDeploymentWorkflowOptions(ctx, cfg, bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source, _, err := admitStructuralSource(cfg, bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := runtime.ValidateDeclaredAgentModelAdmission(executionposture.Live, cfg.Config, source); err != nil {
+				t.Fatal(err)
+			}
+			result, err := runtime.ValidateWorkflowContractSurface(ctx, source, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, observation := range result.BootReport.Observations {
+				if observation.CheckID == "invalid_field_detection" && observation.Class == bootverify.AdmissionDeploymentObservation {
+					found = true
+					if observation.Status != bootverify.AdmissionPassed {
+						t.Fatalf("the configured concrete model was not observed: %+v", observation)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("concrete model observation disappeared from the registry report")
+			}
+		})
 	}
 }
 

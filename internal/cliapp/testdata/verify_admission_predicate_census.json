@@ -261,7 +261,7 @@
     "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentWorkflowOptions",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
     "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
-    "body_sha256": "61cb50ae44a7f98bc8d851211d475897b7ace1c993b883c753534ce094e6045f"
+    "body_sha256": "43fd0e1525169dd1c5177d95e0b6cda379383a86c9e92357e0f485e617620f16"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::accountVerifyStoreTail",
@@ -285,13 +285,25 @@
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifySelectedStore",
     "audit_rows": "A19,A20,A21,A22,A23,A24",
     "proof_families": "P17,P18,P19,P20,P21",
-    "body_sha256": "4a84eb68bc16c3cdc3996516ea2632c59d04f3c4c91f6ae4b9d6bec0d826c8b7"
+    "body_sha256": "92a991e5c319af6b3f059128671eb4afe34e65f49c78606af448e39e916deb15"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::prepareVerifySelectedStoreInspection",
+    "audit_rows": "A19,A20,A21,A22,A23,A24",
+    "proof_families": "P17,P18,P19,P20,P21",
+    "body_sha256": "62fcd3c10ab77f2ae7d290f80584d60afbe8ab9fcd3f3e3d68537b5f7d08a8ff"
   },
   {
     "owner": "internal/cliapp/verify_deployment_workspace.go::inspectVerifyWorkspaceDependencies",
     "audit_rows": "A15,A16,A17",
     "proof_families": "P13,P14,P15",
     "body_sha256": "8691436fdf2638a62d8c78ceffffc13a5146d1c9b793adab02d69f562ec777e6"
+  },
+  {
+    "owner": "internal/cliapp/verify_retained_dependencies.go::appendVerifyForkAdmissionReport",
+    "audit_rows": "A11,A12,A13,A14,A22,A24,A25",
+    "proof_families": "P09,P10,P11,P12,P15,P20,P21",
+    "body_sha256": "e21f46a3766b4fec9eaf621d5626b006fa4834f6aaae495d7063da787dd41447"
   },
   {
     "owner": "internal/cliapp/verify_retained_dependencies.go::inspectVerifyRetainedActorConfiguration",
@@ -303,7 +315,13 @@
     "owner": "internal/cliapp/verify_retained_dependencies.go::inspectVerifyRetainedDependencies",
     "audit_rows": "A11,A12,A13,A14,A22,A24,A25",
     "proof_families": "P09,P10,P11,P12,P15,P20,P21",
-    "body_sha256": "b657329c3b01c65df1ed1448e8f8ee2201398d76615ea7ca8688236dfc64a035"
+    "body_sha256": "4a8893714921e8f5ee606bfea4b7a5c4cd8038d0b441a2e66187de98ca69983d"
+  },
+  {
+    "owner": "internal/cliapp/verify_retained_dependencies.go::inspectVerifyRetainedForkDependencies",
+    "audit_rows": "A11,A12,A13,A14,A22,A24,A25",
+    "proof_families": "P09,P10,P11,P12,P15,P20,P21",
+    "body_sha256": "b8954329cb686e9b97a43e1e47a75b4670dd07326fcdbdff0f586cac05b6a35e"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::admitStructuralSource",
@@ -363,7 +381,13 @@
     "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextLines",
     "audit_rows": "A01,A28,A29,A30",
     "proof_families": "P01,P02,P23,P24",
-    "body_sha256": "e4e1db8360fa8eeb5f4e97335637a47e527772e563fa6efa7b6a93f56b45f505"
+    "body_sha256": "ecd122f7a2cda8ed0f6872996a4e7010979eecac54ff22f0e5e442079720eb9a"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextSubject",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "aecc2c80e08ce5a446aaeb54ddb00e183a5a829329398646cd38025fb5e6dbd4"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyBundleResultWithOptions",

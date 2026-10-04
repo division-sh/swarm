@@ -97,12 +97,12 @@ func Test2376HumanSourceIdentityConsumerTable(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out, errOut bytes.Buffer
-			if code := executeRootCommand(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t)}, &out, &errOut); code != 0 || !strings.Contains(out.String(), artifact.HumanLabel()) || strings.Contains(out.String(), artifact.BundleHash()) {
+			if code := executeRootCommand(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", writeTestVerifyRuntimeConfig(t)}, &out, &errOut); code != 0 || !strings.Contains(out.String(), artifact.HumanLabel()) || strings.Contains(out.String(), artifact.BundleHash()) {
 				t.Fatalf("verify human identity: code=%d %s / %s", code, &out, &errOut)
 			}
 			out.Reset()
 			errOut.Reset()
-			if code := executeRootCommand(context.Background(), RepoRoot(), []string{"verify", root, "--json", "--config", writeTestVerifyRuntimeConfig(t)}, &out, &errOut); code != 0 {
+			if code := executeRootCommand(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--json", "--config", writeTestVerifyRuntimeConfig(t)}, &out, &errOut); code != 0 {
 				t.Fatalf("verify machine identity: code=%d %s / %s", code, &out, &errOut)
 			}
 			var result verifyCommandResult

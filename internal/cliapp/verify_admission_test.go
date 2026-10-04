@@ -93,7 +93,7 @@ func TestVerifyPortableAdmissionOutputParity(t *testing.T) {
 				t.Fatalf("unchecked readiness hidden: %q", text)
 			}
 			for _, observation := range result.Observations {
-				if observation.Status == runtimebootverify.AdmissionNotRun && !strings.Contains(text, "not_run: "+observation.CheckID+" @ "+observation.Subject) {
+				if observation.Status == runtimebootverify.AdmissionNotRun && !strings.Contains(text, "not_run: "+observation.CheckID+" @ source:"+result.SourceLabel) {
 					t.Fatalf("%s erased unperformed check %s: %s", mode, observation.CheckID, text)
 				}
 			}

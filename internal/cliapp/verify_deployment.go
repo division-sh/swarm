@@ -61,6 +61,7 @@ func verifyDeploymentWorkflowOptions(ctx context.Context, cfg RuntimeConfigLoadR
 	}
 	opts := runtime.DefaultWorkflowContractValidationOptions(credentials, executionposture.Live)
 	opts.Purpose = bootverify.ExecutionValidation
+	opts.ValidateLLMModelResolution = true
 	opts.LLMProfile, opts.ModelAliases = profile, cfg.Config.LLM.Models
 	opts.ProviderCredentials, opts.ManagedCredentials = providerCredentials, managedCredentials
 	opts.ProviderTriggerCatalog, opts.ChannelPlans = packs.ProviderTriggers.Catalog, packs.Channels.Plans
