@@ -284,7 +284,7 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 			isolateCLIAPIConfigEnv(t)
 			var verifyOut, verifyErr bytes.Buffer
 			config := writeServeRuntimeTestConfig(t)
-			if code := cliapp.Execute(context.Background(), []string{"verify", root, "--config", config}, &verifyOut, &verifyErr, nil, nil); code != 0 {
+			if code := cliapp.Execute(context.Background(), []string{"verify", root, "--portable", "--config", config}, &verifyOut, &verifyErr, nil, nil); code != 0 {
 				t.Fatalf("verify nested templates: code=%d\n%s\n%s", code, &verifyOut, &verifyErr)
 			}
 			rt := startLifecycleTemplateRuntime(t, backend, root)

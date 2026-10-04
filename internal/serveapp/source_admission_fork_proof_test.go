@@ -29,7 +29,7 @@ func Test2376VerifyServeArtifactParityBothStores(t *testing.T) {
 			root := canonicalrouting.CopyLifecycleForkSource(t, true)
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			var out, errOut bytes.Buffer
-			if code := executeCLIFrom(context.Background(), root, []string{"verify", ".", "--json", "--config", opts.ConfigPath}, &out, &errOut, nil); code != 0 {
+			if code := executeCLIFrom(context.Background(), root, []string{"verify", ".", "--portable", "--json", "--config", opts.ConfigPath}, &out, &errOut, nil); code != 0 {
 				t.Fatalf("verify code=%d: %s / %s", code, &out, &errOut)
 			}
 			var verified struct {

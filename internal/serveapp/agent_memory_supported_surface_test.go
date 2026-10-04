@@ -26,12 +26,14 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 const standingMemoryAsyncProofTimeout = 30 * time.Second
@@ -158,11 +160,62 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 		}
 	}
 
+	// Default verification observes an existing deployment; it must not create
+	// the store or its possession coordinate as part of this observation.
+	prepared, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedClosed := false
+	t.Cleanup(func() {
+		if !preparedClosed {
+			if err := prepared.Close(); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
+	plans, err := cliapp.StateStoreSchemaPlans(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := cliapp.SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := prepared.BootstrapSchema(context.Background(), schema); err != nil {
+		t.Fatal(err)
+	}
+	capability, err := prepared.AcquireProcessCapability(context.Background(), startupownership.AcquireRequest{
+		OwnerID: "live-channel-verification-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := capability.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepared.Close(); err != nil {
+		t.Fatal(err)
+	}
+	preparedClosed = true
 	var verifyOut, verifyErr bytes.Buffer
 	if code := executeCLIFrom(context.Background(), sourceRoot, []string{
-		"verify", sourceRoot, "--config", configPath,
+		"verify", sourceRoot, "--config", configPath, "--json",
 	}, &verifyOut, &verifyErr, Run); code != 0 {
 		t.Fatalf("explicit live graduation verify exit=%d\nstdout:\n%s\nstderr:\n%s", code, verifyOut.String(), verifyErr.String())
+	}
+	var admission struct {
+		OK                bool   `json:"ok"`
+		AdmissionComplete bool   `json:"admission_complete"`
+		ValidationScope   string `json:"validation_scope"`
+		LiveReadiness     string `json:"live_readiness"`
+	}
+	if err := json.Unmarshal(verifyOut.Bytes(), &admission); err != nil {
+		t.Fatal(err)
+	}
+	if !admission.OK || !admission.AdmissionComplete || admission.ValidationScope != "deployment" || admission.LiveReadiness != "not_evaluated" {
+		t.Fatalf("live graduation did not complete admission without claiming execution: %s", &verifyOut)
 	}
 
 	providerRecorder := &standingLiveAnthropicRecorder{t: t}

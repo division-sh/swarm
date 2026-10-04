@@ -590,7 +590,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	opts.ConfigPath = configPath
 	var verifyOut, verifyErr bytes.Buffer
 	if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"verify", sourceRoot, "--config", configPath,
+		"verify", sourceRoot, "--portable", "--config", configPath,
 	}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code = %d stderr=%s stdout=%s", backend, code, verifyErr.String(), verifyOut.String())
 	}
@@ -981,7 +981,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	t.Setenv("SWARM_MANAGED_CREDENTIALS_FILE", credentialPath)
 	sourceRoot := scaffoldConformanceArchetype(t, archetype)
 	var verifyOut, verifyErr bytes.Buffer
-	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot}, &verifyOut, &verifyErr, nil); code != 0 {
+	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot, "--portable"}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
 	}
 	oldBuildStores := buildStoresForServe

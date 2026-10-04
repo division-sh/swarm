@@ -144,7 +144,7 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 		config = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
 	env := append(releaseProviderTriggerProcessEnv(), "PGPASSWORD="+os.Getenv("PGPASSWORD"), "ANTHROPIC_API_KEY=", "OPENAI_API_KEY=")
-	verify := exec.Command(binary, "verify", root, "--config", config)
+	verify := exec.Command(binary, "verify", root, "--portable", "--config", config)
 	verify.Dir, verify.Env = repoRootForTest(), env
 	if output, err := verify.CombinedOutput(); err != nil {
 		t.Fatalf("public verify failed: %v\n%s", err, output)
