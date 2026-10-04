@@ -3996,7 +3996,7 @@
   {
     "file": "internal/runtime/pipeline/workflow_join_lifecycle_test.go",
     "before_hash": "c59dee413a8a71ad631c02f36b29459c06e728fb337f2901fd87ecfc2dd48971",
-    "after_hash": "5581301bf1c913508fefb714d4e47a6ef4fab184da7fd41af33c19744bdf0fb0",
+    "after_hash": "04fe58e68914914865da5432fe02dcfc93e3fc8b713238d75b2114989f8b00a6",
     "edits": [
       {
         "start": 1183,
@@ -4014,8 +4014,8 @@
           "\t\t\t\t{\"on_deadline: {advances_to: attention}\", \"on_deadline: {advances_to: awaiting, data_accumulation: {writes: [{target_field: expected, value: \\\"${[loop.revision_id]}\\\"}]}}\"},"
         ],
         "add": [
-          "\t\t\t\t{\"on_complete: {advances_to: ready}\", \"on_complete:\\n  advances_to: awaiting\\n  data_accumulation:\\n    writes:\\n      - target_field: expected\\n        value: |-\\n          [loop.revision_id]\"},",
-          "\t\t\t\t{\"on_deadline: {advances_to: attention}\", \"on_deadline:\\n  advances_to: awaiting\\n  data_accumulation:\\n    writes:\\n      - target_field: expected\\n        value: |-\\n          [loop.revision_id]\"},"
+          "\t\t\t\t{\"on_complete: {advances_to: ready}\", \"on_complete:\\n          advances_to: awaiting\\n          data_accumulation:\\n            writes:\\n              - target_field: expected\\n                value: |-\\n                  [loop.revision_id]\"},",
+          "\t\t\t\t{\"on_deadline: {advances_to: attention}\", \"on_deadline:\\n          advances_to: awaiting\\n          data_accumulation:\\n            writes:\\n              - target_field: expected\\n                value: |-\\n                  [loop.revision_id]\"},"
         ]
       }
     ],
@@ -4023,6 +4023,7 @@
       "dispatcher.event_handlers.order.accepted.fan_out.emit.fields.line_item_id: unwrap typed expression",
       "on_complete.data_accumulation.writes.0.value: unwrap typed expression",
       "on_deadline.data_accumulation.writes.0.value: unwrap typed expression",
+      "captured outcome replacement: preserve join-outcome nesting when expanding CEL list value to a block scalar",
       "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
     ]
   },
@@ -4856,7 +4857,7 @@
   {
     "file": "internal/runtime/testfixtures/canonicalrouting/fork_loop_retained_join.go",
     "before_hash": "cb81640794645214786c53666005cc8860125bb8ac944af97383e50ef1609360",
-    "after_hash": "27a7104249d0af0bdc4b7f00071365066634a6830dd0c8d79076629205dceaa6",
+    "after_hash": "90c9c6e90858e68d4fb6a7a1ff7ec03cefb056917b1169b448b5c811db9f570f",
     "edits": [
       {
         "start": 13,
@@ -4867,6 +4868,15 @@
         "add": [
           "              revision_id: loop.revision_id",
           "              completed: join.completed"
+        ]
+      },
+      {
+        "start": 16,
+        "remove": [
+          "\tapplyClosedReplacement(t, filepath.Join(root, \"nodes.yaml\"), \"subscribes_to: [work.requested, review.requested, review.retry, review.closed]\", \"subscribes_to: [work.requested, review.requested, review.retry, review.closed, checkpoint.requested]\")"
+        ],
+        "add": [
+          "\tapplyClosedReplacement(t, filepath.Join(root, \"nodes.yaml\"), \"    - review.closed\\n  event_handlers:\", \"    - review.closed\\n    - checkpoint.requested\\n  event_handlers:\")"
         ]
       },
       {
@@ -5044,6 +5054,7 @@
       "emit.fields.completed: unwrap typed expression",
       "event_handlers.checkpoint.requested.emit.fields.revision_id: unwrap typed expression",
       "event_handlers.checkpoint.requested.emit.fields.completed: remove literal escape",
+      "separate checkpoint subscription replacement: match the admitted block-list source exactly and retain closed-anchor refusal",
       "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
     ]
   },
@@ -7470,7 +7481,7 @@
   {
     "file": "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go",
     "before_hash": "5dab75ecb838f87d739c601c6427009c235dccffb344546eadd08372c777e4b9",
-    "after_hash": "39fa9db8bd04e75bb1c8541b4aa8fc00ddafd83de0cc97432e1d14534506e663",
+    "after_hash": "107561a7d83bdfaa942c0e6c31fa2fd30bb72747035566fee0aba73917660d52",
     "edits": [
       {
         "start": 218,
@@ -7479,6 +7490,24 @@
         ],
         "add": [
           "\t\treturn singletonCoordinatorFirstMapWriteYAML(\"set\", \"entity.lead_index[payload.lead_id]\", \"key: payload.lead_id\", `"
+        ]
+      },
+      {
+        "start": 220,
+        "remove": [
+          "              status: active"
+        ],
+        "add": [
+          "              status: \"active\""
+        ]
+      },
+      {
+        "start": 227,
+        "remove": [
+          "              status: active"
+        ],
+        "add": [
+          "              status: \"active\""
         ]
       },
       {
@@ -7500,12 +7529,30 @@
         ]
       },
       {
+        "start": 239,
+        "remove": [
+          "              status: active"
+        ],
+        "add": [
+          "              status: \"active\""
+        ]
+      },
+      {
         "start": 244,
         "remove": [
           "\t\treturn singletonCoordinatorFirstMapWriteYAML(\"replace\", \"entity.lead_index\", \"key: \\\"${payload.lead_id}\\\"\", `"
         ],
         "add": [
           "\t\treturn singletonCoordinatorFirstMapWriteYAML(\"replace\", \"entity.lead_index\", \"key: payload.lead_id\", `"
+        ]
+      },
+      {
+        "start": 246,
+        "remove": [
+          "              status: active"
+        ],
+        "add": [
+          "              status: \"active\""
         ]
       },
       {
@@ -7533,6 +7580,15 @@
         ],
         "add": [
           "            key: payload.lead_id"
+        ]
+      },
+      {
+        "start": 279,
+        "remove": [
+          "              status: active"
+        ],
+        "add": [
+          "              status: \"active\""
         ]
       },
       {
@@ -7575,6 +7631,12 @@
       }
     ],
     "slots": [
+      "singletonCoordinatorValidWritesPrefixYAML value.status: quote intentional business text active",
+      "SingletonCoordinatorPilotDynamicBracketTarget value.status: quote active while preserving the dynamic-target refusal",
+      "SingletonCoordinatorPilotMissingMapKey value.status: quote active while preserving the absent-key refusal",
+      "SingletonCoordinatorPilotUndeclaredTarget value.status: quote active while preserving the unknown-target refusal",
+      "SingletonCoordinatorPilotUnsupportedOperation value.status: quote active while preserving the operation refusal",
+      "singleton coordinator map key and write values: unwrap typed payload references in assembled fragments",
       "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
     ]
   },

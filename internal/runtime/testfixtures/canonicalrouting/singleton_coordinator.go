@@ -218,14 +218,14 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
 	case SingletonCoordinatorPilotDynamicBracketTarget:
 		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index[payload.lead_id]", "key: payload.lead_id", `
             value:
-              status: active
+              status: "active"
               score: 0
               observations: []
 `)
 	case SingletonCoordinatorPilotMissingMapKey:
 		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index", "", `
             value:
-              status: active
+              status: "active"
               score: 0
               observations: []
 `)
@@ -237,14 +237,14 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
 	case SingletonCoordinatorPilotUndeclaredTarget:
 		return singletonCoordinatorFirstMapWriteYAML("set", "entity.missing_index", "key: payload.lead_id", `
             value:
-              status: active
+              status: "active"
               score: 0
               observations: []
 `)
 	case SingletonCoordinatorPilotUnsupportedOperation:
 		return singletonCoordinatorFirstMapWriteYAML("replace", "entity.lead_index", "key: payload.lead_id", `
             value:
-              status: active
+              status: "active"
               score: 0
               observations: []
 `)
@@ -277,7 +277,7 @@ func singletonCoordinatorValidWritesPrefixYAML() string {
             target: entity.lead_index
             key: payload.lead_id
             value:
-              status: active
+              status: "active"
               score: 0
               observations: []
           - op: merge

@@ -14,7 +14,7 @@ func CopyForkLoopRetainedJoinSeparateCheckpoint(t testing.TB) string {
               revision_id: loop.revision_id
               completed: join.completed
 `, "")
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "subscribes_to: [work.requested, review.requested, review.retry, review.closed]", "subscribes_to: [work.requested, review.requested, review.retry, review.closed, checkpoint.requested]")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    - review.closed\n  event_handlers:", "    - review.closed\n    - checkpoint.requested\n  event_handlers:")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "  event_handlers:\n    work.requested:\n", `  event_handlers:
     checkpoint.requested:
       loop: {admit: revision, from: reviewing}
