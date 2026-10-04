@@ -3,12 +3,14 @@ package apiv1
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/registration"
 )
 
 type ChannelOnboardingLifecycle interface {
@@ -156,10 +158,7 @@ func channelOnboardingError(err error) error {
 	var credentialRequired *channelonboarding.CredentialRequiredError
 	switch {
 	case errors.As(err, &credentialRequired):
-		if !runtimefailures.OnlyBranches(err, func(branch error) bool {
-			var required *channelonboarding.CredentialRequiredError
-			return errors.As(branch, &required)
-		}) {
+		if !channelCredentialRequiredBranches(err) {
 			return err
 		}
 		return NewApplicationError(ChannelCredentialRequiredCode, false, map[string]any{
@@ -180,5 +179,31 @@ func channelOnboardingError(err error) error {
 		return NewInvalidParamsError(details)
 	default:
 		return err
+	}
+}
+
+// Provider rejection owns its response cause, but no independently joined
+// cleanup or revision failure can become a credential-correction outcome.
+func channelCredentialRequiredBranches(err error) bool {
+	switch cause := err.(type) {
+	case interface{ Unwrap() []error }:
+		branches := cause.Unwrap()
+		if len(branches) == 0 {
+			return false
+		}
+		for _, branch := range branches {
+			if !channelCredentialRequiredBranches(branch) {
+				return false
+			}
+		}
+		return true
+	case *channelonboarding.CredentialRequiredError:
+		return cause != nil
+	case *registration.ProviderCredentialRejectedError:
+		return cause != nil && (cause.StatusCode == http.StatusUnauthorized || cause.StatusCode == http.StatusForbidden)
+	case interface{ Unwrap() error }:
+		return channelCredentialRequiredBranches(cause.Unwrap())
+	default:
+		return false
 	}
 }

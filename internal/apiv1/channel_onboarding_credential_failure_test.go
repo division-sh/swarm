@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/registration"
 )
 
 func TestChannelOnboardingUnusableCredentialFailureProjection(t *testing.T) {
@@ -72,6 +73,46 @@ func TestChannelOnboardingMissingCredentialApplicationProjection(t *testing.T) {
 		var app *ApplicationError
 		if !errors.As(mapped, &app) || app.Code != ChannelCredentialRequiredCode {
 			t.Fatalf("pure missing-credential meaning lost: %v -> %v", err, mapped)
+		}
+	}
+}
+
+func TestChannelOnboardingRejectedCredentialApplicationProjection(t *testing.T) {
+	required := &channelonboarding.CredentialRequiredError{OperationID: "operation", Role: "provider", StoreKey: "provider"}
+	cleanupErr := errors.New("credential cleanup failed")
+	for _, status := range []int{401, 403} {
+		rejected := &registration.ProviderCredentialRejectedError{ToolID: "telegram.identify", StatusCode: status, Err: errors.New("provider response")}
+		refusal := errors.Join(required, fmt.Errorf("provider preflight: %w", rejected))
+		for _, tc := range []struct {
+			name string
+			err  error
+			want bool
+		}{
+			{"rejected", refusal, true},
+			{"wrapped", fmt.Errorf("activation: %w", refusal), true},
+			{"cleanup_failure", errors.Join(refusal, cleanupErr), false},
+			{"revision_conflict", errors.Join(refusal, channelonboarding.ErrRevisionConflict), false},
+			{"unusable_sibling", errors.Join(refusal, credentials.ErrCredentialValueUnusable), false},
+			{"no_admitted_responsibility", rejected, false},
+			{"not_authentication_rejection", errors.Join(required, &registration.ProviderCredentialRejectedError{ToolID: "telegram.identify", StatusCode: 500, Err: errors.New("server failure")}), false},
+		} {
+			t.Run(fmt.Sprintf("%d/%s", status, tc.name), func(t *testing.T) {
+				mapped := channelOnboardingError(tc.err)
+				var app *ApplicationError
+				got := errors.As(mapped, &app) && app.Code == ChannelCredentialRequiredCode
+				if got != tc.want {
+					t.Fatalf("credential rejection projection = %v, want application refusal %t", mapped, tc.want)
+				}
+				if !tc.want && mapped != tc.err {
+					t.Fatalf("independent failure or unowned rejection was replaced: %v -> %v", tc.err, mapped)
+				}
+				if tc.want {
+					details, ok := app.Details.(map[string]any)
+					if !ok || details["operation_id"] != required.OperationID || details["remediation"] != required.ResumeCommand() || !strings.Contains(fmt.Sprint(details["reason"]), fmt.Sprintf("HTTP %d", status)) {
+						t.Fatalf("exact rejection correction lost: %#v", app.Details)
+					}
+				}
+			})
 		}
 	}
 }
