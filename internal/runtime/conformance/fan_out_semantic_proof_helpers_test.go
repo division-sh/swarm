@@ -123,12 +123,12 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 		raw = replace(raw, "    - portfolio.opened\n", "    - portfolio.opened\n"+subscriptions.String())
 		// Existing producers of account.registered must satisfy the extended
 		// output contract too, even though these proofs use the new handlers.
-		raw = replace(raw, "            eligible: ${entity.threshold >= 70}\n", "            eligible: ${entity.threshold >= 70}\n            ordinal: ${fan_out.index}\n            source_count: ${fan_out.count}\n            snapshot_threshold: ${entity.threshold}\n")
+		raw = replace(raw, "            eligible: entity.threshold >= 70\n", "            eligible: entity.threshold >= 70\n            ordinal: fan_out.index\n            source_count: fan_out.count\n            snapshot_threshold: entity.threshold\n")
 		for _, producer := range []struct{ event, site, source string }{
 			{semanticProofPayloadEvent, "rules", "payload.account_ids"},
 			{semanticProofEntityEvent, "on_complete", "entity.account_ids"},
 		} {
-			predicate := "condition: else"
+			predicate := ""
 			if producer.site == "rules" {
 				predicate = "else: true"
 			}
@@ -150,15 +150,15 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
             emit:
               event: account.registered
               fields:
-                portfolio_id: ${payload.portfolio_id}
-                account_id: ${account.account_id}
-                eng_roles: ${account.eng_roles}
-                gem_score: ${account.gem_score}
-                external_id: ${account.external_id}
-                eligible: ${entity.threshold >= 70}
-                ordinal: ${fan_out.index}
-                source_count: ${fan_out.count}
-                snapshot_threshold: ${entity.threshold}
+                portfolio_id: payload.portfolio_id
+                account_id: account.account_id
+                eng_roles: account.eng_roles
+                gem_score: account.gem_score
+                external_id: account.external_id
+                eligible: entity.threshold >= 70
+                ordinal: fan_out.index
+                source_count: fan_out.count
+                snapshot_threshold: entity.threshold
 `, producer.event, producer.site, predicate, producer.source)
 		}
 		raw += fmt.Sprintf(`    %s:
