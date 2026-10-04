@@ -40,7 +40,7 @@ func TestNotifyHumanManagedPlanningCoversEveryShippedBackendAndKillsOmission(t *
 		{name: "openai_compatible_api", contract: OpenAICompatibleProviderContract(), binding: managedcapabilities.BindingAPIDefinition, exactNames: []string{toolName}},
 		{name: "openai_responses_api", contract: OpenAIResponsesProviderContract(), binding: managedcapabilities.BindingAPIDefinition, exactNames: []string{toolName}},
 		{name: "claude_cli", contract: ClaudeCLIProviderContract(), binding: managedcapabilities.BindingMCPTool, exactNames: []string{"mcp__runtime-tools__notify_human"}},
-		{name: "mock", contract: MockProviderContract(), binding: managedcapabilities.BindingLocalRuntime, exactNames: []string{toolName}},
+		{name: "mock", contract: MockProviderContract(), binding: managedcapabilities.BindingMCPTool, exactNames: []string{"mcp__runtime-tools__" + toolName}},
 	}
 
 	actor := runtimeactors.AgentConfig{ID: "hitl-agent", Identity: testAgentIdentity("hitl-agent", "")}

@@ -155,7 +155,7 @@ func TestRecoveredAcquirePostCommitErrorReleasesExactGrantBothStores(t *testing.
 					if releasePostCommit {
 						registry.releaseErr = errors.New("injected postcommit release failure")
 					}
-					runtime := runtimellm.NewMockRuntime(&config.Config{}, registry, fixture.leaseHolder, nil, nil, controller)
+					runtime := runtimellm.NewMockRuntime(&config.Config{}, registry, fixture.leaseHolder, nil, nil, controller, runtimellm.MockRuntimeOptions{})
 					conversation := managedConsumerWithRuntime(t, fixture, settlement, runtime)
 					runCtx := managedExecutionStoreTestContext(t, runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal))
 					if canceled {
@@ -276,7 +276,7 @@ func managedConsumerForCommittedCompletion(t *testing.T, fixture completionSettl
 	if !ok {
 		t.Fatal("selected completion store does not expose its session registry")
 	}
-	runtime := runtimellm.NewMockRuntime(&config.Config{}, registry, fixture.leaseHolder, nil, nil, controller)
+	runtime := runtimellm.NewMockRuntime(&config.Config{}, registry, fixture.leaseHolder, nil, nil, controller, runtimellm.MockRuntimeOptions{})
 	return managedConsumerWithRuntime(t, fixture, settlement, runtime)
 }
 

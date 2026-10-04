@@ -1,0 +1,8 @@
+name: workspace-mcp
+stages:
+  pending: {initial: true}
+  working: {}
+  complete: {terminal: true}
+pins:
+  inputs:
+    events: [work.requested]
