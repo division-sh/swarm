@@ -9,6 +9,8 @@ var rootDeferralReasons = map[string]map[string]string{
 		"TestProjectPackImportSubprocessHelper": "subprocess entry point, not a standalone proof",
 	},
 	"internal/releasee2e": {
+		"TestWorkspaceMCPCompiledDockerConformance":                  "real Docker proof required separately by the workspace-image CI job; no skip credit",
+		"TestWorkspaceMCPCompiledDockerDoctorAndLiveBootRefusal":     "real Docker proof required separately by the workspace-image CI job; no skip credit",
 		"TestClaudeCLIPositiveSelectorAgainstInstalledWorkspace":     "separately provisioned live selector proof",
 		"TestClaudeCLIPaidAgenticLifecycleFromReleaseBinaryDefaults": "separately provisioned paid agentic proof",
 		"TestCommandLiveServeAndRestartParity":                       "separately provisioned live command proof",
@@ -28,9 +30,16 @@ var rootDeferralReasons = map[string]map[string]string{
 		"TestCanonicalRoutingTrackedSplitsRemainOpen": "separately provisioned remote tracker check",
 	},
 	"internal/runtime/workspace": {
-		"TestClaudeStateDockerRetentionAndRefusal":      "opt-in real Docker proof",
-		"TestClaudeStateDockerSharedWorkspaceIsolation": "opt-in real Docker proof",
-		"TestResetContainerIntentRealDocker":            "opt-in real Docker proof",
+		"TestWorkerRealDockerIdentityReuseAndCancellationJoin":           "real Docker proof required separately by the workspace-image CI job; no skip credit",
+		"TestWorkerRealDockerHTTPDeadlineJoinsGatewayRequest":            "real Docker proof required separately by the workspace-image CI job; no skip credit",
+		"TestWorkerRealDockerLostClientJoinsGatewayRequest":              "real Docker proof required separately by the workspace-image CI job; no skip credit",
+		"TestWorkerRealDockerLostClientAfterToolCommitDoesNotReplay":     "real Docker proof required separately by the workspace-image CI job; no skip credit",
+		"TestWorkerRealDockerCallDeadlineKeepsCommittedOutcomeUncertain": "real Docker proof required separately by the workspace-image CI job; no skip credit",
+		"TestWorkerRealDockerLostClientRetainsCleanupFailure":            "real Docker proof required separately by the workspace-image CI job; no skip credit",
+		"TestWorkerRealDockerLostClientPreservesSiblingAndSource":        "real Docker proof required separately by the workspace-image CI job; no skip credit",
+		"TestClaudeStateDockerRetentionAndRefusal":                       "opt-in real Docker proof",
+		"TestClaudeStateDockerSharedWorkspaceIsolation":                  "opt-in real Docker proof",
+		"TestResetContainerIntentRealDocker":                             "opt-in real Docker proof",
 	},
 	"internal/serveapp": {
 		"TestChannelOnboardingCrashServeProcessHelper":                  "subprocess entry point, not a standalone proof",

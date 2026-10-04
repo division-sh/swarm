@@ -2,8 +2,8 @@
 
 Agent: agent-g. Phase: implementation under the approved independent gate.
 Audited origin/master: `76fbddd6dacec435e7807de14562be03b2a47e1d`.
-The production implementation is in uncommitted work in this branch; no runtime
-closure, paid provider invocation, or Telegram call is claimed. The original
+The production implementation is committed locally in this branch; no complete
+class closure, paid provider invocation, or Telegram call is claimed. The original
 matrix below remains a proof plan, not a completed proof audit. The implementation
 stop-condition addendum at the end retains the counterexamples and their
 superseding bounded dispositions. Fork-chat coding is approved; compensation
@@ -876,3 +876,40 @@ reach the real transport assertions; this admission failure earns no proof.
 The original RED receipts remain retained. The complete 48-row class, E-owned
 #2525 compensation integration, public hosted default-Linux Docker proof and
 full/full exact-head qualification remain open.
+
+### Full-run fixture and separately provisioned proof correction
+
+The first explicit `swarm-test --full` at clean `f8721729b` is RED, retained as
+`worker-f872-independent-full-pg16.log`. It planned 65 units and started 11 before
+fail-fast cancellation. Neither unfinished units nor opt-in skips earn credit.
+The four observed failure families are within existing fixture/proof ownership:
+
+- Release's strict compiled-process boundary correctly rejects G's two observer
+  imports of the production worker package. The observers now inspect bounded
+  wire bytes and join only their own forwarding descriptors using standard
+  library code. They still execute the compiled native child; the boundary guard
+  is unchanged and no in-process model or tool execution is introduced.
+- The Docker emulator treated the first `--mount` (now the read-only worker bind)
+  as Claude's retained provider volume. It must consume its already-parsed
+  `providerMount`, separately from the worker bind and disposable tmpfs. Exact
+  mount and missing/foreign provider backing assertions stay strict.
+- A compiled read test used a plain temporary root for sealed retained data
+  projections. It now uses the existing test-owned root helper, which joins its
+  children before restoring directory removal permission, never a runtime
+  permission change or early unsealing.
+- All four canonical Telegram memory/restart cells refused with persisted typed
+  `workspace_worker_target_missing`: the test injected a workspace stub with no
+  executable target. Remove that stub so the retained H composition uses real
+  host workspace execution and gateway HTTP. Keep every receipt, causal identity,
+  session continuity and both-recovery-policy assertion.
+
+The full plan also tried to require PASS from opt-in Docker roots in ordinary
+shards without an image. Declare these nine exact roots as separately provisioned
+through the existing finite deferral owner, matching the existing Docker proof
+policy. Their mandatory hosted owner remains the image-building Ubuntu
+`sqlite-local-dev` job, with opt-in enabled and both exact worker/release command
+families. Add an executable owner guard with missing-provisioning and lost-test
+negative controls. This is proof venue correction, not Q01/M09 waiver: ordinary
+skips give no transport, remote-join, default-network or class-closure credit.
+Public default Linux Docker Q01, E's merged compensation L01/L04, every original
+48-row obligation and fresh full/full qualification remain required.
