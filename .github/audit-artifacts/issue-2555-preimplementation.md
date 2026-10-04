@@ -1025,3 +1025,15 @@ head integrating actually merged #2525. No further pre-merge full is allowed.
 E's critical-path qualification has priority over G's server2 capacity. Final
 L01/L04 refusal/join/new-attempt retry remains explicitly dependent on that
 merge; G does not duplicate E's compensation repair.
+
+### Independent static-doctor proof
+
+`TestWorkspaceMCPCompiledStaticDoctorProofCredit` now exercises the actual
+compiled, source-free command in text and JSON with no external executable
+path. It requires the container path to be explicitly unprobed, credential
+validity to remain unprobed, exactly one informational/skipped gateway finding
+in JSON, and no private test session or database acquisition. Both modes pass
+(4.899s, captured before commit). This closes that wording observation gap,
+not the hosted Docker path, paid doctor, final-head qualification or L06.
+The new root is consumed by the existing mandatory release-rest partition;
+no planner, timeout, tier, runtime or production assertion changes are made.
