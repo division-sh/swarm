@@ -195,29 +195,13 @@ func ClassifyStandingRestart(fact StandingRestartFact) (StandingRestartDispositi
 	if err != nil {
 		return StandingRestartDisposition{}, err
 	}
-	if fact.EffectiveState != "active" && fact.EffectiveState != "suspended" && fact.EffectiveState != "orphaned" && fact.EffectiveState != "dormant" && fact.EffectiveState != "recovery_required" {
-		return StandingRestartDisposition{}, fmt.Errorf("invalid standing restart effective_state %q", fact.EffectiveState)
+	if err := validateStandingDesiredState(fact); err != nil {
+		return StandingRestartDisposition{}, err
 	}
-	if fact.OperatorOverride != "none" && fact.OperatorOverride != "suspended" {
-		return StandingRestartDisposition{}, fmt.Errorf("invalid standing restart operator_override %q", fact.OperatorOverride)
-	}
-	desiredValid := (!fact.DeclarationPresent && !fact.BindingEnabled && fact.EffectiveState == "orphaned" &&
-		(fact.OperatorOverride == "none" || fact.OperatorOverride == "suspended")) ||
-		(fact.DeclarationPresent && fact.BindingEnabled && fact.EffectiveState == "active" && fact.OperatorOverride == "none") ||
-		(fact.DeclarationPresent && fact.BindingEnabled && fact.EffectiveState == "suspended" && fact.OperatorOverride == "suspended") ||
-		(fact.DeclarationPresent && !fact.BindingEnabled && (fact.EffectiveState == "dormant" || fact.EffectiveState == "recovery_required"))
 	result := StandingRestartDisposition{
 		ServiceID: fact.ServiceID, RunID: fact.RunID, Generation: fact.Generation,
 		DeclarationPresent: fact.DeclarationPresent, BindingEnabled: fact.BindingEnabled, EffectiveState: fact.EffectiveState,
 		OperatorOverride: fact.OperatorOverride, RunState: string(state),
-	}
-	if !desiredValid {
-		return StandingRestartDisposition{}, fmt.Errorf(
-			"standing restart desired-state product is inconsistent: declaration_present=%t effective_state=%s operator_override=%s",
-			fact.DeclarationPresent,
-			fact.EffectiveState,
-			fact.OperatorOverride,
-		)
 	}
 	switch {
 	case state.Terminal() && fact.DeclarationPresent:
@@ -244,4 +228,27 @@ func ClassifyStandingRestart(fact StandingRestartFact) (StandingRestartDispositi
 		result.Kind, result.Remediation = StandingRestartInvalidCurrent, StandingRestartRestoreThenReset
 	}
 	return result, result.Validate()
+}
+
+func validateStandingDesiredState(fact StandingRestartFact) error {
+	if fact.EffectiveState != "active" && fact.EffectiveState != "suspended" && fact.EffectiveState != "orphaned" && fact.EffectiveState != "dormant" && fact.EffectiveState != "recovery_required" {
+		return fmt.Errorf("invalid standing restart effective_state %q", fact.EffectiveState)
+	}
+	if fact.OperatorOverride != "none" && fact.OperatorOverride != "suspended" {
+		return fmt.Errorf("invalid standing restart operator_override %q", fact.OperatorOverride)
+	}
+	desiredValid := (!fact.DeclarationPresent && !fact.BindingEnabled && fact.EffectiveState == "orphaned" &&
+		(fact.OperatorOverride == "none" || fact.OperatorOverride == "suspended")) ||
+		(fact.DeclarationPresent && fact.BindingEnabled && fact.EffectiveState == "active" && fact.OperatorOverride == "none") ||
+		(fact.DeclarationPresent && fact.BindingEnabled && fact.EffectiveState == "suspended" && fact.OperatorOverride == "suspended") ||
+		(fact.DeclarationPresent && !fact.BindingEnabled && (fact.EffectiveState == "dormant" || fact.EffectiveState == "recovery_required"))
+	if !desiredValid {
+		return fmt.Errorf(
+			"standing restart desired-state product is inconsistent: declaration_present=%t effective_state=%s operator_override=%s",
+			fact.DeclarationPresent,
+			fact.EffectiveState,
+			fact.OperatorOverride,
+		)
+	}
+	return nil
 }

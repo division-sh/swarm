@@ -795,7 +795,7 @@ func (s *Service) Recover(ctx context.Context) error {
 			return err
 		}
 		op = rebound
-		if candidate.Target.Generation == 0 && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget()) {
+		if recoveryNeedsFreshTargetAdmission(op, candidate) {
 			// Local recovery may settle historical responsibility, but cannot
 			// execute a declaration-only candidate or adopt its default keys.
 			continue
@@ -809,6 +809,10 @@ func (s *Service) Recover(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func recoveryNeedsFreshTargetAdmission(op Operation, candidate Candidate) bool {
+	return candidate.Target.Generation == 0 && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget())
 }
 
 func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {
@@ -1255,18 +1259,8 @@ func credentialRequiredForStaleParent(parent Operation, identity operatorchannel
 }
 
 func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate Candidate, providerCredential string, allowNewAdmission bool) ([]CredentialAdmission, error) {
-	currentByRole := map[string]CredentialAdmission{}
-	if current, err := s.store.GetConnectedChannelActivation(ctx, op.SlotKey); err == nil {
-		for _, admission := range current.CredentialAdmissions {
-			if err := admission.Validate(); err != nil {
-				return nil, err
-			}
-			if _, duplicate := currentByRole[admission.Role]; duplicate {
-				return nil, fmt.Errorf("%w: current activation has duplicate credential role %q", ErrConflict, admission.Role)
-			}
-			currentByRole[admission.Role] = admission
-		}
-	} else if !errors.Is(err, ErrNotFound) {
+	currentByRole, err := s.currentCredentialAdmissions(ctx, op.SlotKey)
+	if err != nil {
 		return nil, err
 	}
 	admissions := make([]CredentialAdmission, len(op.CredentialReservations))
@@ -1301,27 +1295,17 @@ func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate 
 				}
 			}
 		case candidate.SigningCredentialRole:
-			if current, ok := currentByRole[reservation.Role]; ok {
-				observed, present, err := s.credentials.ObserveOptional(ctx, current.StoreKey)
-				if err != nil {
-					return nil, err
-				}
-				if !present {
-					missingErr = errors.Join(missingErr, &CredentialRequiredError{OperationID: op.OperationID, Role: reservation.Role, StoreKey: current.StoreKey})
+			admitted, generate, err := s.admitSigningCredential(ctx, op, reservation, currentByRole[reservation.Role])
+			if err != nil {
+				var missing *CredentialRequiredError
+				if errors.As(err, &missing) {
+					missingErr = errors.Join(missingErr, err)
 					continue
 				}
-				if observed.ValueSeal != current.ValueSeal {
-					return nil, fmt.Errorf("%w: current signing credential %q changed", ErrConflict, current.StoreKey)
-				}
-				admissions[i] = observedCredentialAdmissionForKey(op.OperationID, reservation.Role, current.StoreKey, observed)
-				continue
-			}
-			observed, present, err := s.credentials.ObserveOptional(ctx, reservation.StoreKey)
-			if err != nil {
 				return nil, err
 			}
-			if present {
-				admissions[i] = observedCredentialAdmission(op.OperationID, reservation, observed)
+			if !generate {
+				admissions[i] = admitted
 				continue
 			}
 			if generateSigning != -1 {
@@ -1379,6 +1363,51 @@ func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate 
 		admissions[i] = CredentialAdmission{Role: op.CredentialReservations[i].Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, ValueSeal: written.ValueSeal}
 	}
 	return admissions, nil
+}
+
+func (s *Service) currentCredentialAdmissions(ctx context.Context, slot string) (map[string]CredentialAdmission, error) {
+	out := map[string]CredentialAdmission{}
+	current, err := s.store.GetConnectedChannelActivation(ctx, slot)
+	if errors.Is(err, ErrNotFound) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, admission := range current.CredentialAdmissions {
+		if err := admission.Validate(); err != nil {
+			return nil, err
+		}
+		if _, duplicate := out[admission.Role]; duplicate {
+			return nil, fmt.Errorf("%w: current activation has duplicate credential role %q", ErrConflict, admission.Role)
+		}
+		out[admission.Role] = admission
+	}
+	return out, nil
+}
+
+func (s *Service) admitSigningCredential(ctx context.Context, op Operation, reservation CredentialReservation, current CredentialAdmission) (CredentialAdmission, bool, error) {
+	key := reservation.StoreKey
+	if current.StoreKey != "" {
+		key = current.StoreKey
+	}
+	observed, present, err := s.credentials.ObserveOptional(ctx, key)
+	if err != nil {
+		return CredentialAdmission{}, false, err
+	}
+	if current.StoreKey != "" {
+		if !present {
+			return CredentialAdmission{}, false, &CredentialRequiredError{OperationID: op.OperationID, Role: reservation.Role, StoreKey: key}
+		}
+		if observed.ValueSeal != current.ValueSeal {
+			return CredentialAdmission{}, false, fmt.Errorf("%w: current signing credential %q changed", ErrConflict, key)
+		}
+		return observedCredentialAdmissionForKey(op.OperationID, reservation.Role, key, observed), false, nil
+	}
+	if present {
+		return observedCredentialAdmission(op.OperationID, reservation, observed), false, nil
+	}
+	return CredentialAdmission{}, true, nil
 }
 
 func (s *Service) validateCredentialAdmissions(ctx context.Context, op Operation) error {
