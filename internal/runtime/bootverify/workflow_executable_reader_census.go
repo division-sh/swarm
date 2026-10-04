@@ -175,13 +175,16 @@ func noHandlerRuleExecutableReaders(*[]expressionReference, executableReaderCont
 
 func appendExecutableReader(out *[]expressionReference, kind, expression string, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
 	expression = strings.TrimSpace(expression)
-	if expression == "" || strings.EqualFold(expression, "else") {
+	if expression == "" {
 		return
 	}
 	*out = append(*out, expressionReference{Kind: strings.TrimSpace(kind), SourceSlot: strings.TrimSpace(kind), Expression: expression, Phase: phase})
 }
 
 func appendConditionExecutableReader(out *[]expressionReference, kind, expression string, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase, context runtimepipeline.WorkflowConditionContext) {
+	if strings.EqualFold(strings.TrimSpace(expression), "else") && (context == runtimepipeline.WorkflowConditionContextRule || context == runtimepipeline.WorkflowConditionContextOnComplete) {
+		return // Only internal selection defaults are not executable expressions.
+	}
 	before := len(*out)
 	appendExecutableReader(out, kind, expression, phase)
 	if len(*out) > before {
