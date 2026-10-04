@@ -146,7 +146,7 @@ func TestSurfaceIdentitySeparatesSameSlugConcreteActors(t *testing.T) {
 }
 
 func TestSurfaceAcceptsCanonicalProviderTransports(t *testing.T) {
-	for _, transport := range []string{"api", "cli", "in_process"} {
+	for _, transport := range []string{"api", "cli"} {
 		plan := Plan{
 			ActorIdentity: managedCapabilityTestIdentity("worker"), RuntimeMode: "task", Provider: "test", Transport: transport,
 			ProviderContract: "test.v1", CreatedAt: time.Unix(1, 0).UTC(),

@@ -453,6 +453,7 @@ func (r *LocalPreflightReport) checkListener(code, name, addr string) {
 }
 
 func (r *LocalPreflightReport) checkGatewayEnv() {
+	r.add(localPreflightGatewayPrerequisite, "workspace_gateway_not_probed", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "gateway reachability not checked from inside a container; provider credential validity not probed", "use the free doctor gateway probe for target-local network evidence")
 	for _, entry := range swarmEnvCatalogEntries() {
 		if entry.Category != swarmEnvCategoryGeneratedBoundary {
 			continue

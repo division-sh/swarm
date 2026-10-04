@@ -190,7 +190,7 @@ var registrations = []Registration{
 	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_compatible", "http", "internal/runtime/llm/openai_compatible_runtime.go", []string{"internal/runtime/llm/openai_compatible_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes"),
 	registration(KindProviderTurn, EffectWriteOrUnknown, "openai_responses", "http", "internal/runtime/llm/openai_responses_runtime.go", []string{"internal/runtime/llm/openai_responses_runtime.go:sendRequest:http_do:1"}, "TestManagedProviderEffectOutcomes"),
 	registration(KindProviderTurn, EffectWriteOrUnknown, "claude_cli", "process", "internal/runtime/llm/cli_runtime_process.go", []string{"internal/runtime/llm/cli_runtime_process.go:runWithPreparedInput:process_launch:1", "internal/runtime/llm/cli_runtime_process.go:runStreamingPrepared:process_launch:1"}, "TestManagedClaudeCLIEffectOutcomes"),
-	registration(KindProviderTurn, EffectReadOnly, "mock_python", "in_process", "internal/runtime/llm/mock_runtime.go", nil, "TestMockManagedRequestConsumesCanonicalExecutionFrame"),
+	registration(KindProviderTurn, EffectReadOnly, "mock_python", "process", "internal/runtime/llm/mock_runtime.go", []string{"internal/runtime/workspace/worker_execution.go:RunWorker:process_launch:1"}, "TestMockManagedRequestConsumesCanonicalExecutionFrame"),
 	registration(KindHTTPToolTarget, EffectWriteOrUnknown, "authored_http_tool", "http", "internal/runtime/tools/executor_http.go", []string{"internal/runtime/tools/executor_http.go:execHTTPRequestOnce:http_do:1"}, "TestManagedToolEffectOutcomes"),
 	registration(KindServeRegistration, EffectWriteOrUnknown, "provider_registration", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestProviderRegistrationApplyEffectOutcomes"),
 	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelConfirmationEffectOutcomes"),
@@ -450,6 +450,25 @@ type Store interface {
 	MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) error
 	MarkExternalAttemptResponseObserved(context.Context, Attempt, map[string]any, time.Time) error
 	SettleExternalAttempt(context.Context, Settlement) error
+}
+
+// ForkChatWorkspaceStore observes the owned preallocated group without claiming
+// a provider attempt. Prepared workspace admission is not execution admission.
+type ForkChatWorkspaceStore interface {
+	IsForkChatWorkspaceAuthorityCurrent(context.Context, Authority) (bool, error)
+}
+
+func ForkChatWorkspaceCurrent(ctx context.Context) (bool, error) {
+	authority, ok := AuthorityFromContext(ctx)
+	controller, configured := ControllerFromContext(ctx)
+	if !ok || !configured || authority.Kind != AuthorityConversationForkChat || !authority.Valid() {
+		return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "forkchat_workspace_authority_missing", "external-effects", "admit_forkchat_workspace", nil)
+	}
+	owner, ok := controller.store.(ForkChatWorkspaceStore)
+	if !ok {
+		return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "forkchat_workspace_owner_missing", "external-effects", "admit_forkchat_workspace", nil)
+	}
+	return owner.IsForkChatWorkspaceAuthorityCurrent(ctx, authority)
 }
 
 type OperationOutcome struct {

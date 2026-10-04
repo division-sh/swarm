@@ -422,6 +422,23 @@ func TestWorkspaceAdmittedForkChatExecutorAllowsAPIBackend(t *testing.T) {
 	}
 }
 
+func TestWorkspaceAdmittedForkChatExecutorDistinguishesMockFromLiveCLI(t *testing.T) {
+	for _, backend := range []string{workspace.BackendHost, workspace.BackendDocker, WorkspaceBackendNone} {
+		t.Run(backend, func(t *testing.T) {
+			decision := WorkspaceBackendSelection{Backend: backend, NoWorkspace: backend == WorkspaceBackendNone}
+			inner := recordingForkChatExecutor{result: runfork.ConversationForkChatExecution{AssistantMessage: "admitted"}}
+			mock := NewWorkspaceAdmittedForkChatExecutor(inner, staticWorkspaceAgentRuntimeResolver{runtime: &runtimellm.MockRuntime{}}, decision)
+			if got, err := mock.ExecuteForkChat(context.Background(), runfork.ConversationForkChatPrepared{}, "inspect"); err != nil || got.AssistantMessage != "admitted" {
+				t.Fatalf("model-only mock was mistaken for live Claude: result=%+v err=%v", got, err)
+			}
+			live := NewWorkspaceAdmittedForkChatExecutor(inner, staticWorkspaceAgentRuntimeResolver{runtime: &runtimellm.ClaudeCLIRuntime{}}, decision)
+			if _, err := live.ExecuteForkChat(context.Background(), runfork.ConversationForkChatPrepared{}, "inspect"); (err != nil) != (backend != workspace.BackendDocker) {
+				t.Fatalf("live Claude isolation changed: %v", err)
+			}
+		})
+	}
+}
+
 type recordingForkChatExecutor struct {
 	result runfork.ConversationForkChatExecution
 }

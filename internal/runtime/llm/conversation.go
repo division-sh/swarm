@@ -171,6 +171,13 @@ func (c *Conversation) RunForkChat(ctx context.Context, input string) (response 
 	if msg.Content == "" {
 		return nil, errors.New("fork-chat input is required")
 	}
+	if tools := c.turnToolDefinitions(); len(tools) != 0 {
+		dispatch, err := newForkChatToolDispatch(ctx, c.toolExecutor, tools)
+		if err != nil {
+			return nil, err
+		}
+		ctx = dispatch.WithContext(ctx)
+	}
 	defer func() {
 		retErr = errors.Join(retErr, c.releaseInvocationState(ctx))
 		if retErr != nil && response != nil && response.forkChatCompletionAcknowledged && len(response.ToolCalls) == 0 {
@@ -562,7 +569,19 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 		callCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, callIdentity)
 		var out any
 		var err error
-		if terminal && response.ToolOutputAuthority != nil {
+		transported := false
+		if mock, ok := c.runtime.(*MockRuntime); ok {
+			if terminal && response.ToolOutputAuthority == nil && managedAgentExecutionContext(ctx) {
+				err = runtimefailures.New(runtimefailures.ClassLifecycleConflict, "tool_output_authority_missing", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(tc.Name)})
+			} else {
+				var authority *ToolOutputAuthority
+				if terminal {
+					authority = response.ToolOutputAuthority
+				}
+				out, err = mock.executeTransportTool(callCtx, c.Session, tc, authority, callIdentity)
+				transported = true
+			}
+		} else if terminal && response.ToolOutputAuthority != nil {
 			identity, identityErr := response.ToolOutputAuthority.eventIdentity(callIdentity)
 			if identityErr != nil {
 				err = runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "tool_output_event_identity_invalid", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(tc.Name)}, identityErr)
@@ -581,7 +600,11 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 			entry["tool_call_id"] = id
 		}
 		if err == nil {
-			projected, projectErr := c.projectToolResult(callCtx, tc.Name, tc.Arguments, out)
+			projected := out
+			var projectErr error
+			if !transported {
+				projected, projectErr = c.projectToolResult(callCtx, tc.Name, tc.Arguments, out)
+			}
 			if projectErr != nil {
 				err = projectErr
 			} else {
@@ -592,6 +615,11 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 		if err != nil {
 			entry["ok"] = false
 			failure := runtimefailures.Normalize(err, "llm-conversation", "execute_tool")
+			if transported && failure.Class == runtimefailures.ClassOutcomeUncertain {
+				// A new model round could mint another call for a tool that already
+				// committed. Keep the existing continuation unconsumed instead.
+				return "", executed, err
+			}
 			failureValue, valueErr := runtimefailures.EnvelopeValue(failure)
 			if valueErr != nil {
 				return "", executed, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "tool_failure_envelope_encode_failed", "llm-conversation", "deliver_tool_result", map[string]any{"tool": strings.TrimSpace(tc.Name)}, valueErr)

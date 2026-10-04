@@ -135,7 +135,7 @@ func (f RuntimeFactory) buildProfile(profile llmselection.Profile) (Runtime, err
 		runtime.(*OpenAIResponsesRuntime).completionController = f.CompletionController
 		runtime.(*OpenAIResponsesRuntime).liveSessions = f.LiveSessions
 	case llmselection.BackendMock:
-		runtime = NewMockRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, f.CompletionController)
+		runtime = NewMockRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, f.CompletionController, MockRuntimeOptions{Workspaces: f.Workspaces, MCPTurns: f.MCPTurns, ToolGateway: f.ToolGateway})
 		runtime.(*MockRuntime).liveSessions = f.LiveSessions
 	default:
 		return nil, fmt.Errorf("unsupported llm backend profile: %s", profile.ID)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -17,9 +18,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
 
@@ -82,10 +86,19 @@ func TestForkChatCommittedAssistantSurvivesCleanupErrorThroughAPI(t *testing.T) 
 `)
 	harness := effecttest.New()
 	probe := &committedForkChatCompletionProbe{Harness: harness, cleanupErr: errors.New("completion cleanup failed after commit")}
+	turns := mcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
+	gateway := mcp.NewGateway(nil, "forkchat-test-boot", mcp.GatewayHooks{ResolveTurnContext: turns.ResolveTurnContext, WithActor: runtimeactors.WithActor})
+	server := httptest.NewServer(gateway.Handler())
+	t.Cleanup(server.Close)
+	binding, err := toolgateway.NewRuntimeOwnedBinding(toolgateway.TransportHTTP, server.URL, server.URL, "forkchat-test-boot", toolgateway.LifecycleOwnerServeBoot, toolgateway.SourceBoundMCPListener)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaces := forkChatAckHostWorkspace{root: t.TempDir()}
 	runtime := runtimellm.NewMockRuntime(&config.Config{LLM: config.LLMConfig{Models: llmselection.ModelAliases{
 		llmselection.ModelAliasRegular: {llmselection.BackendMock: "mock-regular"},
 	}}}, sessions.NewInMemoryRegistry(time.Minute), "worker-1", nil, nil,
-		runtimeeffects.NewCompletionController(probe, probe, probe, probe).WithExecutionPosture(executionposture.Live))
+		runtimeeffects.NewCompletionController(probe, probe, probe, probe).WithExecutionPosture(executionposture.Live), runtimellm.MockRuntimeOptions{Workspaces: workspaces, MCPTurns: turns, ToolGateway: binding})
 
 	forkID, forkTurnID, sourceRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	bundleHash := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -148,6 +161,16 @@ func TestForkChatCommittedAssistantSurvivesCleanupErrorThroughAPI(t *testing.T) 
 	if got := len(harness.CompletionSettlementsForAdapter("mock_python")); got != 2 {
 		t.Fatalf("completion settlements = %d, want 2", got)
 	}
+}
+
+type forkChatAckHostWorkspace struct{ root string }
+
+func (w forkChatAckHostWorkspace) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
+	return &workspace.Target{Backend: workspace.BackendHost, Workdir: w.root}, nil
+}
+
+func (w forkChatAckHostWorkspace) ResolveWorkspaceForCapabilityAdmission(ctx context.Context, actor runtimeactors.AgentConfig) (*workspace.Target, error) {
+	return w.ResolveWorkspace(ctx, actor)
 }
 
 func TestForkChatAPIRejectsResponseWithoutCompletionAcknowledgement(t *testing.T) {

@@ -502,6 +502,7 @@ func startLocalRunServe(ctx context.Context, root InvocationRoot, opts runComman
 	}
 	if opts.mcpPort > 0 {
 		serveOpts.MCPListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.mcpPort))
+		serveOpts.MCPListenAddrSource = ListenerAddressFlag
 	}
 	serveCtx, cancel := context.WithCancel(ctx)
 	done := make(chan int, 1)

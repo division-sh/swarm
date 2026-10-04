@@ -54,13 +54,14 @@ const (
 )
 
 type scenarioTestCommandOptions struct {
-	apiOptions   rootCommandOptions
-	contracts    string
-	timeout      time.Duration
-	pollInterval time.Duration
-	derive       string
-	input        string
-	allInputs    bool
+	apiOptions       rootCommandOptions
+	contracts        string
+	timeout          time.Duration
+	pollInterval     time.Duration
+	derive           string
+	input            string
+	allInputs        bool
+	workspaceBackend string
 }
 
 type scenarioTestFile struct {
@@ -184,11 +185,20 @@ func newTestCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command
 	cmd.Flags().StringVar(&testOpts.derive, "derive", "", "Derive and run a scenario for an exact flow")
 	cmd.Flags().StringVar(&testOpts.input, "input", "", "Exact public input pin for derived mode")
 	cmd.Flags().BoolVar(&testOpts.allInputs, "all-inputs", false, "Derive one scenario for every public input of the selected flow")
+	cmd.Flags().StringVar(&testOpts.workspaceBackend, "workspace-backend", "host", "Private test workspace: host or docker; does not import deployment resources")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &testOpts.apiOptions, cliAPICommandClassMutating, "swarm test")
 	return cmd
 }
 
 func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io.Writer, args []string, opts scenarioTestCommandOptions) error {
+	workspaceBackend := opts.workspaceBackend
+	if workspaceBackend == "" {
+		workspaceBackend = "host"
+	}
+	workspaceBackend, err := normalizeWorkspaceBackend(workspaceBackend, "--workspace-backend")
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, err)
+	}
 	if opts.timeout <= 0 {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("--timeout must be positive"))
 	}
@@ -301,6 +311,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	err = opts.apiOptions.runTest(ctx, TestSessionRequest{
 		Bundle: bundle, SourceRoot: sourceRoot, PlatformSpecPath: platformSpec,
 		PlatformPackBase: platformPackBase, LiveBackend: profile.ID, ModelAliases: configResult.Config.LLM.Models,
+		WorkspaceBackend: workspaceBackend,
 	}, func(sessionCtx context.Context, endpoint TestSessionEndpoint) error {
 		rpcEndpoint, err := cliAPIRPCEndpointFromServer(endpoint.APIServer, "private test session")
 		if err != nil {

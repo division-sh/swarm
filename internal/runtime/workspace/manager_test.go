@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -296,6 +297,13 @@ func TestEnsureWorkspaceContainerReusesExactRunProjectionIdentity(t *testing.T) 
 			return string(labels), nil
 		case args[0] == "rm" || args[0] == "create" || args[0] == "start":
 			mutatingCall = true
+		case len(args) >= 3 && args[0] == "inspect" && strings.Contains(args[2], ".HostConfig.ExtraHosts"):
+			artifact, err := currentWorkerArtifact()
+			if err != nil {
+				return "", err
+			}
+			input, err := json.Marshal(map[string]any{"hosts": []string{"host.docker.internal:host-gateway"}, "mounts": []map[string]any{{"Type": "bind", "Source": artifact.path, "Destination": WorkerContainerPath, "RW": false}}})
+			return string(input), err
 		}
 		return "", nil
 	})
@@ -339,6 +347,53 @@ func TestEnsureWorkspaceContainerRejectsUnownedNameCollision(t *testing.T) {
 	}
 	if mutatingCall {
 		t.Fatal("unowned container name collision triggered mutation")
+	}
+}
+
+func TestReusedWorkspaceRequiresExactWorkerAndGatewayInputs(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("native Linux immutable container inputs; Desktop uses image admission")
+	}
+	artifact, err := currentWorkerArtifact()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, host, source, mountType string
+		writable, valid               bool
+	}{
+		{"exact", "host.docker.internal:host-gateway", artifact.path, "bind", false, true},
+		{"missing_alias", "", artifact.path, "bind", false, false},
+		{"guessed_ip", "host.docker.internal:172.17.0.1", artifact.path, "bind", false, false},
+		{"old_executable", "host.docker.internal:host-gateway", "/obsolete/swarm", "bind", false, false},
+		{"writable_executable", "host.docker.internal:host-gateway", artifact.path, "bind", true, false},
+		{"unproven_volume", "host.docker.internal:host-gateway", artifact.path, "volume", false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := NewDockerManager()
+			cfg := DefaultDockerConfig()
+			cfg.WorkspaceNetwork = ""
+			manager.SetConfig(cfg)
+			mutations := 0
+			manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+				if args[0] != "inspect" {
+					mutations++
+					return "", nil
+				}
+				if args[2] == "{{.State.Running}}" {
+					return "true", nil
+				}
+				if !strings.Contains(args[2], ".HostConfig.ExtraHosts") {
+					return "", fmt.Errorf("unexpected inspection: %v", args)
+				}
+				input, err := json.Marshal(map[string]any{"hosts": []string{test.host}, "mounts": []map[string]any{{"Type": test.mountType, "Source": test.source, "Destination": WorkerContainerPath, "RW": test.writable}}})
+				return string(input), err
+			})
+			err := manager.EnsureContainerRunning(context.Background(), "exact-owned-container", nil)
+			if (err == nil) != test.valid || mutations != 0 {
+				t.Fatalf("reuse accepted=%v expected=%v mutations=%d error=%v", err == nil, test.valid, mutations, err)
+			}
+		})
 	}
 }
 
@@ -637,11 +692,11 @@ func TestResolveWorkspaceForCapabilityAdmissionDoesNotMaterializeRunBoundData(t 
 	if !target.ExecutionTarget().Supports(ExecutionCapabilityClaudeCLI) {
 		t.Fatalf("capability-admission target = %#v, want Claude CLI support", target)
 	}
-	if target.Container != manager.cfg.SystemContainer || target.Workdir != manager.cfg.SystemWorkdir {
-		t.Fatalf("capability-admission target = %#v, want existing runless system workspace", target)
+	if target.Container == manager.cfg.SystemContainer || target.Workdir != manager.cfg.WorkspaceWorkdir {
+		t.Fatalf("capability-admission target = %#v, want the concrete actor workspace", target)
 	}
-	if len(created) != 0 {
-		t.Fatalf("capability admission created execution workspace: %v", created)
+	if len(created) == 0 {
+		t.Fatal("concrete admission did not acquire its actual workspace")
 	}
 	if strings.Contains(strings.Join(created, " "), ":/data:ro") {
 		t.Fatalf("capability-admission container received a run-bound data mount: %v", created)

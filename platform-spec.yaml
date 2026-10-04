@@ -7430,7 +7430,7 @@ engine:
           protocol: native_openai_responses
         mock:
           provider: mock
-          transport: in_process
+          transport: cli
           budget_usage_accounting: estimated_hypothetical
           native_tool_policy: no provider-native or fallback external tools
           protocol: mock_python_json
@@ -7547,9 +7547,9 @@ engine:
               proof, and not a provider runtime implementation for any backend id named openai.
           mock:
             provider: mock
-            transport: in_process
+            transport: cli
             provider_contract_runtime_mode: mock
-            protocol: A captured Python performance evaluated through the pinned python-json-v1 Wasmtime runtime.
+            protocol: A captured Python performance evaluated by the target-compatible swarm workspace worker through the pinned python-json-v1 Wasmtime runtime; tools use the real authenticated MCP HTTP transport.
             legacy_backend_ids: []
             credential_source:
               secret_key: null
@@ -7560,7 +7560,9 @@ engine:
             proof_boundary: >
               This profile is the Python-only Tier-1 deterministic agent runtime. It consumes normal agent sessions,
               visible tool schemas, tool results, persistence, lifecycle authority, and routing, but it never launches an
-              external effect. It is not fixture replay, a scenario-runner interpreter, a live provider emulator, a local
+              live business effect. Only the model is substituted: the performance runs inside its selected workspace,
+              and its calls use that workspace's exact MCP gateway, never parent-side or in-process tool dispatch.
+              It is not fixture replay, a scenario-runner interpreter, a live provider emulator, a local
               model backend, or a compatibility alias for any live provider.
         reserved_persisted_backend_profiles:
           local: Reserved persisted profile id for local model execution. It is not a supported active runtime backend until
@@ -17688,7 +17690,7 @@ platform_tables:
             run_id                   UUID REFERENCES runs(run_id),
             actor_id                 TEXT NOT NULL,
             provider                 TEXT NOT NULL,
-            transport                TEXT NOT NULL CHECK (transport IN ('api', 'cli', 'in_process')),
+            transport                TEXT NOT NULL CHECK (transport IN ('api', 'cli')),
             surface                  JSONB NOT NULL,
             created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (authority_kind, authority_id),
@@ -22227,7 +22229,7 @@ workspace_model:
       `claude_cli` proof flows. This owner is an explicit operator setup surface. It is separate from runtime startup:
       runtime startup consumes `workspace_model.runtime_image_packaging` and MUST remain fail-closed inspect-only when the
       configured image is missing or unusable.
-    command_surface: swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>]
+    command_surface: swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>] [--worker-binary <linux-swarm>]
     build_plan_rule: >
       The command MUST use an embedded/materialized workspace Dockerfile or equivalent embedded build plan. It MUST NOT
       locate build material by walking for a source checkout, reading repo-root `Dockerfile.workspace`, using
@@ -22257,6 +22259,15 @@ workspace_model:
       tag until validation passes. After build, the command MUST validate the temporary image by running a harmless
       executable Claude CLI proof inside the image, equivalent to `command -v -- "$1" >/dev/null && "$1" --version
       >/dev/null` with `$1=claude`. Image inspection alone and command lookup alone are insufficient.
+    workspace_worker_artifact_rule: >
+      Optional --worker-binary supplies an explicit Linux amd64/arm64 swarm artifact through this same embedded
+      build owner. The temporary image contains read-only executable bytes and pins their SHA-256, version, source
+      revision, worker ABI and pinned interpreter identity. Before publishing the image, a network-disabled native
+      worker identity execution must match every coordinate. Runtime never builds or downloads a worker. Native Linux
+      containers may instead bind the current executable read-only; macOS-to-Linux execution requires a clean matching
+      source revision and a validated image artifact. Missing, foreign or changed artifacts refuse before the model.
+      Native Linux adoption also verifies the exact host-gateway alias and the current executable's read-only bind
+      on an existing container before starting or adopting it; foreign or obsolete writable/mounted bytes refuse.
     consumer_boundaries:
       - '`swarm workspace build` is the setup producer for this first slice.'
       - '`swarm doctor --backend claude_cli` may report or recommend the build command, but MUST NOT build images.'
@@ -24766,7 +24777,14 @@ cli_specification:
       - '`llm.ValidateClaudeCLIRuntimeConfig`'
       - MCP HTTP binding for startup/runtime tool calls
       startup_probe_rule: >
-        For agent-present `cli_test` managed agents, startup validation MUST execute the Claude
+        Before every model or mock launch, and once per exact activation attempt before runnable lifecycle admission,
+        perform bounded authenticated initialize/tools-list observation from the actual selected workspace. The
+        observation cannot execute business tools or confer readiness; same-attempt generation restamps create no
+        additional attempt, and new attempts recheck. DNS/connect/timeout/auth refusal is a redacted typed
+        workspace_gateway_unreachable before model dispatch, not outcome_uncertain. Reachable missing, malformed,
+        foreign or changed definitions remain exact capability mismatches. Failure after dispatch retains truthful
+        uncertain or committed settlement, and settled deliveries must not be replayed.
+        For live agent-present `cli_test` managed agents, startup validation MUST execute the Claude
         CLI/container startup probe for every managed agent before accepting MCP-only
         `tools/list` or optional `tools/call` gateway proof. Provider-native builtin surfaces
         still additionally compare the provider-visible native tool list. Startup probe stdout
@@ -24814,6 +24832,14 @@ cli_specification:
         the same binding path through the serve startup owner. Selected-fork ephemeral gateways MUST create their
         own typed binding from the actual ephemeral gateway listener, with selected-fork lifecycle/source metadata,
         and pass that binding directly to selected-fork runtime consumers.
+      native_linux_docker_default: >
+        Only a provenance-confirmed implicit listener default becomes a Docker-reachable wildcard MCP bind on native
+        Linux. Explicit flag or config loopback, IPv4, IPv6 and wildcard addresses remain exact, even if equal to the
+        old default; unreachable choices fail typed. The API remains loopback. Workspace containers receive
+        host.docker.internal:host-gateway; MCP requests require the per-boot token and exact registered context token.
+        Hardened hosts may explicitly bind MCP to a reachable interface and restrict it to their workspace network;
+        Swarm does not guess bridge subnets or change firewalls. Foreground run, doctor, private test and serve carry
+        the same explicit listener provenance. One listener accounts for every admitted workspace context.
       endpoint_env_rule: >
         `SWARM_TOOL_GATEWAY_URL` and `SWARM_TOOL_GATEWAY_CONTAINER_URL` are not public/operator source
         authority for local serve/run endpoint binding. Stale values MUST NOT override the typed binding.
@@ -27113,7 +27139,7 @@ cli_specification:
       owner: provider_trigger_adapters.pack_envelope_source_authority
       behavior: Render one exact selected pack identity and provenance; unknown or unselected ids fail closed.
     doctor:
-      command: swarm doctor [--backend claude_cli] [--target] [--schema-inventory] [--json]
+      command: swarm doctor [--backend claude_cli] [--target] [--schema-inventory] [--gateway-probe] [--json]
       group: getting_started
       tier: should_have
       implementation_status: implemented
@@ -27133,6 +27159,11 @@ cli_specification:
         unavailable or non-current selected store reports ownership unavailable rather than inferring it. Human typed findings render through the shared typed diagnostic list renderer
         as `[BLOCKER]`, `[WARN]`, or `[INFO]` lines with remediation when present. JSON output is supported for scripts
         and remains the existing doctor/preflight report shape.
+      free_gateway_probe: >
+        Default diagnostics state that gateway reachability was not checked from inside a container and provider
+        credential validity was not probed. Explicit --gateway-probe owns and joins temporary listener/workspace
+        resources and gives only target-local network/authentication credit. It never starts a model, spends a
+        provider call or reads/writes retained runtime state. It is separate from the paid doctor --probe tail of #1779.
       schema_inventory:
         flag: --schema-inventory
         canonical_owner: platform-spec.yaml#cli_specification.command_catalog.doctor.schema_inventory
@@ -27180,7 +27211,7 @@ cli_specification:
           confirmation: --confirm <sha256 findings digest>
           user_data: untouched
     test:
-      command: swarm test [directory] [scenario-label] [--derive <flow>] [--input <pin>|--all-inputs] [--timeout <duration>] [--poll-interval <duration>]
+      command: swarm test [directory] [scenario-label] [--derive <flow>] [--input <pin>|--all-inputs] [--timeout <duration>] [--poll-interval <duration>] [--workspace-backend host|docker]
       group: author_validate
       tier: should_have
       implementation_status: implemented_first_slice
@@ -27307,7 +27338,7 @@ cli_specification:
         Zero-agent automation declares its flow at the selected root. The webhook responder has direct telegram-ingress
         and telegram-chat children, separating standing ingress from conversation instances without an intermediate bot wrapper.
     workspace_build:
-      command: swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>]
+      command: swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>] [--worker-binary <linux-swarm>]
       group: getting_started
       tier: should_have
       implementation_status: implemented_first_slice
@@ -27318,7 +27349,9 @@ cli_specification:
         config, otherwise the built-in `docker` default. It builds into a temporary image tag, targets `--image`,
         `workspace.image`, or `swarm-workspace:latest` by default, passes the approved `claude_cli` build args, validates
         that the temporary image can execute `claude --version`, and only then tags the validated image as the configured
-        target. `SWARM_DOCKER_BIN` and `SWARM_WORKSPACE_IMAGE` are retired and must not be read as fallback sources.
+        target. Optional --worker-binary provisions and validates the compatible revision/digest/ABI-pinned Linux worker
+        through the same temporary image before publication. `SWARM_DOCKER_BIN` and `SWARM_WORKSPACE_IMAGE` are retired
+        and must not be read as fallback sources.
       boundaries:
       - no runtime startup auto-build
       - no source-checkout Dockerfile lookup or go.mod walk
@@ -40174,7 +40207,6 @@ managed_agent_capability_surface:
       provider_builtin: Exact provider-native name enabled and observed for the turn.
       mcp_tool: Exact runtime MCP catalog name returned by tools/list under the turn context. The delivered description and schema MUST match the planned candidate_definition_identity; a same-name definition with changed description or schema is a typed mismatch, not confirmation.
       mcp_provider_visible: Exact MCP tool name observed through provider initialization/response evidence. For a CLI provider_turn, the exact provider-owned tools/call occurrence confirms this existing binding immediately before authorization; registration and tools/list MUST NOT pre-confirm it.
-      local_runtime: Explicit runtime-local binding only where the provider contract authorizes it; it is never inferred as fallback for an unavailable provider binding.
   evidence:
     statuses: [confirmed, unavailable, mismatch]
     rule: Each planned binding names its required typed evidence kind. Effective visibility and callability require the upstream toolcapabilities decision to be visible/callable and every required delivery binding to have exact confirmed evidence. Missing evidence is not success. Unavailable evidence denies that tool. Any unplanned, duplicate, missing, schema-changed, cross-authority, or otherwise mismatched delivery records a typed mismatch and denies the complete surface.
@@ -40241,7 +40273,43 @@ managed_agent_capability_surface:
     receiver_scope: A provider turn reached through EventBus consumes only the receiver-owned normal or selected-contract execution variant. Publisher execution state is not provider-turn evidence and cannot authorize tools, MCP calls, completions, or effects.
     api: Exact live-request definitions are the delivery evidence. Planned names alone are not observation.
     cli: Provider-builtin availability uses positive --tools selection from the exact callable provider_builtin bindings on every first, resumed, and tool-result process launch. The closed provider transport-control set, currently ExitPlanMode, is selected separately and is excluded from actor capability evidence. --allowedTools is permission admission for the selected builtins, exact MCP bindings, permitted local tools, and transport controls; it is never builtin-availability authority, and MCP/local names never enter --tools. Provider-visible initialization facts preserve every reported non-control builtin as exact evidence; unknown/default builtins are typed mismatches rather than filtered observations. Prompt text is a rendering only and cannot authorize a tool. A provider-owned MCP tools/call occurrence atomically confirms its exact planned mcp_provider_visible binding and consumes that occurrence before tool authorization. Missing, ambiguous, or mismatched managed-versus-forkchat authority, incompatible selector support, unplanned tools, missing occurrence coordinates, and replayed occurrences fail closed with no static catalog, negative complement, compatibility fallback, or discovery/relaunch.
-    in_process: Deterministic platform mock execution carries the exact local-runtime bindings and interpreter evidence in the same provider-turn surface. It is not reclassified as API or CLI transport and cannot authorize external effects.
+    mock_workspace: >-
+      Deterministic platform mocks consume CLI/MCP bindings and a target-compatible
+      swarm worker, not local-runtime bindings. The worker checks exact executable
+      version, revision, digest, ABI and pinned interpreter identity before launch,
+      evaluates only the captured bounded Python performance, and calls tools
+      through the selected workspace HTTP gateway. The parent preserves canonical
+      completion-before-output ordering, carries settled output authority only in
+      the registered server-side context, and consumes child results without
+      re-executing tools. Old in_process descriptors or local_runtime capability
+      bindings are invalid; there is no fallback or compatibility reader. Each
+      Docker launch owns its exact remote worker separately from the attached
+      client. The native worker requires an exact launch acknowledgement and
+      cancels and joins work on input disconnect. The parent observes that exact
+      worker gone before claiming cleanup; local client exit or elapsed time alone
+      is not remote cleanup. Unproven cleanup preserves both client and cleanup
+      failures and leaves the operation uncertain, without container retirement
+      or call replay. A missing or malformed post-call result, including its
+      projected value, is an uncertain outcome, not a pre-dispatch definition
+      mismatch or known tool failure. Cancellation after tool dispatch preserves
+      typed outcome uncertainty through the native protocol and the parent join;
+      it cannot replace possible-commit evidence with bare cancellation. An
+      uncertain transported tool outcome stops
+      the conversation without consuming its completion continuation or producing
+      model feedback; another model round cannot mint a replacement call for a
+      possibly committed effect. A known, observed tool failure retains ordinary
+      tool-result handling. Loss of a launched model response remains
+      outcome_uncertain, whereas an observed pre-model refusal with proven cleanup
+      is not an invocation.
+    forkchat_transport: >
+      Fork-chat subprocess consumers carry the original frozen conversation snapshot/stub executor and definitions
+      through the existing opaque MCP turn registry. The server validates the exact fork, turn, source, request
+      occurrence, actor, owner, fence and unexpired lease before listing or calling a sandbox tool. A bare sandbox
+      permission cannot substitute the live workflow executor. MCP request payloads cannot create this dispatch
+      authority; the conversation remains its owner. Native mock and live CLI transports use this same boundary.
+      Sandbox target resolution consumes the existing capability-admission workspace without materializing a live
+      run's data projection. Fork-scoped Claude backing remains invocation-local, and live Claude still requires
+      Docker; a mock subprocess descriptor is not mistaken for the live Claude provider or its host prohibition.
     cli_inventory: Every fresh, resumed and tool-result CLI process requires a valid authoritative inventory. Native
       comparisons consume the exact native channel only; MCP names remain exact MCP evidence, even when their canonical
       display names collide with native names. A failure discovered after provider execution settles outcome_uncertain
@@ -40265,6 +40333,34 @@ managed_external_effect_authority:
     managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface carrying the typed concrete actor identity, selected-store controller, and typed logical-operation identity. Normal agents additionally require an exactly matching lifecycle token, usage target, and exactly one live typed origin, either the event-delivery claim with exact delivery ID, run, route identity, claim token/version, agent subscriber class, and subscriber identity, or the executing directive operation with exact operation and execution-owner identity. The two variants are mutually exclusive and neither may be inferred from event, run, latest-row, or context coincidence. Selected-contract-fork agents require the exact selected execution authority and actor usage target and cannot carry a normal origin. Same-slug sibling identity is a mismatch. Missing, ambiguous, or mismatched context fails closed before authorization.
     eventbus_handoff: Managed-effect context authority installed after EventBus transfer is receiver-owned. Normal authority derives from the acting lifecycle token; selected-contract authority is the exact typed selected owner. Publisher context ancestry cannot establish, replace, or shadow either authority.
     startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, matching normal startup or selected-fork preparation authority, and selected-store controller. Pre-admission probing carries the exact runless agent plan. Selected-fork preparation additionally requires current process possession and the fixed target/plan/configuration/catalog evidence; it carries no fork-run or executable generation. Its effect mode is the admitted actor configuration mode checked against the selected process controller's immutable execution posture before issuing probe authority; preparation cannot mint live authority or bypass mock_only. Startup authority cannot authorize a provider turn or be reused after execution admission.
+    activation_gateway_observation: >
+      A fresh initialize/list-only observation precedes publication of every exact executable receiver occurrence.
+      It consumes the current normal grant or the process-owned frozen selected-preparation catalog, together with
+      the exact unpublished lifecycle token. It cannot reuse a startup receipt as current network proof, authorize
+      tools/call or /tools, start a model, advance readiness, or impersonate a provider turn. Foreign, retired and
+      already-published lifecycle tokens refuse. Existing lifecycle compensation owns failure; a current-occurrence
+      replay or same-plan restamp does not create another attempt. Concrete actors observe their selected workspace
+      without materializing a run-bound data projection; runless preparation remains non-executable.
+      Non-executing host admission may create only its owned workspace root. Selected preparation requires exact
+      receipts for every admitted subprocess descriptor, including mock, and preserves its closed actor census;
+      an API descriptor does not acquire a fictional subprocess receipt. A complete native worker response retains
+      its observed/model-started facts even if attached-wait cleanup subsequently reports cancellation.
+    forkchat_workspace_projection: >
+      The existing workspace owner projects exact selected-store conversation_fork_turns authority into an
+      isolated disposable target. Snapshot actor/source identity remains immutable provenance and policy input,
+      never the sandbox's ordinary run-container identity. Mock and Claude fork-state callers consume this same
+      projection. Missing, malformed, stale, foreign, source-mismatched or mode-mismatched authority refuses before
+      target mutation and provider dispatch. The target receives only the admitted immutable authored source,
+      never source-run data, writable source workspace or provider state. Exact fork-turn/request/owner/fence and
+      process projection select its resources; cleanup may retire only those resources. No persistent sandbox
+      ledger, ordinary-run authority substitute or source-container replacement is permitted.
+      Read-only workspace admission accepts the owned prepared or executing group with exact identity and live
+      lease; it neither changes the group state nor authorizes a provider attempt. Existing completion admission
+      alone claims prepared -> executing and fences every provider dispatch; terminal groups cannot obtain targets.
+      A conflicting existing sandbox identity refuses rather than using ordinary stale-workspace replacement.
+      Partial target creation joins identity-checked cleanup and retains a typed pre-model refusal; cleanup cannot
+      delete a sibling that now occupies the name. Gateway refusal retains its dependency classification, but the
+      exact failed fork occurrence remains terminal and cannot be relaunched through its request key.
     serve_registration: >
       Channel-backed provider callback apply requires one closed serve-registration authority containing the current
       startup authority identity/state version and one process-local registration intent identity. The selected-store

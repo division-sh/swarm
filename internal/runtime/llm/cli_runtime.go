@@ -313,6 +313,10 @@ func (r *ClaudeCLIRuntime) continueClaudeTurn(ctx context.Context, s *Session, m
 	if err != nil {
 		return nil, err
 	}
+	ctx, err = r.probeWorkspaceMCP(ctx, s, target)
+	if err != nil {
+		return nil, err
+	}
 	mcpConfig, mcpContextToken, mcpEnabled, err := r.buildMCPConfigArg(ctx, s)
 	if err != nil {
 		return nil, err

@@ -1663,6 +1663,17 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 		}
+		if am.workspaceGatewayAdmission != nil {
+			admissionCtx := runtimeactors.WithActor(loopCtx, candidate.Config)
+			if err := am.workspaceGatewayAdmission(admissionCtx, candidate.Config); err != nil {
+				abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
+				return replaceExecutionResult{}, errors.Join(err, abortErr, cleanupPrepared())
+			}
+			if err := am.ProveUnpublishedActivation(token); err != nil {
+				abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
+				return replaceExecutionResult{}, errors.Join(err, abortErr, cleanupPrepared())
+			}
+		}
 		if err := publishPreparedAgentRoute(preparedRoute); err != nil {
 			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(fmt.Errorf("publish generation-owned agent route: %w", err), abortErr, cleanupPrepared())

@@ -9,6 +9,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func cliInventoryResponseForTest(inventory string) *Response {
@@ -141,7 +142,7 @@ func TestCLIInventoryChannelIntegrity(t *testing.T) {
 		{"wrong_native_family", `["Read"]`, true, nil, false, false},
 		{"missing_native", `["mcp__runtime-tools__bash"]`, true, []string{"bash"}, true, false},
 		{"unplanned_mcp", `["mcp__runtime-tools__unexpected"]`, false, nil, true, false},
-		{"disconnected_mcp", `["mcp__runtime-tools__read_chat"]`, false, []string{"read_chat"}, false, true},
+		{"disconnected_mcp", `["mcp__runtime-tools__read_chat"]`, false, []string{"read_chat"}, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			surface := cliInventoryPlanForTest(t, tc.bash, tc.mcp)
@@ -153,8 +154,15 @@ func TestCLIInventoryChannelIntegrity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := ValidateCLIProviderCapabilitySurface(observed, resp); (err == nil) != tc.valid {
+			err = ValidateCLIProviderCapabilitySurface(observed, resp)
+			if (err == nil) != tc.valid {
 				t.Fatalf("managed validity=%v, want %v", err, tc.valid)
+			}
+			if tc.name == "disconnected_mcp" {
+				failure, ok := failures.EnvelopeFromError(err)
+				if !ok || failure.Class != failures.ClassDependencyUnavailable || failure.Detail.Code != "workspace_gateway_unreachable" {
+					t.Fatalf("disconnected plan refused at wrong owner: %v", err)
+				}
 			}
 			if !tc.connected {
 				for _, name := range tc.mcp {

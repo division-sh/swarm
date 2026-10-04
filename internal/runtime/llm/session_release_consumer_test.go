@@ -42,7 +42,7 @@ func TestProviderStartSessionConsumesTypedReleaseOutcome(t *testing.T) {
 						ID: identity.AgentID(), ExecutionMode: "mock",
 						Mock: mockperformance.Performance{Kind: "python", Source: []byte("def handle(input): return {}"), Digest: "test-module"},
 					})
-					runtime = NewMockRuntime(cfg, registry, "worker-1", nil, publisher, nil)
+					runtime = NewMockRuntime(cfg, registry, "worker-1", nil, publisher, nil, MockRuntimeOptions{})
 				}
 				session, err := runtime.StartSession(ctx, identity.AgentID(), "system", nil)
 				if registry.releases != 1 {

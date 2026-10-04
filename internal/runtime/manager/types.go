@@ -295,6 +295,7 @@ type AgentManagerOptions struct {
 	ReceiverExecution              eventreceiver.ExecutionVariant
 	RuntimeIngressSafetyPause      func(context.Context, string, *runtimefailures.Envelope) error
 	NativeToolAdmissionValidator   func(context.Context, models.AgentConfig) error
+	WorkspaceGatewayAdmission      func(context.Context, models.AgentConfig) error
 	ThrottleSuppressPrefixes       []string
 	DisableSpinupControl           bool
 	EnableLegacySpinupControl      bool

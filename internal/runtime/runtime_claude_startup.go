@@ -559,10 +559,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve managed provider runtime for agent %s: %w", strings.TrimSpace(agentCfg.ID), resolveErr)
 		}
-		if resolved.Selection.Mode == runtimeeffects.ExecutionModeMock {
-			continue
-		}
-		if resolved.Selection.Profile.ID != llmselection.BackendClaudeCLI {
+		if resolved.Selection.Profile.ID != llmselection.BackendClaudeCLI && resolved.Selection.Mode != runtimeeffects.ExecutionModeMock {
 			continue
 		}
 		startupProbe, ok := llm.StartupVisibleToolSurfaceProberForRuntime(resolved.Runtime)

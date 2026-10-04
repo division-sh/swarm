@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -555,7 +556,62 @@ func goldenReleaseRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve release root: %v", err)
 	}
+	// Later process cleanups join children before this restores removal permission
+	// on their intentionally sealed projections. WalkDir never follows symlinks.
+	t.Cleanup(func() {
+		if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return os.Chmod(path, 0o700)
+			}
+			return nil
+		}); err != nil {
+			t.Errorf("release retained proof directories: %v", err)
+		}
+	})
 	return root
+}
+
+func TestGoldenReleaseRootJoinsBeforeUnsealingOwnedDirectories(t *testing.T) {
+	external := filepath.Join(t.TempDir(), "external")
+	if err := os.Mkdir(external, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(external, 0o700); err != nil {
+			t.Error(err)
+		}
+	})
+	var root string
+	t.Run("owned", func(t *testing.T) {
+		root = goldenReleaseRoot(t)
+		projection := filepath.Join(root, ".lifecycle-data-projections", "actor")
+		if err := os.MkdirAll(projection, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(projection, "access.v1.json"), []byte("{}"), 0o444); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(external, filepath.Join(projection, "outside")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(projection, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if info, err := os.Stat(projection); err != nil || info.Mode().Perm() != 0o555 {
+				t.Errorf("projection unsealed before child cleanup: info=%v err=%v", info, err)
+			}
+		})
+	})
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("owned release root survived cleanup: %v", err)
+	}
+	if info, err := os.Stat(external); err != nil || info.Mode().Perm() != 0o555 {
+		t.Fatalf("cleanup changed unrelated symlink target: info=%v err=%v", info, err)
+	}
 }
 
 func goldenSQLiteStore(root string) goldenStoreSelection {
@@ -1708,8 +1764,8 @@ func assertGoldenAgentStartEvents(t *testing.T, events []goldenEvent, entities g
 			continue
 		}
 		if event.Payload["llm_backend"] != "mock" || event.Payload["resolved_llm_provider"] != "mock" ||
-			event.Payload["resolved_llm_transport"] != "in_process" {
-			t.Errorf("platform.agent_started for %q = %#v, want in-process mock execution", key, event.Payload)
+			event.Payload["resolved_llm_transport"] != "cli" {
+			t.Errorf("platform.agent_started for %q = %#v, want workspace-worker mock execution", key, event.Payload)
 		}
 		seen[key]++
 	}

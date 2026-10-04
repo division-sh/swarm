@@ -33,7 +33,7 @@ func TestPreparedGatewayConstructionSettlesWork(t *testing.T) {
 			case "ambient_environment":
 				t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "retired")
 			}
-			binding, cleanup, err := startSelectedContractAgentRuntimeGateway(executor, mcp.NewTurnContextRegistry(nil), work, nil)
+			binding, cleanup, err := startSelectedContractAgentRuntimeGateway(executor, mcp.NewTurnContextRegistry(nil), work, nil, nil)
 			if scenario == "success" || scenario == "ambient_environment" {
 				if err != nil || binding.Empty() || cleanup == nil {
 					t.Fatalf("gateway: %v", err)

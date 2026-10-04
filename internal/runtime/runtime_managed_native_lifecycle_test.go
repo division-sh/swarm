@@ -583,7 +583,7 @@ func validateManagedNativeLifecycleSurface(
 	}
 	for _, kind := range []managedcapabilities.BindingKind{
 		managedcapabilities.BindingAPIDefinition,
-		managedcapabilities.BindingLocalRuntime,
+		managedcapabilities.BindingKind("local_runtime"),
 	} {
 		if got := surface.PlannedBindingNames(kind); len(got) != 0 {
 			return fmt.Errorf("startup surface contains forbidden %s fallback bindings %v", kind, got)

@@ -156,7 +156,6 @@ const (
 	BindingProviderBuiltin BindingKind = "provider_builtin"
 	BindingMCPTool         BindingKind = "mcp_tool"
 	BindingMCPProvider     BindingKind = "mcp_provider_visible"
-	BindingLocalRuntime    BindingKind = "local_runtime"
 )
 
 type EvidenceStatus string
@@ -460,7 +459,7 @@ func (s Surface) Validate() error {
 		return fmt.Errorf("managed capability surface identity is incomplete")
 	}
 	switch s.Transport {
-	case "api", "cli", "in_process":
+	case "api", "cli":
 	default:
 		return fmt.Errorf("managed capability surface transport %q is invalid", s.Transport)
 	}
@@ -961,7 +960,7 @@ func validateEvidence(evidence DeliveryEvidence, bindings []DeliveryBinding) err
 
 func validBindingKind(kind BindingKind) bool {
 	switch kind {
-	case BindingAPIDefinition, BindingProviderBuiltin, BindingMCPTool, BindingMCPProvider, BindingLocalRuntime:
+	case BindingAPIDefinition, BindingProviderBuiltin, BindingMCPTool, BindingMCPProvider:
 		return true
 	default:
 		return false

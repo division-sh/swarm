@@ -32,6 +32,7 @@ type ServeOptions struct {
 	APITokenFileFlagSet              bool
 	APIListenAddr                    string
 	MCPListenAddr                    string
+	MCPListenAddrSource              ListenerAddressSource
 	Expose                           bool
 	PublicWebhookBaseURL             string
 	PublicWebhookListen              string
@@ -62,10 +63,11 @@ type ServeOptions struct {
 
 func DefaultServeOptions() ServeOptions {
 	return ServeOptions{
-		StoreMode:     storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr: "127.0.0.1:8081",
-		MCPListenAddr: "127.0.0.1:8082",
-		ShutdownGrace: runtime.DefaultShutdownGrace,
-		SelfCheck:     true,
+		StoreMode:           storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:       "127.0.0.1:8081",
+		MCPListenAddr:       "127.0.0.1:8082",
+		MCPListenAddrSource: ListenerAddressDefault,
+		ShutdownGrace:       runtime.DefaultShutdownGrace,
+		SelfCheck:           true,
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/google/uuid"
 )
 
@@ -45,10 +46,13 @@ type TurnContext struct {
 	DifferentOwner         runtimeeffects.DifferentOwner
 	LogicalIdentity        string
 	HasLogicalIdentity     bool
+	ToolOutputCall         llm.ToolOutputCall
+	HasToolOutputCall      bool
 	CapabilitySurface      *managedcapabilities.Surface
 	ExecutionAdmission     managedexecution.Admission
 	HasExecutionAdmission  bool
 	ForkSandboxAllowed     map[string]struct{}
+	ForkSandboxDispatch    *llm.ForkChatToolDispatch
 	Recorder               *runtimebus.EmittedEventsRecorder
 	Emitted                map[string]struct{}
 	MCPCallOccurrences     map[string]struct{}
@@ -122,6 +126,7 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 	executionAdmission, hasExecutionAdmission := managedexecution.FromContext(ctx)
 	differentOwner, _ := runtimeeffects.DifferentOwnerFromContext(ctx)
 	logicalIdentity, hasLogicalIdentity := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
+	outputCall, hasOutputCall := llm.ToolOutputCallFromContext(ctx)
 	r.put(token, TurnContext{
 		Presentation:           channelactivation.BindPresentation(ctx, now.Add(ttl)),
 		RunID:                  runtimecorrelation.RunIDFromContext(ctx),
@@ -144,6 +149,8 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 		DifferentOwner:         differentOwner,
 		LogicalIdentity:        logicalIdentity,
 		HasLogicalIdentity:     hasLogicalIdentity,
+		ToolOutputCall:         outputCall,
+		HasToolOutputCall:      hasOutputCall,
 		CapabilitySurface:      capabilitySurfacePointer(surface),
 		ExecutionAdmission:     executionAdmission,
 		HasExecutionAdmission:  hasExecutionAdmission,
@@ -170,6 +177,10 @@ func (r *TurnContextRegistry) RegisterConversationForkSandboxTurnContext(ctx con
 	if !ok || authority.Kind != runtimeeffects.AuthorityConversationForkChat || !authority.Valid() {
 		return ""
 	}
+	dispatch, hasDispatch := llm.ForkChatToolDispatchFromContext(ctx)
+	if !hasDispatch {
+		return ""
+	}
 	actor, ok := r.actorResolver(ctx)
 	if !ok || strings.TrimSpace(actor.ID) == "" {
 		return ""
@@ -188,7 +199,7 @@ func (r *TurnContextRegistry) RegisterConversationForkSandboxTurnContext(ctx con
 		SourceArtifactFact: source, HasSourceArtifactFact: hasSource, Inbound: inbound, HasInbound: hasInbound,
 		Actor: actor, EffectController: controller, EffectAuthority: authority, HasEffectAuthority: true,
 		LogicalIdentity: logicalIdentity, HasLogicalIdentity: hasLogicalIdentity,
-		ForkSandboxAllowed: normalizeForkSandboxTools(allowedTools), CreatedAt: now, ExpiresAt: now.Add(ttl),
+		ForkSandboxAllowed: normalizeForkSandboxTools(allowedTools), ForkSandboxDispatch: dispatch, CreatedAt: now, ExpiresAt: now.Add(ttl),
 	})
 	return token
 }

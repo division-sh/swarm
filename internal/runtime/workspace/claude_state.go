@@ -158,6 +158,9 @@ func (m *DockerManager) ResolveClaudeWorkspace(ctx context.Context, actor actors
 	if source, ok := correlation.SourceArtifactFactFromContext(ctx); ok && source.BundleHash() != m.cfg.BundleHash {
 		return nil, fmt.Errorf("Claude state source does not match the admitted workspace")
 	}
+	if request.kind == "fork" {
+		return m.resolveClaudeForkWorkspace(ctx, actor, key, confirmedHead)
+	}
 	var base *Target
 	if request.kind == "probe" {
 		base, err = m.ResolveWorkspaceForCapabilityAdmission(ctx, actor)
@@ -217,6 +220,37 @@ func (m *DockerManager) ResolveClaudeWorkspace(ctx context.Context, actor actors
 	target.ClaudeState = state
 	bound = true
 	return &target, nil
+}
+
+func (m *DockerManager) resolveClaudeForkWorkspace(ctx context.Context, actor actors.AgentConfig, key, confirmedHead string) (_ *Target, retErr error) {
+	base, err := m.ResolveForkChatWorkspace(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	bound := false
+	defer func() {
+		if !bound {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			retErr = errors.Join(retErr, base.Release(cleanup))
+		}
+	}()
+	identity, found, err := m.inspectRuntimeContainerIdentity(ctx, base.Container)
+	if err != nil || !found {
+		return nil, errors.Join(err, fmt.Errorf("Claude fork workspace has no runtime identity"))
+	}
+	state := &dockerClaudeState{manager: m, container: base.Container, key: key, workdir: base.Workdir, identity: identity}
+	if _, err := m.RunDocker(ctx, "exec", "--user", "0", base.Container, "node", "-e", claudePrepareStateScript, ClaudeStateDirectory, key, fmt.Sprint(confirmedHead != "")); err != nil {
+		return nil, fmt.Errorf("prepare Claude fork private backing: %w", err)
+	}
+	if confirmedHead != "" {
+		if err := state.CheckHead(ctx, confirmedHead); err != nil {
+			return nil, err
+		}
+	}
+	base.ClaudeState = state
+	bound = true
+	return base, nil
 }
 
 const claudePrepareStateScript = `

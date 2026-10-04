@@ -273,18 +273,19 @@ type cliServeListenerAddressOptions struct {
 	RepoRoot             string
 }
 
-func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (string, string, error) {
+func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (string, string, ListenerAddressSource, error) {
 	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: opts.RepoRoot, RuntimeConfigPath: opts.ConfigPath}); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	apiAddr, apiResolved := resolveCLIServeListenerAddressFlag(opts.APIListenAddr, opts.APIListenAddrFlagSet)
 	mcpAddr, mcpResolved := resolveCLIServeListenerAddressFlag(opts.MCPListenAddr, opts.MCPListenAddrFlagSet)
+	mcpSource := ListenerAddressFlag
 	if apiResolved && mcpResolved {
-		return apiAddr, mcpAddr, nil
+		return apiAddr, mcpAddr, mcpSource, nil
 	}
 	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.ConfigPath})
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	return resolveCLIServeListenerAddressesFromConfig(opts, cfg)
 }
@@ -300,11 +301,13 @@ func resolveCLIServeListenerAddressesFromConfig(opts cliServeListenerAddressOpti
 	}
 	if !mcpResolved {
 		mcpAddr = defaultMCPListenAddr
+		mcpSource = ListenerAddressDefault
 		if config := strings.TrimSpace(cfg.Serve.MCPListenAddr); config != "" {
 			mcpAddr = config
+			mcpSource = ListenerAddressConfig
 		}
 	}
-	return apiAddr, mcpAddr, nil
+	return apiAddr, mcpAddr, mcpSource, nil
 }
 
 func resolveCLIServeListenerAddressFlag(flagValue string, flagSet bool) (string, bool) {
