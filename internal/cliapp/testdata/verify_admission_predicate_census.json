@@ -570,6 +570,18 @@
     "body_sha256": "08d2ca58a9bfa244bf9cb837898fec5cf892ba6d55346c0b053e6f05732b8951"
   },
   {
+    "owner": "internal/runtime/llm/cli_runtime_boot.go::ValidateClaudeCLIRuntimeConfig",
+    "audit_rows": "A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "724fad34ce6f39b11ceaa8b6cf81b0ff10d411bdc15730474690ab8275ad2e78"
+  },
+  {
+    "owner": "internal/runtime/llm/cli_runtime_boot.go::ValidateProviderAdmissionEnvironment",
+    "audit_rows": "A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "2be0033b0f30ce9a5e9436596fc3198ea8962b8915132dd4315e9ae9a9b9c27a"
+  },
+  {
     "owner": "internal/runtime/llm/provider_admission.go::*ProviderAdmissionRegistry.Admit",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
@@ -682,6 +694,144 @@
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
     "body_sha256": "420c9d3bc06ae35fba9e59c5c520fcec5a69bac849dc6ade679e807ccc439b9e"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::NativeToolCapabilitiesForRuntime",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "d03f55000e88e99ea231eb37b6fcff9da7a9f6c71d9dd747994ff17a95d20b82"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::PersistConversationSnapshotForRuntime",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "cf44f874b0b4d4a9f908655590e3af5f57055c9b1dc874d5b9affcd07835bb53"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::ProviderContract.Validate",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "7fe25c68b6cd0f46f24b7f12362f878b3282696d18309c769e855fe84c84872d"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::ProviderContractForProfile",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "b0abc0595a141603db427e24768b66619a600ce67ed6d8212ec5e8983f27e1e7"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::ProviderContractForRuntime",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "d8fa0eafa0ab7a4cb9791187c7ed1ebfe1576589542bc2c2b5a8b03617833e33"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::RequireProviderContract",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "39fbdab8187a468d0118ed64d52ee89562b67c0174671aff37bf5d0b47ecf487"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::RequireProviderContractForProfile",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "40dc64ad871239d81931c758a69e7abd0883d36374ff23f6f3eedce81273a88b"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::RuntimeEnforcesProviderNativeTools",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "dc3f812072b3e3640aef13ffa5993c2c158714fb67335ce3f926d1838d837e21"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::StartupVisibleToolSurfaceProberForRuntime",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "904654f5987071f96852eb11e696572291861c072fa986e78281dfebabfc1886"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::contractForProfile",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "4eef1daad3bc77fddbf3e17cb15edc3df9a1fd7c5302f44b0a23a8050c8a4500"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::IsMissingProviderCredential",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "a8f3863a58b85a073413d2815b7cfa3bcc7d6b1c71f9eff47b7a41e5a23b2966"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::MissingProviderCredentialError.Error",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "c7ceaf5e6d854704fdc4d642fd1260f1928138ec72775370735837e67d4d6d84"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::NewProviderCredentialResolver",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "7870483eab1581495fc7d2b8f0d9b2102dc9ce51113646053bcb51eda8891d7b"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::NewProviderCredentialResolverWithEnvLookup",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "eb789d74f3db5d0c46dae59d2f14f797ad8996bab17b6ae2bab924ec13927d77"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialKey",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "f484e71494e324d30ff8ec824f2fe2b2d6836477fc99e8da8d22dd198ab57520"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.Inspect",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "c24dab0748fc5d25ae7ba19c609498ea73803123e9046c222957065b92dc2347"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.Resolve",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "7a62e8f57bcb27cc00a8fdd72417e408836bb33671a28aceacfa0eb4eef6baac"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.envPresent",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "7f2666b90ffe55c460b76f5b363f5a791e86e02a8107c8346e0b4675cc0be562"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.storeValue",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "ff6f4da2254491098d3ee6832139a08f782eef885df3b752895d36a9f0258e6c"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::inspectProviderCredentialStore",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "8e4fc67f86f9d43de5e0fe4710f39cbcb2212008d69799aea5bee9a2dfa82b69"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::providerCredentialReadError.Error",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "e2cad58ea81e3fad5e4c72aa302a60337b5001391013bd0d3f66b0c71e8f8505"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::providerCredentialReadError.Unwrap",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "d0e6fe1eca2fc2ac1fb242a550ef75f60ab8993c55cbb714d02d0b99eb731bfc"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::providerCredentialReadFailure",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "b8ba4169b245e6897d9a4ae880b8a21a876e64ee39221844e196e814f3c713e6"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.InstallStartupTopology",
@@ -1750,6 +1900,144 @@
     "audit_rows": "A11,A13,A25",
     "proof_families": "P09,P11,P15,P21",
     "body_sha256": "c4542cbc5d2141a7b90e02dcc93cb8ebc319bd360fe991fb74b17604502cdd28"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.inspectDeliveryRecoveryInventory",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "26303d14183136b371a57b69e38496a2bc4215ce4b4b8b2ce3141eacce3c17ea"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.inspectStartupRecoverySnapshot",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "9342cfd4129430916dfd99484c99419170df3bbd778fc6cebeee6a463605e1c4"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.logStartupRecoveryDecision",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "ed06f704b09dc04737bfc5508c970a248b59832cd947de20fc7bc9829012a7e3"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.startupTimerObligationReader",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "1a65a277f19cd40ec3fb1bd5c34ac3cc5e304c762db4c513d5da03908b93449c"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::InspectStartupRecoveryAdmission",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "f8cd60aa27f6aa5ff004e08f97fb0099b2b6e1e32357d2d4c8fc243dde4479d8"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::canonicalDeliveryRecoveryInventory",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "7dfe7bf075f103f227ca937be840183a36933dece078f9989aef88b423151a0d"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::canonicalTimerObligationSnapshot",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "cfb40da80f930d8b0c239beb4badb2a41aad97d8426f7c3214f4d29d9d3ce388"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::inspectDeliveryRecoveryInventory",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "d8ffe188611c8c7d395a409a4962f7fbd746563f58718ae09ce8fce7a4050261"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::inspectStartupRecoverySnapshot",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "d90849fbe62c4a1075f8902f5986356d2efe3f0084c44e6f204ad1b243c71f9e"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::newStartupRecoveryDecisionReport",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "8f9ea365ae69c8ff48c1bb406299968beb7e9636f86cbe17599cfee55f6e9ed6"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::newStartupRecoveryFailure",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "13c6b68c27144c8ca8adfc1da94bd5bb3b273179dd49f0afdb633307c88504db"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::partitionDeliveryRecoveryInventory",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "369d71e0adfe2114e123731ed729bb2cc7995b678936bebd1d9996c38cf2caf3"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.bootPayload",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "089073f4881f0e58cec40e4cf5617e5771a2483c1e9cb0e670a87105b18ced18"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.denialError",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "f391ccadaa4bc68a5b4afe5753cc675f3de5fa571bc0f5329d59a0837e4a0d1d"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.detail",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "320fd871161d1a49fe02e9e0dfd318bdab91080b189b487412e74bff0c73a7c1"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.level",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "152580eedec63ed522f309890f2ef92534eb67bd3739e7bd2ca4b7b2e582486d"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.message",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "4b12e2f9b959e96309a7f3d45b46ca8bfda291cfdbf76869e71c4cb622ae7dc6"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.Detail",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "37a31c764f3e1cb8d706e2e1451f1a7c3db3a903397391d461d8e6e1562625d8"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.HasRecoverableWork",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "e1bf2d99e2f501ea91b1e8ed788f71e26f52eb06ecb4f0ff103bcaaaf18bddeb"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.HasStartupBlockingRecoverableWork",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "99a7cd0ba8b8d57dc10643fbf83b78973bc13e8bb1078b7344b39f93e318aaae"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.StartupBlockingWorkClasses",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "dd1dfdb4d2bfd1110f94fc7e889ee41867ec7e4487e97faf446a171ceb3a9cfb"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.WorkClasses",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "854787f4393bb306841ed8f77c21f628713778aad2c9d1e456d740456516b365"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.summary",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "a2910c06cbc47de0cbf64fc1a7a48a9dbf8dae1ac0b1e53cdec5cb1374677c2e"
   },
   {
     "owner": "internal/runtime/startupownership/acquisition_admission.go::AdmitAuthorityInspection",

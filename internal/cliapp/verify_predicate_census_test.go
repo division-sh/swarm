@@ -43,6 +43,7 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/bootverify/admission_report.go", "A28,A29,A30", "P23,P24"},
 	{"internal/runtime/runtime_claude_startup.go", "A11,A12,A18,A25", "P09,P10,P15,P21"},
 	{"internal/runtime/runtime_prepared_catalog.go", "A11,A13,A25", "P09,P11,P15,P21"},
+	{"internal/runtime/startup_recovery_diagnostics.go", "A23,A24", "P20,P21"},
 	{"internal/runtime/manager/agent_manager.go", "A11,A23,A24", "P09,P20,P21"},
 	{"internal/runtime/manager/static_topology.go", "A11,A24", "P09,P20,P21"},
 	{"internal/runtime/manager/retained_actor_inspection.go", "A11,A24", "P09,P20,P21"},
@@ -54,6 +55,9 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/workspace/capability_admission.go", "A15,A16,A17", "P13,P14,P15"},
 	{"internal/runtime/workspace/source_admission.go", "A15", "P13,P14"},
 	{"internal/runtime/llm/provider_admission.go", "A11,A12,A18,A25", "P09,P10,P15,P21"},
+	{"internal/runtime/llm/cli_runtime_boot.go", "A12,A18,A25", "P09,P10,P15,P21"},
+	{"internal/runtime/llm/provider_contract.go", "A11,A25", "P09,P15,P21"},
+	{"internal/runtime/llm/provider_credentials.go", "A12", "P10,P21"},
 	{"internal/runtime/tools/native_tools_admission.go", "A13", "P09,P11"},
 	{"internal/store/selected/admission.go", "A19,A20,A22,A23,A24", "P18,P19,P20,P21"},
 	{"internal/store/internal/backend/postgres/backend.go", "A19,A20,A28", "P18,P19,P24"},
@@ -237,5 +241,47 @@ func TestAdmissionPredicateRatchetRejectsRemovedVerifyConsumer(t *testing.T) {
 	}
 	if err := compareAdmissionPredicateBodies(expected, measured); err == nil || !strings.Contains(err.Error(), "inspectVerifySourceAdmission") {
 		t.Fatalf("removed verify consumer escaped independent census: %v", err)
+	}
+}
+
+func TestAdmissionPredicateRatchetRejectsUncoveredProviderPrerequisite(t *testing.T) {
+	var surface admissionPredicateSurface
+	for _, candidate := range admissionPredicateSurfaces {
+		if candidate.File == "internal/runtime/llm/cli_runtime_boot.go" {
+			surface = candidate
+			break
+		}
+	}
+	if surface.File == "" {
+		t.Fatal("provider prerequisite owner is missing from the independent census")
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", surface.File), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := admissionPredicateFileBodies(surface, file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := parser.ParseExpr(`func() { if true { panic("unaccounted provider prerequisite") } }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := false
+	for _, declaration := range file.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == "ValidateClaudeCLIRuntimeConfig" {
+			function.Body.List = append(guard.(*ast.FuncLit).Body.List, function.Body.List...)
+			changed = true
+		}
+	}
+	if !changed {
+		t.Fatal("production provider prerequisite entrypoint was not found")
+	}
+	measured, err := admissionPredicateFileBodies(surface, file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compareAdmissionPredicateBodies(expected, measured); err == nil || !strings.Contains(err.Error(), "ValidateClaudeCLIRuntimeConfig") || !strings.Contains(err.Error(), "P15") {
+		t.Fatalf("uncovered provider prerequisite escaped owner/caller/proof ratchet: %v", err)
 	}
 }
