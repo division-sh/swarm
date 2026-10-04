@@ -7,7 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 )
 
-func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRuntime, runID string) {
+func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRuntime, runID string, completionCount int) {
 	t.Helper()
 	params := map[string]any{"run_id": runID}
 	var get struct {
@@ -72,21 +72,23 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 		t.Fatalf("selected conversation census: %+v", conversations)
 	}
 	conversation := conversations.Conversations[0]
-	if conversation.RunID != runID || conversation.AgentID != "same-name" || conversation.TurnCount != 1 {
+	if conversation.RunID != runID || conversation.AgentID != "same-name" || conversation.TurnCount != completionCount {
 		t.Fatalf("selected conversation lost its turn authority: %+v", conversation)
 	}
 	var turns operatorread.OperatorConversationTurnListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list_turns", map[string]any{"session_id": conversation.SessionID}, &turns)
-	if len(turns.Turns) != 1 || turns.Conversation.RunID != runID || turns.Conversation.SessionID != conversation.SessionID {
+	if len(turns.Turns) != completionCount || turns.Conversation.RunID != runID || turns.Conversation.SessionID != conversation.SessionID {
 		t.Fatalf("selected turn list borrowed another conversation: %+v", turns)
 	}
-	var turn operatorread.OperatorPublicConversationTurnDetail
-	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.get_turn", map[string]any{"session_id": conversation.SessionID, "turn_id": turns.Turns[0].TurnID}, &turn)
-	if turn.Turn.TurnID != turns.Turns[0].TurnID || turn.Session.RunID != runID || turn.Session.SessionID != conversation.SessionID || turn.Turn.Failure != nil || turn.Frame.FrameID == "" {
-		t.Fatalf("selected turn detail lost execution/frame evidence: %+v", turn)
-	}
-	if turn.Turn.Tokens == nil || turn.Turn.Tokens.Input != 1 || turn.Turn.Tokens.Output != 1 {
-		t.Fatalf("selected turn did not retain target mock usage: %+v", turn.Turn.Tokens)
+	for _, summary := range turns.Turns {
+		var turn operatorread.OperatorPublicConversationTurnDetail
+		requireServedJSONRPCResult(t, rt.Endpoint, "conversation.get_turn", map[string]any{"session_id": conversation.SessionID, "turn_id": summary.TurnID}, &turn)
+		if turn.Turn.TurnID != summary.TurnID || turn.Session.RunID != runID || turn.Session.SessionID != conversation.SessionID || turn.Turn.Failure != nil || turn.Frame.FrameID == "" {
+			t.Fatalf("selected turn detail lost execution/frame evidence: %+v", turn)
+		}
+		if turn.Turn.Tokens == nil || turn.Turn.Tokens.Input != 1 || turn.Turn.Tokens.Output != 1 {
+			t.Fatalf("selected turn did not retain target mock usage: %+v", turn.Turn.Tokens)
+		}
 	}
 	var eventList operatorread.OperatorEventListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 1000}, &eventList)
