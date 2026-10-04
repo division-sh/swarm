@@ -59,22 +59,7 @@ func runDockerWorker(ctx context.Context, target *Target, dockerBin string, cmd 
 	stop := context.AfterFunc(ctx, func() { _ = stdin.Close() })
 	defer stop()
 	reader := bufio.NewReader(stdout)
-	_, protocolErr := stdin.Write(append(input, '\n'))
-	var ready worker.Ready
-	if protocolErr == nil {
-		var frame []byte
-		frame, protocolErr = worker.ReadFrame(reader)
-		if protocolErr == nil {
-			ready, protocolErr = worker.DecodeReady(frame)
-		}
-	}
-	admitted := protocolErr == nil && ready.Invocation == invocation && ready.Identity == expected
-	if !admitted && protocolErr == nil {
-		protocolErr = failures.New(failures.ClassDependencyUnavailable, "workspace_worker_incompatible", "workspace", "admit_worker", nil)
-	}
-	if admitted {
-		protocolErr = json.NewEncoder(stdin).Encode(worker.Acknowledgement{Invocation: invocation, Execute: true})
-	}
+	admitted, protocolErr := acknowledgeDockerWorker(stdin, reader, input, invocation, expected)
 	if protocolErr != nil {
 		_ = stdin.Close()
 	}
@@ -115,6 +100,24 @@ func runDockerWorker(ctx context.Context, target *Target, dockerBin string, cmd 
 		return result, &WorkerExecutionError{Started: true, Observed: observed, ModelStarted: result.ModelStarted, RemoteCleanupUnproven: cleanupErr != nil, Err: err}
 	}
 	return result, nil
+}
+
+func acknowledgeDockerWorker(stdin io.Writer, reader *bufio.Reader, input []byte, invocation string, expected worker.Identity) (bool, error) {
+	if _, err := stdin.Write(append(input, '\n')); err != nil {
+		return false, err
+	}
+	frame, err := worker.ReadFrame(reader)
+	if err != nil {
+		return false, err
+	}
+	ready, err := worker.DecodeReady(frame)
+	if err != nil {
+		return false, err
+	}
+	if ready.Invocation != invocation || ready.Identity != expected {
+		return false, failures.New(failures.ClassDependencyUnavailable, "workspace_worker_incompatible", "workspace", "admit_worker", nil)
+	}
+	return true, json.NewEncoder(stdin).Encode(worker.Acknowledgement{Invocation: invocation, Execute: true})
 }
 
 func observeDockerWorkerGone(dockerBin, containerID, argument string, admitted bool) error {
