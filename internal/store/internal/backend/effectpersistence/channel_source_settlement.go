@@ -1,6 +1,7 @@
 package effectpersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -112,7 +113,7 @@ func (e channelSettlementEvidence) authority(lease time.Time) (runtimeeffects.Au
 
 func loadChannelRecoverySettlementTx(ctx context.Context, tx *sql.Tx, c externalEffectRecoveryCandidate,
 	state runtimeeffects.State, failure []byte, now time.Time, postgres bool) (runtimeeffects.Settlement, error) {
-	query := `SELECT o.authority_evidence,a.evidence,a.lease_expires_at,o.authority_id
+	query := `SELECT a.authority_evidence,a.evidence,a.lease_expires_at,o.authority_id
 		FROM runtime_external_effect_operations o JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		WHERE o.operation_id=$1 AND a.attempt_id=$2 AND a.state=$3`
 	if postgres {
@@ -180,4 +181,28 @@ func recoverChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, c externa
 		return changed, err
 	}
 	return true, projectChannelSourceSettlementTx(ctx, tx, s, postgres)
+}
+
+func requireChannelSettlementEvidence(authority runtimeeffects.Authority, attempt, original, operation []byte) error {
+	wantRaw, err := json.Marshal(authority.Evidence())
+	if err != nil {
+		return err
+	}
+	want, err := canonicaljson.Canonicalize(wantRaw)
+	if err != nil {
+		return err
+	}
+	got, err := canonicaljson.Canonicalize(attempt)
+	if err != nil || !bytes.Equal(want, got) {
+		return fmt.Errorf("channel settlement evidence contradicts exact attempt authority")
+	}
+	first, err := canonicaljson.Canonicalize(original)
+	if err != nil {
+		return err
+	}
+	history, err := canonicaljson.Canonicalize(operation)
+	if err != nil || !bytes.Equal(first, history) {
+		return fmt.Errorf("channel operation history contradicts original attempt authority")
+	}
+	return nil
 }
