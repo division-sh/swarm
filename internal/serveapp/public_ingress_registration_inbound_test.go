@@ -81,7 +81,7 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 	return transport.applyCount
 }
 
-func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *testing.T) {
+func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *testing.T) {
 	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
@@ -118,12 +118,11 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	for key, value := range map[string]string{"bot": "telegram-bot-token", "webhook_signing.telegram": "telegram-secret-v1", "channel.generated.signing": "generated-secret"} {
+	for key, value := range map[string]string{"bot": "telegram-bot-token", "webhook_signing.telegram": "telegram-secret-v1"} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("Set(%s): %v", key, err)
 		}
 	}
-	gateway.SetCredentialStore(credentialStore)
 	admission, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
 	})
@@ -140,10 +139,16 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	if err != nil {
 		t.Fatalf("InstalledCapabilitySubjects: %v", err)
 	}
+	rt := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner,
+		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog,
+			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash)}}
+	if _, err := rt.PlanStandingTargets(); err != nil {
+		t.Fatal(err)
+	}
+	gateway.SetCredentialAdmission(rt.AdmitInboundCredentials)
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
 		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash), Source: source,
-		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner,
-			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog}}, WorkOwner: workOwner,
+		Runtime: rt, WorkOwner: workOwner,
 		StandingTargets: []runtimepkg.StandingTarget{target}, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 	}))
 	if err != nil {
@@ -151,47 +156,10 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 	t.Cleanup(func() { _ = manager.QuiesceAllRuntimeContexts(context.Background()) })
 
-	channelPlan := loadSupportedTelegramChannelPlan(t)
-	learnedBinding, err := packs.NewOutboundBindingPlanWithRegistration(
-		"learned-telegram", channelPlan, "42", nil,
-		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "channel.generated.signing"},
-		"ingress:telegram-ingress:telegram",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	loadedContext := manager.LoadedContexts()[0]
-	activationPlanGeneration, err := learnedBinding.PlanGeneration()
-	if err != nil {
-		t.Fatal(err)
-	}
 	bundleHash = loadedContext.SourceArtifactFact.BundleHash()
 	credentialSnapshots, err := runtimecredentials.NewSnapshotOwner(credentialStore)
 	if err != nil {
-		t.Fatal(err)
-	}
-	admittedCredentials := []channelonboarding.CredentialAdmission{}
-	for role, key := range learnedBinding.CredentialStoreKeys() {
-		seal, err := credentialSnapshots.SealCurrentValue(context.Background(), key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		admittedCredentials = append(admittedCredentials, channelonboarding.CredentialAdmission{Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: seal.Seal})
-	}
-	learnedPublication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{{
-		Source: channelonboarding.ActivationSourceDeclared,
-		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-			BundleHash: bundleHash, BundleIdentity: "telegram@1.0.0#activation-readiness",
-			PackInventoryGeneration: loadedContext.PackInventoryDigest, RuntimeInstanceID: loadedContext.RuntimeInstanceID,
-			ContextPublicationGeneration: loadedContext.PublicationGeneration,
-			PlanGeneration:               activationPlanGeneration, TargetGeneration: 1,
-		},
-		Plan: learnedBinding, CredentialAdmissions: admittedCredentials,
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.ReplaceChannelActivationsContext(context.Background(), bundleHash, loadedContext.PublicationGeneration, learnedPublication); err != nil {
 		t.Fatal(err)
 	}
 
@@ -292,6 +260,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	if err := credentialStore.Set(context.Background(), "webhook_signing.telegram", "telegram-secret-v2"); err != nil {
 		t.Fatalf("rotate signing credential: %v", err)
 	}
+	assertIngressStatus(packs.StatusNotReady)
 	staleCallback := httptest.NewRecorder()
 	handler.ServeHTTP(staleCallback, httptest.NewRequest(http.MethodPost, initial.Registrations[0].CallbackURL, strings.NewReader(initialBody)))
 	if staleCallback.Code != http.StatusNotFound {
@@ -322,15 +291,15 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	oldSecret.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v1")
 	oldSecretRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(oldSecretRecorder, oldSecret)
-	if oldSecretRecorder.Code != http.StatusUnauthorized || len(eventsStore.events) != 2 {
-		t.Fatalf("old secret through fresh registration status/events=%d/%d, want 401/2", oldSecretRecorder.Code, len(eventsStore.events))
+	if oldSecretRecorder.Code != http.StatusServiceUnavailable || len(eventsStore.events) != 2 {
+		t.Fatalf("old secret with stale runtime admission status/events=%d/%d, want 503/2", oldSecretRecorder.Code, len(eventsStore.events))
 	}
 	newSecret := httptest.NewRequest(http.MethodPost, rotated.Registrations[0].CallbackURL, strings.NewReader(rotatedBody))
 	newSecret.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v2")
 	newSecretRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(newSecretRecorder, newSecret)
-	if newSecretRecorder.Code != http.StatusAccepted || len(eventsStore.events) != 4 {
-		t.Fatalf("new secret through fresh registration status/events=%d/%d, want 202/4", newSecretRecorder.Code, len(eventsStore.events))
+	if newSecretRecorder.Code != http.StatusServiceUnavailable || len(eventsStore.events) != 2 {
+		t.Fatalf("provider registration alone refreshed runtime admission status/events=%d/%d, want 503/2", newSecretRecorder.Code, len(eventsStore.events))
 	}
 }
 

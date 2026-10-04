@@ -424,6 +424,18 @@ func (p *SecretBindingProjection) ObserveActivationCredential(ctx context.Contex
 	return binding.snapshot, nil
 }
 
+// Consumers of an admitted projection cannot add a new observation on read.
+func (p *SecretBindingProjection) FrozenSecretBinding(key string) (SecretBinding, error) {
+	if p == nil {
+		return SecretBinding{}, fmt.Errorf("credential binding %q has no frozen observation", key)
+	}
+	binding, found := p.bindings[key]
+	if !found {
+		return SecretBinding{}, fmt.Errorf("credential binding %q has no frozen observation", key)
+	}
+	return binding, nil
+}
+
 // Learned authority requires its admitted value and, for written occurrences,
 // its exact receipt. An observed replacement is evidence, never new authority.
 func (p *SecretBindingProjection) ObserveAdmittedActivationCredential(ctx context.Context, evidence ValueEvidence, receipt string) (AdmittedSnapshot, bool, error) {

@@ -81,7 +81,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		})
 		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, executionposture.Live, persistence)
 		credentialStore := processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"}
-		gateway.SetCredentialStore(credentialStore)
+		setTestInboundCredentialAdmission(t, gateway, credentialStore)
 		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
 		if err != nil {
 			t.Fatalf("CompileAdmission(%s): %v", alias, err)

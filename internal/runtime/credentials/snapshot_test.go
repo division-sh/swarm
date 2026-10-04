@@ -135,6 +135,42 @@ func TestSecretBindingProjectionReusesExactKeyAndRejectsRotation(t *testing.T) {
 	}
 }
 
+func TestSecretBindingProjectionFrozenReadNeverObservesOrAddsAuthority(t *testing.T) {
+	ctx := context.Background()
+	const key = "webhook_signing.acme"
+	store := &sequenceSnapshotStore{Store: EnvStore{}, snapshots: []AtomicSnapshot{
+		NewAtomicSnapshot(Metadata{Key: key, Present: true}, "secret-a"),
+		NewAtomicSnapshot(Metadata{Key: key, Present: true}, "secret-b"),
+	}}
+	owner, err := NewSnapshotOwner(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := owner.BeginSecretBindingProjection()
+	if _, err := projection.FrozenSecretBinding(key); err == nil || store.calls != 0 {
+		t.Fatalf("unadmitted read err=%v calls=%d, want refusal without observation", err, store.calls)
+	}
+	admitted, err := projection.ObserveSecretBinding(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := projection.FrozenSecretBinding(key)
+	if err != nil || frozen.CredentialValue() != "secret-a" || frozen.ObservationToken() != admitted.ObservationToken() || store.calls != 1 {
+		t.Fatalf("frozen read err=%v calls=%d, want unchanged admitted evidence", err, store.calls)
+	}
+	if _, err := projection.FrozenSecretBinding("sibling"); err == nil || store.calls != 1 {
+		t.Fatalf("sibling read err=%v calls=%d, want refusal without observation", err, store.calls)
+	}
+	var stale *SecretBindingProjectionStaleError
+	if err := projection.ValidateCurrent(ctx); !errors.As(err, &stale) || stale.Key != key || store.calls != 2 {
+		t.Fatalf("rotation validation err=%v calls=%d, want stale original authority", err, store.calls)
+	}
+	frozen, err = projection.FrozenSecretBinding(key)
+	if err != nil || frozen.CredentialValue() != "secret-a" || store.calls != 2 {
+		t.Fatalf("post-validation frozen read err=%v calls=%d, want no replacement adoption", err, store.calls)
+	}
+}
+
 func TestSecretBindingProjectionScopedCurrentnessNeverAdoptsSiblingChanges(t *testing.T) {
 	ctx := context.Background()
 	store, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))

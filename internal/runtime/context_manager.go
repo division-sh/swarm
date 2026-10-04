@@ -952,6 +952,7 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 	revision := m.capabilityRevision
 	base := packs.CloneSubjects(m.capabilitySubjects)
 	targets := make(map[string]StandingTarget)
+	credentialOwners := make(map[string]*Runtime)
 	ineligible := make(map[string]standingIngressReadback)
 	for _, bundleHash := range m.order {
 		entry := m.contexts[bundleHash]
@@ -987,11 +988,13 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 				return nil, fmt.Errorf("derive standing ingress capability subject: %w", err)
 			}
 			targets[subject.ID] = target
+			credentialOwners[subject.ID] = entry.runtime
 		}
 	}
 	m.mu.RUnlock()
 
 	projection := owner.BeginSecretBindingProjection()
+	var validateAdmissions []func(context.Context) error
 	evaluated := make([]packs.Subject, 0, len(base))
 	for _, subject := range base {
 		if subject.Kind != packs.SubjectProviderTrigger || subject.Applicability != "effective" {
@@ -1015,12 +1018,17 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 		if activationBackedSubject.ID != subject.ID {
 			return nil, fmt.Errorf("activation-backed provider trigger subject changed identity from %q to %q", subject.ID, activationBackedSubject.ID)
 		}
-		current, err := evaluateStandingIngressCapabilitySubject(ctx, target, activationBackedSubject, projection)
+		credentialOwner := credentialOwners[subject.ID]
+		if credentialOwner == nil {
+			return nil, fmt.Errorf("standing ingress subject %q has no runtime credential admission owner", subject.ID)
+		}
+		current, validate, err := credentialOwner.evaluateStandingIngressAdmission(ctx, target, activationBackedSubject, projection)
 		if err != nil {
 			return nil, err
 		}
-		enabled := true
-		current.TriggerAdmission.BindingEnabled = &enabled
+		if validate != nil {
+			validateAdmissions = append(validateAdmissions, validate)
+		}
 		evaluated = append(evaluated, current)
 	}
 	normalized, err := packs.NormalizeSubjects(evaluated)
@@ -1029,6 +1037,11 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 	}
 	if err := projection.ValidateCurrent(ctx); err != nil {
 		return nil, err
+	}
+	for _, validate := range validateAdmissions {
+		if err := validate(ctx); err != nil {
+			return nil, err
+		}
 	}
 	m.mu.RLock()
 	currentRevision := m.capabilityRevision

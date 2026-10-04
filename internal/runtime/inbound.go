@@ -76,7 +76,7 @@ type InboundGateway struct {
 	shutdownAdmissionClosed func() bool
 	beginAdmission          func(context.Context) (context.Context, func(), bool)
 	runtimeIngress          *runtimeingress.Controller
-	credentialOwner         *runtimecredentials.SnapshotOwner
+	admitCredentials        func(context.Context, InboundTarget) (runtimecredentials.SecretBinding, func(context.Context) error, error)
 	standingAdmissionMu     sync.Mutex
 	standingAdmissions      map[string]*shutdownAdmission
 	publicationMu           sync.Mutex
@@ -127,16 +127,10 @@ func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdown
 	return g
 }
 
-func (g *InboundGateway) SetCredentialStore(store runtimecredentials.Store) error {
-	if g == nil {
-		return fmt.Errorf("inbound gateway is required")
+func (g *InboundGateway) SetCredentialAdmission(admit func(context.Context, InboundTarget) (runtimecredentials.SecretBinding, func(context.Context) error, error)) {
+	if g != nil {
+		g.admitCredentials = admit
 	}
-	owner, err := runtimecredentials.NewSnapshotOwner(store)
-	if err != nil {
-		return err
-	}
-	g.credentialOwner = owner
-	return nil
 }
 
 func (g *InboundGateway) SetRuntimeIngress(controller *runtimeingress.Controller) {
@@ -279,6 +273,22 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		http.Error(w, fmt.Sprintf("ingress target %q provider %q has no compiled admission plan; request rejected before provider admission", target.Alias, provider), http.StatusServiceUnavailable)
 		return
 	}
+	if g.admitCredentials == nil {
+		http.Error(w, "standing ingress credential admission unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	binding, validateCredentials, err := g.admitCredentials(r.Context(), target)
+	if err != nil || validateCredentials == nil {
+		http.Error(w, "standing ingress credential admission unavailable; restart or explicitly admit fresh credentials", http.StatusServiceUnavailable)
+		return
+	}
+	validate := func() bool {
+		if err := validateCredentials(r.Context()); err != nil {
+			http.Error(w, "standing ingress credential admission became stale; restart or explicitly admit fresh credentials", http.StatusServiceUnavailable)
+			return false
+		}
+		return true
+	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, inboundWebhookMaxBodyBytes+1))
 	if err != nil {
@@ -299,20 +309,14 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			http.Error(w, fmt.Sprintf("ingress alias %q provider %q requires a signing secret for %s request authentication", target.Alias, provider, target.AdmissionPlan.RequestAuthentication()), http.StatusServiceUnavailable)
 			return
 		}
-		if g.credentialOwner == nil {
-			http.Error(w, fmt.Sprintf("signing secret %s is UNBOUND; run `swarm secrets set %s`", target.SigningSecret, target.SigningSecret), http.StatusServiceUnavailable)
-			return
-		}
-		binding, err := g.credentialOwner.ObserveSecretBinding(r.Context(), target.SigningSecret)
-		if err != nil {
-			http.Error(w, "read signing secret failed", http.StatusServiceUnavailable)
-			return
-		}
 		if !binding.Bound() {
 			http.Error(w, fmt.Sprintf("signing secret %s is UNBOUND; run `swarm secrets set %s`", target.SigningSecret, target.SigningSecret), http.StatusServiceUnavailable)
 			return
 		}
 		signingValue = binding.CredentialValue()
+	}
+	if !validate() {
+		return
 	}
 	target.NormalizeEntity()
 	var payload any
@@ -356,6 +360,9 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if admitted.Response != nil {
+		if !validate() {
+			return
+		}
 		status := admitted.Response.Status
 		if status == 0 {
 			status = http.StatusOK
@@ -433,10 +440,16 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			return
 		case <-done:
 		}
+		if !validate() {
+			return
+		}
 		if existing, found, loadErr := g.store.LoadInboundPublicationByIdentity(requestCtx, provider, entityID, providerEventID); loadErr != nil {
 			http.Error(w, "read inbound publication failed", http.StatusServiceUnavailable)
 			return
 		} else if found {
+			if !validate() {
+				return
+			}
 			if existing.RequestProjectionVersion != publicationRequest.RequestProjectionVersion || existing.RequestFingerprint != publicationRequest.RequestFingerprint {
 				http.Error(w, "inbound provider identity conflicts with the committed semantic request", http.StatusConflict)
 				return
@@ -451,10 +464,16 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		http.Error(w, "inbound bundle source admission failed", http.StatusConflict)
 		return
 	}
+	if !validate() {
+		return
+	}
 	if existing, found, loadErr := g.store.LoadInboundPublicationByIdentity(pubCtx, provider, entityID, providerEventID); loadErr != nil {
 		http.Error(w, "read inbound publication failed", http.StatusServiceUnavailable)
 		return
 	} else if found {
+		if !validate() {
+			return
+		}
 		if existing.RequestProjectionVersion != publicationRequest.RequestProjectionVersion || existing.RequestFingerprint != publicationRequest.RequestFingerprint {
 			http.Error(w, "inbound provider identity conflicts with the committed semantic request", http.StatusConflict)
 			return
@@ -478,6 +497,9 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if operatorEvent != nil && operatorEvent.BareCandidate == nil {
+		if !validate() {
+			return
+		}
 		commitResult, err := g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
 			Request: publicationRequest, Finalization: runtimeinbound.Finalization{EvidenceEvent: evidence},
 			OperatorChannelClaim: operatorEvent.Claim, OperatorChannelAction: operatorEvent.Action,
@@ -543,6 +565,10 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	var bareCandidate *operatorchannel.InboundText
 	if operatorEvent != nil {
 		bareCandidate = operatorEvent.BareCandidate
+	}
+	if !validate() {
+		_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+		return
 	}
 	commitResult, err := g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
 		Request: publicationRequest, Finalization: finalization,

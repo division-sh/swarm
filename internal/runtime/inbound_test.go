@@ -146,7 +146,7 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *Runti
 			store.bindTestInboundEventStore(bus.Store())
 		}
 	}
-	gateway.SetCredentialStore(identityInboundCredentialStore{})
+	gateway.SetCredentialAdmission(testInboundCredentialAdmission(t, identityInboundCredentialStore{}))
 	var resolver testInboundTargetResolver
 	if len(stores) > 0 {
 		resolver, _ = any(stores[0]).(testInboundTargetResolver)
@@ -155,6 +155,25 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *Runti
 }
 
 type identityInboundCredentialStore struct{}
+
+func testInboundCredentialAdmission(t *testing.T, store runtimecredentials.Store) func(context.Context, InboundTarget) (runtimecredentials.SecretBinding, func(context.Context) error, error) {
+	t.Helper()
+	owner, err := runtimecredentials.NewSnapshotOwner(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func(ctx context.Context, target InboundTarget) (runtimecredentials.SecretBinding, func(context.Context) error, error) {
+		projection := owner.BeginSecretBindingProjection()
+		var binding runtimecredentials.SecretBinding
+		if target.AdmissionPlan.RequiresSecret() && target.SigningSecret != "" {
+			binding, err = projection.ObserveSecretBinding(ctx, target.SigningSecret)
+			if err != nil {
+				return binding, nil, err
+			}
+		}
+		return binding, projection.ValidateCurrent, nil
+	}
+}
 
 func testInboundTarget(alias, signingSecret string) InboundTarget {
 	return InboundTarget{
@@ -509,6 +528,19 @@ func (s *recordingInboundStore) CommitInboundPublication(_ context.Context, comm
 
 func (s *recordingInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
 	return s.record, s.record.State == "committed", nil
+}
+
+type credentialMutatingInboundStore struct {
+	*recordingInboundStore
+	onLoad func()
+}
+
+func (s *credentialMutatingInboundStore) LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, eventID string) (runtimeinbound.Record, bool, error) {
+	record, found, err := s.recordingInboundStore.LoadInboundPublicationByIdentity(ctx, provider, entityID, eventID)
+	if found && s.onLoad != nil {
+		s.onLoad()
+	}
+	return record, found, err
 }
 
 func (s *recordingInboundStore) ValidateInboundPublicationIntegrity(context.Context) error {
@@ -964,6 +996,52 @@ func normalizedRetryRequest(body string) *http.Request {
 	return request
 }
 
+func TestInboundGatewayDuplicateReadRevalidatesFrozenCredential(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	target := testInboundTarget("chat", "webhook_signing.telegram")
+	target.Provider = "telegram"
+	bus, err := newInboundTestEventBus(t, eventStore, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &credentialMutatingInboundStore{recordingInboundStore: &recordingInboundStore{inserted: true}}
+	gateway := newTestInboundGateway(t, bus, nil, nil, store)
+	plan, err := gateway.catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.AdmissionPlan = plan
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := credentialStore.Set(context.Background(), target.SigningSecret, "secret-a"); err != nil {
+		t.Fatal(err)
+	}
+	gateway.SetCredentialAdmission(testInboundCredentialAdmission(t, credentialStore))
+	request := func() *http.Request {
+		req := normalizedRetryRequest(`{"update_id":991,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"probe"}}`)
+		req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "secret-a")
+		return req
+	}
+	first := httptest.NewRecorder()
+	gateway.HandleResolvedWebhook(first, request(), target, nil)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first request HTTP %d: %s", first.Code, first.Body.String())
+	}
+	count := len(eventStore.events)
+	store.onLoad = func() {
+		if err := credentialStore.Set(context.Background(), target.SigningSecret, "secret-b"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	duplicate := httptest.NewRecorder()
+	gateway.HandleResolvedWebhook(duplicate, request(), target, nil)
+	if duplicate.Code != http.StatusServiceUnavailable || len(eventStore.events) != count {
+		t.Fatalf("stale duplicate HTTP %d events=%d, want refusal without publication", duplicate.Code, len(eventStore.events))
+	}
+}
+
 func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := newInboundTestEventBus(t, eventStore)
@@ -1084,9 +1162,7 @@ func TestInboundGatewayRejectsUnusableSigningBindingBeforeMarkerAndPublish(t *te
 					t.Fatal(err)
 				}
 			}
-			if err := gateway.SetCredentialStore(credentials); err != nil {
-				t.Fatal(err)
-			}
+			gateway.SetCredentialAdmission(testInboundCredentialAdmission(t, credentials))
 			body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
 			req := newSignedSlackRequest("/webhooks/customer-a/slack", "unused", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
 			rec := httptest.NewRecorder()
@@ -2744,7 +2820,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 			}
 			store := &recordingInboundStore{inserted: true, store: eventStore}
 			gateway := NewInboundGateway(bus, nil, nil, executionposture.Live, store)
-			gateway.SetCredentialStore(identityInboundCredentialStore{})
+			gateway.SetCredentialAdmission(testInboundCredentialAdmission(t, identityInboundCredentialStore{}))
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", strings.NewReader(string(body)))
 			req.Header.Set("X-Partner-Signature", tc.signature)
 			req.Header.Set("X-Partner-Delivery", "declared-delivery")
@@ -2801,7 +2877,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	}
 	store := &recordingInboundStore{inserted: true, store: eventStore}
 	gateway := NewInboundGateway(bus, nil, nil, executionposture.Live, store)
-	gateway.SetCredentialStore(identityInboundCredentialStore{})
+	gateway.SetCredentialAdmission(testInboundCredentialAdmission(t, identityInboundCredentialStore{}))
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", nil)
 	req.Header.Set("X-Partner-Signature", signature)
 	rec := httptest.NewRecorder()

@@ -29,7 +29,7 @@ func (s *ingressBindingSequenceStore) Snapshot(context.Context, string) (runtime
 }
 
 func TestStaticEffectiveIngressProjectionObservesSharedKeyOnceAndFencesRotation(t *testing.T) {
-	testIngressBindingProjectionSharedKey(t, func(
+	testIngressBindingProjectionSharedKey(t, false, func(
 		ctx context.Context,
 		base []packs.Subject,
 		_ *RuntimeContextManager,
@@ -40,7 +40,7 @@ func TestStaticEffectiveIngressProjectionObservesSharedKeyOnceAndFencesRotation(
 }
 
 func TestManagerEffectiveIngressProjectionObservesSharedKeyOnceAndFencesRotation(t *testing.T) {
-	testIngressBindingProjectionSharedKey(t, func(
+	testIngressBindingProjectionSharedKey(t, true, func(
 		ctx context.Context,
 		_ []packs.Subject,
 		manager *RuntimeContextManager,
@@ -52,6 +52,7 @@ func TestManagerEffectiveIngressProjectionObservesSharedKeyOnceAndFencesRotation
 
 func testIngressBindingProjectionSharedKey(
 	t *testing.T,
+	scoped bool,
 	project func(context.Context, []packs.Subject, *RuntimeContextManager, *runtimecredentials.SnapshotOwner) ([]packs.Subject, error),
 ) {
 	t.Helper()
@@ -87,6 +88,9 @@ func testIngressBindingProjectionSharedKey(
 			if err != nil {
 				t.Fatal(err)
 			}
+			freezeTestStandingCredentialAdmission(t, primary, store)
+			freezeTestStandingCredentialAdmission(t, survivor, store)
+			store.calls = 0
 			subjects, err := project(ctx, base, manager, owner)
 			var staleErr *runtimecredentials.SecretBindingProjectionStaleError
 			if tc.wantStale {
@@ -110,8 +114,15 @@ func testIngressBindingProjectionSharedKey(
 					t.Fatalf("READY effective subjects = %d, want 2", ready)
 				}
 			}
-			if store.calls != 2 {
-				t.Fatalf("snapshot calls = %d, want one shared-key capture plus one validation", store.calls)
+			wantCalls := 2
+			if scoped {
+				wantCalls = 6
+				if tc.wantStale {
+					wantCalls = 4
+				}
+			}
+			if store.calls != wantCalls {
+				t.Fatalf("snapshot calls = %d, want %d (one presence capture/validation plus scoped frozen checks)", store.calls, wantCalls)
 			}
 		})
 	}

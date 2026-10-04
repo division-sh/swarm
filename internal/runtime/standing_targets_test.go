@@ -349,7 +349,7 @@ func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPi
 	}
 	publicationStore := &recordingInboundStore{inserted: true, store: eventStore}
 	gateway := NewInboundGateway(bus, nil, nil, executionposture.Live, publicationStore)
-	gateway.SetCredentialStore(identityInboundCredentialStore{})
+	gateway.SetCredentialAdmission(testInboundCredentialAdmission(t, identityInboundCredentialStore{}))
 	body := []byte(`{"action":"created","issue":{"number":7}}`)
 	mac := hmac.New(sha256.New, []byte("github-secret"))
 	_, _ = mac.Write(body)
