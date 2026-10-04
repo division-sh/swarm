@@ -98,7 +98,7 @@ func (r managerRecoveryReads) ListSelectedContractRouteRecoveryRecords(ctx conte
 	if r.am.bus == nil {
 		return nil, errors.New("selected-contract route recovery reader is required")
 	}
-	reader, ok := r.am.bus.Store().(selectedContractRouteRecoveryLister)
+	reader, ok := r.am.bus.Store().(SelectedContractRouteRecoveryReader)
 	if !ok || reader == nil {
 		return nil, errors.New("selected-contract route recovery reader is required")
 	}

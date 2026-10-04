@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -90,29 +91,51 @@ type selectedContractRecoveredRecipientPlanEvent struct {
 
 type selectedContractRecoveredRecipient = forkrecipient.Evidence
 
-type selectedContractRouteRecoveryLister interface {
+type SelectedContractRouteRecoveryReader interface {
 	ListSelectedContractRouteRecoveryRecords(ctx context.Context) ([]SelectedContractRouteRecoveryRecord, error)
+}
+
+// InspectSelectedContractRouteRecoveries validates boot's retained evidence
+// without installing routes or reconstructing executable agents.
+func InspectSelectedContractRouteRecoveries(ctx context.Context, reader SelectedContractRouteRecoveryReader) (map[string]SelectedContractRouteRecoveryTruth, error) {
+	if reader == nil {
+		return nil, failures.New(failures.ClassDependencyUnavailable, "selected_route_observation_unavailable", "agent-manager", "inspect_selected_routes", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	records, err := reader.ListSelectedContractRouteRecoveryRecords(ctx)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, failures.Wrap(failures.ClassDependencyUnavailable, "selected_route_observation_unavailable", "agent-manager", "inspect_selected_routes", nil, err)
+	}
+	recovered := make(map[string]SelectedContractRouteRecoveryTruth, len(records))
+	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		truth, err := decodeSelectedContractRouteRecoveryTruth(record)
+		if err != nil {
+			return nil, err
+		}
+		recovered[strings.TrimSpace(record.ForkRunID)] = truth
+	}
+	return recovered, nil
 }
 
 func (am *AgentManager) restoreSelectedContractRouteRecoveries(ctx context.Context) error {
 	if am == nil || am.bus == nil || am.bus.Store() == nil {
 		return nil
 	}
-	lister, ok := am.bus.Store().(selectedContractRouteRecoveryLister)
+	lister, ok := am.bus.Store().(SelectedContractRouteRecoveryReader)
 	if !ok || lister == nil {
 		return nil
 	}
-	records, err := lister.ListSelectedContractRouteRecoveryRecords(ctx)
+	recovered, err := InspectSelectedContractRouteRecoveries(ctx, lister)
 	if err != nil {
-		return fmt.Errorf("list selected-contract route recoveries: %w", err)
-	}
-	recovered := make(map[string]SelectedContractRouteRecoveryTruth, len(records))
-	for _, record := range records {
-		truth, err := decodeSelectedContractRouteRecoveryTruth(record)
-		if err != nil {
-			return err
-		}
-		recovered[strings.TrimSpace(record.ForkRunID)] = truth
+		return err
 	}
 	am.mu.Lock()
 	am.selectedContractRouteRecoveries = recovered

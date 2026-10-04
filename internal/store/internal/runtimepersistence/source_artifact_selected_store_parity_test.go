@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -83,7 +84,7 @@ func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var selected interface {
 				selectedSourceArtifactStore
-				startuprecovery.AvailabilityReader
+				runbundle.ActiveAvailabilityReader
 			}
 			var db *sql.DB
 			placeholder := "?"

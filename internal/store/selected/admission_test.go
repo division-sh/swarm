@@ -12,6 +12,7 @@ import (
 	runtimecore "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
@@ -116,6 +117,9 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				if _, err := snapshot.ReadResetInventory(ctx); err != nil {
 					return err
 				}
+				if pending, err := destructivereset.InspectPendingOperations(ctx, snapshot); err != nil || len(pending) != 0 {
+					t.Fatalf("empty reset ledger inspection: %+v err=%v", pending, err)
+				}
 				if _, err := snapshot.ListSelectedForkRecoveryEntries(ctx); err != nil {
 					return err
 				}
@@ -151,6 +155,9 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			}
 			if _, err := retained.InspectAuthority(context.Background()); !errors.Is(err, context.Canceled) {
 				t.Fatalf("expired snapshot escaped to authority reader: %v", err)
+			}
+			if _, err := retained.PendingResetOperations(context.Background()); !errors.Is(err, context.Canceled) {
+				t.Fatalf("expired snapshot escaped to reset ledger reader: %v", err)
 			}
 			var processRows int
 			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&processRows); err != nil {
