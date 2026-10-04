@@ -73,6 +73,7 @@ func CopyLegacyStaticCreate(t testing.TB, withTimer bool) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: exact-once-test\npins:\n  inputs:\n    - thing.created\n  outputs:\n    - thing.created\nconnect:\n  - {event: thing.created, from: ., to: validation}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "thing.created:\n  amount: integer\n  who: text\n")
+	writeClosedVariantFile(t, root, "validation/agents.yaml", "result-observer:\n  intent: {inline: 'Observe the exact created-entity result.'}\n  subscriptions: [thing.emitted]\n")
 	inputs := "thing.created"
 	produces := "thing.emitted"
 	timer := ""

@@ -52,9 +52,12 @@ stages:
   active: {initial: true}
 pins:
   inputs:
-    events: [seed, item.keyed, item.nested, item.unkeyed]
+    - seed
+    - item.keyed
+    - item.nested
+    - item.unkeyed
   outputs:
-    events: [item.recorded]
+    - item.recorded
 `,
 		"entities.yaml": "work:\n  marker: text?\n",
 		"types.yaml": `types:

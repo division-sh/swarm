@@ -220,8 +220,7 @@ stages:
   scored: {terminal: true}
 pins:
   outputs:
-    events:
-      - score.dimension_complete
+    - score.dimension_complete
 `)
 	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "types.yaml"), `
 types:

@@ -223,7 +223,7 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 
 func a2JoinResultTypeFiles(resultType string) map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: a2-result-types\nstages:\n  awaiting: {initial: true}\n  ready: {terminal: true}\npins:\n  inputs:\n    events: [item.completed, halt.requested]\n",
+		"schema.yaml":   "name: a2-result-types\nstages:\n  awaiting: {initial: true}\n  ready: {terminal: true}\npins:\n  inputs:\n    - item.completed\n    - halt.requested\n",
 		"entities.yaml": fmt.Sprintf("result_state:\n  final_expected: integer\n  final_completed: integer\n  final_results: \"[%s]\"\n  final_reason: text\n", resultType),
 		"types.yaml": `scalars:
   Score: integer

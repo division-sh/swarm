@@ -170,7 +170,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema = strings.Replace(schema, declaration, strings.Replace(declaration, "fields: {", "fields: {second_revision_id: {literal: first}, ", 1)+second, 1)
 		schema = strings.Replace(schema, "  drafting: {}", "  drafting: {}\n  drafting_second: {}\n  review_second: {}", 1)
 		for _, event := range []string{"start", "admit", "repeat", "close"} {
-		schema = strings.Replace(schema, "  outputs:\n", "    - second."+event+"\n  outputs:\n", 1)
+			schema = strings.Replace(schema, "  outputs:\n", "    - second."+event+"\n  outputs:\n", 1)
 		}
 		events = strings.Replace(events, "loop.escaped:\n", "loop.escaped:\n  second_revision_id: text\n", 1)
 		events += "second.start:\n  seed: boolean\nsecond.admit:\n  second_revision_id: text\nsecond.repeat:\n  second_revision_id: text\nsecond.close:\n  second_revision_id: text\n"

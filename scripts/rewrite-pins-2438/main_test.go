@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,13 +55,13 @@ func rewritten(t *testing.T, inputs map[string][]byte) (map[string][]byte, []cha
 }
 
 func TestRewriteNamesOnlyPreservesOtherSourceAndIsIdempotent(t *testing.T) {
-	before := []byte("# original heading\nname: 'unchanged'\npins:\n  inputs:\n    events: [work.started]\n  outputs:\n    events:\n      - event: work.done\n        sink: harness\n\nstages: {idle: {initial: true}}\nconnect:\n  - {event: work.started, from: ., to: child, resolution: create}\n")
+	before := []byte(canonicalrouting.PinRewriteSyntaxSource(t, "RewriteNamesOnlyPreservesOtherSourceAndIsIdempotent-1"))
 	after, plan := rewritten(t, map[string][]byte{"schema.yaml": before})
 	if len(plan) != 1 {
 		t.Fatalf("expected one rewrite, got %v", plan)
 	}
 	text := string(after["schema.yaml"])
-	if !strings.HasPrefix(text, "# original heading\nname: 'unchanged'\n") || !strings.HasSuffix(text, "\nstages: {idle: {initial: true}}\nconnect:\n  - {event: work.started, from: ., to: child, resolution: create}\n") {
+	if !strings.HasPrefix(text, "# original heading\nname: 'unchanged'\n") || !strings.HasSuffix(text, canonicalrouting.PinRewriteSyntaxSource(t, "RewriteNamesOnlyPreservesOtherSourceAndIsIdempotent-2")) {
 		t.Fatalf("unrelated source changed:\n%s", text)
 	}
 	doc, err := parseTestSource(after["schema.yaml"])
@@ -102,21 +103,21 @@ func TestRewritePreservesInitializePassengerExactly(t *testing.T) {
 	}
 }
 
-func replySources(correlation bool) map[string][]byte {
+func replySources(t testing.TB, correlation bool) map[string][]byte {
 	extra := ""
 	if correlation {
 		extra = "          correlation_key: request_id\n"
 	}
 	return map[string][]byte{
-		replyRequester: []byte("name: requester\npins:\n  inputs:\n    events:\n      - event: provider.replied\n        resolution:\n          mode: reply\n          replies_to: provider.requested\n" + extra + "  outputs:\n    events: [provider.requested]\n"),
-		replyParent:    []byte("name: parent\npins:\n  inputs:\n    events: [request.start]\nconnect:\n  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: provider, to: requester}\n  - {event: other.requested, from: requester, to: other, resolution: select, key_from: payload.other_id}\n"),
+		replyRequester: []byte(canonicalrouting.PinRewriteSyntaxSource(t, "replySources-3") + extra + "  outputs:\n    events: [provider.requested]\n"),
+		replyParent:    []byte(canonicalrouting.PinRewriteSyntaxSource(t, "replySources-4")),
 	}
 }
 
 func TestRewriteMovesExactReplyAndCorrelationToResponseConnection(t *testing.T) {
 	for _, correlation := range []bool{false, true} {
 		t.Run(map[bool]string{false: "event_id", true: "explicit_correlation"}[correlation], func(t *testing.T) {
-			after, plan := rewritten(t, replySources(correlation))
+			after, plan := rewritten(t, replySources(t, correlation))
 			if len(plan) != 2 {
 				t.Fatalf("expected both schemas rewritten, got %v", plan)
 			}
@@ -153,8 +154,8 @@ func TestRewriteRejectsUnratifiedOrAmbiguousForms(t *testing.T) {
 		"unknown_option":    "pins: {inputs: {events: [{event: work.start, surprise: true}]}}\n",
 		"wrong_sink":        "pins: {outputs: {events: [{event: work.done, sink: other}]}}\n",
 		"output_init":       "pins: {outputs: {events: [{event: work.done, initialize: {x: payload.x}}]}}\n",
-		"fan_out":           "pins: {inputs: {events: [{event: work.start, resolution: {mode: fan-out}}]}}\n",
-		"fan_in":            "pins: {inputs: {events: [{event: work.start, resolution: {mode: fan-in, aggregation: sum}}]}}\n",
+		"fan_out":           canonicalrouting.PinRewriteSyntaxSource(t, "RewriteRejectsUnratifiedOrAmbiguousForms-5"),
+		"fan_in":            canonicalrouting.PinRewriteSyntaxSource(t, "RewriteRejectsUnratifiedOrAmbiguousForms-6"),
 		"invalid_event":     "pins: {inputs: {events: [/work.start]}}\n",
 		"qualified_event":   "pins: {inputs: {events: [worker/work.start]}}\n",
 		"padded_event":      "pins: {inputs: {events: [' work.start ']}}\n",
@@ -176,7 +177,7 @@ func TestRewriteRejectsUnratifiedOrAmbiguousForms(t *testing.T) {
 		"duplicate_reply": "  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: other, to: requester}",
 	} {
 		t.Run(name, func(t *testing.T) {
-			inputs := replySources(false)
+			inputs := replySources(t, false)
 			inputs[replyParent] = []byte(strings.Replace(string(inputs[replyParent]), "  - {event: provider.requested, from: requester, to: provider}", replacement, 1))
 			if _, err := planRewrite(inputs); err == nil {
 				t.Fatal("invalid paired topology admitted")
@@ -184,14 +185,14 @@ func TestRewriteRejectsUnratifiedOrAmbiguousForms(t *testing.T) {
 		})
 	}
 	t.Run("padded_correlation", func(t *testing.T) {
-		inputs := replySources(true)
+		inputs := replySources(t, true)
 		inputs[replyRequester] = []byte(strings.Replace(string(inputs[replyRequester]), "correlation_key: request_id", "correlation_key: ' request_id '", 1))
 		if _, err := planRewrite(inputs); err == nil {
 			t.Fatal("nonexact correlation key admitted")
 		}
 	})
 	t.Run("multiple_reply_moves", func(t *testing.T) {
-		parent, err := parse(replySources(false)[replyParent])
+		parent, err := parse(replySources(t, false)[replyParent])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -271,7 +272,7 @@ func trackedTestSources(t *testing.T, inputs map[string][]byte) string {
 }
 
 func TestRewriteApplicationPreservesModesAndIsIdempotent(t *testing.T) {
-	inputs := replySources(true)
+	inputs := replySources(t, true)
 	inputs[retiredHarness+"README.md"] = []byte("retired example\n")
 	for _, root := range retiredGrantFixtures {
 		inputs[root+"child/schema.yaml"] = []byte("retired grant mechanism\n")
@@ -294,7 +295,7 @@ func TestRewriteApplicationPreservesModesAndIsIdempotent(t *testing.T) {
 	if err := run(root, true); err != nil {
 		t.Fatal(err)
 	}
-	selected := replySources(true)
+	selected := replySources(t, true)
 	selected[retiredHarness+"README.md"] = inputs[retiredHarness+"README.md"]
 	for _, root := range retiredGrantFixtures {
 		selected[root+"child/schema.yaml"] = inputs[root+"child/schema.yaml"]

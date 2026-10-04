@@ -25,6 +25,27 @@ var manualGoSources = map[string]bool{
 	"harness_injection.go":          true,
 	"arrival_join_guard_sources.go": true,
 	"publication_sites.go":          true,
+	"pin_rewrite_syntax.go":         true,
+}
+
+var inlineGoSources = []string{
+	"internal/runtime/accprojection/resolver_test.go",
+	"internal/runtime/authoringview/view_test.go",
+	"internal/runtime/bootverify/report_test.go",
+	"internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go",
+	"internal/runtime/bus/root_subscription_verify_test.go",
+	"internal/runtime/engine/executor_test.go",
+	"internal/runtime/pipeline/engine_adapter_test.go",
+	"internal/runtime/pipeline/a2_accumulator_persistence_external_test.go",
+	"internal/runtime/pipeline/a2_join_result_types_external_test.go",
+	"internal/runtime/pipeline/a2_same_commit_join_binding_external_test.go",
+	"internal/runtime/pipeline/fan_out_backlog_test.go",
+	"internal/runtime/pipeline/sqlite_dynamic_activation_test.go",
+	"internal/runtime/pipeline/workflow_guard_reachability_proof_test.go",
+	"internal/runtime/pipeline/workflow_instance_activation_test.go",
+	"internal/runtime/pipeline/workflow_nodes_test.go",
+	"internal/runtime/runforkexecution/workflow_receiver_readiness_test.go",
+	"internal/store/internal/backend/runforkpersistence/receiver_config_history_test.go",
 }
 
 func runGoSources(root string, write bool) error {
@@ -52,17 +73,18 @@ func runGoSources(root string, write bool) error {
 			plan = append(plan, change{Path: name, After: after})
 		}
 	}
-	name := "internal/runtime/bootverify/report_test.go"
-	data, err := os.ReadFile(filepath.Join(root, name))
-	if err != nil {
-		return err
-	}
-	after, err := rewriteGoSource(name, data)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(data, after) {
-		plan = append(plan, change{Path: name, After: after})
+	for _, name := range inlineGoSources {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			return err
+		}
+		after, err := rewriteGoSource(name, data)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(data, after) {
+			plan = append(plan, change{Path: name, After: after})
+		}
 	}
 	if write {
 		if err := applyPlan(root, plan, nil); err != nil {
@@ -92,7 +114,7 @@ func rewriteGoSource(name string, data []byte) ([]byte, error) {
 		}
 		if call, ok := node.(*ast.CallExpr); ok {
 			if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
-				if pkg, ok := selector.X.(*ast.Ident); ok && pkg.Name == "strings" {
+				if pkg, ok := selector.X.(*ast.Ident); ok && pkg.Name == "strings" && selector.Sel.Name != "TrimSpace" {
 					markLiteralFragments(call, fragments)
 				}
 			}
@@ -102,7 +124,7 @@ func rewriteGoSource(name string, data []byte) ([]byte, error) {
 	var rewriteErr error
 	ast.Inspect(file, func(node ast.Node) bool {
 		literal, ok := node.(*ast.BasicLit)
-		if !ok || literal.Kind != token.STRING || fragments[literal] || rewriteErr != nil {
+		if !ok || literal.Kind != token.STRING || rewriteErr != nil {
 			return true
 		}
 		text, err := strconv.Unquote(literal.Value)
@@ -110,7 +132,10 @@ func rewriteGoSource(name string, data []byte) ([]byte, error) {
 			rewriteErr = err
 			return false
 		}
-		after, err := rewriteGoPinLiteral([]byte(text))
+		after := []byte(rewritePinMutationLiteral(name, text))
+		if !fragments[literal] {
+			after, err = rewriteGoPinLiteral(after)
+		}
 		if err != nil {
 			rewriteErr = fmt.Errorf("%s: %w", positions.Position(literal.Pos()), err)
 			return false

@@ -146,6 +146,9 @@ coordinator-indexer:
 
 func writeStatelessCountJoinSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
+	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: stateless-count-join\npins:\n  inputs: [job.received]\nconnect:\n  - {event: job.received, from: ., to: coordinator}\n")
+	writeSingletonCoordinatorFile(t, root, "types.yaml", singletonCoordinatorTypesYAMLForFixture())
+	writeSingletonCoordinatorFile(t, root, "events.yaml", "job.received:\n  vertical_id: text\n  job: Job\n")
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
 stages:
   active: {initial: true}
@@ -157,11 +160,6 @@ pins:
 `)
 	writeSingletonCoordinatorFile(t, root, "coordinator/types.yaml", singletonCoordinatorTypesYAMLForFixture())
 	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", "coordinator_state: {}\n")
-	writeSingletonCoordinatorFile(t, root, "coordinator/events.yaml", `
-job.received:
-  vertical_id: text
-  job: Job
-`)
 	writeSingletonCoordinatorFile(t, root, "coordinator/nodes.yaml", `
 coordinator-node:
   execution_type: system_node
@@ -202,15 +200,13 @@ func RetiredFanInCoordinatorSchema() string {
 	return `name: coordinator
 pins:
   inputs:
-    events:
-      - event: job.received
-        source: harness
-        resolution:
-          mode: fan-in
-          aggregation: stream
-          window: payload.vertical_id
-          dedup_by: [event.id]
-          singleton: coordinator
+    - event: job.received
+      resolution:
+        mode: fan-in
+        aggregation: stream
+        window: payload.vertical_id
+        dedup_by: [event.id]
+        singleton: coordinator
 `
 }
 

@@ -176,9 +176,9 @@ func CopyForkReceiverRepeatedOwnership(t testing.TB, receivers []ForkReceiver) s
 	t.Helper()
 	root := CopyForkReceiverOwnership(t, receivers, false)
 	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "  active: {terminal: true}", "  active: {}\n  done: {terminal: true}")
-	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "    events: [work.requested]", "    events:\n      - work.requested\n      - producer.closed")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - start.closed\n", "      - start.closed\n      - producer.closed\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "events: [work.requested", "events: [producer.closed, work.requested")
+	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "    - work.requested", "    - work.requested\n    - producer.closed")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - start.closed\n", "    - start.closed\n    - producer.closed\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [work.requested", "outputs: [producer.closed, work.requested")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: producer.closed, from: ., to: producer}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "start.closed:\n", "start.closed:\nproducer.closed:\n")
 	applyClosedReplacement(t, filepath.Join(root, "producer/nodes.yaml"), "subscribes_to: [work.requested]", "subscribes_to: [work.requested, producer.closed]")
@@ -201,7 +201,7 @@ func CopyForkReceiverNestedOwnership(t testing.TB, receivers []ForkReceiver) str
 	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "start.seeded", "start.seeded")
 	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "start.requested", "start.requested")
 	applyClosedReplacement(t, filepath.Join(inner, "events.yaml"), "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed:\n", "")
-	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "      - receiver.closed\n", "      - receiver.close.requested\n")
+	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "    - receiver.closed\n", "    - receiver.close.requested\n")
 	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "  subscribes_to: [start.seeded, start.requested, start.closed]", "  subscribes_to: [start.seeded, start.requested, start.closed, receiver.close.requested]")
 	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "  event_handlers:\n    start.seeded:", "  event_handlers:\n    receiver.close.requested:\n      emit: {event: receiver.closed}\n    start.seeded:")
 	root := t.TempDir()
@@ -270,18 +270,18 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		seen[receiver.Path] = true
 		rootEdges += fmt.Sprintf("  - {event: work.ready, from: producer, to: %s}\n", receiver.Path)
 		rootEdges += fmt.Sprintf("  - {event: receiver.finished, from: %s, to: ., rename: %s.finished}\n", receiver.Path, receiver.Path)
-		receiptPins += fmt.Sprintf("      - %s.finished\n", receiver.Path)
+		receiptPins += fmt.Sprintf("    - %s.finished\n", receiver.Path)
 		receiptNodes += forkReceiverReceiptObserver(receiver.Path)
 		seeded := receiver.Policy == ForkReceiverOptionalExisting || receiver.Policy == ForkReceiverRequiredExisting
 		if seeded {
 			seedEdges += fmt.Sprintf("  - {event: receiver.seeded, from: ., to: %s}\n", receiver.Path)
 		}
 		inputs := "work.ready"
-		pinInputs := "      - work.ready\n"
+		pinInputs := "    - work.ready\n"
 		seedHandler := ""
 		if seeded {
 			inputs += ", receiver.seeded"
-			pinInputs += "      - receiver.seeded\n"
+			pinInputs += "    - receiver.seeded\n"
 			seedHandler = fmt.Sprintf(`    receiver.seeded:
       advances_to: active
       data_accumulation:
@@ -295,7 +295,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 			closeEdges += fmt.Sprintf("  - {event: receiver.closed, from: ., to: %s}\n", receiver.Path)
 			stages = "stages:\n  waiting: {initial: true}\n  active: {}\n  done: {terminal: true}\n"
 			inputs += ", receiver.closed"
-			pinInputs += "      - receiver.closed\n"
+			pinInputs += "    - receiver.closed\n"
 			seedHandler += "    receiver.closed:\n      advances_to: done\n"
 			entities = "receipt:\n  marker: text\n"
 		}
@@ -321,9 +321,8 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		writeClosedVariantFile(t, root, receiver.Path+"/schema.yaml", fmt.Sprintf(`name: %s
 %spins:
   inputs:
-    events:
 %s  outputs:
-    events: [receiver.finished]
+    - receiver.finished
 `, receiver.Path, stages, pinInputs))
 		writeClosedVariantFile(t, root, receiver.Path+"/entities.yaml", entities)
 		writeClosedVariantFile(t, root, receiver.Path+"/events.yaml", "receiver.finished:\n  owner: text\n  token: text\n")
@@ -341,7 +340,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 	closeEvent := ""
 	if closeEdges != "" {
 		outputs += ", receiver.closed"
-		closeInput = "      - receiver.closed\n"
+		closeInput = "    - receiver.closed\n"
 		closeEvent = "receiver.closed:\n"
 	}
 	if seedEdges != "" {
@@ -356,12 +355,11 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - start.seeded
-      - start.requested
-      - start.closed
+    - start.seeded
+    - start.requested
+    - start.closed
 `+receiptPins+closeInput+`  outputs:
-    events: [`+outputs+`]
+    [`+outputs+`]
 connect:
 `+rootEdges+seedEdges+closeEdges)
 	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  marker: text\n")
@@ -408,7 +406,7 @@ func removeForkReceiverFinishedConnection(t testing.TB, root, receiver string) {
 	t.Helper()
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 		fmt.Sprintf("  - {event: receiver.finished, from: %s, to: ., rename: %s.finished}\n", receiver, receiver), "")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), fmt.Sprintf("      - %s.finished\n", receiver), "")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), fmt.Sprintf("    - %s.finished\n", receiver), "")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), forkReceiverReceiptObserver(receiver), "")
 }
 

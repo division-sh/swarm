@@ -1304,8 +1304,7 @@ func writeDuplicateNodeIDFlow(t testing.TB, root, flowID string) {
 name: `+flowID+`
 pins:
   inputs:
-    events:
-      - observed
+    - observed
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "types.yaml"), `
 types:

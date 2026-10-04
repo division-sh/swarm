@@ -28,7 +28,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 		if variant == ArrivalJoinBoundReplyObserver {
 			files["schema.yaml"] += "  - {event: provider.replied, from: provider, to: observer, resolution: select}\n"
 			files["schema.yaml"] += "  - {event: provider.notified, from: provider, to: observer, resolution: select}\n"
-			files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "events: [provider.replied]", "events: [provider.replied, provider.notified]", 1)
+			files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "    - provider.replied\n", "    - provider.replied\n    - provider.notified\n", 1)
 			files["provider/events.yaml"] += "ordinary.requested:\n  order_id: text\n  member_id: text\n  result: JoinResult\nprovider.notified:\n  order_id: text\n  member_id: text\n  result: JoinResult\n"
 			files["provider/nodes.yaml"] += `    ordinary.requested:
       emit:
@@ -39,9 +39,8 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
           result: "${payload.result}"
 `
 			files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "name: requester", "name: observer", 1)
-			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "{event: provider.replied, resolution: {mode: reply, replies_to: provider.requested}}", "provider.replied", 1)
-			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs: [provider.requested]\n", "", 1)
-			files["observer/schema.yaml"] += "      - provider.notified\n"
+			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    - provider.requested\n", "", 1)
+			files["observer/schema.yaml"] += "    - provider.notified\n"
 			files["observer/entities.yaml"] = files["requester/entities.yaml"] + "  ordinary_result: JoinResult\n"
 			start := strings.Index(files["requester/nodes.yaml"], "collector:\n")
 			end := strings.Index(files["requester/nodes.yaml"], "dispatcher:\n")
@@ -262,8 +261,7 @@ stages:
   attention: {terminal: true}
 pins:
   inputs:
-    events:
-      - halt.requested
+    - halt.requested
 `, flow)
 		files[flow+"/entities.yaml"] = "order_state:\n  order_id: {type: text, indexed: true}\n  expected: \"[text]\"\n  halt_count: {type: integer, initial: 0}\n"
 		files[flow+"/events.yaml"] = "manual.abort:\ndispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\nalternate.completed:\n  member_id: text\n  result: JoinResult\nhalt.observed:\n  order_id: text\n  count: integer\n"
