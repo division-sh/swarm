@@ -55,7 +55,7 @@ func TestScalar2556RuleDiagnosticCoordinatesUsePositions(t *testing.T) {
 	for _, collection := range []string{"rules", "on_complete"} {
 		for _, label := range []string{"", "named", "1", "0", "bracket]label"} {
 			t.Run(collection+"/"+label, func(t *testing.T) {
-				field, tail := "when", "        - else: true\n"
+				field, tail := "when", "        - when: true\n        - else: true\n"
 				if collection == "on_complete" {
 					field, tail = "condition", "        - condition: true\n          emit: proof.done\n"
 				}
@@ -119,6 +119,31 @@ func TestScalar2556NestedDiagnosticSourceOwnership(t *testing.T) {
 				t.Fatal("nested executable reader missing")
 			}
 		})
+	}
+}
+
+func TestScalar2556DiagnosticPreservesAuthoredFieldNames(t *testing.T) {
+	for _, owner := range []string{"activity", "emit"} {
+		for _, key := range []string{"ref", "cel", "condition", `value"[part]`} {
+			t.Run(owner+"/"+key, func(t *testing.T) {
+				body := "          activity:\n            tool: send\n            input:\n              '" + key + "': missing_root\n"
+				if owner == "emit" {
+					body = "          emit:\n            event: proof.done\n            fields:\n              '" + key + "': missing_root\n"
+				}
+				ctx, record, source := scalar2556LoadedSource(t, "      rules:\n        - id: '1'\n          else: true\n"+body)
+				node, _ := record.Identity()
+				matched := false
+				for _, reader := range handlerExecutableReaderExpressionsForSource(ctx.source, node, "proof.requested", record.Entry.EventHandlers["proof.requested"]) {
+					if reader.Expression == "missing_root" {
+						scalar2556AssertDiagnosticCoordinates(t, ctx, record, source, reader)
+						matched = true
+					}
+				}
+				if !matched {
+					t.Fatal("authored field reader missing")
+				}
+			})
+		}
 	}
 }
 
