@@ -18,7 +18,7 @@ func TestReadProofFactoringCompiledSurfaces(t *testing.T) {
 	lifecycle := buildOwnedMockLifecycleBinary(t, root)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			cwd := t.TempDir()
+			cwd := goldenReleaseRoot(t)
 			store := goldenSQLiteStore(cwd)
 			if backend == "postgres" {
 				store = goldenPostgresStore(t, os.Getenv(goldenPostgresEnv))

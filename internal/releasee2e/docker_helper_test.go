@@ -25,8 +25,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 )
 
 const (
@@ -1025,7 +1023,7 @@ func fakeDockerCreate(root string, args []string) int {
 		}
 		state.ContainerIDs[id] = name
 		container := fakeDockerContainer{ID: id, Labels: labels, WorkerPath: create.workerPath, ExtraHosts: create.extraHosts}
-		if mount := dockerOptionValue(args, "--mount"); os.Getenv(releaseResourceReadEnv) == "1" && mount != "" {
+		if mount := create.providerMount; os.Getenv(releaseResourceReadEnv) == "1" && mount != "" {
 			container.ProviderKey = strings.TrimSuffix(strings.TrimPrefix(mount, "type=volume,source="), ",target=/opt/swarm/provider/claude")
 			if state.ProviderVolumes == nil {
 				state.ProviderVolumes = map[string]fakeProviderVolume{}
@@ -1358,7 +1356,7 @@ func validateReleaseMCPConfig(raw string) (string, string, map[string]string, er
 }
 
 func fakeDockerExec(root string, args []string) int {
-	if len(args) == 7 && args[1] == "-i" && args[2] == "-w" && args[5] == "/opt/swarm/bin/swarm" && strings.HasPrefix(args[6], worker.Argument+"=") {
+	if len(args) == 7 && args[1] == "-i" && args[2] == "-w" && args[5] == "/opt/swarm/bin/swarm" && strings.HasPrefix(args[6], releaseWorkerArgument+"=") {
 		return fakeDockerWorker(root, args)
 	}
 	input, err := io.ReadAll(os.Stdin)
@@ -1401,16 +1399,17 @@ func fakeDockerExec(root string, args []string) int {
 // The legacy Docker emulator executes the mounted native worker and real HTTP
 // probe. Endpoint translation models its host process; it earns no Docker proof.
 func fakeDockerWorker(root string, args []string) int {
-	if _, err := worker.InvocationArgument(strings.TrimPrefix(args[6], worker.Argument+"=")); err != nil {
+	invocation := strings.TrimPrefix(args[6], releaseWorkerArgument+"=")
+	if decoded, err := hex.DecodeString(invocation); err != nil || len(decoded) != 16 || strings.ToLower(invocation) != invocation {
 		return fakeDockerUnexpected(root, args, "invalid native worker launch coordinate")
 	}
-	ownedInput, err := worker.InterruptibleInput(os.Stdin)
+	ownedInput, err := releaseWorkerInput(os.Stdin)
 	if err != nil {
 		return fakeDockerUnexpected(root, args, "native worker input cannot be joined")
 	}
 	defer ownedInput.Close()
 	reader := bufio.NewReader(ownedInput)
-	input, err := worker.ReadFrame(reader)
+	input, err := readReleaseWorkerFrame(reader)
 	if err != nil {
 		return fakeDockerUnexpected(root, args, "invalid native worker request frame")
 	}
