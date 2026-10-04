@@ -80,7 +80,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			}
 			root := writeProviderAliasAuthorityFixture(t, scenario)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			rt := startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, root, scenario.agents)
 			baseURL := strings.TrimSuffix(rt.Endpoint, "/v1/rpc")
 			for aliasIndex, alias := range []string{"alpha", "beta"} {
 				for shapeIndex, shape := range []string{"text", "callback"} {
