@@ -95,22 +95,21 @@ func artifactActionResultStaticDeliveryFixtureFiles() map[string]string {
 }
 
 func addArtifactActionResultChildRequest(files map[string]string) {
-	files["schema.yaml"] += "pins:\n  inputs:\n    events: [start.requested]\n  outputs:\n    events: [start.requested]\nconnect:\n  - {event: start.requested, from: ., to: repo-scaffold/child-1}\n"
+	files["schema.yaml"] += "pins:\n  inputs:\n    - start.requested\n  outputs:\n    - start.requested\nconnect:\n  - {event: start.requested, from: ., to: repo-scaffold/child-1}\n"
 	files["events.yaml"] = "start.requested:\n  request_id: text\n  mvp_yaml: text\n"
 	files["repo-scaffold/events.yaml"] = strings.TrimPrefix(files["repo-scaffold/events.yaml"], "repo_scaffold.repo_commit_requested:\n  request_id: string\n  mvp_yaml: string\n")
 	files["repo-scaffold/schema.yaml"] += `pins:
   inputs:
-    events: [repo_scaffold.repo_commit_requested]
+    - repo_scaffold.repo_commit_requested
 connect:
   - {event: repo_scaffold.repo_commit_requested, from: child-1, to: .}
 `
 	files["repo-scaffold/child-1/schema.yaml"] = `name: child-requester
 pins:
   inputs:
-    events:
-      - start.requested
+    - start.requested
   outputs:
-    events: [repo_scaffold.repo_commit_requested]
+    - repo_scaffold.repo_commit_requested
 `
 	files["repo-scaffold/child-1/events.yaml"] = `repo_scaffold.repo_commit_requested:
   request_id: text

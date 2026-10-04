@@ -39,7 +39,6 @@ const (
 	FlowInputResolutionModeCreate
 	FlowInputResolutionModeSelect
 	FlowInputResolutionModeSelectOrCreate
-	FlowInputResolutionModeFanOut
 	FlowInputResolutionModeReply
 )
 
@@ -51,10 +50,6 @@ func ParseFlowInputResolutionMode(raw string) (FlowInputResolutionMode, error) {
 		return FlowInputResolutionModeSelect, nil
 	case "select-or-create":
 		return FlowInputResolutionModeSelectOrCreate, nil
-	case "fan-out":
-		return FlowInputResolutionModeFanOut, nil
-	case "reply":
-		return FlowInputResolutionModeReply, nil
 	case "":
 		return FlowInputResolutionModeNone, nil
 	default:
@@ -72,8 +67,6 @@ func FlowInputResolutionModeCode(m FlowInputResolutionMode) string {
 		return "select"
 	case FlowInputResolutionModeSelectOrCreate:
 		return "select-or-create"
-	case FlowInputResolutionModeFanOut:
-		return "fan-out"
 	case FlowInputResolutionModeReply:
 		return "reply"
 	default:

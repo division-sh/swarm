@@ -20,7 +20,7 @@ func admitSchemaFragment(source string) (FlowSchemaDocument, error) {
 	if err != nil {
 		return FlowSchemaDocument{}, err
 	}
-	return projectFlowSchemaValue(snapshot.Document("schema.yaml").Root())
+	return AdmitFlowSchemaValue(snapshot.Document("schema.yaml").Root())
 }
 
 func loadSchemaFragment(t *testing.T, source string) (*WorkflowContractBundle, error) {

@@ -26,7 +26,6 @@ const (
 	FanInStream             ArtifactID = "fan-in/stream"
 	FanInBarrier            ArtifactID = "fan-in/barrier"
 	MapScatterGather        ArtifactID = "map-scatter-gather"
-	HarnessInjection        ArtifactID = "harness-injection"
 	PolicyRules             ArtifactID = "policy-rules"
 	TelegramAgent           ArtifactID = "telegram-agent"
 )
@@ -133,9 +132,9 @@ imports:
       event: inbound.telegram.text_message
 pins:
   inputs:
-    events: [inbound.telegram.text_message]
+    - inbound.telegram.text_message
   outputs:
-    events: [inbound.telegram.text_message]
+    - inbound.telegram.text_message
 connect:
   - {event: inbound.telegram.text_message, from: ., to: telegram-chat, resolution: select-or-create}
 `)
@@ -214,7 +213,6 @@ func canonicalExamplePath(id ArtifactID) (string, bool) {
 		FanInStream:             "examples/routing/fan-in/stream",
 		FanInBarrier:            "examples/routing/fan-in/barrier",
 		MapScatterGather:        "examples/routing/map-scatter-gather",
-		HarnessInjection:        "examples/routing/harness-injection",
 		PolicyRules:             "examples/routing/policy-rules",
 		TelegramAgent:           telegramAgentExamplePath,
 	}
@@ -361,9 +359,11 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
 pins:
   inputs:
-    events: [account.requested, legacy.seen]
+    - account.requested
+    - legacy.seen
   outputs:
-    events: [account.requested, legacy.seen]
+    - account.requested
+    - legacy.seen
 connect:
   - {event: account.requested, from: ., to: producer}
   - {event: account.ready, from: producer, to: account, resolution: select-or-create}
@@ -376,8 +376,7 @@ stages:
   archived: {terminal: true}
 pins:
   inputs:
-    events:
-      - legacy.seen
+    - legacy.seen
 `)
 	writeClosedNegativeFile(t, root, "legacy_static/entities.yaml", `legacy_record:
   legacy_id:
@@ -412,8 +411,7 @@ stages:
   active: {initial: true}
 pins:
   inputs:
-    events:
-      - subject.created
+    - subject.created
 `)
 	writeClosedNegativeFile(t, root, "nodes.yaml", `root-node:
   execution_type: system_node

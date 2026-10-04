@@ -21,11 +21,9 @@ imports:
 connect: [{event: work.requested, from: source, to: worker, rename: work.received, resolution: create, key_from: event.id}]
 pins:
   inputs:
-    events:
-      - event: work.requested
-        initialize: {note: payload.note}
-  outputs:
-    events: [work.completed]
+    - event: work.requested
+      initialize: {note: payload.note}
+  outputs: [work.completed]
 required_agents: [{role: worker, subscribes_to: [], emits: [work.completed], description: ''}]
 instance_variables:
   description: Configuration
@@ -61,10 +59,8 @@ stages:
     timers: [{after: 1s, emit: work.expired}]
   done: {terminal: true}
 pins:
-  inputs:
-    events: [work.requested]
-  outputs:
-    events: [work.completed]
+  inputs: [work.requested]
+  outputs: [work.completed]
 `
 
 const (

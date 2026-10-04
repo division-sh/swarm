@@ -34,7 +34,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		if sibling {
 			kind, value, role = "boolean", "True", "sibling-writer"
 		}
-		input := "      - work.requested\n"
+		input := "    - work.requested\n"
 		modeDecl := ""
 		if mode == "template" && !sibling {
 			modeDecl = "instance: case_id\n"
@@ -42,12 +42,12 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		if sibling {
 			input = strings.ReplaceAll(input, "work.requested", "sibling.requested")
 		}
-		schema := "name: emit-proof\n" + modeDecl + "pins:\n  inputs:\n    events:\n" + input
+		schema := "name: emit-proof\n" + modeDecl + "pins:\n  inputs:\n" + input
 		extraEvent, extraOutput, extraEmit := "", "", ""
 		if sibling {
-			extraEvent, extraOutput, extraEmit = "foreign.only:\n", "  outputs:\n    events:\n      - work.ack\n      - {event: foreign.only, sink: harness}\n", ", foreign.only"
+			extraEvent, extraOutput, extraEmit = "foreign.only:\n", "  outputs:\n    - work.ack\n    - foreign.only\n", ", foreign.only"
 		} else if scope != "." {
-			extraOutput = "  outputs:\n    events: [work.ack]\n"
+			extraOutput = "  outputs: [work.ack]\n"
 		}
 		writeClosedVariantFile(t, root, filepath.Join(flow, "schema.yaml"), schema+extraOutput)
 		events := "work.requested:\n  case_id: text\nwork.started:\n  case_id: text\nwork.result:\n  value: " + kind + "\nwork.ack:\n  value: " + kind + "\n" + extraEvent
@@ -77,16 +77,16 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		writeClosedVariantFile(t, root, filepath.Join(flow, "mocks/writer.py"), "import json\n\ndef handle(input):\n    frame = {}\n    for message in input[\"messages\"]:\n        if message[\"role\"] == \"user\":\n            frame = json.loads(message[\"content\"])\n"+bad+fmt.Sprintf("    if input[\"round\"] == 1:\n        return {\"calls\": [{\"name\": \"emit_work_result\", \"arguments\": {\"value\": %s}}], \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n    return {\"text\": \"Complete\", \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n", value))
 
 	}
-	rootSchema := "name: managed-driver\npins:\n  inputs:\n    events: [work.requested, sibling.requested, sibling.ack]\n  outputs:\n    events: [work.requested, sibling.requested, sibling.ack, work.ack]\nconnect:\n  - {event: sibling.requested, from: ., to: sibling}\n  - {event: work.ack, from: sibling, to: ., rename: sibling.ack}\n"
+	rootSchema := "name: managed-driver\npins:\n  inputs:\n    - work.requested\n    - sibling.requested\n    - sibling.ack\n  outputs:\n    - work.requested\n    - sibling.requested\n    - sibling.ack\n    - work.ack\nconnect:\n  - {event: sibling.requested, from: ., to: sibling}\n  - {event: work.ack, from: sibling, to: ., rename: sibling.ack}\n"
 	if scope != "." {
-		rootSchema = strings.Replace(rootSchema, "sibling.ack]", "sibling.ack, source.ack]", 1)
-		rootSchema = strings.Replace(rootSchema, "sibling.ack, work.ack]", "sibling.ack, source.ack]", 1)
+		rootSchema = strings.Replace(rootSchema, "    - sibling.ack\n  outputs:", "    - sibling.ack\n    - source.ack\n  outputs:", 1)
+		rootSchema = strings.Replace(rootSchema, "    - work.ack\nconnect:", "    - source.ack\nconnect:", 1)
 		rootSchema += "  - {event: work.requested, from: ., to: " + scope + "}\n"
 		rootSchema += "  - {event: work.ack, from: " + scope + ", to: ., rename: source.ack}\n"
 	}
 	rootEvents := "work.requested:\n  case_id: text\nsibling.requested:\n  case_id: text\n"
 	if mode == "template" {
-		rootSchema = "name: managed-driver\npins:\n  inputs:\n    events: [work.requested, sibling.requested, sibling.ack, source.ack]\n  outputs:\n    events: [work.dispatch, sibling.requested, sibling.ack, source.ack]\nconnect:\n  - {event: work.dispatch, from: ., to: source, rename: work.requested, resolution: select-or-create}\n  - {event: sibling.requested, from: ., to: sibling}\n  - {event: work.ack, from: sibling, to: ., rename: sibling.ack}\n  - {event: work.ack, from: source, to: ., rename: source.ack}\n"
+		rootSchema = "name: managed-driver\npins:\n  inputs:\n    - work.requested\n    - sibling.requested\n    - sibling.ack\n    - source.ack\n  outputs:\n    - work.dispatch\n    - sibling.requested\n    - sibling.ack\n    - source.ack\nconnect:\n  - {event: work.dispatch, from: ., to: source, rename: work.requested, resolution: select-or-create}\n  - {event: sibling.requested, from: ., to: sibling}\n  - {event: work.ack, from: sibling, to: ., rename: sibling.ack}\n  - {event: work.ack, from: source, to: ., rename: source.ack}\n"
 		rootEvents = "work.requested:\n  key: case_id\n  case_id: text\nwork.dispatch:\n  key: case_id\n  case_id: text\nsibling.requested:\n  case_id: text\n"
 		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested:\n      emit: {event: work.dispatch, fields: {case_id: \"${payload.case_id}\"}}\n")
 	}

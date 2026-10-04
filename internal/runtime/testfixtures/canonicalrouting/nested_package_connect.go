@@ -15,7 +15,7 @@ func CopyNestedFlowConnect(t testing.TB) string {
 		"child/schema.yaml": `name: child
 pins:
   inputs:
-    events: [micro.done]
+    - micro.done
 connect:
   - event: micro.done
     from: grandchild
@@ -31,7 +31,7 @@ connect:
 		"child/grandchild/schema.yaml": `name: grandchild
 pins:
   outputs:
-    events: [micro.done]
+    - micro.done
 `,
 		"child/grandchild/events.yaml": "micro.done:\n",
 	}

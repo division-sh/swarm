@@ -18,23 +18,18 @@ func (s *producerCensusCounter) WorkflowTimers() []runtimecontracts.WorkflowTime
 }
 
 func TestInputProducerSharesOnlyOperationLocalCensus(t *testing.T) {
-	for _, kind := range []runtimecontracts.FlowInputPinSource{runtimecontracts.FlowInputPinSourceNone, runtimecontracts.FlowInputPinSourceHarness} {
-		name := "provider"
-		if kind == runtimecontracts.FlowInputPinSourceHarness {
-			name = "harness"
-		}
-		t.Run(name, func(t *testing.T) {
-			source := &producerCensusCounter{Source: flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{Event: "work.requested", Source: kind}, nil)}
-			if kind == runtimecontracts.FlowInputPinSourceNone {
+	for _, tc := range []struct {
+		name     string
+		provider bool
+	}{{name: "provider", provider: true}, {name: "unbound private input"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &producerCensusCounter{Source: flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{Event: "work.requested"}, nil)}
+			if tc.provider {
 				source.Source = markedToolOverlaySource{Source: source.Source, capabilities: source.SemanticCapabilities().WithProviderTriggerEvents(source.Source, triggergeneration.FromCanonicalBytes([]byte("producer-work")), nil).WithProviderIngressEvents(map[string][]string{"worker": {"work.requested"}})}
 			}
 			for calls := 1; calls <= 2; calls++ {
 				got := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
-				want := runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress
-				if kind == runtimecontracts.FlowInputPinSourceHarness {
-					want = runtimecontracts.FlowInputProducerBoundaryHarnessInjection
-				}
-				if source.builds != calls || !got.HasEvidenceKind(want) {
+				if source.builds != calls || got.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) != tc.provider || got.HasEvidence() != tc.provider {
 					t.Fatalf("builds = %d, want %d; evidence=%#v", source.builds, calls, got.Evidence)
 				}
 			}

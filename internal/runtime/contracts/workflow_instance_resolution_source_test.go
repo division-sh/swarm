@@ -8,7 +8,7 @@ import (
 )
 
 func TestInputPinResolutionGeneratedSourceModeMatrix(t *testing.T) {
-	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeSelect, FlowInputResolutionModeSelectOrCreate, FlowInputResolutionModeFanOut, FlowInputResolutionModeReply} {
+	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeSelect, FlowInputResolutionModeSelectOrCreate, FlowInputResolutionModeReply} {
 		t.Run(FlowInputResolutionModeCode(mode), func(t *testing.T) {
 			_, err := ResolveFlowInputInstanceSource(mode, FlowInputInstanceSourceGeneratedUUIDPath)
 			if err == nil || !strings.Contains(err.Error(), "only valid for resolution create") {

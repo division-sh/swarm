@@ -43,16 +43,15 @@ func CopyTemplateReplyWithInertFrom(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateReply)
 	applyClosedReplacement(t, filepath.Join(root, "requester", "schema.yaml"),
-		"          mode: reply", "          mode: reply\n          from: payload.ignored")
+		"    - provider.replied", "    - {event: provider.replied, from: payload.ignored}")
 	return root
 }
 
 func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 	t.Helper()
-	requesterSchema := filepath.Join(root, "requester", "schema.yaml")
-	applyClosedReplacement(t, requesterSchema,
-		"          replies_to: provider.requested\n",
-		"          replies_to: provider.requested\n          correlation_key: provider_request_id\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"    replies_to: provider.requested\n",
+		"    replies_to: provider.requested\n    correlation_key: provider_request_id\n")
 	applyClosedReplacement(t, filepath.Join(root, "requester", "events.yaml"),
 		"provider.requested:\n", "provider.requested:\n  key: provider_request_id\n  provider_request_id: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "provider", "events.yaml"),
@@ -83,9 +82,9 @@ func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, account
 	requestKey = closedScalarLiteral(t, "request key", requestKey, "human-request")
 	accountID = closedScalarLiteral(t, "account ID", accountID, "account-a")
 	providerSchema := filepath.Join(root, "provider", "schema.yaml")
-	applyClosedReplacement(t, providerSchema, "      - provider.requested\n  outputs:\n", `      - provider.requested
-      - human_task.deferred
-      - human_task.approved
+	applyClosedReplacement(t, providerSchema, "    - provider.requested\n  outputs:\n", `    - provider.requested
+    - human_task.deferred
+    - human_task.approved
   outputs:
 `)
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:

@@ -123,36 +123,32 @@ func TestResolveNonConnectFlowInputProducer_DoesNotClassifyParentConnect(t *test
 	}
 }
 
-func TestResolveFlowInputProducer_ClassifiesDeclaredHarnessSource(t *testing.T) {
-	source := harnessOnlyFlowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
-		Event:  "work.requested",
-		Source: runtimecontracts.FlowInputPinSourceHarness,
+func TestResolveFlowInputProducer_DoesNotInventPrivateProducer(t *testing.T) {
+	source := unboundFlowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
+		Event: "work.requested",
 	}, nil)
 
 	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 
-	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection) {
-		t.Fatalf("evidence = %#v, want harness injection", resolution.Evidence)
+	if resolution.HasEvidence() {
+		t.Fatalf("evidence = %#v, an unbound private input must have no producer", resolution.Evidence)
 	}
 	if got := resolution.ProducerPatterns(); len(got) != 0 {
-		t.Fatalf("ProducerPatterns = %#v, want no harness routing authority", got)
+		t.Fatalf("ProducerPatterns = %#v, want no invented routing authority", got)
 	}
 	if got := resolution.ProducerFlows(); len(got) != 0 {
-		t.Fatalf("ProducerFlows = %#v, want no harness routing authority", got)
-	}
-	if resolution.HasConflictingHarnessEvidence() {
-		t.Fatalf("evidence = %#v, want harness as the sole producer proof", resolution.Evidence)
+		t.Fatalf("ProducerFlows = %#v, want no invented routing authority", got)
 	}
 }
 
-func TestResolveFlowInputAutoWire_HarnessEvidenceHasNoPatternsOrProducerFlows(t *testing.T) {
-	source := harnessOnlyFlowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
-		Event: "work.requested", Source: runtimecontracts.FlowInputPinSourceHarness,
+func TestResolveFlowInputAutoWire_UnboundPrivateInputHasNoPatternsOrProducerFlows(t *testing.T) {
+	source := unboundFlowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
+		Event: "work.requested",
 	}, nil)
 
 	resolution := ResolveFlowInputAutoWire(source, "worker", "work.requested")
 	if len(resolution.Patterns) != 0 || len(resolution.ProducerFlows) != 0 {
-		t.Fatalf("auto-wire = %#v, want no harness routing authority", resolution)
+		t.Fatalf("auto-wire = %#v, want no invented routing authority", resolution)
 	}
 	if patterns := FlowInputProducerPatterns(source, "worker", "work.requested"); len(patterns) != 0 {
 		t.Fatalf("producer patterns = %#v, want none", patterns)
@@ -274,7 +270,7 @@ func flowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputE
 	return withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"worker": {inputPin}}, map[string][]runtimecontracts.FlowOutputEventPin{"producer": {{Event: "work.requested"}}})
 }
 
-func harnessOnlyFlowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowConnect) Source {
+func unboundFlowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowConnect) Source {
 	t.Helper()
 	source := flowInputProducerFixture(t, inputPin, connects)
 	bundle, ok := Bundle(source)

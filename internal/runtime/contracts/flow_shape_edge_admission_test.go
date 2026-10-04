@@ -53,7 +53,7 @@ func TestConnectionPoliciesRemainEdgeLocal(t *testing.T) {
 			t.Fatal(err)
 		}
 		pin, ok := bundle.FlowInputEventPin("worker", "work.ready")
-		if !ok || !pin.Resolution().Empty() {
+		if !ok || pin.EventType() != "work.ready" {
 			t.Fatalf("edge policy leaked into shared pin: %#v", pin)
 		}
 		seen := map[FlowInputResolutionMode]string{}
@@ -145,7 +145,7 @@ func TestEdgeResolutionPreservesPinInitialization(t *testing.T) {
 				t.Fatal(err)
 			}
 			pin, ok := bundle.FlowInputEventPin("account", "account.ready")
-			if !ok || !pin.Resolution().Empty() {
+			if !ok || pin.EventType() != "account.ready" {
 				t.Fatal("initialization manufactured shared-pin selection policy")
 			}
 			values, err := pin.Initialization().EvaluateWithIdentity(map[string]any{"count": 0, "label": "kept", "active": false, "attributes": []any{}}, map[string]any{"account_id": "one"})

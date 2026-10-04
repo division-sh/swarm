@@ -43,8 +43,14 @@ func CopyChannelLearnedObjectAnchorJourney(t testing.TB) string {
 	writeClosedVariantFile(t, root, "reviews/events.yaml", "work.completed:\n  result: text\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `name: object-channel
 pins:
-  inputs: {events: [work.requested, observer.requested, effect.requested]}
-  outputs: {events: [work.requested, observer.requested, effect.requested]}
+  inputs:
+    - work.requested
+    - observer.requested
+    - effect.requested
+  outputs:
+    - work.requested
+    - observer.requested
+    - effect.requested
 connect:
   - {event: work.requested, from: ., to: reviews}
   - {event: effect.requested, from: ., to: reviews}
@@ -59,8 +65,10 @@ func copyChannelLearnedObjectInputJourney(t testing.TB, inputType string) string
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", `name: object-channel
 pins:
-  inputs: {events: [work.requested]}
-  outputs: {events: [work.requested]}
+  inputs:
+    - work.requested
+  outputs:
+    - work.requested
 connect:
   - {event: work.requested, from: ., to: reviews}
 `)
@@ -99,7 +107,8 @@ stages:
   active: {initial: true, gate: {decision: retire_service, outcomes: {retire: {advances_to: done}}}}
   done: {terminal: true}
 pins:
-  inputs: {events: [inbound.mock]}
+  inputs:
+    - inbound.mock
 ingress:
   alias: objects
   providers: [{provider: mock, signing_secret: webhook_signing.mock}]

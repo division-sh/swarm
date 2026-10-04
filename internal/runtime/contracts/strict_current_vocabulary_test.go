@@ -15,7 +15,7 @@ import (
 // Each witness traverses its declaration root and nested production projectors.
 func TestRemovedClosedFieldsUseCurrentVocabularyAcrossPresenceAndMerges(t *testing.T) {
 	admitNodes := func(d yamlsource.Document) error { _, err := projectNodeDeclarationsValue(d.Root()); return err }
-	admitSchema := func(d yamlsource.Document) error { _, err := projectFlowSchemaValue(d.Root()); return err }
+	admitSchema := func(d yamlsource.Document) error { _, err := AdmitFlowSchemaValue(d.Root()); return err }
 	handler := "worker: {event_handlers: {work.ready: {%s}}}\n"
 	for _, tc := range []struct {
 		name, file, format string
@@ -76,7 +76,7 @@ func TestCurrentVocabularyDiagnosticsAcrossDeclarationFamilies(t *testing.T) {
 		admit                    func(yamlsource.Document) error
 	}{
 		{"nodes.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectNodeDeclarationsValue(d.Root()); return err }},
-		{"schema.yaml", "name: sample\nnaem: typo\n", "naem", "name", func(d yamlsource.Document) error { _, err := projectFlowSchemaValue(d.Root()); return err }},
+		{"schema.yaml", "name: sample\nnaem: typo\n", "naem", "name", func(d yamlsource.Document) error { _, err := AdmitFlowSchemaValue(d.Root()); return err }},
 		{"agents.yaml", "worker: {intent: {inline: business intent}, modle: typo}\n", "modle", "model", func(d yamlsource.Document) error { _, err := projectAgentDeclarationsValue(d.Root()); return err }},
 		{"tools.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectToolDeclarationsValue(d.Root()); return err }},
 		{"types.yaml", "enmus: {}\n", "enmus", "enums", func(d yamlsource.Document) error { _, err := projectTypeCatalogDocument(d.Root()); return err }},

@@ -29,7 +29,6 @@ func inputProducerSourceIsExternalNoTarget(resolution runtimecontracts.FlowInput
 		switch strings.TrimSpace(evidence.Kind) {
 		case runtimecontracts.FlowInputProducerBoundaryExternalIngress,
 			runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress,
-			runtimecontracts.FlowInputProducerBoundaryHarnessInjection,
 			runtimecontracts.FlowInputProducerPlatformSource:
 			return true
 		}

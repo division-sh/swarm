@@ -43,7 +43,7 @@ func TestSchemaAdmissionOwnershipHasNoRetiredInterpreter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(loading, []byte("DecodeYAML(source.Schema")) || !bytes.Contains(loading, []byte("projectFlowSchemaValue(document.Root())")) {
+	if bytes.Contains(loading, []byte("DecodeYAML(source.Schema")) || !bytes.Contains(loading, []byte("AdmitFlowSchemaValue(document.Root())")) {
 		t.Fatal("schema loader bypasses authoritative Value root")
 	}
 	events, err := os.ReadFile(filepath.Join(root, "internal/runtime/contracts/event_catalog_admission.go"))

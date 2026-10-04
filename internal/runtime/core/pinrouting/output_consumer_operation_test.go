@@ -37,7 +37,7 @@ func TestOutputConsumerOperationPreservesEveryClassification(t *testing.T) {
 					if !reflect.DeepEqual(got, want) {
 						t.Fatalf("routing=%+v event=%q attempt=%d: got=%+v want=%+v", routing, event, attempt, got, want)
 					}
-					got.classes[OutputConsumerHarness] = struct{}{}
+					got.classes[OutputConsumerClass(255)] = struct{}{}
 					if len(got.connects) > 0 {
 						got.connects[0] = ConnectRoutePlan{}
 					}
@@ -93,7 +93,7 @@ func TestOutputConsumerOperationConcurrentResultsAreIsolated(t *testing.T) {
 					t.Error("concurrent classification substituted evidence")
 					return
 				}
-				got.classes[OutputConsumerHarness] = struct{}{}
+				got.classes[OutputConsumerClass(255)] = struct{}{}
 				if len(got.connects) > 0 {
 					got.connects[0] = ConnectRoutePlan{}
 				}

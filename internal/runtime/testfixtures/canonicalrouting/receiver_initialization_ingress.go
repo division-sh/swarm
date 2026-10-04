@@ -22,11 +22,10 @@ auto_emit_on_create:
   event: chat.initialized
 pins:
   inputs:
-    events:
-      - event: inbound.telegram.text_message
-        initialize:
-          initial_text: payload.text
-          message_number: payload.provider_message_reference
+    - event: inbound.telegram.text_message
+      initialize:
+        initial_text: payload.text
+        message_number: payload.provider_message_reference
 `)
 	writeClosedVariantFile(t, root, "telegram-chat/entities.yaml", `chat:
   conversation_reference: {type: text, _unused_reason: canonical receiver key}

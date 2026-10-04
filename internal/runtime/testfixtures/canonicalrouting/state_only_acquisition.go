@@ -52,7 +52,7 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 				schema += "instance: instance_key\n"
 			}
 			if path == targetFlow {
-				schema += "pins:\n  inputs:\n    events: [test.node_emitted.selector, test.node_emitted.upserter]\n"
+				schema += "pins:\n  inputs:\n    - test.node_emitted.selector\n    - test.node_emitted.upserter\n"
 			}
 		}
 		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "schema.yaml")), schema)

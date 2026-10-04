@@ -109,11 +109,11 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		// counterexample, not an extra producer to satisfy a gate-only fixture.
 		nodes += "worker:\n  execution_type: system_node\n  subscribes_to: [work.handled]\n  event_handlers:\n    work.handled:\n      emit:\n        event: work.completed\n        fields: {result: {literal: handled}}\n"
 		events += "work.handled:\n"
-		schema += "      - work.handled\n"
-		schema += "  outputs:\n    events: [work.completed]\n"
+		schema += "    - work.handled\n"
+		schema += "  outputs: [work.completed]\n"
 		if variant == LifecycleStaticMixedOutput {
 			schema += "connect:\n  - {event: work.completed, from: ., to: sink}\n"
-			writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    events: [work.completed]\n")
+			writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    - work.completed\n")
 			writeClosedVariantFile(t, root, "sink/nodes.yaml", "collector:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed: {}\n")
 		}
 	case LifecycleStaticActorCollision:
@@ -170,7 +170,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema = strings.Replace(schema, declaration, strings.Replace(declaration, "fields: {", "fields: {second_revision_id: {literal: first}, ", 1)+second, 1)
 		schema = strings.Replace(schema, "  drafting: {}", "  drafting: {}\n  drafting_second: {}\n  review_second: {}", 1)
 		for _, event := range []string{"start", "admit", "repeat", "close"} {
-			schema = strings.Replace(schema, "  outputs:\n", "      - second."+event+"\n  outputs:\n", 1)
+		schema = strings.Replace(schema, "  outputs:\n", "    - second."+event+"\n  outputs:\n", 1)
 		}
 		events = strings.Replace(events, "loop.escaped:\n", "loop.escaped:\n  second_revision_id: text\n", 1)
 		events += "second.start:\n  seed: boolean\nsecond.admit:\n  second_revision_id: text\nsecond.repeat:\n  second_revision_id: text\nsecond.close:\n  second_revision_id: text\n"

@@ -156,7 +156,7 @@ func decodeNodeTestYAML(body []byte, target any) error {
 	}
 	switch out := target.(type) {
 	case *FlowSchemaDocument:
-		*out, err = projectFlowSchemaValue(root)
+		*out, err = AdmitFlowSchemaValue(root)
 	case *ExpressionValue:
 		*out, err = projectNodeExpressionValue(root)
 	case *EmitSpec:

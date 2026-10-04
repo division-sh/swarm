@@ -20,82 +20,82 @@ rows:
 - id: B003
   path: tests/tier1-primitives/test-advances-to-terminal/nodes.yaml
   event: task.finished
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-advances-to-terminal
 - id: B004
   path: tests/tier1-primitives/test-advances-to/nodes.yaml
   event: task.progressed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-advances-to
 - id: B005
   path: tests/tier1-primitives/test-clear-gates/nodes.yaml
   event: gates.cleared
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-clear-gates
 - id: B006
   path: tests/tier1-primitives/test-compute-standalone/nodes.yaml
   event: scores.computed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compute-standalone
 - id: B007
   path: tests/tier1-primitives/test-data-accumulation-direct/nodes.yaml
   event: item.stored
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-data-accumulation-direct
 - id: B008
   path: tests/tier1-primitives/test-data-accumulation-literal/nodes.yaml
   event: item.categorized
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-data-accumulation-literal
 - id: B009
   path: tests/tier1-primitives/test-data-accumulation-mapped/nodes.yaml
   event: item.stored
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-data-accumulation-mapped
 - id: B010
   path: tests/tier1-primitives/test-emits-multiple/nodes.yaml
   event: item.processed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-emits-multiple
 - id: B011
   path: tests/tier1-primitives/test-emits-payload-transform/nodes.yaml
   event: item.scored
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-emits-payload-transform
 - id: B012
   path: tests/tier1-primitives/test-from-filter/nodes.yaml
   event: task.acknowledged
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-from-filter
 - id: B013
   path: tests/tier1-primitives/test-guard-compound-condition/nodes.yaml
   event: check.passed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-guard-compound-condition
 - id: B014
   path: tests/tier1-primitives/test-guard-entity-ref/nodes.yaml
   event: check.passed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-guard-entity-ref
 - id: B015
   path: tests/tier1-primitives/test-guard-multi/nodes.yaml
   event: check.passed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-guard-multi
 - id: B016
   path: tests/tier1-primitives/test-guard-pass/nodes.yaml
   event: check.passed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-guard-pass
 - id: B017
   path: tests/tier1-primitives/test-guard-policy-ref/nodes.yaml
   event: check.passed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-guard-policy-ref
 - id: B018
   path: tests/tier1-primitives/test-on-complete-first-match/nodes.yaml
   event: item.passed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-on-complete-first-match
 - id: B019
   path: tests/tier1-primitives/test-on-complete-first-match/nodes.yaml
@@ -110,27 +110,27 @@ rows:
 - id: B021
   path: tests/tier1-primitives/test-on-complete-second-match/nodes.yaml
   event: item.failed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-on-complete-second-match
 - id: B022
   path: tests/tier1-primitives/test-on-complete-with-state/nodes.yaml
   event: item.expedited
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-on-complete-with-state
 - id: B023
   path: tests/tier1-primitives/test-payload-transform-multi-source/nodes.yaml
   event: item.exported
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-payload-transform-multi-source
 - id: B024
   path: tests/tier1-primitives/test-record-evidence/nodes.yaml
   event: evidence.recorded
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-record-evidence
 - id: B025
   path: tests/tier1-primitives/test-rules-advances-to/nodes.yaml
   event: item.approved
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-rules-advances-to
 - id: B026
   path: tests/tier1-primitives/test-rules-else/nodes.yaml
@@ -140,12 +140,12 @@ rows:
 - id: B027
   path: tests/tier1-primitives/test-rules-else/nodes.yaml
   event: routed.unknown
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-rules-else
 - id: B028
   path: tests/tier1-primitives/test-rules-match/nodes.yaml
   event: routed.a
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-rules-match
 - id: B029
   path: tests/tier1-primitives/test-rules-match/nodes.yaml
@@ -165,12 +165,12 @@ rows:
 - id: B032
   path: tests/tier1-primitives/test-sets-gate/nodes.yaml
   event: gate.set
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-sets-gate
 - id: B033
   path: tests/tier10-policy-patterns/test-policy-capacity-query/nodes.yaml
   event: slot.granted
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-policy-capacity-query
 - id: B034
   path: tests/tier10-policy-patterns/test-policy-counter-escalate/nodes.yaml
@@ -185,7 +185,7 @@ rows:
 - id: B036
   path: tests/tier10-policy-patterns/test-policy-hard-gate-override/nodes.yaml
   event: result.demoted
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-policy-hard-gate-override
 - id: B037
   path: tests/tier10-policy-patterns/test-policy-hard-gate-override/nodes.yaml
@@ -205,7 +205,7 @@ rows:
 - id: B040
   path: tests/tier10-policy-patterns/test-policy-threshold-three-way/nodes.yaml
   event: eval.tier_b
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-policy-threshold-three-way
 - id: B041
   path: tests/tier10-policy-patterns/test-policy-threshold-three-way/nodes.yaml
@@ -220,7 +220,7 @@ rows:
 - id: B043
   path: tests/tier10-policy-patterns/test-policy-timeout-elapsed/nodes.yaml
   event: task.timed_out
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-policy-timeout-elapsed
 - id: B044
   path: tests/tier11-flow-composition/test-child-flow-absolute-path/child/nodes.yaml
@@ -230,7 +230,7 @@ rows:
 - id: B045
   path: tests/tier11-flow-composition/test-child-flow-absolute-path/nodes.yaml
   event: work.finished
-  disposition: harness
+  disposition: root_export
   proof: TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput/B045
 - id: B046
   path: tests/tier11-flow-composition/test-child-flow-loads/child/nodes.yaml
@@ -247,7 +247,7 @@ rows:
 - id: B048
   path: tests/tier11-flow-composition/test-child-flow-local-events/child/nodes.yaml
   event: child.done
-  disposition: harness
+  disposition: root_export
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-child-flow-local-events
 - id: B049
@@ -270,7 +270,7 @@ rows:
 - id: B052
   path: tests/tier11-flow-composition/test-child-flow-policy-inherit/child/nodes.yaml
   event: check.passed
-  disposition: harness
+  disposition: root_export
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-child-flow-policy-inherit
 - id: B053
@@ -282,7 +282,7 @@ rows:
 - id: B054
   path: tests/tier11-flow-composition/test-child-flow-sibling-isolation/flow-a/nodes.yaml
   event: alpha.complete
-  disposition: harness
+  disposition: root_export
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-child-flow-sibling-isolation
 - id: B055
@@ -363,7 +363,7 @@ rows:
 - id: B068
   path: tests/tier11-flow-composition/test-multi-level-policy-inherit/child/grandchild/nodes.yaml
   event: grandchild.passed
-  disposition: harness
+  disposition: root_export
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-multi-level-policy-inherit
 - id: B069
@@ -404,13 +404,13 @@ rows:
 - id: B075
   path: tests/tier11-flow-composition/test-subject-id-cross-flow-inherit/scoring/nodes.yaml
   event: score.done
-  disposition: harness
+  disposition: root_export
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-subject-id-cross-flow-inherit
 - id: B076
   path: tests/tier11-flow-composition/test-subject-id-first-flow-seeds/intake/nodes.yaml
   event: item.processed
-  disposition: harness
+  disposition: root_export
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-subject-id-first-flow-seeds
 - id: B077
@@ -421,7 +421,7 @@ rows:
 - id: B078
   path: tests/tier11-flow-composition/test-tool-override/nodes.yaml
   event: task.done
-  disposition: harness
+  disposition: root_export
   proof: TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput/B078
 - id: B079
   path: tests/tier11-flow-composition/test-wildcard-deep-subscription/child/grandchild/nodes.yaml
@@ -436,7 +436,7 @@ rows:
 - id: B081
   path: tests/tier11-flow-composition/test-wildcard-deep-subscription/nodes.yaml
   event: pipeline.complete
-  disposition: harness
+  disposition: root_export
   proof: TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput/B081
 - id: B082
   path: tests/tier12-runtime-fork/test-non-agent-replay-fail-closed/nodes.yaml
@@ -446,82 +446,82 @@ rows:
 - id: B083
   path: tests/tier3-list-processing/test-fan-out-basic/nodes.yaml
   event: item.assigned
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-fan-out-basic
 - id: B084
   path: tests/tier3-list-processing/test-fan-out-count/nodes.yaml
   event: task.dispatched
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-fan-out-count
 - id: B085
   path: tests/tier3-list-processing/test-fan-out-emit-mapping/nodes.yaml
   event: routed.a
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-fan-out-emit-mapping
 - id: B086
   path: tests/tier3-list-processing/test-fan-out-empty/nodes.yaml
   event: item.assigned
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-fan-out-empty
 - id: B087
   path: tests/tier3-list-processing/test-filter-basic/nodes.yaml
   event: items.filtered
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-filter-basic
 - id: B088
   path: tests/tier3-list-processing/test-filter-empty/nodes.yaml
   event: items.filtered
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-filter-empty
 - id: B089
   path: tests/tier3-list-processing/test-group-by-standalone/nodes.yaml
   event: items.grouped
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-group-by-standalone
 - id: B090
   path: tests/tier3-list-processing/test-reduce-count/nodes.yaml
   event: items.counted
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-reduce-count
 - id: B091
   path: tests/tier3-list-processing/test-reduce-max/nodes.yaml
   event: values.reduced
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-reduce-max
 - id: B092
   path: tests/tier3-list-processing/test-reduce-min/nodes.yaml
   event: values.reduced
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-reduce-min
 - id: B093
   path: tests/tier3-list-processing/test-reduce-operation-count/nodes.yaml
   event: batch.counted
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-reduce-operation-count
 - id: B094
   path: tests/tier3-list-processing/test-reduce-pick-or-average/nodes.yaml
   event: scores.resolved
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-reduce-pick-or-average
 - id: B095
   path: tests/tier3-list-processing/test-reduce-sum/nodes.yaml
   event: values.totaled
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-reduce-sum
 - id: B096
   path: tests/tier3-list-processing/test-reduce-weighted-average/nodes.yaml
   event: scores.aggregated
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-reduce-weighted-average
 - id: B097
   path: tests/tier4-cross-entity/test-clear-multiple-targets/nodes.yaml
   event: state.reset_completed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-clear-multiple-targets
 - id: B098
   path: tests/tier4-cross-entity/test-clear-state/nodes.yaml
   event: state.cleared
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-clear-state
 - id: B099
   path: tests/tier4-cross-entity/test-create-entity/child-flow/nodes.yaml
@@ -537,12 +537,12 @@ rows:
 - id: B101
   path: tests/tier4-cross-entity/test-query-filter/nodes.yaml
   event: filter.completed
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-query-filter
 - id: B102
   path: tests/tier4-cross-entity/test-query-group-by/nodes.yaml
   event: digest.compiled
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-query-group-by
 - id: B103
   path: tests/tier5-flow-lifecycle/test-auto-emit-on-create/worker/nodes.yaml
@@ -572,7 +572,7 @@ rows:
 - id: B108
   path: tests/tier5-flow-lifecycle/test-terminal-state-preserves/nodes.yaml
   event: task.finished
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-terminal-state-preserves
 - id: B109
   path: tests/tier5-flow-lifecycle/test-terminal-state-preserves/nodes.yaml
@@ -582,7 +582,7 @@ rows:
 - id: B110
   path: tests/tier5-flow-lifecycle/test-terminal-state-rejects/nodes.yaml
   event: task.finished
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-terminal-state-rejects
 - id: B111
   path: tests/tier5-flow-lifecycle/test-terminal-state-rejects/nodes.yaml
@@ -592,22 +592,22 @@ rows:
 - id: B112
   path: tests/tier5-flow-lifecycle/test-timer-cancel/nodes.yaml
   event: timer.cancelled
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-timer-cancel
 - id: B113
   path: tests/tier5-flow-lifecycle/test-timer-start-on/nodes.yaml
   event: task.timed_out
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-timer-start-on
 - id: B114
   path: tests/tier5-flow-lifecycle/test-wildcard-subscription/nodes.yaml
   event: match.found
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-wildcard-subscription
 - id: B115
   path: tests/tier6-event-loop/test-atomicity-commit/nodes.yaml
   event: task.accepted
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-atomicity-commit
 - id: B116
   path: tests/tier6-event-loop/test-atomicity-guard-rollback/nodes.yaml
@@ -637,17 +637,17 @@ rows:
 - id: B121
   path: tests/tier6-event-loop/test-entity-serialization/nodes.yaml
   event: step.first_done
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-entity-serialization
 - id: B122
   path: tests/tier6-event-loop/test-entity-serialization/nodes.yaml
   event: step.second_done
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-entity-serialization
 - id: B123
   path: tests/tier6-event-loop/test-event-persisted-before-delivery/nodes.yaml
   event: task.accepted
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-event-persisted-before-delivery
 - id: B124
   path: tests/tier6-event-loop/test-event-validation/nodes.yaml
@@ -662,52 +662,52 @@ rows:
 - id: B126
   path: tests/tier6-event-loop/test-on-complete-atomicity-chain/nodes.yaml
   event: task.done
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-on-complete-atomicity-chain
 - id: B127
   path: tests/tier7-composition/test-agent-emits-to-node/nodes.yaml
   event: task.finalized
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-agent-emits-to-node
 - id: B128
   path: tests/tier7-composition/test-dual-delivery/nodes.yaml
   event: task.finalized
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-dual-delivery
 - id: B129
   path: tests/tier7-composition/test-full-lifecycle/nodes.yaml
   event: order.finalized
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-full-lifecycle
 - id: B130
   path: tests/tier7-composition/test-multi-gate-pipeline/nodes.yaml
   event: gate.set
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-multi-gate-pipeline
 - id: B131
   path: tests/tier7-composition/test-multi-gate-pipeline/nodes.yaml
   event: gate.set
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-multi-gate-pipeline
 - id: B132
   path: tests/tier7-composition/test-multi-gate-pipeline/nodes.yaml
   event: gate.set
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-multi-gate-pipeline
 - id: B133
   path: tests/tier7-composition/test-multi-gate-pipeline/nodes.yaml
   event: approval.granted
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores2/test-multi-gate-pipeline
 - id: B134
   path: tests/tier7-composition/test-two-node-chain/nodes.yaml
   event: task.finished
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores3/test-two-node-chain
 - id: B135
   path: tests/tier7-composition/test-wildcard-cross-flow/flow-alpha/nodes.yaml
   event: job.alpha_done
-  disposition: harness
+  disposition: root_export
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier7-composition/test-wildcard-cross-flow
 - id: B136
@@ -920,7 +920,7 @@ rows:
 - id: B177
   path: tests/tier9-composition-patterns/test-compose-accumulate-compute-branch/nodes.yaml
   event: result.high
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-accumulate-compute-branch
 - id: B178
   path: tests/tier9-composition-patterns/test-compose-accumulate-compute-branch/nodes.yaml
@@ -935,7 +935,7 @@ rows:
 - id: B180
   path: tests/tier9-composition-patterns/test-compose-clear-gates-reenter/nodes.yaml
   event: review.approved
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-clear-gates-reenter
 - id: B181
   path: tests/tier9-composition-patterns/test-compose-clear-gates-reenter/nodes.yaml
@@ -955,17 +955,17 @@ rows:
 - id: B184
   path: tests/tier9-composition-patterns/test-compose-gate-chain-three/nodes.yaml
   event: release.ready
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-gate-chain-three
 - id: B185
   path: tests/tier9-composition-patterns/test-compose-gate-data-advance-emit/nodes.yaml
   event: stage.two_start
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-gate-data-advance-emit
 - id: B186
   path: tests/tier9-composition-patterns/test-compose-gate-data-advance-emit/nodes.yaml
   event: stage.complete
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-gate-data-advance-emit
 - id: B187
   path: tests/tier9-composition-patterns/test-compose-guard-counter-escalate/nodes.yaml
@@ -975,17 +975,17 @@ rows:
 - id: B188
   path: tests/tier9-composition-patterns/test-compose-guard-multi-source/nodes.yaml
   event: candidate.accepted
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-guard-multi-source
 - id: B189
   path: tests/tier9-composition-patterns/test-compose-guard-query-capacity/nodes.yaml
   event: admission.granted
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-guard-query-capacity
 - id: B190
   path: tests/tier9-composition-patterns/test-compose-lifecycle-seven-states/nodes.yaml
   event: lifecycle.complete
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-lifecycle-seven-states
 - id: B191
   path: tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow/tracker/nodes.yaml
@@ -995,30 +995,30 @@ rows:
 - id: B192
   path: tests/tier9-composition-patterns/test-compose-rules-fanout-data/nodes.yaml
   event: batch.dispatched
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-rules-fanout-data
 - id: B193
   path: tests/tier9-composition-patterns/test-compose-rules-fanout-data/nodes.yaml
   event: batch.dispatched
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-rules-fanout-data
 - id: B194
   path: tests/tier9-composition-patterns/test-compose-rules-fanout-data/nodes.yaml
   event: batch.dispatched
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-rules-fanout-data
 - id: B195
   path: tests/tier9-composition-patterns/test-compose-rules-per-rule-data/nodes.yaml
   event: conflict.resolved
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-rules-per-rule-data
 - id: B196
   path: tests/tier9-composition-patterns/test-compose-rules-per-rule-data/nodes.yaml
   event: conflict.resolved
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-rules-per-rule-data
 - id: B197
   path: tests/tier9-composition-patterns/test-compose-rules-per-rule-data/nodes.yaml
   event: conflict.resolved
-  disposition: harness
+  disposition: root_export
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-rules-per-rule-data

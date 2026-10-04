@@ -133,7 +133,7 @@ rows:
   - id: flow.identity_mode
     ruled: issue-2438-slice-1
     paths: "schema.name, schema.instance; mode/entity are retired on presence"
-    owners: [projectFlowSchemaValue, FlowSchemaDocument.EffectiveMode]
+    owners: [AdmitFlowSchemaValue, FlowSchemaDocument.EffectiveMode]
     information:
       choice: [instance]
       derived_projection: [mode_from_instance_presence, entity]
@@ -248,7 +248,7 @@ rows:
   - id: flow.other_surface
     ruled: mechanical-ratified
     paths: "schema.tool_surface.role_scoped_entity_tools, schema.required_agents, schema.instance_variables.description, schema.instance_variables.variables.<name>, schema.auto_emit_on_create.event, schema.auto_emit_on_create.description"
-    owners: [projectSchemaReceiverVariablesValue, decodeWave1FieldValue, projectSchemaRequiredAgentsValue, projectFlowSchemaValue]
+    owners: [projectSchemaReceiverVariablesValue, decodeWave1FieldValue, projectSchemaRequiredAgentsValue, AdmitFlowSchemaValue]
     information:
       choice: [variable declarations, auto_emit_on_create, explicit_required_agent_boundary]
       derived_projection: [required_agents]
@@ -769,7 +769,7 @@ node_root_admission:
 
 schema_root_admission:
   issue: 2490
-  owner: projectFlowSchemaValue
+  owner: AdmitFlowSchemaValue
   source_owner: yamlsource.Document.Root/Value
   nested_owner_family: workflow_contract_schema_*_value.go
   provenance_owner: populateEffectiveProvenance

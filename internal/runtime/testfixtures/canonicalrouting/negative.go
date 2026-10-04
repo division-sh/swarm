@@ -13,8 +13,8 @@ func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root stri
 		"    rename: deploy.completed\n",
 		"    rename: deploy.completed\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer", "schema.yaml"),
-		"      - deploy.completed\n",
-		"      - deploy.completed\n      - deploy.audited\n")
+		"    - deploy.completed\n",
+		"    - deploy.completed\n    - deploy.audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer", "nodes.yaml"),
 		"  subscribes_to: [deploy.completed]\n",
 		"  subscribes_to: [deploy.completed, deploy.audited]\n")
@@ -42,7 +42,7 @@ func ApplyTemplateSelectOrCreateNegativeMutation(t testing.TB, root string, muta
 	producerNodes := filepath.Join(root, "producer", "nodes.yaml")
 	switch mutation {
 	case TemplateSelectOrCreateRetiredInstanceKey:
-		applyClosedReplacement(t, receiverSchema, "      - account.ready\n", "      - event: account.ready\n        resolution:\n          mode: select-or-create\n          instance_key: account_id\n")
+		applyClosedReplacement(t, receiverSchema, "    - account.ready\n", "    - event: account.ready\n      resolution:\n        mode: select-or-create\n        instance_key: account_id\n")
 	case TemplateSelectOrCreateOptionalIdentitySource:
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
 			"account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: text?\n")
@@ -76,11 +76,10 @@ const (
 
 func ApplyTemplateReplyNegativeMutation(t testing.TB, root string, mutation TemplateReplyNegativeMutation) {
 	t.Helper()
-	requesterSchema := filepath.Join(root, "requester", "schema.yaml")
 	compositionFile := filepath.Join(root, "schema.yaml")
 	switch mutation {
 	case TemplateReplyMissingRepliesTo:
-		applyClosedReplacement(t, requesterSchema, "          replies_to: provider.requested\n", "")
+		applyClosedReplacement(t, compositionFile, "    replies_to: provider.requested\n", "")
 	case TemplateReplyMissingCorrelationField:
 		applyClosedReplacement(t, filepath.Join(root, "requester", "events.yaml"),
 			"  key: provider_request_id\n  provider_request_id: text\n", "")
@@ -90,8 +89,8 @@ func ApplyTemplateReplyNegativeMutation(t testing.TB, root string, mutation Temp
 			"  - event: provider.requested\n    from: requester\n    to: provider\n  - event: provider.requested\n    from: requester\n    to: provider\n")
 	case TemplateReplyMismatchedProvider:
 		applyClosedReplacement(t, compositionFile,
-			"  - event: provider.replied\n    from: provider\n    to: requester\n",
-			"  - event: provider.replied\n    from: other-provider\n    to: requester\n")
+			"  - event: provider.replied\n    from: provider\n",
+			"  - event: provider.replied\n    from: other-provider\n")
 		duplicateFlowForNegativeMutation(t, root, "provider", "other-provider")
 		applyClosedReplacement(t, filepath.Join(root, "other-provider", "schema.yaml"), "name: provider\n", "name: other-provider\n")
 	default:

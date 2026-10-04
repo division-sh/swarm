@@ -19,13 +19,13 @@ instance_variables:
     active: boolean
     attributes: json
 `)
-	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "      - account.ready\n", `      - event: account.ready
-        initialize:
-          count: payload.count
-          label: payload.label
-          ratio: payload.ratio
-          active: payload.active
-          attributes: payload.attributes
+	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "    - account.ready\n", `    - event: account.ready
+      initialize:
+        count: payload.count
+        label: payload.label
+        ratio: payload.ratio
+        active: payload.active
+        attributes: payload.attributes
 `)
 	for _, event := range []string{"account.setup", "account.ready"} {
 		applyClosedReplacement(t, filepath.Join(root, "producer/events.yaml"), event+":\n  key: account_id\n  account_id: text\n", event+`:

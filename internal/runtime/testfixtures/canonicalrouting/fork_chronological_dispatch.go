@@ -18,10 +18,9 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [item.received]
+    - item.received
   outputs:
-    events:
-      - {event: item.processed, sink: harness}
+    - item.processed
 `,
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "item.received:\n  entity_id: uuid\nitem.processed:\n",

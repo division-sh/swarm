@@ -63,8 +63,6 @@ type AuthoredEventEndpoint struct {
 	SourceFile     string                                   `json:"source_file,omitempty"`
 	SourceLine     int                                      `json:"source_line,omitempty"`
 	SourceLocation string                                   `json:"source_location,omitempty"`
-	ResolutionMode runtimecontracts.FlowInputResolutionMode `json:"-"`
-	Sink           string                                   `json:"sink,omitempty"`
 }
 
 type TypedPubSubMatchKind string
@@ -652,14 +650,12 @@ func (b *endpointCensusBuilder) addPinEndpoints() {
 			endpoint := b.endpoint(EventEndpointInputPin, EventEndpointFlowInputPin, flowID, pin.EventType())
 			endpoint.PinName = strings.TrimSpace(pin.EventType())
 			endpoint.SourceLocation = "pins.inputs.events." + endpoint.PinName
-			endpoint.ResolutionMode = pin.Resolution().Mode
 			b.add(endpoint)
 		}
 		for _, pin := range sortedOutputPins(b.source.FlowOutputEventPins(flowID)) {
 			endpoint := b.endpoint(EventEndpointOutputPin, EventEndpointFlowOutputPin, flowID, pin.EventType())
 			endpoint.PinName = strings.TrimSpace(pin.EventType())
 			endpoint.SourceLocation = "pins.outputs.events." + endpoint.PinName
-			endpoint.Sink = runtimecontracts.FlowOutputSinkCode(pin.Sink())
 			b.add(endpoint)
 		}
 	}

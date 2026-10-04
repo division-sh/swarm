@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -41,7 +40,7 @@ func TestOutputConsumerSharesOnlyOperationLocalCensus(t *testing.T) {
 					t.Fatalf("call %d: source reads before=%d after=%d; want exactly one census (%d reads) removed per call", call, before.reads, after.reads, censusReads)
 				}
 				// Neither the census nor caller-owned classification is retained.
-				got.classes[OutputConsumerHarness] = struct{}{}
+				got.classes[OutputConsumerClass(255)] = struct{}{}
 			}
 		})
 	}
@@ -84,13 +83,6 @@ func classifyOutputConsumerBeforeCensusReuse(source semanticview.Source, flowID,
 	outputPins := outputPinsForEvent(source, flowID, eventType)
 	graph := CompileConnectGraph(source)
 	for _, pin := range outputPins {
-		if !pin.Sink().Valid() {
-			classification.invalidSink = true
-			continue
-		}
-		if pin.Sink() == runtimecontracts.FlowOutputSinkHarness {
-			classification.classes[OutputConsumerHarness] = struct{}{}
-		}
 		if routingSource.Empty() {
 			classification.connects = append(classification.connects, graph.PlansFromOutputPin(flowID, pin)...)
 		}

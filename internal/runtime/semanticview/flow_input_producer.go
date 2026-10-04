@@ -70,13 +70,8 @@ func resolveNonConnectFlowInputProducer(source Source, flowID, eventType string,
 	}
 
 	census := censusForSource()
-	var pins []runtimecontracts.CompiledFlowInputPin
 	if isInputEvent {
-		pins = flowInputPinsForEvent(source, census, flowID, eventType)
 		appendBoundaryIngressEvidence(source, flowID, eventType, appendEvidence)
-	}
-	if isInputEvent {
-		appendHarnessInputEvidence(pins, flowID, eventType, appendEvidence)
 	}
 	appendProviderIngressEvidence(source, flowID, eventType, appendEvidence)
 	appendPlatformSourceEvidence(source, flowID, eventType, appendEvidence)
@@ -101,21 +96,6 @@ func appendBoundaryIngressEvidence(source Source, flowID, eventType string, appe
 			Detail:    "root input pin is externally ingressible",
 		})
 		return
-	}
-}
-
-func appendHarnessInputEvidence(pins []runtimecontracts.CompiledFlowInputPin, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	for _, pin := range pins {
-		if pin.Source() != runtimecontracts.FlowInputPinSourceHarness {
-			continue
-		}
-		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-			Kind:      runtimecontracts.FlowInputProducerBoundaryHarnessInjection,
-			FlowID:    flowID,
-			EventType: eventType,
-			Pin:       pin.EventType(),
-			Detail:    "input pin declares source: harness",
-		})
 	}
 }
 
@@ -162,22 +142,6 @@ func appendInternalTopologyEvidence(census AuthoredEventEndpointCensus, flowID, 
 			Detail:    detail,
 		})
 	}
-}
-
-func flowInputPinsForEvent(source Source, census AuthoredEventEndpointCensus, flowID, eventType string) []runtimecontracts.CompiledFlowInputPin {
-	if source == nil || eventidentity.Normalize(eventType) == "" {
-		return nil
-	}
-	association := census.ResolveDeclaredInputEndpoint(flowID, eventType)
-	endpoint, ok := association.Endpoint()
-	if !ok {
-		return nil
-	}
-	pin, ok := source.FlowInputEventPin(flowID, endpoint.PinName)
-	if !ok {
-		return nil
-	}
-	return []runtimecontracts.CompiledFlowInputPin{pin}
 }
 
 func (endpoint AuthoredEventEndpoint) ProducerDescription() string {

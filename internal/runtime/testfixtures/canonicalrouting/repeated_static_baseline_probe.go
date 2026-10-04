@@ -13,10 +13,9 @@ stages:
   active: {terminal: true}
 pins:
   inputs:
-    events:
-      - parent.seeded
+    - parent.seeded
   outputs:
-    events: [work.requested]
+    - work.requested
 connect:
   - {event: work.requested, from: ., to: producer}
   - {event: work.ready, from: producer, to: consumer}
@@ -40,10 +39,9 @@ stages:
   active: {terminal: true}
 pins:
   inputs:
-    events:
-      - work.requested
+    - work.requested
   outputs:
-    events: [work.ready]
+    - work.ready
 `)
 	writeClosedVariantFile(t, root, "producer/entities.yaml", "work:\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  work_id: text\n")

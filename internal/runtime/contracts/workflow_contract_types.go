@@ -141,7 +141,6 @@ const (
 	FlowInputProducerBoundaryExternalIngress  = "boundary_external_ingress"
 	FlowInputProducerBoundaryIntrinsicIngress = "boundary_intrinsic_ingress"
 	FlowInputProducerBoundaryParentConnect    = "boundary_parent_connect"
-	FlowInputProducerBoundaryHarnessInjection = "boundary_harness_injection"
 	FlowInputProducerPlatformSource           = "platform_source"
 	FlowInputProducerInternalTopology         = "internal_topology_producer"
 	FlowInputProducerMissing                  = "missing"
@@ -180,26 +179,12 @@ func FlowInputProducerEvidenceKindIsProof(kind string) bool {
 	case FlowInputProducerBoundaryExternalIngress,
 		FlowInputProducerBoundaryIntrinsicIngress,
 		FlowInputProducerBoundaryParentConnect,
-		FlowInputProducerBoundaryHarnessInjection,
 		FlowInputProducerPlatformSource,
 		FlowInputProducerInternalTopology:
 		return true
 	default:
 		return false
 	}
-}
-
-func (r FlowInputProducerResolution) HasConflictingHarnessEvidence() bool {
-	if !r.HasEvidenceKind(FlowInputProducerBoundaryHarnessInjection) {
-		return false
-	}
-	for _, evidence := range r.Evidence {
-		kind := strings.TrimSpace(evidence.Kind)
-		if kind != FlowInputProducerBoundaryHarnessInjection && FlowInputProducerEvidenceKindIsProof(kind) {
-			return true
-		}
-	}
-	return false
 }
 
 func (r FlowInputProducerResolution) ProducerPatterns() []string {
@@ -229,7 +214,7 @@ func (r FlowInputProducerResolution) ProducerFlows() []string {
 			continue
 		}
 		switch strings.TrimSpace(evidence.Kind) {
-		case FlowInputProducerInternalTopology, FlowInputProducerBoundaryHarnessInjection:
+		case FlowInputProducerInternalTopology:
 			continue
 		}
 		flowID := strings.TrimSpace(evidence.FlowID)
@@ -1263,93 +1248,16 @@ type FlowOutputPins struct {
 }
 type FlowInputEventPin struct {
 	Event      string                 `yaml:"event"`
-	Source     FlowInputPinSource     `yaml:"source"`
-	Resolution FlowInputPinResolution `yaml:"resolution"`
 	Initialize map[string]string      `yaml:"initialize,omitempty"`
 	sourceLine int
 	sourceCol  int
 }
 type FlowOutputEventPin struct {
 	Event      string         `yaml:"event"`
-	Sink       FlowOutputSink `yaml:"sink,omitempty"`
 	sourceLine int
 	sourceCol  int
 }
 
-type FlowInputPinSource uint8
-
-const (
-	FlowInputPinSourceNone FlowInputPinSource = iota
-	FlowInputPinSourceHarness
-)
-
-func ParseFlowInputPinSource(raw string) (FlowInputPinSource, error) {
-	switch raw {
-	case "external":
-		return FlowInputPinSourceNone, fmt.Errorf("input event pin source must be public, harness, or omitted")
-	case "harness":
-		return FlowInputPinSourceHarness, nil
-	default:
-		return FlowInputPinSourceNone, fmt.Errorf("input event pin source must be %q", "harness")
-	}
-}
-
-func FlowInputPinSourceCode(source FlowInputPinSource) string {
-	switch source {
-	case FlowInputPinSourceNone:
-		return ""
-	case FlowInputPinSourceHarness:
-		return "harness"
-	default:
-		return "invalid"
-	}
-}
-
-func (s FlowInputPinSource) Empty() bool { return s == FlowInputPinSourceNone }
-func (s FlowInputPinSource) Valid() bool {
-	return s == FlowInputPinSourceNone || s == FlowInputPinSourceHarness
-}
-
-type FlowOutputSink uint8
-
-const (
-	FlowOutputSinkNone FlowOutputSink = iota
-	FlowOutputSinkHarness
-)
-
-func ParseFlowOutputSink(raw string) (FlowOutputSink, error) {
-	switch raw {
-	case "harness":
-		return FlowOutputSinkHarness, nil
-	default:
-		return FlowOutputSinkNone, fmt.Errorf("output event pin sink must be %q", FlowOutputSinkCode(FlowOutputSinkHarness))
-	}
-}
-
-func FlowOutputSinkCode(s FlowOutputSink) string {
-	switch s {
-	case FlowOutputSinkNone:
-		return ""
-	case FlowOutputSinkHarness:
-		return "harness"
-	default:
-		return "invalid"
-	}
-}
-
-func (s FlowOutputSink) Empty() bool {
-	return s == FlowOutputSinkNone
-}
-
-func (s FlowOutputSink) Valid() bool {
-	return s == FlowOutputSinkNone || s == FlowOutputSinkHarness
-}
-
-type FlowInputPinResolution struct {
-	Mode           FlowInputResolutionMode `yaml:"mode"`
-	RepliesTo      string                  `yaml:"replies_to"`
-	CorrelationKey string                  `yaml:"correlation_key"`
-}
 type FlowConnect struct {
 	OwnerFlowPath string                  `yaml:"-"`
 	SourceFile    string                  `yaml:"-"`
@@ -1360,6 +1268,8 @@ type FlowConnect struct {
 	Rename        string                  `yaml:"rename"`
 	Resolution    FlowInputResolutionMode `yaml:"resolution"`
 	KeyFrom       string                  `yaml:"key_from"`
+	RepliesTo     string                  `yaml:"replies_to"`
+	CorrelationKey string                 `yaml:"correlation_key"`
 }
 type FlowRequiredAgent struct {
 	Role         string   `yaml:"role"`

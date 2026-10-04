@@ -8,7 +8,8 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func projectFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
+// AdmitFlowSchemaValue is the sole source-schema vocabulary admission owner.
+func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return FlowSchemaDocument{}, err
 	}

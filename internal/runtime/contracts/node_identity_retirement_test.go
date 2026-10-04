@@ -215,7 +215,7 @@ func TestNodeIDRetirementCorpusEffectiveEquivalence(t *testing.T) {
 	paths := []string{
 		"examples/integrations/telegram-agent",
 		"examples/routing/fan-in/barrier", "examples/routing/fan-in/stream",
-		"examples/routing/harness-injection", "examples/routing/notify-all-children",
+		"examples/routing/notify-all-children",
 		"examples/routing/parent-connect", "examples/routing/root-ingress",
 		"examples/routing/template-create-minted-key", "examples/routing/template-reply",
 		"examples/routing/template-select-existing", "examples/routing/template-select-or-create",

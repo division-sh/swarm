@@ -14,10 +14,9 @@ run:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - flow.started
+    - flow.started
   outputs:
-    events: [flow.started]
+    - flow.started
 connect:
   - event: flow.started
     from: .
@@ -35,8 +34,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - flow.started
+    - flow.started
 `)
 	writeClosedVariantFile(t, root, "discovery/entities.yaml", `
 discovery: {}

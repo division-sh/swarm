@@ -13,8 +13,7 @@ func CopyAncestorEventWithoutReceiverMembership(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root
 pins:
   inputs:
-    events:
-      - root.started
+    - root.started
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "root.started:\n")
 	writeClosedVariantFile(t, root, "child/schema.yaml", `name: child

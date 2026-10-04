@@ -160,9 +160,6 @@ func compileConnectionInput(bundle *WorkflowContractBundle, pins ConnectionInput
 	if !ok {
 		return CompiledConnectionInput{}, fmt.Errorf("connect receiver input pin is unavailable")
 	}
-	if !pin.Resolution().Empty() {
-		return CompiledConnectionInput{}, fmt.Errorf("connect.resolution cannot override a reply or fan-out input policy")
-	}
 	instance, err := bundle.ResolveFlowTemplateInstance(receiverFlow)
 	if err != nil {
 		return CompiledConnectionInput{}, err

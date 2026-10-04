@@ -498,8 +498,6 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		return serveRuntimeBundleContext{}, fmt.Errorf("command execution purpose is required")
 	}
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials, posture)
-	validationOpts.AllowHarnessInputs = posture == executionposture.MockOnly
-	validationOpts.AllowHarnessOutputs = posture == executionposture.MockOnly
 	validationOpts.ModelAliases = req.Config.LLM.Models
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderCredentials = req.ProviderCredentials

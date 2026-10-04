@@ -18,7 +18,9 @@ connect:
 		"producer/schema.yaml": `name: producer
 pins:
   outputs:
-    events: [mixed.none, mixed.one, mixed.multi]
+    - mixed.none
+    - mixed.one
+    - mixed.multi
 `,
 		"producer/events.yaml": "mixed.none:\nmixed.one:\nmixed.multi:\n",
 		"one/schema.yaml": `name: one
@@ -26,7 +28,7 @@ stages:
   active: {initial: true}
 pins:
   inputs:
-    events: [mixed.one]
+    - mixed.one
 `,
 		"one/entities.yaml": "test_entity: {}\n",
 		"one/nodes.yaml": `one-node:
@@ -40,7 +42,7 @@ stages:
   active: {initial: true}
 pins:
   inputs:
-    events: [mixed.multi]
+    - mixed.multi
 `,
 		"multi-a/entities.yaml": "test_entity: {}\n",
 		"multi-a/nodes.yaml": `multi-a-node:
@@ -54,7 +56,7 @@ stages:
   active: {initial: true}
 pins:
   inputs:
-    events: [mixed.multi]
+    - mixed.multi
 `,
 		"multi-b/entities.yaml": "test_entity: {}\n",
 		"multi-b/nodes.yaml": `multi-b-node:
@@ -68,7 +70,7 @@ stages:
   active: {initial: true}
 pins:
   inputs:
-    events: [mixed.multi]
+    - mixed.multi
 `,
 		"child/entities.yaml": "test_entity: {}\n",
 		"child/nodes.yaml": `child-node:

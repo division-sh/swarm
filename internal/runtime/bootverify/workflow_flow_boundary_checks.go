@@ -38,17 +38,6 @@ func (c *checkerContext) inputPinWiring() []Finding {
 				continue
 			}
 			producerProof := c.inputPinProducerSourceProof(flowID, eventType)
-			if producerProof.hasConflictingHarnessSource() {
-				c.inputPinFindings = append(c.inputPinFindings, Finding{
-					CheckID:     "input_pin_wiring",
-					Severity:    SeverityHardInvalidity,
-					Message:     producerProof.conflictingHarnessMessage(flowID, eventType),
-					Location:    inputPinFlowLabel(flowID),
-					Remediation: "Keep source: harness only for an intentionally producer-less validation fixture, or remove it and use the real production source.",
-					Evidence:    producerProof.evidence(),
-				})
-				continue
-			}
 			if producerProof.hasAny() {
 				continue
 			}
@@ -81,32 +70,18 @@ func (p inputPinProducerSourceProof) hasAny() bool {
 	return p.resolution.HasEvidence()
 }
 
-func (p inputPinProducerSourceProof) hasConflictingHarnessSource() bool {
-	return p.resolution.HasConflictingHarnessEvidence()
-}
-
-func (p inputPinProducerSourceProof) conflictingHarnessMessage(flowID, eventType string) string {
-	return fmt.Sprintf(
-		"Flow %s declares input pin event %s with source: harness and another accepted producer source: %s. Harness source is validation-only and must be the exclusive producer intent for that input.",
-		inputPinFlowLabel(flowID),
-		strings.TrimSpace(eventType),
-		p.nonHarnessProofDetails(),
-	)
-}
-
 func (p inputPinProducerSourceProof) message(flowID, eventType, targetRefs string, source semanticview.Source) string {
 	flowID = inputPinFlowLabel(flowID)
 	eventType = strings.TrimSpace(eventType)
 	targetRefs = strings.TrimSpace(targetRefs)
 	message := fmt.Sprintf(
-		"Flow %s declares input pin event %s but no accepted producer source was found in the authored bundle. Expected a producer proof for input pin target %s.\n\nChecked producer source classes:\n- Selected-root public input: %s\n- Admitted provider ingress: %s\n- Parent connect: %s\n- Validation-only harness input: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add a connect entry in the nearest common ancestor schema.yaml into %s\n- Select this flow as the source root for public input admission, or declare its provider ingress\n- Use a platform-owned event if this is platform-produced\n- Produce the event through the intra-flow topology, or remove the input pin if it is not boundary-facing\n- For a validation fixture only, set source: harness on the input pin; this will remain non-production-valid\n\nDelivery and public write access require one of these admitted producer proofs; catalog visibility never grants delivery or public write access.",
+		"Flow %s declares input pin event %s but no accepted producer source was found in the authored bundle. Expected a producer proof for input pin target %s.\n\nChecked producer source classes:\n- Selected-root public input: %s\n- Admitted provider ingress: %s\n- Parent connect: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add a connect entry in the nearest common ancestor schema.yaml into %s\n- Select this flow as the source root for public input admission, or declare its provider ingress\n- Use a platform-owned event if this is platform-produced\n- Produce the event through the intra-flow topology, or remove the input pin if it is not boundary-facing\n\nDelivery and public write access require one of these admitted producer proofs; catalog visibility never grants delivery or public write access.",
 		flowID,
 		eventType,
 		targetRefs,
 		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress),
 		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress),
 		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryParentConnect),
-		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection),
 		p.detailsForKind(runtimecontracts.FlowInputProducerPlatformSource),
 		p.detailsForKind(runtimecontracts.FlowInputProducerInternalTopology),
 		targetRefs,
@@ -124,7 +99,7 @@ func (p inputPinProducerSourceProof) remediation(flowID, eventType, targetRefs s
 	if targetRefs == "" {
 		targetRefs = inputPinTargetRef(flowID, eventType)
 	}
-	return fmt.Sprintf("Provide one resolver-backed production source: parent connect into %s, selected-root public input or admitted provider ingress, platform-owned source, or internal topology production. For a validation fixture only, set source: harness on the input pin; it will remain non-production-valid.", targetRefs)
+	return fmt.Sprintf("Provide one resolver-backed production source: parent connect into %s, selected-root public input or admitted provider ingress, platform-owned source, or internal topology production.", targetRefs)
 }
 
 func (p inputPinProducerSourceProof) evidence() []string {
@@ -159,26 +134,6 @@ func (p inputPinProducerSourceProof) detailsForKind(kind string) string {
 	}
 	if len(details) == 0 {
 		return "not found"
-	}
-	sort.Strings(details)
-	return strings.Join(details, ", ")
-}
-
-func (p inputPinProducerSourceProof) nonHarnessProofDetails() string {
-	details := make([]string, 0)
-	for _, evidence := range p.resolution.Evidence {
-		kind := strings.TrimSpace(evidence.Kind)
-		if kind == runtimecontracts.FlowInputProducerBoundaryHarnessInjection || !runtimecontracts.FlowInputProducerEvidenceKindIsProof(kind) {
-			continue
-		}
-		detail := strings.TrimSpace(evidence.Detail)
-		if detail == "" {
-			detail = kind
-		}
-		details = append(details, kind+": "+detail)
-	}
-	if len(details) == 0 {
-		return "none"
 	}
 	sort.Strings(details)
 	return strings.Join(details, ", ")
@@ -309,9 +264,8 @@ func flowInputEventDeclaresPayloadField(source semanticview.Source, flowID, even
 func flowInputHasCallerSelectedIdentity(source semanticview.Source, flowID, eventType string) bool {
 	producer := runtimepinrouting.ResolveFlowInputProducer(source, flowID, eventType)
 	// A provider envelope's entity_id is transport data, not entity acquisition
-	// authority. Public or harness admission still permits caller-supplied data.
+	// authority. Public admission still permits caller-supplied data.
 	return producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) ||
-		producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection) ||
 		!producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress)
 }
 

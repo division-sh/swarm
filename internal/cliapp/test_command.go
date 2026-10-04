@@ -261,7 +261,6 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	}
 	source := projection.Source()
 	validation := runtime.StructuralWorkflowContractValidationOptions()
-	validation.AllowHarnessInputs, validation.AllowHarnessOutputs = true, true
 	validation.ModelAliases = configResult.Config.LLM.Models
 	validation.ProviderTriggerCatalog, validation.ChannelPlans = metadata.ProviderTriggers, metadata.ChannelPlans
 	if _, err := runtime.ValidateWorkflowContractSurface(ctx, source, validation); err != nil {

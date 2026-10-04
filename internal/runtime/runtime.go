@@ -739,10 +739,10 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 }
 
 func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
-	return ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, false, nil)
+	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil)
 }
 
-func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, allowValidationHarness bool, modelAliases llmselection.ModelAliases) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -763,8 +763,6 @@ func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llms
 	if !validationOpts.ChannelActivationPublication.Generation().Valid() {
 		validationOpts.ChannelActivationPublication = opts.ChannelActivationPublication
 	}
-	validationOpts.AllowHarnessInputs = allowValidationHarness
-	validationOpts.AllowHarnessOutputs = allowValidationHarness
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
 	if err != nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, err
@@ -796,10 +794,6 @@ func (deps RuntimeDeps) Validate() error {
 }
 
 func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
-	return deps.validatedWithHarnessPolicy(false)
-}
-
-func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) (validatedRuntimeDeps, error) {
 	cfg := deps.Config
 	opts := deps.Options
 	if !opts.DeclaredChannelPublication.Generation().Valid() {
@@ -882,7 +876,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
-	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, allowValidationHarness, cfg.LLM.Models)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -1092,18 +1086,11 @@ func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
 }
 
 func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
-	return newRuntime(ctx, deps, deps.Options.ExecutionPosture == executionposture.MockOnly)
+	return newRuntime(ctx, deps)
 }
 
-// NewValidationHarnessRuntime is the explicit non-production catalog execution
-// surface for contracts that declare source/sink harness pins. It changes only
-// admission; harness pins still create no runtime route or delivery authority.
-func NewValidationHarnessRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
-	return newRuntime(ctx, deps, true)
-}
-
-func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bool) (*Runtime, error) {
-	boot, err := deps.validatedWithHarnessPolicy(allowValidationHarness)
+func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
+	boot, err := deps.validated()
 	if err != nil {
 		return nil, err
 	}

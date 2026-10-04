@@ -9,8 +9,7 @@ stages:
     terminal: true
 pins:
   inputs:
-    events:
-      - worker.inspect.requested
-      - worker.ready.requested
+    - worker.inspect.requested
+    - worker.ready.requested
   outputs:
-    events: [worker.observed]
+    - worker.observed

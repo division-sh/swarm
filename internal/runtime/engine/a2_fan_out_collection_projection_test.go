@@ -26,7 +26,7 @@ func a2FanOutCollectionFixture(t *testing.T, sourcePath, typ string, payload, st
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := rc.FlowSchemaDocument{Pins: rc.FlowPins{Outputs: rc.FlowOutputPins{EventPins: []rc.FlowOutputEventPin{{Event: "item.ready", Sink: rc.FlowOutputSinkHarness}}}}}
+	schema := rc.FlowSchemaDocument{Pins: rc.FlowPins{Outputs: rc.FlowOutputPins{EventPins: []rc.FlowOutputEventPin{{Event: "item.ready"}}}}}
 	catalog := map[string]rc.EventCatalogEntry{
 		"batch.ready": requiredEventPayload(map[string]rc.EventFieldSpec{"items": {Type: typ}}),
 		"item.ready":  requiredEventPayload(map[string]rc.EventFieldSpec{"key": {Type: "text"}, "index": {Type: "integer"}, "count": {Type: "integer"}}),

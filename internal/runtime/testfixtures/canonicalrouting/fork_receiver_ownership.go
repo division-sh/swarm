@@ -127,12 +127,11 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - work.closed
-      - child.ready
-      - work.requested
+    - work.closed
+    - child.ready
+    - work.requested
   outputs:
-    events: [work.requested]
+    - work.requested
 connect:
   - {event: work.requested, from: ., to: child}
   - {event: child.ready, from: child, to: .}
@@ -159,7 +158,7 @@ connect:
   emit_events: []
 `)
 	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the receiving root entity.\n")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\npins:\n  inputs:\n    events: [work.requested]\n  outputs:\n    events: [child.ready]\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - child.ready\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "child.ready:\n  token: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `producer:
   execution_type: system_node
@@ -214,14 +213,16 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - outer.seeded
-      - outer.requested
-      - outer.closed
-      - receiver.closed
-      - start.closed
+    - outer.seeded
+    - outer.requested
+    - outer.closed
+    - receiver.closed
+    - start.closed
   outputs:
-    events: [start.seeded, start.requested, receiver.closed, start.closed]
+    - start.seeded
+    - start.requested
+    - receiver.closed
+    - start.closed
 connect:
   - {event: start.seeded, from: ., to: branch}
   - {event: start.requested, from: ., to: branch}

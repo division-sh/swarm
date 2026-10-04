@@ -12,11 +12,10 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - seed
-      - select
+    - seed
+    - select
   outputs:
-    events: [ack]
+    - ack
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  marker: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", `seed:

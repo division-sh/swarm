@@ -22,7 +22,7 @@ stages:
   done: {terminal: true}
 pins:
   outputs:
-    events: [work.ready]
+    - work.ready
 `, "work.ready:\n  item_id: text\n", "producer_state:\n  item_id: {type: text}\n", "")
 	writeLegacyInstanceFlow(t, root, "other", `name: other
 instance: item_id
@@ -31,7 +31,7 @@ stages:
   done: {terminal: true}
 pins:
   outputs:
-    events: [other.ready]
+    - other.ready
 `, "other.ready:\n  item_id: text\n", "other_state:\n  item_id: {type: text}\n", "")
 	writeLegacyInstanceFlow(t, root, "observer", `name: observer
 instance: item_id
@@ -40,7 +40,8 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [work.ready, other.ready]
+    - work.ready
+    - other.ready
 `, "", "observer_state:\n  item_id: {type: text}\n", `observe:
   execution_type: system_node
   subscribes_to: [work.ready, other.ready]

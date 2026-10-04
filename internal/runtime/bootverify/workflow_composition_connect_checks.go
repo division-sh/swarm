@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func checkCompositionConnectValidation(c *checkerContext) []Finding {
@@ -14,7 +12,6 @@ func checkCompositionConnectValidation(c *checkerContext) []Finding {
 		return nil
 	}
 	var findings []Finding
-	findings = append(findings, validateInputPinResolutions(c.source)...)
 	graph := runtimepinrouting.CompileConnectGraph(c.source)
 	for _, issue := range graph.Issues() {
 		context := issue.DiagnosticContext()
@@ -43,96 +40,4 @@ func checkCompositionConnectValidation(c *checkerContext) []Finding {
 		})
 	}
 	return findings
-}
-
-func validateInputPinResolutions(source semanticview.Source) []Finding {
-	if source == nil {
-		return nil
-	}
-	var findings []Finding
-	for flowID := range source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
-		}
-		for _, pin := range source.FlowInputEventPins(flowID) {
-			if pin.Resolution().Empty() {
-				continue
-			}
-			findings = append(findings, validateInputPinResolution(source, flowID, pin)...)
-		}
-	}
-	return findings
-}
-func validateInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {
-	var findings []Finding
-	resolution := pin.Resolution()
-	location := flowID
-	switch resolution.Mode {
-	case runtimecontracts.FlowInputResolutionModeReply:
-		return validateReplyInputPinResolution(source, flowID, pin)
-	case runtimecontracts.FlowInputResolutionModeFanOut:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_unimplemented", fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", runtimecontracts.FlowInputResolutionModeCode(resolution.Mode)), location))
-	case runtimecontracts.FlowInputResolutionModeNone:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution.mode is required", location))
-	default:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %q is not supported", runtimecontracts.FlowInputResolutionModeCode(resolution.Mode)), location))
-	}
-	return findings
-}
-
-func validateReplyInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {
-	resolution := pin.Resolution()
-	location := flowID
-	var findings []Finding
-	requestPinName := strings.TrimSpace(resolution.RepliesTo)
-	if requestPinName == "" {
-		return append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", "resolution mode reply requires replies_to", location))
-	}
-	requestPin, ok := source.FlowOutputEventPin(flowID, requestPinName)
-	if !ok {
-		return append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply replies_to %q must name a same-flow output pin", requestPinName), location))
-	}
-	correlationKey := strings.TrimSpace(resolution.CorrelationKey)
-	if correlationKey != "" && !outputPinRequiredPayloadFieldExists(source, flowID, requestPin, correlationKey) {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply correlation_key %q must name a required payload field declared by output event %s", correlationKey, requestPin.EventType()), location))
-	}
-	graph := runtimepinrouting.CompileConnectGraph(source)
-	requestConnects := graph.PlansFromOutputPin(strings.TrimSpace(flowID), requestPin)
-	replyConnects := graph.PlansToInputPin(strings.TrimSpace(flowID), pin)
-	if len(requestConnects) != 1 {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply request pin %s.%s must have exactly one connected counterpart, got %d", flowID, requestPinName, len(requestConnects)), location))
-		return findings
-	}
-	if len(replyConnects) != 1 {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply input pin %s.%s must have exactly one connected provider output, got %d", flowID, pin.EventType(), len(replyConnects)), location))
-		return findings
-	}
-	requestTarget := requestConnects[0].ReceiverEndpoint()
-	replySource := replyConnects[0].SourceEndpoint()
-	if requestTarget.IsRoot() || replySource.IsRoot() || !runtimepinrouting.ConnectEndpointsShareFlow(requestTarget, replySource) {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", "resolution mode reply request and reply edges must connect the same provider flow", location))
-	}
-	return findings
-}
-
-func outputPinRequiredPayloadFieldExists(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowOutputPin, field string) bool {
-	field = strings.TrimSpace(field)
-	if field == "" || strings.Contains(field, ".") {
-		return false
-	}
-	resolved, ok := semanticview.ResolveEventSchema(source, flowID, pin.EventType()).Field(field)
-	return ok && !resolved.IsOptional
-}
-
-func inputPinResolutionFinding(flowID string, pin runtimecontracts.CompiledFlowInputPin, reason, detail, location string) Finding {
-	if strings.TrimSpace(location) == "" {
-		location = flowID
-	}
-	return Finding{
-		CheckID:  "composition_connect_validation",
-		Severity: "error",
-		Message:  fmt.Sprintf("input pin %s.%s resolution is invalid: %s: %s", strings.TrimSpace(flowID), strings.TrimSpace(pin.EventType()), reason, detail),
-		Location: location,
-	}
 }

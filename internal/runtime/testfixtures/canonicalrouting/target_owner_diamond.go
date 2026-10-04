@@ -12,11 +12,9 @@ func CopyTargetOwnerDiamond(t testing.TB) string {
 		"schema.yaml": `name: target-owner-diamond
 pins:
   inputs:
-    events:
-      - branch.done
+    - branch.done
   outputs:
-    events:
-      - branch.start
+    - branch.start
 connect:
   - event: branch.start
     from: .
@@ -39,12 +37,10 @@ connect:
 instance: branch_id
 pins:
   inputs:
-    events:
-      - branch.start
+    - branch.start
   outputs:
-    events:
-      - work.ready
-      - branch.done
+    - work.ready
+    - branch.done
 connect:
   - event: work.ready
     from: .
@@ -67,8 +63,7 @@ connect:
 		"branch/worker/result-static/schema.yaml": `name: static-result
 pins:
   inputs:
-    events:
-      - work.ready
+    - work.ready
 `,
 		"branch/worker/result-static/nodes.yaml": `static-result-node:
   execution_type: system_node
@@ -81,8 +76,7 @@ pins:
 		"branch/worker/result/schema.yaml": `name: singleton-result
 pins:
   inputs:
-    events:
-      - work.ready
+    - work.ready
 `,
 		"branch/worker/result/nodes.yaml": `singleton-result-node:
   execution_type: system_node
@@ -93,15 +87,13 @@ pins:
 		"decoy/schema.yaml": `name: decoy
 pins:
   outputs:
-    events:
-      - work.ready
+    - work.ready
 `,
 		"decoy/events.yaml": "work.ready:\n  branch_id: string\n",
 		"unrelated/worker/result/schema.yaml": `name: hostile
 pins:
   inputs:
-    events:
-      - work.ready
+    - work.ready
 `,
 		"unrelated/worker/result/events.yaml": "work.ready:\n  branch_id: string\n",
 		"unrelated/worker/result/nodes.yaml": `hostile-node:

@@ -79,9 +79,6 @@ func (c *checkerContext) eventWarnings() []Finding {
 			})
 			continue
 		}
-		if runtimepinrouting.OutputHarnessSink(c.source, ref.FlowID, ref.Authored) {
-			continue
-		}
 		if topologyRoutesProducer(topology, connectGraph, entry) || eventIsPublicRootOutput(c.source, ref) {
 			continue
 		}

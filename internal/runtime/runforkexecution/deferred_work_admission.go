@@ -250,7 +250,6 @@ func selectedContractFlowInputResolutionRequiresDynamicFlowOwner(mode runtimecon
 		runtimecontracts.FlowInputResolutionModeSelectOrCreate:
 		return true
 	case runtimecontracts.FlowInputResolutionModeSelect,
-		runtimecontracts.FlowInputResolutionModeFanOut,
 		runtimecontracts.FlowInputResolutionModeReply:
 		return false
 	case runtimecontracts.FlowInputResolutionModeNone:

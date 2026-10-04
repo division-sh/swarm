@@ -3,7 +3,6 @@ package routingtopology
 import (
 	"encoding/json"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -17,60 +16,26 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate"
 )
 
-func TestHarnessInputCreatesEndpointWithoutRouteOrTopologyEdge(t *testing.T) {
-	harness := loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
-	withoutSource := loadHarnessTopologySource(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
-	harnessTopology := Build(harness)
-	plainTopology := Build(withoutSource)
-
-	if len(harnessTopology.InputPins) != 1 || harnessTopology.InputPins[0].FlowID != "worker" {
-		t.Fatalf("input endpoints = %#v, want worker harness endpoint", harnessTopology.InputPins)
-	}
-	if len(harnessTopology.OutputPins) != 1 || harnessTopology.OutputPins[0].Sink != "harness" {
-		t.Fatalf("output endpoints = %#v, want worker harness sink", harnessTopology.OutputPins)
-	}
-	outputID := harnessTopology.OutputPins[0].ID
-	for _, edge := range harnessTopology.Edges {
-		if edge.Producer.ID == outputID || edge.Consumer.ID == outputID {
-			t.Fatalf("harness output acquired delivery edge %#v", edge)
-		}
-	}
-	if !sameTopologyEdgeIdentities(harnessTopology.Edges, plainTopology.Edges) ||
-		!sameBoundaryExposureIdentities(harnessTopology.BoundaryExposures, plainTopology.BoundaryExposures) ||
-		!reflect.DeepEqual(harnessTopology.RootInputSources, plainTopology.RootInputSources) {
-		t.Fatalf("harness declaration changed delivery topology\nharness=%#v\nplain=%#v", harnessTopology, plainTopology)
-	}
+func TestRootExportHasNoSyntheticDeliveryEdge(t *testing.T) {
+ topology := Build(loadTopologySource(t, canonicalrouting.CopyReceiverEntitylessRootExport(t)))
+ if len(topology.InputPins) != 1 || topology.InputPins[0].FlowID != "." {
+  t.Fatalf("root input endpoints = %#v", topology.InputPins)
+ }
+ if len(topology.OutputPins) != 1 || topology.OutputPins[0].FlowID != "." || topology.OutputPins[0].Event.Canonical != "child.finished" {
+  t.Fatalf("root output endpoints = %#v", topology.OutputPins)
+ }
+ outputID := topology.OutputPins[0].ID
+ for _, edge := range topology.Edges {
+  if edge.Producer.ID == outputID || edge.Consumer.ID == outputID {
+   t.Fatalf("root export acquired synthetic delivery edge %#v", edge)
+  }
+ }
+ if len(topology.BoundaryExposures) != 1 || topology.BoundaryExposures[0].Output.ID != outputID {
+  t.Fatalf("root export observation boundary = %#v", topology.BoundaryExposures)
+ }
 }
 
-func sameBoundaryExposureIdentities(left, right []BoundaryExposure) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for idx := range left {
-		if left[idx].ID != right[idx].ID || left[idx].Event.Canonical != right[idx].Event.Canonical ||
-			left[idx].Producer.ID != right[idx].Producer.ID || left[idx].Output.ID != right[idx].Output.ID ||
-			left[idx].Output.Sink != right[idx].Output.Sink {
-			return false
-		}
-	}
-	return true
-}
-
-func sameTopologyEdgeIdentities(left, right []Edge) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for idx := range left {
-		if left[idx].ID != right[idx].ID || left[idx].Scope != right[idx].Scope ||
-			left[idx].Event != right[idx].Event || left[idx].Producer.ID != right[idx].Producer.ID ||
-			left[idx].Consumer.ID != right[idx].Consumer.ID {
-			return false
-		}
-	}
-	return true
-}
-
-func loadHarnessTopologySource(t *testing.T, root string) semanticview.Source {
+func loadTopologySource(t *testing.T, root string) semanticview.Source {
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
@@ -79,13 +44,13 @@ func loadHarnessTopologySource(t *testing.T, root string) semanticview.Source {
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
-		t.Fatalf("load harness injection artifact: %v", err)
+		t.Fatalf("load topology source: %v", err)
 	}
 	return semanticview.Wrap(bundle)
 }
 
 func TestBuildProjectsOrdinaryKeyedReportConnectWithCompleteResolution(t *testing.T) {
-	topology := Build(loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream)))
+	topology := Build(loadTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream)))
 	if topology.SchemaVersion != SchemaVersion || topology.SourceAuthority != SourceAuthority || !topology.ProjectionOnly {
 		t.Fatalf("identity = %q/%q, want canonical artifact identity", topology.SchemaVersion, topology.SourceAuthority)
 	}
@@ -131,7 +96,7 @@ func TestBuildProjectsOrdinaryKeyedReportConnectWithCompleteResolution(t *testin
 }
 
 func TestBuildKeepsTypedPubSubAndConnectProofShapesMutuallyExclusive(t *testing.T) {
-	topology := Build(loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream)))
+	topology := Build(loadTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream)))
 	seen := map[DeliveryScope]bool{}
 	for _, edge := range topology.Edges {
 		seen[edge.Scope] = true
@@ -242,7 +207,7 @@ func TestBuildProjectsReplyAsPairedEdges(t *testing.T) {
 }
 
 func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
-	createPlans := pinrouting.CompileConnectGraph(loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey))).Plans()
+	createPlans := pinrouting.CompileConnectGraph(loadTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey))).Plans()
 	var createPlan pinrouting.ConnectRoutePlan
 	for _, plan := range createPlans {
 		if plan.InstanceKey() != nil && plan.InstanceKey().Mode() == runtimecontracts.FlowInputResolutionModeCreate {
@@ -253,7 +218,7 @@ func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
 	if createPlan.InstanceKey() == nil {
 		t.Fatal("canonical create plan is missing")
 	}
-	staticPlans := pinrouting.CompileConnectGraph(loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect))).Plans()
+	staticPlans := pinrouting.CompileConnectGraph(loadTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect))).Plans()
 	if len(staticPlans) == 0 {
 		t.Fatal("canonical parent-connect static plan is missing")
 	}
@@ -279,7 +244,7 @@ func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
 }
 
 func TestBuildKeepsInvalidConnectAsIssueOnly(t *testing.T) {
-	source := loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream))
+	source := loadTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream))
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("canonical source bundle unavailable")
@@ -313,7 +278,7 @@ func TestBuildKeepsInvalidConnectAsIssueOnly(t *testing.T) {
 }
 
 func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T) {
-	source := loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream))
+	source := loadTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream))
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || len(bundle.Semantics.CompositionConnects) == 0 {
 		t.Fatalf("source bundle/connects unavailable")
@@ -473,7 +438,7 @@ func TestBuildRejectsImportedWildcardAsTypedPubSub(t *testing.T) {
 }
 
 func TestBuildIsDeterministic(t *testing.T) {
-	source := loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream))
+	source := loadTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.FanInStream))
 	first, err := json.Marshal(Build(source))
 	if err != nil {
 		t.Fatalf("marshal first topology: %v", err)
@@ -508,7 +473,7 @@ func TestBuildEmptyTopologyUsesStableEmptyCollections(t *testing.T) {
 func TestBuildRendersCompiledReceiverPinCollisionEvidence(t *testing.T) {
 	root := canonicalrouting.CopyCompositionConnect(t, canonicalrouting.CompositionConnectValid)
 	canonicalrouting.ApplyCompositionConnectReceiverPinCollisionMutation(t, root)
-	topology := Build(loadHarnessTopologySource(t, root))
+	topology := Build(loadTopologySource(t, root))
 	for _, issue := range topology.Issues {
 		if issue.Failure == pinrouting.ConnectReceiverPinCollisionFailure &&
 			strings.Contains(issue.Message, "deploy.completed") &&

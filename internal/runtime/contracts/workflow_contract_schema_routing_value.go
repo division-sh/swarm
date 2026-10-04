@@ -31,7 +31,9 @@ func projectSchemaConnectValue(value yamlsource.Value) ([]FlowConnect, error) {
 		if err := schemaValueRequiredTexts(item, fields, map[string]*string{"event": &row.Event, "from": &row.From, "to": &row.To}); err != nil {
 			return nil, err
 		}
-		if err := schemaValueTexts(fields, map[string]*string{"rename": &row.Rename}, true); err != nil {
+		if err := schemaValueTexts(fields, map[string]*string{
+			"rename": &row.Rename, "replies_to": &row.RepliesTo, "correlation_key": &row.CorrelationKey,
+		}, true); err != nil {
 			return nil, err
 		}
 		if !eventidentity.IsValidName(row.Event) || row.Rename != "" && !eventidentity.IsValidName(row.Rename) {
@@ -42,6 +44,9 @@ func projectSchemaConnectValue(value yamlsource.Value) ([]FlowConnect, error) {
 		}
 		if err := projectSchemaConnectResolutionValue(fields, &row); err != nil {
 			return nil, err
+		}
+		if err := validateAuthoredConnectReply(row); err != nil {
+			return nil, nodeValueError(item, err)
 		}
 		out = append(out, row)
 	}
@@ -56,7 +61,7 @@ func projectSchemaConnectResolutionValue(fields map[string]yamlsource.Value, row
 		}
 		row.Resolution, err = ParseFlowInputResolutionMode(text)
 		if err != nil || !ordinaryInstanceResolution(row.Resolution) {
-			return nodeValueError(resolution, fmt.Errorf("connect.resolution must be create, select or select-or-create; reply and fan-out remain input-pin policies"))
+			return nodeValueError(resolution, fmt.Errorf("connect.resolution must be create, select or select-or-create"))
 		}
 	}
 	key, present := fields["key_from"]
@@ -73,6 +78,25 @@ func projectSchemaConnectResolutionValue(fields map[string]yamlsource.Value, row
 	}
 	if _, err := ResolveFlowInputInstanceSource(row.Resolution, row.KeyFrom); err != nil {
 		return nodeValueError(key, err)
+	}
+	return nil
+}
+
+func validateAuthoredConnectReply(row FlowConnect) error {
+	if row.RepliesTo == "" {
+		if row.CorrelationKey != "" {
+			return fmt.Errorf("connect.correlation_key requires replies_to")
+		}
+		return nil
+	}
+	if !eventidentity.IsValidName(row.RepliesTo) || strings.ContainsAny(row.RepliesTo, "/*") {
+		return fmt.Errorf("connect.replies_to must be an exact local event identity")
+	}
+	if row.Resolution != FlowInputResolutionModeNone || row.KeyFrom != "" {
+		return fmt.Errorf("connect.replies_to cannot declare resolution or key_from")
+	}
+	if row.CorrelationKey != "" && strings.ContainsAny(row.CorrelationKey, "./*") {
+		return fmt.Errorf("connect.correlation_key must name a payload field")
 	}
 	return nil
 }
@@ -130,15 +154,11 @@ func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
 		return out, err
 	}
 	for _, direction := range sortedContractKeys(fields) {
-		members, err := schemaValueFields(fields[direction], "pins."+direction, map[string]struct{}{"events": {}}, true)
+		items, err := schemaValueSequence(fields[direction], true)
 		if err != nil {
 			return out, err
 		}
-		if events, present := members["events"]; present {
-			items, err := schemaValueSequence(events, true)
-			if err != nil {
-				return out, err
-			}
+		{
 			seen := map[string]bool{}
 			for _, item := range items {
 				input, output, err := projectSchemaPinValue(item, direction)
@@ -171,50 +191,24 @@ func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputE
 	var err error
 	if value.Presence() == yamlsource.PresenceScalar {
 		event, err = schemaValueText(value, true)
-	} else {
-		allowed := inputEventPinFieldOptions
-		if direction == "outputs" {
-			allowed = outputEventPinFieldOptions
-		}
-		fields, fieldErr := schemaValueFields(value, direction+" event pin", allowed, true)
+	} else if direction == "inputs" {
+		fields, fieldErr := schemaValueFields(value, direction+" event pin", inputEventPinFieldOptions, true)
 		if fieldErr != nil {
 			return input, output, fieldErr
 		}
 		if err = schemaValueRequiredTexts(value, fields, map[string]*string{"event": &event}); err != nil {
 			return input, output, err
 		}
-		if source, present := fields["source"]; present {
-			var text string
-			text, err = schemaValueText(source, true)
-			if err == nil {
-				input.Source, err = ParseFlowInputPinSource(text)
-			}
-		}
-		if err == nil {
-			if sink, present := fields["sink"]; present {
-				var text string
-				text, err = schemaValueText(sink, true)
-				if err == nil {
-					output.Sink, err = ParseFlowOutputSink(text)
-				}
-			}
-		}
-		if err == nil {
-			if resolution, present := fields["resolution"]; present {
-				input.Resolution, err = projectSchemaResolutionValue(resolution)
-			}
-		}
 		if err == nil {
 			if initialize, present := fields["initialize"]; present {
 				input.Initialize, err = projectSchemaInitializeValue(initialize)
 			}
 		}
-		if err == nil && direction == "inputs" && input.Source.Empty() && input.Resolution.Empty() && len(input.Initialize) == 0 {
-			err = fmt.Errorf("input event pin mapping requires a non-default source, resolution or initialize; use a scalar event when no options are needed")
+		if err == nil && len(input.Initialize) == 0 {
+			err = fmt.Errorf("input event pin mapping requires non-empty initialize")
 		}
-		if err == nil && direction == "outputs" && output.Sink == FlowOutputSinkNone {
-			err = fmt.Errorf("output event pin mapping requires a non-default sink; use a scalar event when no options are needed")
-		}
+	} else {
+		_, err = schemaValueText(value, true)
 	}
 	if err != nil {
 		return input, output, nodeValueError(value, err)
@@ -232,31 +226,6 @@ func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputE
 		return input, output, nodeValueError(value, err)
 	}
 	return input, output, nil
-}
-
-func projectSchemaResolutionValue(value yamlsource.Value) (FlowInputPinResolution, error) {
-	fields, err := schemaValueFields(value, "input pin resolution", inputEventPinResolutionFieldOptions, true)
-	var out FlowInputPinResolution
-	if err != nil {
-		return out, err
-	}
-	var mode string
-	if err := schemaValueRequiredTexts(value, fields, map[string]*string{"mode": &mode}); err != nil {
-		return out, err
-	}
-	out.Mode, err = ParseFlowInputResolutionMode(mode)
-	if err != nil {
-		return out, nodeValueError(value, err)
-	}
-	if err := schemaValueTexts(fields, map[string]*string{
-		"replies_to": &out.RepliesTo, "correlation_key": &out.CorrelationKey,
-	}, true); err != nil {
-		return out, err
-	}
-	if err := validateCompiledFlowInputResolution(out); err != nil {
-		return out, nodeValueError(value, err)
-	}
-	return out, nil
 }
 
 func projectSchemaInitializeValue(value yamlsource.Value) (map[string]string, error) {
