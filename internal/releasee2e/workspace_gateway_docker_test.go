@@ -15,8 +15,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 )
 
 const realDockerProxyArgument = "--test-real-workspace-docker-proxy"
@@ -47,16 +45,16 @@ func runWorkspaceDockerProxy(args []string) int {
 	}
 	container := ""
 	for i, arg := range args {
-		if arg == "/opt/swarm/bin/swarm" && i > 0 && i+1 < len(args) && strings.HasPrefix(args[i+1], worker.Argument+"=") {
+		if arg == "/opt/swarm/bin/swarm" && i > 0 && i+1 < len(args) && strings.HasPrefix(args[i+1], releaseWorkerArgument+"=") {
 			container = args[i-1]
 			var err error
-			ownedInput, err = worker.InterruptibleInput(os.Stdin)
+			ownedInput, err = releaseWorkerInput(os.Stdin)
 			if err != nil {
 				return 2
 			}
 			defer ownedInput.Close()
 			nativeReader = bufio.NewReader(ownedInput)
-			raw, err := worker.ReadFrame(nativeReader)
+			raw, err := readReleaseWorkerFrame(nativeReader)
 			if err != nil || json.Unmarshal(raw, &request) != nil {
 				return 2
 			}
@@ -111,18 +109,18 @@ func runWorkspaceDockerProxy(args []string) int {
 			}
 		}()
 		reader := bufio.NewReader(stdout)
-		ready, readyErr := worker.ReadFrame(reader)
+		ready, readyErr := readReleaseWorkerFrame(reader)
 		if readyErr == nil {
 			_, readyErr = os.Stdout.Write(ready)
 		}
 		if readyErr == nil {
-			_, readyErr = io.Copy(&output, io.LimitReader(reader, worker.MaxBytes+1))
+			_, readyErr = io.Copy(&output, io.LimitReader(reader, releaseWorkerMaxBytes+1))
 		}
 		err = cmd.Wait()
 		_ = ownedInput.Close()
 		_ = os.Stdin.Close()
 		<-joined
-		if readyErr != nil || output.Len() > worker.MaxBytes {
+		if readyErr != nil || output.Len() > releaseWorkerMaxBytes {
 			return 2
 		}
 	}
@@ -177,18 +175,74 @@ func runWorkspaceDockerProxy(args []string) int {
 }
 
 func TestCompiledWorkspaceWorkerIdentityEntry(t *testing.T) {
+	t.Run("observer framing", func(t *testing.T) {
+		frame := strings.Repeat("x", releaseWorkerMaxBytes) + "\n"
+		if raw, err := readReleaseWorkerFrame(bufio.NewReader(strings.NewReader(frame + "next\n"))); err != nil || string(raw) != frame {
+			t.Fatalf("exact bounded observer frame: len=%d err=%v", len(raw), err)
+		}
+		for _, invalid := range []string{strings.Repeat("x", releaseWorkerMaxBytes+1) + "\n", "unterminated"} {
+			if _, err := readReleaseWorkerFrame(bufio.NewReader(strings.NewReader(invalid))); err == nil {
+				t.Fatal("unbounded or unterminated observer frame accepted")
+			}
+		}
+	})
+	t.Run("observer forwarding descriptor joins", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("Linux pollable forwarding descriptor control")
+		}
+		input, sender, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer input.Close()
+		defer sender.Close()
+		owned, err := releaseWorkerInput(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer owned.Close()
+		joined := make(chan error, 1)
+		go func() {
+			var frame [1]byte
+			_, err := owned.Read(frame[:])
+			joined <- err
+		}()
+		select {
+		case err := <-joined:
+			t.Fatalf("held observer input returned without disposal: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+		if err := owned.Close(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-joined:
+			if err == nil {
+				t.Fatal("disposed observer descriptor fabricated input")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("disposed observer descriptor left forwarding read alive")
+		}
+	})
 	root := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, root)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, worker.Argument)
+	cmd := exec.CommandContext(ctx, binary, releaseWorkerArgument)
 	cmd.Env = goldenProcessEnv(t, root, "", 0)
 	cmd.Stdin = strings.NewReader(`{"mode":"identity"}`)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
-	result, decodeErr := worker.DecodeResult(stdout.Bytes())
-	if err != nil || decodeErr != nil || result.Err() != nil || result.Identity.ABI != worker.ABI {
+	var result struct {
+		Identity struct {
+			ABI string `json:"abi"`
+		} `json:"identity"`
+		Failure      json.RawMessage `json:"failure"`
+		Cancellation json.RawMessage `json:"cancellation"`
+	}
+	decodeErr := json.Unmarshal(stdout.Bytes(), &result)
+	if err != nil || decodeErr != nil || len(result.Failure) != 0 || len(result.Cancellation) != 0 || result.Identity.ABI != releaseWorkerABI {
 		t.Fatalf("compiled native worker entry: exit=%v decode=%v stdout=%q stderr=%q", err, decodeErr, stdout.String(), stderr.String())
 	}
 }
