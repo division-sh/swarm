@@ -87,6 +87,12 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("last nested caller never reached its committed pre-return boundary")
 			}
+			// Native agent completion is independent of the node's held return.
+			// Observe the exact parent deliveries before asserting their barrier.
+			descriptors := notifyAllChildrenAccountDescriptors(t, ctx, rt.selected)
+			for _, parent := range parents {
+				waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, rt.selected, db, runID, "account-worker", descriptors[parent.AccountID].FlowInstance, "delivered")
+			}
 			reader := nestedPublicReader(t, rt.selected)
 			deadline := time.Now().Add(5 * time.Second)
 			var status string
