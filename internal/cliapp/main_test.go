@@ -3679,7 +3679,7 @@ stages:
   done: {terminal: true}
 `
 	if opts.publicInput {
-		schema += "pins:\n  inputs:\n    events: [item.arrived]\n"
+		schema += "pins:\n  inputs: [item.arrived]\n"
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), schema)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `

@@ -239,7 +239,7 @@ func TestSchemaAdmissionAliasesMergesAndDerivedProvenance(t *testing.T) {
 	if alias.Origin != EffectiveValueOriginAuthored || alias.SourceLine != 4 || alias.SourcePresence != "scalar" {
 		t.Fatalf("alias source occurrence lost: %#v", alias)
 	}
-	for _, path := range []string{"stages.waiting.timers[0].id", "pins.inputs.events[0].event", "pins.outputs.events[0].event"} {
+	for _, path := range []string{"stages.waiting.timers[0].id", "pins.inputs[0].event", "pins.outputs[0].event"} {
 		fact := schema.admissionProvenance[path]
 		if fact.Origin != EffectiveValueOriginDerived || fact.RuleID == "" || len(fact.InputPaths) == 0 {
 			t.Fatalf("missing derived explanation %s: %#v", path, fact)

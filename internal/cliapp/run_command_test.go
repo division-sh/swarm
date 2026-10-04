@@ -677,7 +677,7 @@ func TestRunCommandStartRendersRootInputRejectionFromServerFacts(t *testing.T) {
 	}
 	for _, want := range []string{
 		`ERROR: event "scan.missing" is not a declared root input.`,
-		"A root input is an event declared in the root flow's `pins.inputs.events`.",
+		"A root input is an event declared in the root flow's `pins.inputs`.",
 		"Declared root inputs: scan.requested.",
 		"Routable root inputs: scan.requested.",
 		"Remediation:",

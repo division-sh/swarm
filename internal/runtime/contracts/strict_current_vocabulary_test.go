@@ -37,9 +37,7 @@ func TestRemovedClosedFieldsUseCurrentVocabularyAcrossPresenceAndMerges(t *testi
 		{"clear", "nodes.yaml", fmt.Sprintf(handler, "clear: {%s}"), []string{"target", "pending_dedup", "entity_fields"}, admitNodes},
 		{"schema", "schema.yaml", "name: supported\n%s\n", []string{"mode", "initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule"}, admitSchema},
 		{"connect", "schema.yaml", "name: supported\nconnect: [{%s}]\n", []string{"adapter", "delivery", "reply", "map", "using"}, admitSchema},
-		{"input_pin", "schema.yaml", "name: supported\npins: {inputs: {events: [{%s}]}}\n", []string{"name", "address", "carries", "key", "optional", "convert"}, admitSchema},
-		{"output_pin", "schema.yaml", "name: supported\npins: {outputs: {events: [{%s}]}}\n", []string{"name", "address", "carries", "key", "optional", "convert"}, admitSchema},
-		{"resolution", "schema.yaml", "name: supported\npins: {inputs: {events: [{event: work.ready, resolution: {%s}}]}}\n", []string{"instance_key", "from"}, admitSchema},
+		{"input_pin", "schema.yaml", "name: supported\npins: {inputs: [{event: work.ready, initialize: {note: payload.note}, %s}]}\n", []string{"name", "address", "carries", "key", "optional", "convert", "source", "resolution", "replies_to", "correlation_key"}, admitSchema},
 		{"agent", "agents.yaml", "worker: {%s}\n", []string{"model_tier", "mode", "conversation_mode", "session_scope", "session_scope_authority", "tools_tier2", "subscriptions_bootstrap", "subscribes_to", "prompt_ref", "prompt_inputs", "profile", "agent_defaults", "agent_profiles", "runtime_id_template"}, func(d yamlsource.Document) error { _, err := projectAgentDeclarationsValue(d.Root()); return err }},
 		{"tool", "tools.yaml", "worker: {%s}\n", []string{"parameters", "returns", "endpoint", "type", "required_permission", "kind"}, func(d yamlsource.Document) error { _, err := projectToolDeclarationsValue(d.Root()); return err }},
 	} {
@@ -65,6 +63,25 @@ func TestRemovedClosedFieldsUseCurrentVocabularyAcrossPresenceAndMerges(t *testi
 						}
 					})
 				}
+			}
+		}
+	}
+}
+
+func TestRetiredOutputPinOptionMapsRejectPresenceAndMerges(t *testing.T) {
+	for _, key := range []string{"name", "address", "carries", "key", "optional", "convert", "sink"} {
+		for _, shape := range []string{"null", "''", "false", "7", "{}", "[]"} {
+			for _, merged := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/merged=%v", key, shape, merged), func(t *testing.T) {
+					member := key + ": " + shape
+					if merged {
+						member = "<<: {" + member + "}"
+					}
+					_, err := admitSchemaFragment("pins: {outputs: [{event: work.ready, " + member + "}]}\n")
+					if err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `outputs"][0]`) || !strings.Contains(err.Error(), "schema.yaml:") {
+						t.Fatalf("retired output mapping bypassed scalar admission: %v", err)
+					}
+				})
 			}
 		}
 	}

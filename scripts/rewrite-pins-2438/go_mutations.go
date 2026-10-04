@@ -36,9 +36,28 @@ var pinMutationSpellings = map[string][]string{
 		"events: [producer.closed, work.requested", "outputs: [producer.closed, work.requested",
 	},
 	"receiver_composition.go": {"events: [work.completed", "outputs: [work.completed"},
+	"channel_delivery.go":     {"  inputs: {events: [work.requested]}", "  inputs: [work.requested]"},
+}
+
+var inlinePinSpellings = map[string][]string{
+	"internal/runtime/bus/routing_derivation_test.go":          {"  inputs:\n    events: [root.start]", "  inputs: [root.start]"},
+	"internal/runtime/workflow_timer_startup_recovery_test.go": {"pins:\n  inputs:\n    events: [generic.tick]", "pins:\n  inputs: [generic.tick]"},
+	"internal/serveapp/provider_alias_authority_test.go": {
+		"  inputs:\n    events: [", "  inputs: [",
+		"  outputs:\n    events: [", "  outputs: [",
+	},
+	"internal/serveapp/source_admission_fork_proof_test.go": {"  outputs:\n    events: [work.requested]", "  outputs: [work.requested]"},
+	"internal/runtime/conformance/fan_out_resource_selected_fork_external_test.go": {
+		"  outputs:\n    events:\n", "  outputs:\n",
+		"      - event: task.assigned\n        sink: harness\n", "    - task.assigned\n",
+	},
+	"internal/cliapp/main_test.go": {"pins:\n  inputs:\n    events: [item.arrived]", "pins:\n  inputs: [item.arrived]"},
 }
 
 func rewritePinMutationLiteral(name, text string) string {
+	if pairs := inlinePinSpellings[filepath.ToSlash(name)]; len(pairs) != 0 {
+		return strings.NewReplacer(pairs...).Replace(text)
+	}
 	if filepath.ToSlash(name) == "internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go" {
 		return strings.NewReplacer("events: [item.ready]", "    - item.ready\n", "events: [item.ready, leaf.ready]", "    - item.ready\n    - leaf.ready\n").Replace(text)
 	}

@@ -87,7 +87,7 @@ stages:
           advances_to: done
   done: {terminal: true}
 pins:
-  inputs: {events: [work.requested]}
+  inputs: [work.requested]
 `)
 	writeClosedVariantFile(t, root, "reviews/entities.yaml", "work:\n  detail: text\n")
 	writeClosedVariantFile(t, root, "reviews/nodes.yaml", `requester:

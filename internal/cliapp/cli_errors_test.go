@@ -147,10 +147,10 @@ func TestCLIRootInputDiagnosticRendersServerOwnedDomains(t *testing.T) {
 			routable: []string{"a.event", "z.event"},
 			want: []string{
 				`ERROR: event "missing.event" is not a declared root input.`,
-				"A root input is an event declared in the root flow's `pins.inputs.events`.",
+				"A root input is an event declared in the root flow's `pins.inputs`.",
 				"Declared root inputs: a.event, z.event.",
 				"Routable root inputs: a.event, z.event.",
-				`Declare "missing.event" under ` + "`pins.inputs.events`",
+				`Declare "missing.event" under ` + "`pins.inputs`",
 				"Code: EVENT_NOT_DECLARED",
 			},
 		},

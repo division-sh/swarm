@@ -222,7 +222,7 @@ func a2NegativeGeneratorSpecimen(path, scope, source string) bool {
 	var digest string
 	switch {
 	case path == "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go" && scope == "RetiredFanInCoordinatorSchema":
-		digest = "e5ddef48d633a35f84af0ef9dccaa077b81d528b7cfc1953efd6aa4267a94747"
+		digest = "c57630b53ef1ad0391fbc296700e60a5e1c0c447841cafdea01f5c8ebd536540"
 	case path == "internal/runtime/testfixtures/canonicalrouting/arrival_join_guard_sources.go" && scope == "ArrivalJoinRetirementGuardCases":
 		digest = "08e97be9242a1251a056a50fe4e4c166519f0705bb2a87cbe620a373ce2cb8bf"
 	default:

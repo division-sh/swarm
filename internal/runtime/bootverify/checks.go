@@ -1007,15 +1007,15 @@ func (c *checkerContext) platformNamespace() []Finding {
 			location,
 			func(eventType string) string {
 				if flowID == "." {
-					return fmt.Sprintf("root schema pins.outputs.events references platform-emitted event %s; platform owns this event", eventType)
+					return fmt.Sprintf("root schema pins.outputs references platform-emitted event %s; platform owns this event", eventType)
 				}
-				return fmt.Sprintf("flow %s pins.outputs.events references platform-emitted event %s; platform owns this event", flowID, eventType)
+				return fmt.Sprintf("flow %s pins.outputs references platform-emitted event %s; platform owns this event", flowID, eventType)
 			},
 			func(eventType string) string {
 				if flowID == "." {
-					return fmt.Sprintf("root schema pins.outputs.events references reserved platform.* namespace event %s", eventType)
+					return fmt.Sprintf("root schema pins.outputs references reserved platform.* namespace event %s", eventType)
 				}
-				return fmt.Sprintf("flow %s pins.outputs.events references reserved platform.* namespace event %s", flowID, eventType)
+				return fmt.Sprintf("flow %s pins.outputs references reserved platform.* namespace event %s", flowID, eventType)
 			},
 		); ok {
 			c.namespaceFindings = append(c.namespaceFindings, finding)
