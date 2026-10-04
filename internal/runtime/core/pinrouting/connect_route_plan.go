@@ -3025,10 +3025,6 @@ func connectRequiredPayloadField(source semanticview.Source, flowID, event, fiel
 	}
 }
 
-func resolvedCompositionConnectsTo(source semanticview.Source, flowID, pinName string) []resolvedCompositionConnect {
-	return resolvedCompositionConnects(source, flowID, pinName, false)
-}
-
 func resolvedCompositionConnectsFrom(source semanticview.Source, flowID, pinName string) []resolvedCompositionConnect {
 	return resolvedCompositionConnects(source, flowID, pinName, true)
 }
