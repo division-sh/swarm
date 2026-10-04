@@ -958,13 +958,6 @@ normalized_events:
 	return plan, catalog
 }
 
-func mapProjectedSchemaType(projectedType string) string {
-	if projectedType == "text" {
-		return "string"
-	}
-	return projectedType
-}
-
 func normalizedRetryRequest(body string) *http.Request {
 	request := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
