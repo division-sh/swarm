@@ -11023,6 +11023,9 @@ tool_model:
         The typed cause survives internally but credential bytes, seals, receipts and wrapped diagnostics are not emitted.
         Genuine absence/staleness retains CHANNEL_CREDENTIAL_REQUIRED; corruption, I/O, structural/revision conflicts and
         mixed cleanup errors are not rewritten as unusable-value or routine credential requests.
+        An exact admitted credential responsibility rejected by the provider-owned HTTP 401/403 preflight retains
+        CHANNEL_CREDENTIAL_REQUIRED and its correction command; the redacted provider response cause is not an
+        independent cleanup failure. Independently joined cleanup, revision and observation failures keep precedence.
         Fresh webhook connect may generate a signing value only after the credential snapshot owner proves
         genuine absence of its reserved exact key. A present empty or whitespace-only value, read failure, corruption,
         rotated predecessor value or missing previous-current occurrence is a refusal, never permission to fall back to
@@ -12905,6 +12908,8 @@ flow_model:
         mutation, post-drain publication, provider read/apply and settlement boundaries. Cancellation or failed replacement
         cannot reopen stale predecessor admission. Ordinary writes, renewal and diagnostic reads never reseal stale
         learned evidence or re-admit a changed declaration credential.
+        Refresh of an unchanged complete publication revalidates its existing exact admission without replacing its
+        snapshot or draining already-admitted work; changed publications retain predecessor fencing and post-drain checks.
         Completed onboarding responsibilities and their credential evidence remain immutable; stale completed activations
         use the existing explicit reconnect owner and a fresh ceremony rather than reopening terminal operations.
         The runtime context manager admits exact source/runtime/publication/declaration ownership and cross-context alias
