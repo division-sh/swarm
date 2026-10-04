@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
@@ -44,6 +45,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -51,7 +53,10 @@ import (
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -381,6 +386,19 @@ type gatedNotifyAllChildrenAgent struct {
 	runtimemanager.Agent
 	flowInstance string
 	gate         *notifyAllChildrenAgentGate
+}
+
+type observedNotifyAllChildrenAgent struct {
+	runtimemanager.Agent
+	t *testing.T
+}
+
+func (a *observedNotifyAllChildrenAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
+	out, err := a.Agent.OnEvent(ctx, evt)
+	if err != nil {
+		a.t.Logf("native mock agent event %s failed: %v", evt.ID(), err)
+	}
+	return out, err
 }
 
 func newNotifyAllChildrenAgentGate() *notifyAllChildrenAgentGate {
@@ -2124,6 +2142,43 @@ func newNotifyAllChildrenRuntime(
 		cfg := &config.Config{}
 		cfg.LLM.Backend = llmselection.BackendAnthropic
 		cfg.LLM.Session.LockTTL = time.Minute
+		projection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
+		if err != nil {
+			t.Fatalf("materialize mock conformance workspace source: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := projection.Release(); err != nil {
+				t.Errorf("release mock conformance source: %v", err)
+			}
+		})
+		workspaces := workspace.NewHostManager()
+		workspaceConfig := workspace.DefaultHostConfig()
+		workspaceConfig.WorkspaceRoot = t.TempDir()
+		workspaces.SetConfig(workspaceConfig)
+		workspaces.SetSemanticSource(source)
+		if err := workspaces.BindSourceProjection(projection); err != nil {
+			t.Fatalf("bind mock conformance workspace source: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := workspaces.ReleaseSourceProjection(context.Background()); err != nil {
+				t.Errorf("release mock conformance workspace: %v", err)
+			}
+		})
+		turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
+		gatewayServer := httptest.NewUnstartedServer(nil)
+		t.Cleanup(gatewayServer.Close)
+		hostURL, containerURL, err := toolgateway.ListenerEndpoints(gatewayServer.Listener.Addr())
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := toolgateway.GenerateAuthToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		binding, err := toolgateway.NewRuntimeOwnedBinding(toolgateway.TransportHTTP, hostURL, containerURL, token, toolgateway.LifecycleOwnerServeBoot, toolgateway.SourceBoundMCPListener)
+		if err != nil {
+			t.Fatal(err)
+		}
 		sessionStore = runtimesessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
 		profile, err := llmselection.ResolveLiveBackend(cfg.LLM.Backend)
 		if err != nil {
@@ -2131,6 +2186,7 @@ func newNotifyAllChildrenRuntime(
 		}
 		modelRuntimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
 			Cfg: cfg, Sessions: sessionStore, Conversations: conversations, Events: eventBus,
+			Workspaces: workspaces, MCPTurns: turns, ToolGateway: binding,
 			LockOwner:            "notify-all-children-conformance",
 			CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, discardCompletionSpendProjection{}).WithExecutionPosture(posture),
 		}, nil)
@@ -2147,11 +2203,21 @@ func newNotifyAllChildrenRuntime(
 			EmitRegistry:      emitRegistry,
 			WorkflowInstances: notifyAllChildrenConstructionLoader{workflowPersistence},
 		})
+		gatewayServer.Config.Handler = runtimemcp.NewGateway(toolExecutor, token, runtimepkg.RuntimeMCPGatewayHooks(nil, nil, nil, nil, turns)).Handler()
+		gatewayServer.Start()
 		agentFactory = runtimeagents.NewLLMAgentFactory(
 			modelRuntimes,
 			toolExecutor,
 			runtimeagents.LLMAgentOptions{},
 		)
+		delegate := agentFactory
+		agentFactory = func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+			agent, err := delegate(cfg)
+			if err != nil {
+				return nil, err
+			}
+			return &observedNotifyAllChildrenAgent{Agent: agent, t: t}, nil
+		}
 		if opts.agentGate != nil {
 			agentFactory = opts.agentGate.wrapFactory(agentFactory)
 		}
