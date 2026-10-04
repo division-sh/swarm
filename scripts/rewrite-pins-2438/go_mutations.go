@@ -39,6 +39,9 @@ var pinMutationSpellings = map[string][]string{
 }
 
 func rewritePinMutationLiteral(name, text string) string {
+	if filepath.ToSlash(name) == "internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go" {
+		return strings.NewReplacer("events: [item.ready]", "    - item.ready\n", "events: [item.ready, leaf.ready]", "    - item.ready\n    - leaf.ready\n").Replace(text)
+	}
 	if !strings.Contains(filepath.ToSlash(name), "internal/runtime/testfixtures/canonicalrouting/") {
 		return text
 	}

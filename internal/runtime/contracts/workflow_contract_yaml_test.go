@@ -610,7 +610,7 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 		{
 			name: "instance_key",
 			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedInstanceKeyField),
-			want: `field "instance_key" is not supported`,
+			want: `field "resolution" is not supported`,
 		},
 		{
 			name: "carries",
@@ -643,12 +643,11 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedOutputPinFields(t *testing.T
 name: invalid-output-pins
 pins:
   outputs:
-    events:
-      - event: deploy.done
-        unknown: nope
+    - event: deploy.done
+      unknown: nope
 `), &doc)
-	if err == nil || !strings.Contains(err.Error(), "not supported") {
-		t.Fatalf("yaml.Unmarshal error = %v, want unsupported field", err)
+	if err == nil || !strings.Contains(err.Error(), "scalar text") || !strings.Contains(err.Error(), `["outputs"][0]`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want names-only output shape rejection", err)
 	}
 }
 
@@ -1911,24 +1910,25 @@ func TestW2RejectsNonExactAndBlankMappingKeysAtEveryLayer(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		snippet canonicalrouting.W2MappingKeySnippet
+		want    string
 	}{
-		{name: "flow pins surrounding", snippet: canonicalrouting.W2FlowPinsSurroundingKey},
-		{name: "flow pins blank", snippet: canonicalrouting.W2FlowPinsBlankKey},
-		{name: "input direction surrounding", snippet: canonicalrouting.W2InputDirectionSurroundingKey},
-		{name: "input direction blank", snippet: canonicalrouting.W2InputDirectionBlankKey},
-		{name: "input event surrounding", snippet: canonicalrouting.W2InputEventSurroundingKey},
-		{name: "input event blank", snippet: canonicalrouting.W2InputEventBlankKey},
-		{name: "output event surrounding", snippet: canonicalrouting.W2OutputEventSurroundingKey},
-		{name: "output event blank", snippet: canonicalrouting.W2OutputEventBlankKey},
-		{name: "resolution surrounding", snippet: canonicalrouting.W2ResolutionSurroundingKey},
-		{name: "resolution blank", snippet: canonicalrouting.W2ResolutionBlankKey},
-		{name: "connect surrounding", snippet: canonicalrouting.W2ConnectSurroundingKey},
-		{name: "connect blank", snippet: canonicalrouting.W2ConnectBlankKey},
+		{name: "flow pins surrounding", snippet: canonicalrouting.W2FlowPinsSurroundingKey, want: "not supported"},
+		{name: "flow pins blank", snippet: canonicalrouting.W2FlowPinsBlankKey, want: "not supported"},
+		{name: "retired input direction surrounding", snippet: canonicalrouting.W2InputDirectionSurroundingKey, want: "mapping, want sequence"},
+		{name: "retired input direction blank", snippet: canonicalrouting.W2InputDirectionBlankKey, want: "mapping, want sequence"},
+		{name: "input event surrounding", snippet: canonicalrouting.W2InputEventSurroundingKey, want: "not supported"},
+		{name: "input event blank", snippet: canonicalrouting.W2InputEventBlankKey, want: "not supported"},
+		{name: "retired output event surrounding", snippet: canonicalrouting.W2OutputEventSurroundingKey, want: "scalar text"},
+		{name: "retired output event blank", snippet: canonicalrouting.W2OutputEventBlankKey, want: "scalar text"},
+		{name: "connection resolution surrounding", snippet: canonicalrouting.W2ResolutionSurroundingKey, want: "not supported"},
+		{name: "connection resolution blank", snippet: canonicalrouting.W2ResolutionBlankKey, want: "not supported"},
+		{name: "connect surrounding", snippet: canonicalrouting.W2ConnectSurroundingKey, want: "not supported"},
+		{name: "connect blank", snippet: canonicalrouting.W2ConnectBlankKey, want: "not supported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
 			err := decodeNodeTestSnippet(t, canonicalrouting.W2MappingKeyParserSnippet(t, tc.snippet), &schema)
-			if err == nil || !strings.Contains(err.Error(), "not supported") || !strings.Contains(err.Error(), "nodes.yaml:") {
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "nodes.yaml:") {
 				t.Fatalf("yaml.Unmarshal error = %v, want byte-exact W2 key rejection", err)
 			}
 		})
@@ -1940,14 +1940,15 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 	for _, tc := range []struct {
 		name string
 		root func(testing.TB) string
+		want string
 	}{
-		{name: "fan-in", root: canonicalrouting.CopyRetiredFanInPin},
-		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
+		{name: "fan-in", root: canonicalrouting.CopyRetiredFanInPin, want: `field "resolution" is not supported`},
+		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom, want: `field "from" is not supported`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := LoadWorkflowContractBundleWithOverrides(repo, tc.root(t), DefaultPlatformSpecFile(repo))
-			if err == nil || !strings.Contains(err.Error(), `field "from" is not supported`) {
-				t.Fatalf("bundle load error = %v, want %s resolution.from rejection", err, tc.name)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("bundle load error = %v, want %s retired-field rejection", err, tc.name)
 			}
 		})
 	}

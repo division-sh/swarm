@@ -90,9 +90,11 @@ stages:
   attention: {terminal: true}
 pins:
   inputs:
-    events: [seed, batch.ready, batch.replace]
+    - seed
+    - batch.ready
+    - batch.replace
   outputs:
-    events: [item.ready]
+    - item.ready
 `,
 		"entities.yaml": "work:\n  items:\n    type: map[text][integer]\n    initial: {before: [999]}\n",
 		"events.yaml": `seed:
@@ -699,7 +701,7 @@ func (p *a2MapFanOutExecution) compositeContinuation(t *testing.T, pending gener
 
 func runA2MapToListDuplicateOrdinals(t *testing.T, selected gateRecoveryStoreCase) {
 	files := a2MapFanOutFiles(false)
-	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "events: [item.ready]", "events: [item.ready, leaf.ready]", 1)
+	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "    - item.ready\n", "    - item.ready\n    - leaf.ready\n", 1)
 	files["entities.yaml"] += `  leaf_results:
     type: "[integer]"
     initial: []

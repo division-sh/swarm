@@ -41,7 +41,7 @@ func CopyForkReceiverBusinessMutationOwnership(t testing.TB, entitylessProducer 
         writes:
           - {target_field: processed_token, value: "${payload.token}"}
 `)
-	applyClosedReplacement(t, filepath.Join(root, "consumer/schema.yaml"), "  outputs: [receiver.finished]\n", "")
+	applyClosedReplacement(t, filepath.Join(root, "consumer/schema.yaml"), "  outputs:\n    - receiver.finished\n", "")
 	removeClosedVariantFiles(t, root, "consumer/events.yaml")
 	removeForkReceiverFinishedConnection(t, root, "consumer")
 	return root

@@ -212,9 +212,9 @@ stages:
   shortlisted: {terminal: true}
 pins:
   inputs:
-    events: [root.ready]
+    - root.ready
   outputs:
-    events: [vertical.shortlisted]
+    - vertical.shortlisted
 `)
 	writeFixtureFile(t, root+"/scoring/types.yaml", `
 types:

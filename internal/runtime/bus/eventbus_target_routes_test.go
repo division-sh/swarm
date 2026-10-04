@@ -3633,7 +3633,7 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
 	t.Helper()
 	return loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "name: top-level-project-node\nversion: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "name: top-level-project-node\npins:\n  inputs:\n    events: [thing.created]\n",
+		"schema.yaml":   "name: top-level-project-node\npins:\n  inputs:\n    - thing.created\n",
 		"events.yaml":   "thing.created:\n  entity_id: string\n",
 		"nodes.yaml": `reviewer:
   execution_type: system_node

@@ -46,15 +46,23 @@ func TestImportedOutputPinSchemaBindingIsImmutableAndSingleOwner(t *testing.T) {
 }
 
 func TestW2CanonicalPinEvidenceIsImmutable(t *testing.T) {
- context := FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "collector/schema.yaml"}
- first, err := CompileFlowInputPin(context, FlowInputEventPin{Event: "work.reported"})
- if err != nil { t.Fatal(err) }
- second, err := CompileFlowInputPin(context, FlowInputEventPin{Event: "work.reported"})
- if err != nil { t.Fatal(err) }
- if first.Digest() == "" || first.Digest() != second.Digest() { t.Fatal("equivalent pins lost canonical identity") }
- readback := first.Provenance()
- readback.SourceFile = "changed"
- if first.Provenance().SourceFile != context.SourceFile { t.Fatal("readback mutation changed compiled pin") }
+	context := FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "collector/schema.yaml"}
+	first, err := CompileFlowInputPin(context, FlowInputEventPin{Event: "work.reported"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := CompileFlowInputPin(context, FlowInputEventPin{Event: "work.reported"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Digest() == "" || first.Digest() != second.Digest() {
+		t.Fatal("equivalent pins lost canonical identity")
+	}
+	readback := first.Provenance()
+	readback.SourceFile = "changed"
+	if first.Provenance().SourceFile != context.SourceFile {
+		t.Fatal("readback mutation changed compiled pin")
+	}
 }
 
 func TestW2CompiledResolutionRejectsFieldsOutsideClosedMode(t *testing.T) {
@@ -66,9 +74,9 @@ func TestW2CompiledResolutionRejectsFieldsOutsideClosedMode(t *testing.T) {
 		{name: "reply from", resolution: "mode: reply, from: payload.ignored, replies_to: work.requested"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := admitSchemaFragment("pins: {inputs: {events: [{event: work.completed, resolution: {" + tc.resolution + "}}]}}\n")
-			if err == nil || !strings.Contains(err.Error(), `field "from" is not supported`) {
-				t.Fatalf("admission error = %v, want retired-field rejection with teaching", err)
+			_, err := admitSchemaFragment("pins: {inputs: [{event: work.completed, resolution: {" + tc.resolution + "}}]}\n")
+			if err == nil || !strings.Contains(err.Error(), `field "resolution" is not supported`) {
+				t.Fatalf("admission error = %v, want retired input-resolution rejection", err)
 			}
 		})
 	}

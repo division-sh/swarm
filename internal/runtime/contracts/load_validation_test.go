@@ -949,7 +949,7 @@ stages:
   done: {terminal: true}
 pins:
   outputs:
-    events: [task.done]
+    - task.done
 `)
 	writeFixtureFile(t, filepath.Join(root, "flow-a", "events.yaml"), `
 task.done:
@@ -969,7 +969,7 @@ stages:
   done: {terminal: true}
 pins:
   outputs:
-    events: [task.done]
+    - task.done
 `)
 	writeFixtureFile(t, filepath.Join(root, "flow-b", "events.yaml"), `
 task.done:

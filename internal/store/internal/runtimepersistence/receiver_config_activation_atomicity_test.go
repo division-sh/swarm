@@ -66,7 +66,7 @@ stages:
   pending: {initial: true}
 pins:
   inputs:
-    events: [task.started]
+    - task.started
 `,
 		"review/entities.yaml": "review_item:\n  request_id: string\n",
 		"review/events.yaml":   "task.started:\n",
