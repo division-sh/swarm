@@ -1196,11 +1196,19 @@ target:
 		return invocation, fmt.Errorf("startup probe prompt is not exact")
 	}
 	if invocation.startup {
-		if kind, _, ok := releaseE2EContainerIdentity(container); !ok || kind != "system" {
-			return invocation, fmt.Errorf("Claude startup probe container = %q, want runless system workspace", container)
+		base := container
+		if providerContainer {
+			base, _ = releaseProviderContainerBase(container)
 		}
-		if workdir != releaseE2ESystemWorkdir {
-			return invocation, fmt.Errorf("Claude startup probe workdir = %q, want %q", workdir, releaseE2ESystemWorkdir)
+		kind, _, ok := releaseE2EContainerIdentity(base)
+		wantWorkdir := releaseE2ESystemWorkdir
+		if ok && kind == "agent" && providerContainer {
+			wantWorkdir = releaseE2EAgentWorkdir
+		} else if !ok || kind != "system" {
+			return invocation, fmt.Errorf("Claude startup probe container = %q, want system or exact isolated agent workspace", container)
+		}
+		if workdir != wantWorkdir {
+			return invocation, fmt.Errorf("Claude startup probe workdir = %q, want %q", workdir, wantWorkdir)
 		}
 	} else {
 		if _, ok := releaseE2EAgentContainerFingerprint(container); !ok {
