@@ -366,12 +366,6 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 		Example: `  swarm verify .`,
 		Args:    argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opts.logging.validate(); err != nil {
-				return returnCLIValidationError(cmd.ErrOrStderr(), err)
-			}
-			if err := opts.output.validate(); err != nil {
-				return returnCLIValidationError(cmd.ErrOrStderr(), err)
-			}
 			if len(args) == 1 {
 				opts.sourceRoot = args[0]
 			}
@@ -385,6 +379,7 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&opts.portable, "portable", false, "Validate source structure only; do not observe deployment prerequisites")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
 	return cmd

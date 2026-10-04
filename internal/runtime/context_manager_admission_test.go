@@ -169,8 +169,9 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	}
 	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
 	cfg := &config.Config{}
-	rt, err := NewRuntime(testAuthorActivityContext(ctx), RuntimeDeps{
-		Config: cfg,
+	rt, err := NewRuntime(testAuthorActivityContext(ctx), completeRuntimeRecoveryTestDeps(t, RuntimeDeps{
+		Config:       cfg,
+		ManagerStore: selected,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleCensus: selected,
 		},
@@ -181,7 +182,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 			SourceArtifactFact: fact,
 			ProcessWorkOwner:   runtimeTestProcessWorkOwner(t),
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -190,7 +191,9 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 			t.Errorf("Shutdown: %v", shutdownErr)
 		}
 	})
-	capability, grant, err := newRuntimeTestProcessCapabilityWithSession(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID, selected)
+	capability, grant, err := newRuntimeTestProcessCapabilityWithSession(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID, selected, func(session *runtimeTestRetainedSession) runtimestartupownership.RetainedSession {
+		return &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: runtimestartupownership.SQLiteFanOutCapacity()}
+	})
 	if err != nil {
 		t.Fatalf("new process capability: %v", err)
 	}
