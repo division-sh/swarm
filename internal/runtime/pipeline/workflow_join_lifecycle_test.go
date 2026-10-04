@@ -1229,8 +1229,8 @@ join-node:
 		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    item.completed:\n      join:", "    item.completed:\n      loop: {admit: revision, from: awaiting}\n      join:", 1)
 		if loop == "captured" {
 			for _, replacement := range []struct{ old, new string }{
-				{"on_complete: {advances_to: ready}", "on_complete:\n  advances_to: awaiting\n  data_accumulation:\n    writes:\n      - target_field: expected\n        value: |-\n          [loop.revision_id]"},
-				{"on_deadline: {advances_to: attention}", "on_deadline:\n  advances_to: awaiting\n  data_accumulation:\n    writes:\n      - target_field: expected\n        value: |-\n          [loop.revision_id]"},
+				{"on_complete: {advances_to: ready}", "on_complete:\n          advances_to: awaiting\n          data_accumulation:\n            writes:\n              - target_field: expected\n                value: |-\n                  [loop.revision_id]"},
+				{"on_deadline: {advances_to: attention}", "on_deadline:\n          advances_to: awaiting\n          data_accumulation:\n            writes:\n              - target_field: expected\n                value: |-\n                  [loop.revision_id]"},
 			} {
 				files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], replacement.old, replacement.new, 1)
 			}
