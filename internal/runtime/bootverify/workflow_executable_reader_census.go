@@ -124,6 +124,7 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	},
 	"declarationIdentity": noHandlerRuleExecutableReaders,
 	"authored":            noHandlerRuleExecutableReaders,
+	"admissionProvenance": noHandlerRuleExecutableReaders,
 }
 
 func handlerExecutableReaderExpressionsForSource(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
@@ -177,7 +178,7 @@ func appendExecutableReader(out *[]expressionReference, kind, expression string,
 	if expression == "" || strings.EqualFold(expression, "else") {
 		return
 	}
-	*out = append(*out, expressionReference{Kind: strings.TrimSpace(kind), Expression: expression, Phase: phase})
+	*out = append(*out, expressionReference{Kind: strings.TrimSpace(kind), SourceSlot: strings.TrimSpace(kind), Expression: expression, Phase: phase})
 }
 
 func appendConditionExecutableReader(out *[]expressionReference, kind, expression string, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase, context runtimepipeline.WorkflowConditionContext) {
@@ -204,7 +205,7 @@ func appendActivityExecutableReaders(out *[]expressionReference, ctx executableR
 	sort.Strings(keys)
 	for _, key := range keys {
 		before := len(*out)
-		appendExpressionValueExecutableReaders(out, kind+".input."+strings.TrimSpace(key), activity.Input[key], phase)
+		appendExpressionValueExecutableReaders(out, runtimecontracts.NodeProvenanceMapPath(kind+".input", key), activity.Input[key], phase)
 		resultType, resultOptional, found, err := activityInputResultType(ctx.source, activity.Tool, key)
 		for index := before; index < len(*out); index++ {
 			if err != nil {
@@ -297,8 +298,12 @@ func appendDataAccumulationExecutableReaders(out *[]expressionReference, kind st
 func appendRulesExecutableReaders(out *[]expressionReference, ctx executableReaderContext, kind string, rules []runtimecontracts.HandlerRuleEntry) {
 	for i, rule := range rules {
 		prefix := fmt.Sprintf("%s[%d]", kind, i)
+		if strings.HasPrefix(kind, "join.") {
+			prefix = kind
+		}
+		label := prefix
 		if id := strings.TrimSpace(rule.ID); id != "" {
-			prefix = kind + "[" + id + "]"
+			label = kind + "[" + id + "]"
 		}
 		before := len(*out)
 		for _, field := range sortedExecutableReaderFields(handlerRuleEntryExecutableReaderCensus) {
@@ -311,6 +316,7 @@ func appendRulesExecutableReaders(out *[]expressionReference, ctx executableRead
 			ruleCtx.ruleIndex = i
 			handlerRuleEntryExecutableReaderCensus[field](out, ruleCtx, prefix, rule)
 			for index := fieldBefore; index < len(*out); index++ {
+				(*out)[index].Kind = label + strings.TrimPrefix((*out)[index].Kind, prefix)
 				(*out)[index].RuleCollection = kind
 				(*out)[index].RuleField = field
 				(*out)[index].RuleIndex = i

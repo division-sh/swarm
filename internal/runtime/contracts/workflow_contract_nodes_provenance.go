@@ -49,7 +49,7 @@ func collectNodeValueProvenance(value yamlsource.Value, prefix string, out map[s
 			return err
 		}
 		for _, field := range fields {
-			path := nodeProvenanceMapPath(prefix, field.Name)
+			path := NodeProvenanceMapPath(prefix, field.Name)
 			out[path] = authoredSourceProvenance(field.Value)
 			if err := collectNodeValueProvenance(field.Value, path, out, annotations); err != nil {
 				return err
@@ -71,7 +71,8 @@ func collectNodeValueProvenance(value yamlsource.Value, prefix string, out map[s
 	return nil
 }
 
-func nodeProvenanceMapPath(prefix, key string) string {
+// NodeProvenanceMapPath encodes an exact map key in the admitted source ledger.
+func NodeProvenanceMapPath(prefix, key string) string {
 	simple := key != ""
 	for index, r := range key {
 		if index == 0 {

@@ -71,7 +71,7 @@ func (b *WorkflowContractBundle) HandlerValueProvenance(node runtimeidentity.Exe
 	if b == nil {
 		return EffectiveValueProvenance{}, false
 	}
-	path := effectiveNodeProvenancePrefix(node.FlowPath(), node.NodeID()) + "." + nodeProvenanceMapPath("event_handlers", event) + "." + slot
+	path := effectiveNodeProvenancePrefix(node.FlowPath(), node.NodeID()) + "." + NodeProvenanceMapPath("event_handlers", event) + "." + slot
 	return b.effectiveProvenance.Lookup(path)
 }
 
@@ -79,7 +79,7 @@ func (b *WorkflowContractBundle) GateContextProvenance(flow, stage, field string
 	if b == nil {
 		return EffectiveValueProvenance{}, false
 	}
-	path := "schemas[" + strconv.Quote(flow) + "]." + nodeProvenanceMapPath("stages", stage) + ".gate." + nodeProvenanceMapPath("context", field)
+	path := "schemas[" + strconv.Quote(flow) + "]." + NodeProvenanceMapPath("stages", stage) + ".gate." + NodeProvenanceMapPath("context", field)
 	return b.effectiveProvenance.Lookup(path)
 }
 

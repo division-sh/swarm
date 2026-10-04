@@ -281,6 +281,7 @@ type HandlerRuleEntry struct {
 	FanOut              *FanOutSpec              `yaml:"fan_out"`
 	declarationIdentity runtimeidentity.DeclarationIdentity
 	authored            bool
+	admissionProvenance map[string]EffectiveValueProvenance
 }
 
 func (r HandlerRuleEntry) Authored() bool { return r.authored }

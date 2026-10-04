@@ -440,8 +440,10 @@ type expressionReference struct {
 	GuardCheckIndex           int
 	HasGuardCheckIndex        bool
 	EmitSite                  *runtimecontracts.HandlerDeclarativeEmitSite
+	EmitField                 string
 	FanOutAfterWrites         bool
 	Kind                      string
+	SourceSlot                string
 	Expression                string
 	Phase                     runtimepipeline.WorkflowEntityFieldLifecyclePhase
 	HandlerField              string
@@ -505,6 +507,8 @@ func handlerEmitExpressionsForSource(source semanticview.Source, node runtimeide
 			}
 			ref := expressionReference{
 				Kind:       kindPrefix + " emit field " + strings.TrimSpace(key),
+				SourceSlot: runtimecontracts.NodeProvenanceMapPath(strings.TrimPrefix(strings.ReplaceAll(siteKey, ".emit_template", ".emit"), "handler.")+".fields", key),
+				EmitField:  key,
 				Expression: expr,
 				Phase:      phase,
 				ItemAlias:  strings.TrimSpace(itemAlias),
@@ -530,6 +534,18 @@ func handlerEmitExpressionsForSource(source semanticview.Source, node runtimeide
 		appendSpec(site.Source, site.SiteKey, site.Spec, runtimepipeline.WorkflowEntityFieldLifecycleEmitFields, site.ItemAlias)
 		for index := before; index < len(out); index++ {
 			out[index].EmitSite = &site
+			if strings.HasSuffix(site.SiteKey, ".emit_template") {
+				key := out[index].EmitField
+				rows := handler.Rules
+				if strings.HasPrefix(site.SiteKey, "handler.on_complete[") {
+					rows = handler.OnComplete
+				}
+				if site.RuleIndex >= 0 && site.RuleIndex < len(rows) {
+					if _, specialized := rows[site.RuleIndex].Emit.Fields[key]; !specialized {
+						out[index].SourceSlot = runtimecontracts.NodeProvenanceMapPath("emit.fields", key)
+					}
+				}
+			}
 		}
 		if plan, ok := fanOutPlanForEmitSite(source, node, eventType, site); ok {
 			for index := before; index < len(out); index++ {

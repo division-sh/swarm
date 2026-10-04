@@ -4178,13 +4178,15 @@ handler_specification:
           rules.when, ordinary on_complete.condition, guard.check/checks[].check, query.filter, filter.condition
           and count.condition expect boolean expressions. Quoted source is a verification error naming the source,
           semantic slot, and fix: remove YAML quotes. Optional omission preserves the existing absence behavior.
-          An unconditional completion omits condition; authored condition: else is invalid. Explicit rules
+          The trimmed, case-insensitive else marker is invalid in every authored predicate slot.
+          An unconditional completion omits condition. Explicit rules
           else: true/default: true retain their separate typed default identity. Native boolean predicates do
           not create new definite-assignment exhaustiveness evidence.
         diagnostics: >-
           Expression errors identify the source and semantic slot category. An undeclared plain reference retains
           CEL's undeclared-reference error and adds: quote text or use a declared reference. Other parser/type/program
           errors retain their own cause. Unquoted ${...} is ordinary invalid CEL, without special migration teaching.
+          Diagnostic coordinates consume admitted source paths and exact rule sequence positions, never display IDs.
         slot_categories:
           expression: "Executable values and boolean controls above, plus fan_out.identity; quote style selects meaning."
           path: "emit.from, write source/target paths, collection sources, receiver initialization and connection paths retain their structural path grammar."

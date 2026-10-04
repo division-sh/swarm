@@ -41,6 +41,19 @@ func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeC
 		if err := collectNodeValueProvenance(field.Value, "", projected.admissionProvenance, annotations); err != nil {
 			return nil, fmt.Errorf("node %q provenance: %w", field.Name, err)
 		}
+		// Rules have one effective sequence identity even when authored as a keyed
+		// or singleton mapping. Transfer their admitted source facts, not their IDs.
+		for event, handler := range projected.EventHandlers {
+			for collection, rows := range map[string][]HandlerRuleEntry{"rules": handler.Rules, "on_complete": handler.OnComplete} {
+				for index := range rows {
+					prefix := NodeProvenanceMapPath("event_handlers", event) + fmt.Sprintf(".%s[%d]", collection, index)
+					for path, source := range rows[index].admissionProvenance {
+						projected.admissionProvenance[prefix+"."+path] = source
+					}
+					rows[index].admissionProvenance = nil
+				}
+			}
+		}
 		out[field.Name] = projected
 	}
 	return out, nil
