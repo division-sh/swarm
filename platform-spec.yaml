@@ -5360,9 +5360,9 @@ engine:
       No subsystem may implement its own name resolution logic.'
   cross_flow_routing:
     description: 'Composition-first pin routing is the canonical cross-flow routing surface. Exact least-common-ancestor
-      FlowNode schema.yaml connect entries own only the inter-flow edge, output pins declare the event identity being produced,
-      input pins declare receiver selection, lifecycle, cardinality, and reply resolution, and the analyzer lowers those facts into
-      concrete route-plan facts. For pin-declared outputs, the platform routes by resolved source/target
+      FlowNode schema.yaml connect entries own inter-flow topology, ordinary receiver selection and paired reply facts.
+      Child input/output pins declare boundary event identities; parent-local endpoints consume exact compiled event schemas.
+      The analyzer lowers that evidence into concrete route-plan facts. For pin-declared outputs, the platform routes by resolved source/target
       identity, not by unconstrained event-type broadcast.'
     canonical_owner: platform-spec.yaml#flow_model.composition_routing
     implementation_status: typed_composition_authority_complete_for_supported_surface
