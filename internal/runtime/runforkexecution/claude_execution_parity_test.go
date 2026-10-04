@@ -21,8 +21,13 @@ import (
 
 func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, entityID, eventID string, at time.Time) {
 	t.Helper()
+	seedSelectedAgentExecutionSource(t, ctx, backend, db, selected, loaded, runID, entityID, eventID, at, executionmode.Live)
+}
+
+func seedSelectedAgentExecutionSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, entityID, eventID string, at time.Time, mode executionmode.Mode) {
+	t.Helper()
 	if backend == "postgres" {
-		seedSelectedExecutionRootSourceRun(t, db, runID, entityID, eventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
+		seedSelectedExecutionRootSourceRunWithMode(t, db, runID, entityID, eventID, "task.assigned", at, "test_entity", mode, loaded.SourceArtifactFact)
 		seedSourceOutcomeThatMustNotSuppressFork(t, db, eventID, entityID, at)
 		captureSelectedExecutionSourceRevision(t, db, runID)
 		return
@@ -41,7 +46,7 @@ func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, backen
 		t.Fatal(err)
 	}
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "task.assigned", "source-runtime", "", payload, 0, runID,
-		events.EventEnvelope{Scope: events.EventScopeGlobal}, eventtest.RootRoutingSource(runID), at, executionmode.Live)
+		events.EventEnvelope{Scope: events.EventScopeGlobal}, eventtest.RootRoutingSource(runID), at, mode)
 	route := selectedExecutionTestAgentRoute(t, runID, "test-agent", "worker")
 	route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker", EntityID: entityID})
 	storetest.CommitSemanticEventWithRoutes(t, ctx, s, event, []events.DeliveryRoute{route}, pipelineobligation.ScopeSubscribed)
