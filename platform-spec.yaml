@@ -9023,7 +9023,10 @@ engine:
         Selected-store observations share one consistent read-only snapshot: PostgreSQL repeatable
         read and SQLite read transaction. Schema compatibility consumes the bootstrap owner's
         decision without DDL, schema stamping, process possession or domain writes. Fresh supported
-        state names boot preparation as unperformed; unavailable or partial domain readers never
+        state names boot preparation as unperformed. Existing compatible platform state also
+        names every missing generated state table from the same inspection result as a boot
+        preparation obligation; complete state has no such obligation, while incompatible state
+        is refused. Verification never performs that DDL. Unavailable or partial domain readers never
         mean empty state. Inspection scope is revoked when the callback ends and cannot be escaped
         by supplying a different context. The PostgreSQL inspection-only pool uses the existing
         observation socket owner to bound native connection, read and transaction cleanup I/O;
@@ -9079,7 +9082,10 @@ engine:
         source-artifact fingerprint, finite-feed and recovery-disposition owners. Its prospective
         disposition is not an acknowledged recovery, executable process authority or a grant.
         Immutable retained artifacts are decoded by the existing loader without filesystem
-        projection. Retained ordinary actors first consume the same declaration reconciliation
+        projection. Both selected and original retained-source loaders consume the invocation's
+        frozen configured platform-pack base generation, exactly as boot does; they never fall
+        back to embedded inventory or re-read configuration during retained inspection.
+        Retained ordinary actors first consume the same declaration reconciliation
         projection as startup, then the same persisted descriptor, posture, intent, subscription,
         memory-ownership and build-configuration checks. Flow-readiness actors do not borrow
         static declaration replacement. Foreign selected-fork actors consume their exact selected
@@ -9105,7 +9111,11 @@ engine:
         metadata steps, fifteen seconds for configured subprocess or remote discovery steps and
         a separate bounded five-second cleanup tail. Caller cancellation wins. Permitted protocols
         are exact configured HTTP/stdio MCP initialize/list (never tools/call), configured executable
-        version, inspect-only Docker metadata, and immediate bind-and-close. A CLI image version
+        version, inspect-only Docker metadata, and bounded listener-set bind-and-close. API and
+        MCP observations retain all successfully acquired listeners until the complete configured
+        set is checked, detecting fixed-port and wildcard/specific conflicts just as concurrent
+        boot binding does. Every path closes each probe-owned listener before return; observations
+        do not reserve addresses for later boot. A CLI image version
         probe uses an observed existing immutable image digest, read-only root, no mounts, ports,
         network, privileges or credentials, dropped capabilities, no-new-privileges and a uniquely
         owned cleanup identity. No pull, workspace/network preparation, store mutation, provider
@@ -9516,7 +9526,7 @@ engine:
           Unperformed observations and startup execution obligations remain visible; never bare ok or an unconditional
           promise of live readiness. Portable validation explicitly reports structural scope.
         stderr: Human-readable analyzer diagnostics, advisory lint evidence, warnings, and blocking failures.
-    check_count: 69 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation
+    check_count: 68 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and

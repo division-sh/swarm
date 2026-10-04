@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -22,6 +23,7 @@ type admittedFixtureSelectedContractSourceLoader struct {
 	RepoRoot         string
 	SourceRoot       string
 	PlatformSpecPath string
+	PlatformPackBase *packartifact.PlatformPackInventory
 }
 
 var admittedFixtureSourceArtifacts sync.Map
@@ -46,7 +48,7 @@ func (l admittedFixtureSelectedContractSourceLoader) LoadRunForkSelectedContract
 		return LoadedSelectedContractSource{}, err
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(l.RepoRoot, artifact, l.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
-		AdmitPackInventory: packadmission.AdmitInventory,
+		PlatformPackBase: l.PlatformPackBase, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
 		return LoadedSelectedContractSource{}, err

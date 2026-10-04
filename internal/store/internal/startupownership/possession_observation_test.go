@@ -82,6 +82,15 @@ func TestPostgresPossessionObservationUsesIndependentExactSessionAndKey(t *testi
 }
 
 func TestPossessionObservationExternalProcessReleaseAndCrashBothStores(t *testing.T) {
+	testPossessionObservationExternalProcessReleaseAndCrash(t, []string{"sqlite", "postgres"})
+}
+
+func TestSQLitePossessionObservationExternalProcessReleaseAndCrash(t *testing.T) {
+	testPossessionObservationExternalProcessReleaseAndCrash(t, []string{"sqlite"})
+}
+
+func testPossessionObservationExternalProcessReleaseAndCrash(t *testing.T, backends []string) {
+	t.Helper()
 	if backend := os.Getenv("SWARM_TEST_POSSESSION_OBSERVER_CHILD"); backend != "" {
 		ctx := context.Background()
 		var release func() error
@@ -118,7 +127,7 @@ func TestPossessionObservationExternalProcessReleaseAndCrashBothStores(t *testin
 		}
 		return
 	}
-	for _, backend := range []string{"sqlite", "postgres"} {
+	for _, backend := range backends {
 		for _, ending := range []string{"release", "crash"} {
 			t.Run(backend+"/"+ending, func(t *testing.T) {
 				var probe func(context.Context) (bool, error)

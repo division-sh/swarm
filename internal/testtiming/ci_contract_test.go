@@ -97,6 +97,45 @@ type ciWorkflowStep struct {
 	Env             map[string]string `yaml:"env"`
 }
 
+func TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(testTimingRepoRoot(t), ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]ciWorkflowJob `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, step := range workflow.Jobs["macos-sqlite-possession"].Steps {
+		if !strings.Contains(step.Run, "go test ./internal/store/internal/startupownership") {
+			continue
+		}
+		found = true
+		want := "go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPossessionObservationExternalProcessReleaseAndCrashBothStores)$' -count=1"
+		if !strings.Contains(step.Run, want) {
+			t.Fatalf("SQLite-only qualification no longer selects every SQLite package root: %s", step.Run)
+		}
+	}
+	if !found {
+		t.Fatal("missing macOS possession qualification")
+	}
+	raw, err = os.ReadFile(filepath.Join(testTimingRepoRoot(t), "internal/store/internal/startupownership/possession_observation_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range []string{
+		`testPossessionObservationExternalProcessReleaseAndCrash(t, []string{"sqlite", "postgres"})`,
+		`testPossessionObservationExternalProcessReleaseAndCrash(t, []string{"sqlite"})`,
+	} {
+		if !strings.Contains(string(raw), call) {
+			t.Fatalf("SQLite and both-store entrypoints must retain the same complete process assertion owner: %s", call)
+		}
+	}
+}
+
 func TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(testTimingRepoRoot(t), ".github/workflows/ci.yml"))
 	if err != nil {

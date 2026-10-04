@@ -5945,11 +5945,26 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 68 {
-		t.Fatalf("bootCheckRegistry count = %d, want 68", got)
+	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := len(supplementalChecks); got != 2 {
-		t.Fatalf("supplementalChecks count = %d, want 2; managed credentials share the primary credential observation", got)
+	var spec struct {
+		Engine struct {
+			BootVerification struct {
+				CheckCount string `yaml:"check_count"`
+			} `yaml:"boot_verification"`
+		} `yaml:"engine"`
+	}
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	var primary, supplemental int
+	if n, err := fmt.Sscanf(spec.Engine.BootVerification.CheckCount, "%d primary checks plus %d supplemental checks", &primary, &supplemental); err != nil || n != 2 {
+		t.Fatalf("invalid authoritative check inventory: %q: %v", spec.Engine.BootVerification.CheckCount, err)
+	}
+	if len(bootCheckRegistry) != primary || len(supplementalChecks) != supplemental {
+		t.Fatalf("implemented inventory %d primary/%d supplemental differs from spec %d/%d", len(bootCheckRegistry), len(supplementalChecks), primary, supplemental)
 	}
 }
 

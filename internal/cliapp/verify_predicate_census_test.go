@@ -27,10 +27,10 @@ type admissionPredicateSurface struct {
 }
 
 var admissionPredicateSurfaces = []admissionPredicateSurface{
-	{"internal/cliapp/verify_runtime.go", "A01,A28,A29,A30", "P01,P02,P23,P24"},
-	{"internal/cliapp/verify_deployment.go", "A02,A11,A12,A13,A15,A18,A26,A27,A28", "P02,P09,P10,P11,P13,P15,P16,P22,P24"},
+	{"internal/cliapp/verify_runtime.go", "A01,A28,A29,A30", "P01,P02,P23,P24,P27,P29"},
+	{"internal/cliapp/verify_deployment.go", "A02,A11,A12,A13,A15,A18,A26,A27,A28", "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26"},
 	{"internal/cliapp/verify_deployment_workspace.go", "A15,A16,A17", "P13,P14,P15"},
-	{"internal/cliapp/verify_deployment_store.go", "A10,A19,A20,A21,A22,A23,A24,A27", "P08,P17,P18,P19,P20,P21"},
+	{"internal/cliapp/verify_deployment_store.go", "A10,A19,A20,A21,A22,A23,A24,A27", "P08,P17,P18,P19,P20,P21,P27,P28"},
 	{"internal/channelonboarding/retained_inspection.go", "A10,A27", "P08,P10,P21"},
 	{"internal/channelonboarding/teardown.go", "A10,A27", "P08,P10,P21"},
 	{"internal/serveapp/channel_onboarding.go", "A10,A27", "P08,P10,P21"},
