@@ -23,7 +23,7 @@ stages:
     gate:
       decision: numeric_review
       context:
-        label: entity.name
+        label: "entity.name"
         count: 7
         absent: null
       outcomes:
