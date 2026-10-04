@@ -15,31 +15,19 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
+func TestServeRejectsRetiredPinMarkersBeforeRuntime(t *testing.T) {
 	repo := repoRootForTest()
-	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
-	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
-		SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
-	}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
-	if err != nil {
-		t.Fatalf("loadServeRuntimeBundle: %v", err)
-	}
-	cfg, err := cliapp.DefaultRuntimeConfig()
-	if err != nil {
-		t.Fatalf("DefaultRuntimeConfig: %v", err)
-	}
-	loaded.sourceArtifactFact = mustServeTestEphemeralSourceArtifactFact(loaded.bootIdentity.BundleHash)
-	contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
-		ExecutionPosture: executionposture.Live,
-		Ctx:              context.Background(), Loaded: loaded, StateStoreSummary: "test stores ready",
-		WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: cliapp.WorkspaceBackendNone, NoWorkspace: true, Source: "test"},
-		BootStartedAt:    time.Now().UTC(), Config: cfg,
-	})
-	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness") {
-		t.Fatalf("buildServeRuntimeBundleContext = %#v error=%v, want production rejection", contextDef, err)
-	}
-	if contextDef.runtime != nil {
-		t.Fatal("serve materialized a runtime for harness input")
+	for _, input := range []bool{false, true} {
+		loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
+			SourceRoot: canonicalrouting.CopyRetiredPinMarker(t, input), PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+		}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
+		want := "must be a scalar text"
+		if input {
+			want = `field "source" is not supported`
+		}
+		if err == nil || !strings.Contains(err.Error(), want) || loaded.bundle != nil {
+			t.Fatalf("source admission published retired marker: input=%t loaded=%#v error=%v", input, loaded, err)
+		}
 	}
 }
 

@@ -63,7 +63,6 @@ func TestScenarioAcceptedCorpusSharesAdmissionAndDerivedProjection(t *testing.T)
 		"tests/tier11-flow-composition/test-child-flow-absolute-path/tests/visible-smoke.yaml",
 		"tests/tier11-flow-composition/test-child-flow-pin-wiring/tests/visible-smoke.yaml",
 		"tests/tier11-flow-composition/test-child-flow-policy-inherit/tests/visible-smoke.yaml",
-		"tests/tier11-flow-composition/test-data-pin-wiring/tests/visible-smoke.yaml",
 		"tests/tier11-flow-composition/test-multi-level-policy-inherit/tests/visible-smoke.yaml",
 		"tests/tier11-flow-composition/test-wildcard-deep-subscription/tests/visible-smoke.yaml",
 		"tests/tier12-runtime-fork/test-non-agent-replay-fail-closed/tests/visible-smoke.yaml",

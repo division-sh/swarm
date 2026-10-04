@@ -40,7 +40,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 `
 			files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "name: requester", "name: observer", 1)
 			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "{event: provider.replied, resolution: {mode: reply, replies_to: provider.requested}}", "provider.replied", 1)
-			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    events: [provider.requested]\n", "", 1)
+			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs: [provider.requested]\n", "", 1)
 			files["observer/schema.yaml"] += "      - provider.notified\n"
 			files["observer/entities.yaml"] = files["requester/entities.yaml"] + "  ordinary_result: JoinResult\n"
 			start := strings.Index(files["requester/nodes.yaml"], "collector:\n")

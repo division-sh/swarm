@@ -23,6 +23,7 @@ func TestCatalogScenarioRunFixturesPrecedeRuntimeConstruction(t *testing.T) {
 			t.Fatal(err)
 		}
 		aliases := map[string]bool{}
+		runtimeAliases := map[string]bool{}
 		for _, imp := range file.Imports {
 			value, err := strconv.Unquote(imp.Path.Value)
 			if err == nil && value == "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture" {
@@ -34,6 +35,16 @@ func TestCatalogScenarioRunFixturesPrecedeRuntimeConstruction(t *testing.T) {
 					t.Fatal("scenario fixture import must retain explicit ownership")
 				}
 				aliases[alias] = true
+			}
+			if err == nil && value == "github.com/division-sh/swarm/internal/runtime" {
+				alias := "runtime"
+				if imp.Name != nil {
+					alias = imp.Name.Name
+				}
+				if alias == "." {
+					t.Fatal("runtime import must retain explicit ownership")
+				}
+				runtimeAliases[alias] = true
 			}
 		}
 		for _, decl := range file.Decls {
@@ -56,7 +67,7 @@ func TestCatalogScenarioRunFixturesPrecedeRuntimeConstruction(t *testing.T) {
 				if !ok {
 					return true
 				}
-				if selector.Sel.Name == "NewValidationHarnessRuntime" {
+				if runtimeAliases[owner.Name] && selector.Sel.Name == "NewRuntime" {
 					construction = call.Pos()
 				}
 				if aliases[owner.Name] && (strings.HasPrefix(selector.Sel.Name, "Require") || selector.Sel.Name == "Materialize") {

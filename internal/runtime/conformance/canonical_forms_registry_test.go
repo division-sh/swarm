@@ -806,8 +806,8 @@ func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
 	if record.Wave2.Issue != 2352 || record.Wave2.Status != "closed" || !reflect.DeepEqual(record.Wave2.Rows, wantRows) || !reflect.DeepEqual(record.Wave2.RetiredSurfaces, wantRetired) || !reflect.DeepEqual(record.Wave2.CanonicalOwners, wantOwners) {
 		t.Fatalf("wave 2 registry = %#v", record.Wave2)
 	}
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowInputEventPin{}), []string{"event", "initialize", "resolution", "source"})
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowOutputEventPin{}), []string{"event", "sink"})
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowInputEventPin{}), []string{"event", "initialize"})
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowOutputEventPin{}), []string{"event"})
 	for _, owner := range []reflect.Type{
 		reflect.TypeOf(runtimecontracts.CompiledFlowInputPin{}),
 		reflect.TypeOf(runtimecontracts.CompiledFlowOutputPin{}),

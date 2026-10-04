@@ -210,7 +210,6 @@ func TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix(t *testing.T)
 		{mode: runtimecontracts.FlowInputResolutionModeCreate, want: true},
 		{mode: runtimecontracts.FlowInputResolutionModeSelect, want: false},
 		{mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate, want: true},
-		{mode: runtimecontracts.FlowInputResolutionModeFanOut, want: false},
 		{mode: runtimecontracts.FlowInputResolutionModeReply, want: false},
 		{mode: runtimecontracts.FlowInputResolutionModeNone, want: false},
 		{mode: runtimecontracts.FlowInputResolutionMode(255), want: true},

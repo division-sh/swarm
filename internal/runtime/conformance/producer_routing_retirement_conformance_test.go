@@ -69,7 +69,7 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 		fixtures[fixture.RelativePath] = fixture
 	}
 	wantDispositionCounts := map[string]int{
-		"root_export": 88, "negative_removal": 36, "dead_removal": 46, "retired_handler_action": 1, "connected_creation": 4,
+		"root_export": 81, "retired_static_multi_entity_output": 7, "negative_removal": 36, "dead_removal": 46, "retired_handler_action": 1, "connected_creation": 4,
 		"same_flow": 7, "external": 3, "historical_connect": 7, "retired_pin_grant_fixture": 5,
 	}
 	gotDispositionCounts := map[string]int{}
@@ -137,6 +137,14 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 					t.Fatalf("unexpected handler-action retirement: %#v", row)
 				}
 				requireRetiredActionHistoricalFixture(t, repoRoot)
+			case "retired_static_multi_entity_output":
+				fixture, retired := fixtures[row.RetiredFixture]
+				if !retired || fixture.Metadata.Disposition != testcatalog.DispositionRetired || row.Proof != "TestStaticMultiEntityRetirementConformance" {
+					t.Fatalf("private historical output lacks explicit retirement proof: %#v", row)
+				}
+				if _, declared := outputPins[row.Event]; !declared || !containsProducerRoutingValue(emits, row.Event) {
+					t.Fatalf("historical output evidence lost: %#v pins=%v emits=%v", row, outputPins, emits)
+				}
 			case "root_export":
 				_, exported := outputPins[row.Event]
 				_, selectedRoot := fixtures[filepath.ToSlash(filepath.Dir(row.Path))]

@@ -130,26 +130,42 @@ func TestEffectiveProvenanceWireFormat(t *testing.T) {
 	}
 }
 
-func TestBuildIncludesHarnessInputSourceAndOutputSink(t *testing.T) {
+func TestBuildProjectsNamesOnlyPinsWithoutHarnessAuthority(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
-		canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection),
+		canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect),
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
-		t.Fatalf("load harness injection artifact: %v", err)
+		t.Fatalf("load connected interface artifact: %v", err)
 	}
 	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	worker := flowByID(t, view, "worker")
-	if len(worker.InputPins) != 1 || worker.InputPins[0].Source != "harness" {
-		t.Fatalf("worker input pins = %#v, want effective source harness", worker.InputPins)
+	producer := flowByID(t, view, "producer")
+	if len(producer.InputPins) != 1 || producer.InputPins[0].Event != "work.requested" || producer.InputPins[0].PinDigest == "" {
+		t.Fatalf("producer input evidence = %#v", producer.InputPins)
 	}
-	if got := outputPinByName(t, worker, "work.completed").Sink; got != "harness" {
-		t.Fatalf("worker output sink = %q, want harness", got)
+	output := outputPinByName(t, producer, "work.ready")
+	if output.PinDigest == "" || output.SourceFile == "" {
+		t.Fatalf("output identity/provenance missing: %#v", output)
+	}
+	for _, pin := range []any{producer.InputPins[0], output} {
+		raw, err := json.Marshal(pin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for _, retired := range []string{"source", "sink", "reads", "writes", "resolution", "replies_to", "correlation_key"} {
+			if _, present := fields[retired]; present {
+				t.Fatalf("pin projection retains %q: %s", retired, raw)
+			}
+		}
 	}
 }
 

@@ -10,7 +10,9 @@
         "To": "telegram-chat",
         "Rename": "",
         "Resolution": 3,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -21,7 +23,9 @@
         "To": "telegram-chat",
         "Rename": "",
         "Resolution": 3,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       }
     ],
     "handlers": {
@@ -265,46 +269,54 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 8,
+        "SourceLine": 10,
         "Event": "operating.report.triggered",
         "From": ".",
         "To": "ingress",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 11,
+        "SourceLine": 13,
         "Event": "portfolio.setup",
         "From": ".",
         "To": "portfolio",
         "Rename": "",
         "Resolution": 3,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 15,
+        "SourceLine": 17,
         "Event": "operating.report.requested",
         "From": "ingress",
         "To": "operating",
         "Rename": "",
         "Resolution": 1,
-        "KeyFrom": "event.id"
+        "KeyFrom": "event.id",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 20,
+        "SourceLine": 22,
         "Event": "operating.reported",
         "From": "operating",
         "To": "portfolio",
         "Rename": "",
         "Resolution": 2,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": "portfolio",
@@ -315,7 +327,9 @@
         "To": "period",
         "Rename": "",
         "Resolution": 1,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": "portfolio",
@@ -326,7 +340,9 @@
         "To": "period",
         "Rename": "",
         "Resolution": 2,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       }
     ],
     "handlers": {
@@ -2739,7 +2755,9 @@
         "To": "ingress",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -2750,7 +2768,9 @@
         "To": "operating",
         "Rename": "",
         "Resolution": 1,
-        "KeyFrom": "event.id"
+        "KeyFrom": "event.id",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -2761,7 +2781,9 @@
         "To": "portfolio",
         "Rename": "",
         "Resolution": 3,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       }
     ],
     "handlers": {
@@ -3867,316 +3889,98 @@
       }
     ]
   },
-  "examples/routing/harness-injection": {
-    "connects": [],
-    "handlers": {
-      "d29ya2Vy.d29ya2VyLW5vZGU": {
-        "work.requested": {
-          "Activity": {
-            "ID": "",
-            "Tool": "",
-            "Input": null,
-            "Approval": null
-          },
-          "CreateEntity": false,
-          "Description": "",
-          "Emit": {
-            "Event": "work.completed",
-            "From": "",
-            "Fields": {
-              "work_id": {
-                "Kind": "cel",
-                "Literal": null,
-                "Ref": "",
-                "RefPath": {
-                  "Root": 0,
-                  "Segments": null,
-                  "Raw": ""
-                },
-                "CEL": "payload.work_id"
-              }
-            }
-          },
-          "OnSuccess": {
-            "Emit": {
-              "Event": "",
-              "From": "",
-              "Fields": null
-            }
-          },
-          "Guard": null,
-          "AdvancesTo": "",
-          "SetsGate": null,
-          "ClearGates": null,
-          "DataAccumulation": {
-            "Writes": null,
-            "SourceEvent": ""
-          },
-          "Condition": "",
-          "Logic": "",
-          "Loop": null,
-          "OnComplete": null,
-          "Rules": null,
-          "Accumulate": null,
-          "Join": null,
-          "Compute": null,
-          "Query": null,
-          "FanOut": null,
-          "GroupBy": null,
-          "Filter": null,
-          "Reduce": null,
-          "Count": null,
-          "Clear": null
-        }
-      }
-    },
-    "nodes": {
-      "d29ya2Vy.d29ya2VyLW5vZGU": {
-        "behavior": {
-          "Description": "",
-          "EventHandlers": {
-            "work.requested": {
-              "Accumulate": null,
-              "Activity": {
-                "Approval": null,
-                "ID": "",
-                "Input": null,
-                "Tool": ""
-              },
-              "AdvancesTo": "",
-              "Clear": null,
-              "ClearGates": null,
-              "Compute": null,
-              "Condition": "",
-              "Count": null,
-              "CreateEntity": false,
-              "DataAccumulation": {
-                "SourceEvent": "",
-                "Writes": null
-              },
-              "Description": "",
-              "Emit": {
-                "Event": "work.completed",
-                "Fields": {
-                  "work_id": {
-                    "CEL": "payload.work_id",
-                    "Kind": "cel",
-                    "Literal": null,
-                    "Ref": "",
-                    "RefPath": {
-                      "Raw": "",
-                      "Root": 0,
-                      "Segments": null
-                    }
-                  }
-                },
-                "From": ""
-              },
-              "FanOut": null,
-              "Filter": null,
-              "GroupBy": null,
-              "Guard": null,
-              "Join": null,
-              "Logic": "",
-              "Loop": null,
-              "OnComplete": null,
-              "OnSuccess": {
-                "Emit": {
-                  "Event": "",
-                  "Fields": null,
-                  "From": ""
-                }
-              },
-              "Query": null,
-              "Reduce": null,
-              "Rules": null,
-              "SetsGate": null
-            }
-          },
-          "ExecutionType": "system_node",
-          "GateState": {
-            "Description": "",
-            "Gates": null,
-            "Storage": ""
-          },
-          "IdempotencyTable": "",
-          "Implementation": "",
-          "Produces": [
-            "work.completed"
-          ],
-          "StateSchema": {
-            "Description": "",
-            "Fields": null
-          },
-          "StateTable": "",
-          "SubscribesTo": [
-            "work.requested"
-          ],
-          "Timers": null
-        },
-        "effective": {
-          "ID": "worker-node",
-          "ExecutionType": "system_node",
-          "RuntimeSubscriptions": [
-            "work.requested"
-          ],
-          "Produces": [
-            "work.completed"
-          ]
-        },
-        "identity": {
-          "flow_path": "worker",
-          "node_id": "worker-node"
-        }
-      }
-    },
-    "owners": {
-      "worker/work.requested": [
-        "d29ya2Vy.d29ya2VyLW5vZGU"
-      ]
-    },
-    "transitions": [
-      {
-        "ID": "d29ya2Vy.d29ya2VyLW5vZGU:work.requested",
-        "Node": {
-          "flow_path": "worker",
-          "node_id": "worker-node"
-        },
-        "EventType": "work.requested",
-        "CreateEntity": false,
-        "Activity": {
-          "ID": "",
-          "Tool": "",
-          "Input": null,
-          "Approval": null
-        },
-        "Guard": null,
-        "AdvancesTo": "",
-        "SetsGate": null,
-        "ClearGates": null,
-        "DataAccumulation": {
-          "Writes": null,
-          "SourceEvent": ""
-        },
-        "Emit": {
-          "Event": "work.completed",
-          "From": "",
-          "Fields": {
-            "work_id": {
-              "Kind": "cel",
-              "Literal": null,
-              "Ref": "",
-              "RefPath": {
-                "Root": 0,
-                "Segments": null,
-                "Raw": ""
-              },
-              "CEL": "payload.work_id"
-            }
-          }
-        },
-        "OnSuccess": {
-          "Emit": {
-            "Event": "",
-            "From": "",
-            "Fields": null
-          }
-        },
-        "Condition": "",
-        "Loop": null,
-        "OnComplete": null,
-        "Rules": null,
-        "Accumulate": null,
-        "Join": null,
-        "Compute": null,
-        "Query": null,
-        "FanOut": null,
-        "GroupBy": null,
-        "Filter": null,
-        "Reduce": null,
-        "Count": null,
-        "Clear": null
-      }
-    ]
-  },
   "examples/routing/notify-all-children": {
     "connects": [
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 18,
+        "SourceLine": 16,
         "Event": "portfolio.opened",
         "From": ".",
         "To": "portfolio",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 21,
+        "SourceLine": 19,
         "Event": "portfolio.account.register.requested",
         "From": ".",
         "To": "portfolio",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 24,
+        "SourceLine": 22,
         "Event": "portfolio.accounts.register.requested",
         "From": ".",
         "To": "portfolio",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 27,
+        "SourceLine": 25,
         "Event": "portfolio.membership.seeded",
         "From": ".",
         "To": "portfolio",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 30,
+        "SourceLine": 28,
         "Event": "portfolio.notify.requested",
         "From": ".",
         "To": "portfolio",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 33,
+        "SourceLine": 31,
         "Event": "account.registered",
         "From": "portfolio",
         "To": "account",
         "Rename": "",
         "Resolution": 3,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 37,
+        "SourceLine": 35,
         "Event": "account.notify.requested",
         "From": "portfolio",
         "To": "account",
         "Rename": "",
         "Resolution": 2,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       }
     ],
     "handlers": {
@@ -6247,7 +6051,9 @@
         "To": "producer",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -6258,7 +6064,9 @@
         "To": "consumer",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       }
     ],
     "handlers": {
@@ -7096,7 +6904,9 @@
         "To": "producer",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -7107,7 +6917,9 @@
         "To": "validator",
         "Rename": "",
         "Resolution": 1,
-        "KeyFrom": "generated.uuid"
+        "KeyFrom": "generated.uuid",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -7118,7 +6930,9 @@
         "To": "producer",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       }
     ],
     "handlers": {
@@ -8015,68 +7829,80 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 8,
+        "SourceLine": 10,
         "Event": "requester.setup.requested",
         "From": ".",
         "To": "initiator",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 11,
+        "SourceLine": 13,
         "Event": "request.submitted",
         "From": ".",
         "To": "initiator",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 14,
+        "SourceLine": 16,
         "Event": "requester.setup",
         "From": "initiator",
         "To": "requester",
         "Rename": "",
         "Resolution": 3,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 18,
+        "SourceLine": 20,
         "Event": "requester.requested",
         "From": "initiator",
         "To": "requester",
         "Rename": "",
         "Resolution": 2,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 22,
+        "SourceLine": 24,
         "Event": "provider.requested",
         "From": "requester",
         "To": "provider",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 25,
+        "SourceLine": 27,
         "Event": "provider.replied",
         "From": "provider",
         "To": "requester",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "provider.requested",
+        "CorrelationKey": ""
       }
     ],
     "handlers": {
@@ -9257,46 +9083,54 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 8,
+        "SourceLine": 10,
         "Event": "account.setup.requested",
         "From": ".",
         "To": "producer",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 11,
+        "SourceLine": 13,
         "Event": "account.work.requested",
         "From": ".",
         "To": "producer",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 14,
+        "SourceLine": 16,
         "Event": "account.setup",
         "From": "producer",
         "To": "account",
         "Rename": "",
         "Resolution": 3,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 18,
+        "SourceLine": 20,
         "Event": "account.ready",
         "From": "producer",
         "To": "account",
         "Rename": "",
         "Resolution": 2,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       }
     ],
     "handlers": {
@@ -10047,7 +9881,9 @@
         "To": "producer",
         "Rename": "",
         "Resolution": 0,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       },
       {
         "OwnerFlowPath": ".",
@@ -10058,7 +9894,9 @@
         "To": "account",
         "Rename": "",
         "Resolution": 3,
-        "KeyFrom": ""
+        "KeyFrom": "",
+        "RepliesTo": "",
+        "CorrelationKey": ""
       }
     ],
     "handlers": {

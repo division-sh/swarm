@@ -18,7 +18,7 @@ func TestTemplateSubscriptionProjectionMatchesFreshAdmission(t *testing.T) {
 	scatter, _ := topologyOperationFixture(t)
 	sources := map[string]semanticview.Source{
 		"scatter":           scatter.Source,
-		"template_observer": loadHarnessRouteSource(t, canonicalrouting.CopyTemplateOutputRootConnect(t)),
+		"template_observer": loadNamesOnlyRouteSource(t, canonicalrouting.CopyTemplateOutputRootConnect(t)),
 	}
 	checked := 0
 	for name, source := range sources {

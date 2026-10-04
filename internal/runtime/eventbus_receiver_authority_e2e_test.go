@@ -86,7 +86,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 					Models:  map[string]map[string]string{"regular": {"anthropic": "test-model"}, "cheap": {"anthropic": "test-haiku"}},
 				},
 			}
-			rt, err := swarmruntime.New(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
+			rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config:     cfg,
 				EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
 				EventPayloadAdmissionBinder: selected, InboundPayloadAdmissionBinder: selected,

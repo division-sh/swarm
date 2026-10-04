@@ -41,7 +41,7 @@ func CopyForkReceiverBusinessMutationOwnership(t testing.TB, entitylessProducer 
         writes:
           - {target_field: processed_token, value: "${payload.token}"}
 `)
-	applyClosedReplacement(t, filepath.Join(root, "consumer/schema.yaml"), "  outputs:\n    events: [receiver.finished]\n", "")
+	applyClosedReplacement(t, filepath.Join(root, "consumer/schema.yaml"), "  outputs: [receiver.finished]\n", "")
 	removeClosedVariantFiles(t, root, "consumer/events.yaml")
 	removeForkReceiverFinishedConnection(t, root, "consumer")
 	return root
@@ -388,7 +388,7 @@ connect:
 		producerBody = "      advances_to: active\n      data_accumulation:\n        writes:\n          - {target_field: marker, value: \"${'producer-owned'}\"}\n"
 		writeClosedVariantFile(t, root, "producer/entities.yaml", "work:\n  marker: text\n")
 	}
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\n"+producerStages+"pins:\n  inputs:\n    events: [work.requested]\n  outputs:\n    events: [work.ready]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\n"+producerStages+"pins:\n  inputs: [work.requested]\n  outputs: [work.ready]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  token: text\n")
 	writeClosedVariantFile(t, root, "producer/nodes.yaml", `producer:
   execution_type: system_node

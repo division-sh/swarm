@@ -247,7 +247,7 @@ rows:
 - id: B048
   path: tests/tier11-flow-composition/test-child-flow-local-events/child/nodes.yaml
   event: child.done
-  disposition: root_export
+  disposition: retired_static_multi_entity_output
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-child-flow-local-events
 - id: B049
@@ -270,7 +270,7 @@ rows:
 - id: B052
   path: tests/tier11-flow-composition/test-child-flow-policy-inherit/child/nodes.yaml
   event: check.passed
-  disposition: root_export
+  disposition: retired_static_multi_entity_output
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-child-flow-policy-inherit
 - id: B053
@@ -282,7 +282,7 @@ rows:
 - id: B054
   path: tests/tier11-flow-composition/test-child-flow-sibling-isolation/flow-a/nodes.yaml
   event: alpha.complete
-  disposition: root_export
+  disposition: retired_static_multi_entity_output
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-child-flow-sibling-isolation
 - id: B055
@@ -363,7 +363,7 @@ rows:
 - id: B068
   path: tests/tier11-flow-composition/test-multi-level-policy-inherit/child/grandchild/nodes.yaml
   event: grandchild.passed
-  disposition: root_export
+  disposition: retired_static_multi_entity_output
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-multi-level-policy-inherit
 - id: B069
@@ -404,13 +404,13 @@ rows:
 - id: B075
   path: tests/tier11-flow-composition/test-subject-id-cross-flow-inherit/scoring/nodes.yaml
   event: score.done
-  disposition: root_export
+  disposition: retired_static_multi_entity_output
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-subject-id-cross-flow-inherit
 - id: B076
   path: tests/tier11-flow-composition/test-subject-id-first-flow-seeds/intake/nodes.yaml
   event: item.processed
-  disposition: root_export
+  disposition: retired_static_multi_entity_output
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier11-flow-composition/test-subject-id-first-flow-seeds
 - id: B077
@@ -707,7 +707,7 @@ rows:
 - id: B135
   path: tests/tier7-composition/test-wildcard-cross-flow/flow-alpha/nodes.yaml
   event: job.alpha_done
-  disposition: root_export
+  disposition: retired_static_multi_entity_output
   proof: TestStaticMultiEntityRetirementConformance
   retired_fixture: tests/tier7-composition/test-wildcard-cross-flow
 - id: B136

@@ -12,7 +12,7 @@ func TestPlatformSpecOwnsRootInputRejectionDiagnostics(t *testing.T) {
 		"not_declared_root_input",
 		"declared_root_input_not_routable",
 		"server-owned root-input facts",
-		"pins.inputs.events",
+		"pins.inputs",
 		"none",
 		"MUST NOT reload contracts",
 		"non-canonical",

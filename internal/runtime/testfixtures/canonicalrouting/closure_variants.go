@@ -205,11 +205,11 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	} else {
 		childEvents += "ticket.closed:\n  entity_id: string\n"
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-validation\npins:\n  inputs:\n    events: "+inputs+"\n  outputs:\n    events: "+inputs+"\nconnect:\n"+connections)
+	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-validation\npins:\n  inputs: "+inputs+"\n  outputs: "+inputs+"\nconnect:\n"+connections)
 	writeClosedVariantFile(t, root, "events.yaml", rootEvents)
-	flowPins := "pins:\n  inputs:\n    events: " + inputs + "\n"
+	flowPins := "pins:\n  inputs: " + inputs + "\n"
 	if settings.flowOutput {
-		flowPins += "  outputs:\n    events:\n      - timer.reminder\n"
+		flowPins += "  outputs:\n    - timer.reminder\n"
 	}
 	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {initial: true}\n  active: {}\n  done: {terminal: true}\n"+flowPins)
 	agents := ""
@@ -314,13 +314,13 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	for _, event := range inputs {
 		connections += "  - {event: " + event + ", from: ., to: support}\n"
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-state-cancel-reachability\npins:\n  inputs:\n    events: ["+pinList+"]\n  outputs:\n    events: ["+pinList+"]\nconnect:\n"+connections)
+	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-state-cancel-reachability\npins:\n  inputs: ["+pinList+"]\n  outputs: ["+pinList+"]\nconnect:\n"+connections)
 	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\nticket.closed:\n  entity_id: string\nadmin.done:\nadmin.review:\n")
 	reviewMetadata := "{}"
 	if settings.treatReviewAsTerminalActivation {
 		reviewMetadata = "{terminal: true}"
 	}
-	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {initial: true}\n  active: {}\n  review: "+reviewMetadata+"\n  done: {terminal: true}\npins:\n  inputs:\n    events: ["+pinList+"]\n")
+	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {initial: true}\n  active: {}\n  review: "+reviewMetadata+"\n  done: {terminal: true}\npins:\n  inputs: ["+pinList+"]\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "timer.reminder:\n")
 	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {

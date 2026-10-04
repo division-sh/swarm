@@ -66,7 +66,7 @@ func (c *checkerContext) deadEventSchema() []Finding {
 			CheckID:  "semantic_drift_dead_event_schema",
 			Severity: "warning",
 			Message: fmt.Sprintf(
-				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- Declared input or provider source: %s\n- Public root output: %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n- Parent connect outputs: %d\n- Parent connect inputs: %d\n\nIf this event is no longer used, remove it from %s.\nIf it is produced outside this flow, declare an actual provider ingress or an explicit parent connection; select this directory as the root for public input admission. For a validation fixture only, set source: harness on the input pin; it will remain non-production-valid.",
+				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- Declared input or provider source: %s\n- Public root output: %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n- Parent connect outputs: %d\n- Parent connect inputs: %d\n\nIf this event is no longer used, remove it from %s.\nIf it is produced outside this flow, declare an actual provider ingress or an explicit parent connection; select this directory as the root for public input admission.",
 				decl.Canonical,
 				fileLabel,
 				usage.handlerEmits,

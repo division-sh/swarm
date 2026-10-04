@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+func CopyRetiredPinMarker(t testing.TB, input bool) string {
+	t.Helper()
+	root := CopyExample(t, ParentConnect)
+	direction, field := "outputs", "sink"
+	if input {
+		direction, field = "inputs", "source"
+	}
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"  "+direction+":\n    - work.requested\n",
+		"  "+direction+":\n    - {event: work.requested, "+field+": harness}\n")
+	return root
+}
+
 // ApplyCompositionConnectReceiverPinCollisionMutation creates two distinct
 // receiver-local edges that collapse onto one durable event x subscriber row.
 func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root string) {

@@ -21,7 +21,7 @@ func CopyPublicationStateResult(t testing.TB, mode string) string {
 	if flow == "." {
 		schema += connect
 	} else {
-		writeClosedVariantFile(t, root, "schema.yaml", "name: result-root\npins:\n  inputs:\n    events: [document.requested]\n  outputs:\n    events: [document.requested]\n"+connect+"  - {event: document.requested, from: ., to: source}\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "name: result-root\npins:\n  inputs: [document.requested]\n  outputs: [document.requested]\n"+connect+"  - {event: document.requested, from: ., to: source}\n")
 		writeClosedVariantFile(t, root, "events.yaml", "document.requested:\n  request_id: text\n  content: text\n  result_kind: text\n")
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)

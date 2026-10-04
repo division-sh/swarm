@@ -19,10 +19,10 @@ import (
 // Negative/parser snippets and exact mutation strings are migrated explicitly,
 // not normalized by this one-shot positive-producer rewrite.
 var manualGoSources = map[string]bool{
-	"parser_snippets.go":         true,
-	"negative.go":                true,
-	"schema_admission_source.go": true,
-	"harness_injection.go":       true,
+	"parser_snippets.go":            true,
+	"negative.go":                   true,
+	"schema_admission_source.go":    true,
+	"harness_injection.go":          true,
 	"arrival_join_guard_sources.go": true,
 	"publication_sites.go":          true,
 }
@@ -51,6 +51,18 @@ func runGoSources(root string, write bool) error {
 		if !bytes.Equal(data, after) {
 			plan = append(plan, change{Path: name, After: after})
 		}
+	}
+	name := "internal/runtime/bootverify/report_test.go"
+	data, err := os.ReadFile(filepath.Join(root, name))
+	if err != nil {
+		return err
+	}
+	after, err := rewriteGoSource(name, data)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(data, after) {
+		plan = append(plan, change{Path: name, After: after})
 	}
 	if write {
 		if err := applyPlan(root, plan, nil); err != nil {
