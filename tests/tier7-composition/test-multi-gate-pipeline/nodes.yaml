@@ -42,7 +42,7 @@ approval-node:
     approval.requested:
       guard:
         id: all_gates_check
-        check: "_entity.gates.g1 == true && _entity.gates.g2 == true && _entity.gates.g3 == true"
+        check: _entity.gates.g1 == true && _entity.gates.g2 == true && _entity.gates.g3 == true
       advances_to: approved
       emit:
         event: approval.granted

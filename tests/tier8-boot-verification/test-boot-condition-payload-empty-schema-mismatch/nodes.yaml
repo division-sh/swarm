@@ -6,5 +6,5 @@ test-node:
     check.requested:
       guard:
         id: empty_schema_guard
-        check: "payload.empty_schema_guard == true"
+        check: payload.empty_schema_guard == true
       advances_to: done

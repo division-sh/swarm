@@ -8,6 +8,6 @@ test-node:
         writes:
           - op: append
             target: entity.findings
-            value: {finding: "${payload.finding}", severity: "${payload.severity}"}
+            value: {finding: payload.finding, severity: payload.severity}
       emit:
         event: evidence.recorded

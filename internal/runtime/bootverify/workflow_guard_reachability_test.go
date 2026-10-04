@@ -13,20 +13,20 @@ func TestRunGuardTerminationReachabilityThroughSourceAdmission(t *testing.T) {
 		name, target, handler string
 		wantUnreachable       bool
 	}{
-		{"kill without advance", "killed", "      guard: {id: check, check: 'false', on_fail: kill}\n", false},
-		{"kill with success advance", "killed", "      guard: {id: check, check: 'false', on_fail: kill}\n      advances_to: killed\n", false},
-		{"chain", "killed", "      guard:\n        checks:\n          - {id: first, check: 'true'}\n          - {id: second, check: 'false'}\n        on_fail: kill\n", false},
+		{"kill without advance", "killed", "      guard: {id: check, check: false, on_fail: kill}\n", false},
+		{"kill with success advance", "killed", "      guard: {id: check, check: false, on_fail: kill}\n      advances_to: killed\n", false},
+		{"chain", "killed", "      guard:\n        checks:\n          - {id: first, check: true}\n          - {id: second, check: false}\n        on_fail: kill\n", false},
 		{"on fail only", "killed", "      guard: {on_fail: kill}\n", true},
 		{"empty checks", "killed", "      guard: {checks: [{}], on_fail: kill}\n", true},
 		{"policy only", "killed", "      guard: {policy_ref: threshold, on_fail: kill}\n", true},
-		{"unnamed", "killed", "      guard: {check: 'false', on_fail: kill}\n", false},
-		{"unnamed chain", "killed", "      guard: {checks: [{check: 'true'}, {check: 'false'}], on_fail: kill}\n", false},
-		{"mixed chain", "killed", "      guard: {checks: [{}, {id: first, check: 'true'}, {check: 'false'}, {}], on_fail: kill}\n", false},
+		{"unnamed", "killed", "      guard: {check: false, on_fail: kill}\n", false},
+		{"unnamed chain", "killed", "      guard: {checks: [{check: true}, {check: false}], on_fail: kill}\n", false},
+		{"mixed chain", "killed", "      guard: {checks: [{}, {id: first, check: true}, {check: false}, {}], on_fail: kill}\n", false},
 		{"no op with ordinary advance", "killed", "      guard: {checks: [{}], on_fail: kill}\n      advances_to: killed\n", false},
 		{"no guard", "killed", "      advances_to: ready\n", true},
-		{"reject", "killed", "      guard: {id: check, check: 'false', on_fail: reject}\n", true},
-		{"discard", "killed", "      guard: {id: check, check: 'false', on_fail: discard}\n", true},
-		{"wrong case", "Killed", "      guard: {id: check, check: 'false', on_fail: kill}\n", true},
+		{"reject", "killed", "      guard: {id: check, check: false, on_fail: reject}\n", true},
+		{"discard", "killed", "      guard: {id: check, check: false, on_fail: discard}\n", true},
+		{"wrong case", "Killed", "      guard: {id: check, check: false, on_fail: kill}\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()

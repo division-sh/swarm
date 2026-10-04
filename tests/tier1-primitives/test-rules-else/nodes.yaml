@@ -6,7 +6,7 @@ test-node:
     item.received:
       rules:
         type_a:
-          when: "payload.kind == 'a'"
+          when: payload.kind == 'a'
         unknown:
           else: true
           emit:

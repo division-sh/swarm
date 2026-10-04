@@ -616,7 +616,8 @@ nested-reader:
     nested.ready:
       rules:
         entity-rows:
-          when: "true"
+          when: |-
+                  true
           fan_out:
             items_from: entity.items
             as: row

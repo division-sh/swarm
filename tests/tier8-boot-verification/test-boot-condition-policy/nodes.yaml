@@ -6,5 +6,5 @@ policy-check-node:
     check.requested:
       guard:
         id: policy_ref
-        check: "payload.score >= policy.nonexistent_key"
+        check: payload.score >= policy.nonexistent_key
       advances_to: done

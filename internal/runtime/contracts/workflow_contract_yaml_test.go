@@ -161,8 +161,8 @@ stages:
     gate:
       decision: launch_review
       context:
-        staging: ${entity.staging_url}
-        qa_summary: ${entity.qa_summary}
+        staging: entity.staging_url
+        qa_summary: entity.qa_summary
       outcomes:
         approve:
           advances_to: operating
@@ -174,7 +174,7 @@ stages:
           emit:
             event: launch.rejected
             fields:
-              feedback: ${decision.feedback}
+              feedback: decision.feedback
   building: {}
   operating: {terminal: true}
 `), &doc)
@@ -838,7 +838,7 @@ func TestSystemNodeEventHandlerDecode_RejectsTopLevelEmitWhenRulesExistWithoutRu
 emit: root.done
 rules:
   pass:
-    when: "payload.ok"
+    when: payload.ok
     advances_to: done
   unmatched:
     else: true
@@ -903,7 +903,7 @@ func TestSystemNodeEventHandlerDecode_LowersPolicySheetSelectionRows(t *testing.
 	if err := decodeNodeTestYAML([]byte(`
 rules:
   - id: cto_revision_gate
-    when: "payload.spec_revision > entity.last_cto_reviewed_revision && entity.revision_count >= policy.inner_revision_max"
+    when: payload.spec_revision > entity.last_cto_reviewed_revision && entity.revision_count >= policy.inner_revision_max
     advances_to: cto_review
   - id: deep_scan
     case:
@@ -1474,7 +1474,7 @@ compute:
 			body: `
 on_complete:
   - id: done
-    when: "payload.ok"
+    when: payload.ok
     advances_to: done
 `,
 			contains: "only supported under handler.rules",
@@ -2371,7 +2371,7 @@ func TestWorkflowDataWriteDecode_TreatsScalarValueAsLiteral(t *testing.T) {
 	var write WorkflowDataWrite
 	if err := decodeNodeTestYAML([]byte(`
 target_field: category
-value: premium
+value: "premium"
 `), &write); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2397,11 +2397,11 @@ writes:
   - source_field: result
     target_field: stage_one_result_copy
   - target_field: resolution_method
-    value: first
+    value: "first"
   - target_field: dispatch_count
-    value: ${fan_out.count}
+    value: fan_out.count
   - target_field: score_expr
-    value: ${entity.score + 1}
+    value: entity.score + 1
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2434,12 +2434,12 @@ func TestWorkflowDataWriteDecode_PreservesContainedOperationForms(t *testing.T) 
 writes:
   - op: append
     target: entity.verticals.active_jobs
-    key: ${payload.vertical_id}
-    value: ${payload.job}
+    key: payload.vertical_id
+    value: payload.job
   - op: update
     target: entity.queue
     index: 0
-    value: reviewed
+    value: "reviewed"
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2478,8 +2478,8 @@ writes:
   - op: append
     target_path: entity.verticals.active_jobs
     target: entity.verticals.active_jobs
-    key: north
-    value: job-1
+    key: "north"
+    value: "job-1"
 `), &spec)
 	if err == nil {
 		t.Fatal("expected contained operation target_path ambiguity error")
@@ -2662,7 +2662,7 @@ func TestWorkflowDataWriteDecode_PreservesLiteralValue(t *testing.T) {
 	var write WorkflowDataWrite
 	if err := decodeNodeTestYAML([]byte(`
 target_field: scoring_rubric
-value: corpus_rubric
+value: "corpus_rubric"
 `), &write); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2697,7 +2697,7 @@ expression: entity.score + 1
 
 func TestExpressionValueDecode_PreservesScalarAsLiteralOutsideEmitFields(t *testing.T) {
 	var expr ExpressionValue
-	if err := decodeNodeTestYAML([]byte(`target_state`), &expr); err != nil {
+	if err := decodeNodeTestYAML([]byte(`"target_state"`), &expr); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if expr.Kind != ExpressionKindLiteral {
@@ -2713,13 +2713,13 @@ func TestEmitSpecDecode_R2ValuesOnEmitFields(t *testing.T) {
 	if err := decodeNodeTestYAML([]byte(`
 event: signals.category_ready
 fields:
-  mode: ${payload.mode}
-  batch: {scan_id: "${payload.scan_id}", geography: "${payload.geography}"}
+  mode: payload.mode
+  batch: {scan_id: payload.scan_id, geography: payload.geography}
   count: 0
-  quoted_literal: ready
+  quoted_literal: "ready"
   explicit_literal:
-    literal: ready
-  exact: ${payload.mode}
+    "ready"
+  exact: payload.mode
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2750,10 +2750,10 @@ on_fail:
   escalate:
     event: check.escalated
     fields:
-      score: ${payload.score}
-      threshold: ${policy.threshold}
+      score: payload.score
+      threshold: policy.threshold
       reason:
-        literal: score_below_threshold
+        "score_below_threshold"
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2886,7 +2886,7 @@ func TestEmitSpecDecode_AcceptsLiteralObjectFieldMappings(t *testing.T) {
 event: signals.category_ready
 fields:
   batch:
-    scan_id: payload.scan_id
+    scan_id: "payload.scan_id"
 `), &spec)
 	if err != nil {
 		t.Fatal(err)
@@ -2899,7 +2899,7 @@ fields:
 func TestHandlerRuleEntryDecode_PreservesRuleLevelFanOut(t *testing.T) {
 	var rule HandlerRuleEntry
 	if err := decodeNodeTestYAML([]byte(`
-when: "payload.mode == 'parallel'"
+when: payload.mode == 'parallel'
 fan_out:
   items_from: payload.items
   as: line_item
@@ -2911,7 +2911,7 @@ fan_out:
 data_accumulation:
   writes:
     - target_field: dispatch_count
-      value: ${fan_out.count}
+      value: fan_out.count
 `), &rule); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2934,10 +2934,10 @@ on_success:
     event: handler.succeeded
     fields:
       audit:
-        literal: ok
+        "ok"
 rules:
   needs_human:
-    when: "payload.amount >= 100"
+    when: payload.amount >= 100
     emit:
       event: rule.needs_human
       fields:
@@ -2964,24 +2964,24 @@ func TestSystemNodeEventHandlerDecode_AllowsRulesEmitTemplateSpecialization(t *t
 emit:
   event: account.bucketed
   fields:
-    account_id: ${entity.id}
-    score: ${payload.score}
+    account_id: entity.id
+    score: payload.score
 rules:
   high:
     when: payload.score >= 80
     emit:
       fields:
-        bucket: high
+        bucket: "high"
   medium:
     when: payload.score >= 40
     emit:
       fields:
-        bucket: medium
+        bucket: "medium"
   low:
     else: true
     emit:
       fields:
-        bucket: low
+        bucket: "low"
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}

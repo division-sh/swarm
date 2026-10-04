@@ -24,12 +24,12 @@ stages:
           advances_to: approved
           emit:
             event: work.completed
-            fields: {result: {literal: approved}}
+            fields: {result: "approved"}
         reject:
           advances_to: approved
           emit:
             event: work.completed
-            fields: {result: {literal: rejected}}
+            fields: {result: "rejected"}
   approved: {}
   done: {terminal: true}
 pins:
@@ -47,7 +47,7 @@ pins:
       advances_to: waiting
       emit:
         event: work.completed
-        fields: {result: {literal: ready}}
+        fields: {result: "ready"}
 collector:
   execution_type: system_node
   subscribes_to: [work.completed]
@@ -56,13 +56,13 @@ collector:
       data_accumulation:
         writes:
           - target_field: result
-            value: "${payload.result}"
+            value: payload.result
       rules:
         enter_review:
-          when: "payload.result == 'ready'"
+          when: payload.result == 'ready'
           advances_to: review
         finish:
-          when: "payload.result in ['approved', 'rejected']"
+          when: payload.result in ['approved', 'rejected']
           advances_to: done
         unmatched:
           else: true
@@ -109,17 +109,19 @@ pins:
 			nodes += fmt.Sprintf(`    work.%s:
       guard:
         checks:
-          - {id: %s_choice, check: "payload.choice in ['alpha', 'beta']"}
-          - {id: %s_nonempty, check: "payload.choice != ''"}
+          - id: %s_choice
+            check: payload.choice in ['alpha', 'beta']
+          - id: %s_nonempty
+            check: payload.choice != ''
       rules:
 `, handler, handler, handler)
 			for _, choice := range []string{"alpha", "beta"} {
 				nodes += fmt.Sprintf(`        %s:
-          when: "payload.choice == '%s'"
+          when: payload.choice == '%s'
           advances_to: active
           emit:
             event: work.completed
-            fields: {result: {literal: '%s%s/%s'}}
+            fields: {result: '%s%s/%s'}
 `, choice, choice, prefix, handler, choice)
 			}
 			nodes += "        unmatched:\n          else: true\n"
@@ -132,7 +134,7 @@ pins:
       data_accumulation:
         writes:
           - target_field: result
-            value: "${payload.result}"
+            value: payload.result
       advances_to: done
 `
 		writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
@@ -237,7 +239,7 @@ stages:
           advances_to: approved
           emit:
             event: work.completed
-            fields: {result: {literal: %s}}
+            fields: {result: "%s"}
   approved: {terminal: true}
 pins:
   inputs: [loop.escaped]
@@ -257,7 +259,7 @@ connect:
       data_accumulation:
         writes:
           - target_field: result
-            value: "${payload.result}"
+            value: payload.result
       advances_to: done
 `)
 	}
@@ -294,7 +296,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 				events += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  %s: %s\n", event, command.field, command.typ)
 			}
 			nodes += ", " + input
-			handlers += fmt.Sprintf("    %s:\n      advances_to: active\n      emit:\n        event: %s\n        fields:\n          case_id: ${payload.case_id}\n          %s: ${payload.%s}\n", input, output, command.field, command.field)
+			handlers += fmt.Sprintf("    %s:\n      advances_to: active\n      emit:\n        event: %s\n        fields:\n          case_id: payload.case_id\n          %s: payload.%s\n", input, output, command.field, command.field)
 			mode := "select"
 			if command.name == "seed" {
 				mode = "select-or-create"
@@ -372,7 +374,7 @@ func CopyLifecycleForkSource(t testing.TB, gate bool) string {
   subscribes_to: [work.observed]
   event_handlers:
     work.observed:
-      guard: {id: observed, check: "payload.seed == true"}
+      guard: {id: observed, check: payload.seed == true}
 `
 		}
 		writeClosedVariantFile(t, root, path, text)
@@ -443,7 +445,7 @@ stages:
           advances_to: approved
           emit:
             event: work.completed
-            fields: {result: {literal: approved}}
+            fields: {result: "approved"}
   approved: {}
   done: {terminal: true}
 pins:
@@ -467,7 +469,7 @@ pins:
       data_accumulation:
         writes:
           - target_field: result
-            value: "${payload.result}"
+            value: payload.result
       advances_to: done
 `
 	prefix := ""
@@ -478,10 +480,10 @@ pins:
 	case LifecycleGateOutputDisconnected:
 		schema += "  outputs: [work.completed]\n"
 	case LifecycleGateSharedEvent:
-		schema = strings.Replace(schema, "  approved: {}", "        reject:\n          advances_to: approved\n          emit:\n            event: work.completed\n            fields: {result: {literal: rejected}}\n  approved: {}", 1)
+		schema = strings.Replace(schema, "  approved: {}", "        reject:\n          advances_to: approved\n          emit:\n            event: work.completed\n            fields: {result: \"rejected\"}\n  approved: {}", 1)
 		nodes += consumer
 	case LifecycleGateNoEmit:
-		schema = strings.Replace(schema, "          emit:\n            event: work.completed\n            fields: {result: {literal: approved}}\n", "", 1)
+		schema = strings.Replace(schema, "          emit:\n            event: work.completed\n            fields: {result: \"approved\"}\n", "", 1)
 	case LifecycleGateNested:
 		prefix = "outer/inner/"
 		writeClosedVariantFile(t, root, "schema.yaml", "name: lifecycle-parent\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - work.requested\nconnect:\n  - {event: work.requested, from: ., to: outer/inner}\n")
@@ -498,7 +500,7 @@ pins:
 			{"schema.yaml", "    - loop.escaped\n", "    - loop.escaped\n    - ordinary.repeated\n"},
 			{"schema.yaml", "    to: sink\n", "    to: sink\n  - event: ordinary.repeated\n    from: .\n    to: ordinary\n"},
 			{"events.yaml", "work.requested:\n", "ordinary.repeated:\n  token: text\n  revision_id: text\nwork.requested:\n"},
-			{"nodes.yaml", "loop: {repeat: revision, from: review}\n      advances_to: drafting", "loop: {repeat: revision, from: review}\n      advances_to: drafting\n      emit:\n        event: ordinary.repeated\n        fields: {token: {literal: ordinary}, revision_id: \"${loop.revision_id}\"}"},
+			{"nodes.yaml", "loop: {repeat: revision, from: review}\n      advances_to: drafting", "loop: {repeat: revision, from: review}\n      advances_to: drafting\n      emit:\n        event: ordinary.repeated\n        fields: {token: \"ordinary\", revision_id: loop.revision_id}"},
 		} {
 			raw, err := os.ReadFile(filepath.Join(root, edit.path))
 			if err != nil {
@@ -520,9 +522,9 @@ pins:
       data_accumulation:
         writes:
           - target_field: token
-            value: "${payload.token}"
+            value: payload.token
           - target_field: revision_id
-            value: "${payload.revision_id}"
+            value: payload.revision_id
       advances_to: observed
 `)
 		return root
@@ -552,7 +554,7 @@ loops:
       advances_to: escaped
       emit:
         event: loop.escaped
-        fields: {revision_id: "${loop.revision_id}"}
+        fields: {revision_id: loop.revision_id}
 pins:
   inputs:
     - work.requested
@@ -607,7 +609,7 @@ pins:
       data_accumulation:
         writes:
           - target_field: revision_id
-            value: "${payload.revision_id}"
+            value: payload.revision_id
       advances_to: done
 `)
 }

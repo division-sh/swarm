@@ -16,8 +16,8 @@ func CopyForkReceiverAcquisitionWithoutFinishedEmission(t testing.TB, policy For
 	applyClosedReplacement(t, filepath.Join(root, "consumer/nodes.yaml"), `      emit:
         event: receiver.finished
         fields:
-          owner: {literal: consumer}
-          token: "${payload.token}"
+          owner: "consumer"
+          token: payload.token
 `, "")
 	applyClosedReplacement(t, filepath.Join(root, "consumer/schema.yaml"), "  outputs:\n    - receiver.finished\n", "")
 	removeClosedVariantFiles(t, root, "consumer/events.yaml")

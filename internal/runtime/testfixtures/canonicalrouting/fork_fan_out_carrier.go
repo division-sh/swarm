@@ -14,7 +14,7 @@ func CopyForkFanOutCompletionConsumer(t testing.TB) string {
 	root := CopyForkFanOutConsumer(t, true, true)
 	for path, replacement := range map[string][2]string{
 		"events.yaml": {"batch.completed:\n  total: integer\n  revision_id: text", "batch.completed:\n  total: integer\n  revision_id: text\n  loop_id: text\n  activation_id: text\n  attempt: integer\n  max_attempts: integer"},
-		"nodes.yaml":  {"              revision_id: \"${loop.revision_id}\"\n", "              revision_id: \"${loop.revision_id}\"\n              loop_id: \"${loop.id}\"\n              activation_id: \"${loop.activation_id}\"\n              attempt: \"${loop.attempt}\"\n              max_attempts: \"${loop.max_attempts}\"\n"},
+		"nodes.yaml":  {"              revision_id: loop.revision_id\n", "              revision_id: loop.revision_id\n              loop_id: loop.id\n              activation_id: loop.activation_id\n              attempt: loop.attempt\n              max_attempts: loop.max_attempts\n"},
 	} {
 		body, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
@@ -48,7 +48,7 @@ func CopyForkFanOutConsumer(t testing.TB, loop, barrier bool) string {
 	consumer += `
       data_accumulation:
         writes:
-          - {target_field: processed_value, value: "${payload.value}"}
+          - {target_field: processed_value, value: payload.value}
 `
 	writeClosedVariantFile(t, root, "nodes.yaml", string(nodes)+consumer)
 	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  processed_value: text\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
@@ -94,10 +94,10 @@ pins:
         emit:
           event: items.child
           fields:
-            value: "${entry}"
+            value: entry
 `
 	if loop {
-		nodes += "            revision_id: \"${loop.revision_id}\"\n"
+		nodes += "            revision_id: loop.revision_id\n"
 	}
 	if barrier {
 		nodes += `      join:
@@ -107,10 +107,10 @@ pins:
           emit:
             event: batch.completed
             fields:
-              total: "${join.total}"
+              total: join.total
 `
 		if loop {
-			nodes += "              revision_id: \"${loop.revision_id}\"\n"
+			nodes += "              revision_id: loop.revision_id\n"
 		}
 	}
 	if loop {
@@ -156,9 +156,9 @@ func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
         emit:
           event: items.child
           fields:
-            value: "${entry.slug}"
-            integer_result: "${entry.score + entity.integer + 1}"
-            double_result: "${double(entry.score) + double(entity.decimal)}"
+            value: entry.slug
+            integer_result: entry.score + entity.integer + 1
+            double_result: double(entry.score) + double(entity.decimal)
 `)
 	}
 	return root

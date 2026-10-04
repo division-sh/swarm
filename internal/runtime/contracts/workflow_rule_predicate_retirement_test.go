@@ -99,7 +99,7 @@ func TestHandlerRulesWhenRejectsDefaultSentinel(t *testing.T) {
 	cases := map[string]string{
 		"list_lower_no_fallback":        "rules:\n  - when: else\n    emit: work.ready\n",
 		"list_upper_with_fallback":      "rules:\n  - when: ELSE\n    emit: work.ready\n  - else: true\n",
-		"list_whitespace_with_fallback": "rules:\n  - when: '  Else  '\n    emit: work.ready\n  - else: true\n",
+		"list_whitespace_with_fallback": "rules:\n  - when: |-\n              Else  \n    emit: work.ready\n  - else: true\n",
 		"singleton":                     "rules:\n  when: else\n",
 		"keyed":                         "rules:\n  bad:\n    when: else\n  fallback:\n    else: true\n",
 		"alias":                         "bad: &bad {when: else}\nrules:\n  - *bad\n  - else: true\n",
@@ -182,7 +182,7 @@ func TestBundleAdmissionRejectsRetiredRulePredicateAndCompilesWhen(t *testing.T)
 	if _, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), `field "condition" is not supported`) {
 		t.Fatalf("retired bundle admission = %v", err)
 	}
-	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - id: selected\n          when: 'true'\n        - else: true\n")
+	writeFixtureFile(t, nodes, "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - id: selected\n          when: |-\n                  true\n        - else: true\n")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatal(err)

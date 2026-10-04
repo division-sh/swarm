@@ -2,12 +2,21 @@ node-a:
   execution_type: system_node
   event_handlers:
     work.ready:
-      accumulate: {into: items, from: payload}
+      accumulate:
+        into: items
+        from: payload
     work.clear:
       data_accumulation:
         writes:
-          - {op: clear, target: entity.revision_count}
-          - {op: clear, target: entity.dedup_key}
-          - {op: clear, target: entity.accumulated_count}
+          - op: clear
+            target: entity.revision_count
+          - op: clear
+            target: entity.dedup_key
+          - op: clear
+            target: entity.accumulated_count
     work.kill:
-      guard: {id: stop-work, check: 'false', on_fail: kill}
+      guard:
+        id: stop-work
+        check: |-
+          false
+        on_fail: kill

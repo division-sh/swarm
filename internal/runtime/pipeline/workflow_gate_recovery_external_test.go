@@ -1466,7 +1466,7 @@ func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposa
       activity:
         id: send_support_reply
         tool: provider_write
-        input: {chat_id: "${payload.chat_id}", text: "${payload.text}"}
+        input: {chat_id: payload.chat_id, text: payload.text}
         approval: {decision: support_reply}
     send_support_reply.revision_requested: {}
     send_support_reply.rejected: {}

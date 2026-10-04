@@ -11,6 +11,6 @@ fan-out-node:
         emit:
           event: item.assigned
           fields:
-            item: ${line_item}
-            item_id: ${line_item.id}
+            item: line_item
+            item_id: line_item.id
       advances_to: scanning

@@ -642,7 +642,7 @@ func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := strings.Replace(string(nodes), "        on_complete:\n          advances_to: review", "        on_complete:\n          advances_to: review\n          emit:\n            event: line_item.requested\n            fields:\n              line_item_id: ${join.missing > 1}\n              line_item_index: 0", 1)
+	updated := strings.Replace(string(nodes), "        on_complete:\n          advances_to: review", "        on_complete:\n          advances_to: review\n          emit:\n            event: line_item.requested\n            fields:\n              line_item_id: join.missing > 1\n              line_item_index: 0", 1)
 	if updated == string(nodes) {
 		t.Fatal("join fixture mutation did not match")
 	}
@@ -694,7 +694,7 @@ types:
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := strings.Replace(string(nodes), "        on_complete:\n          advances_to: review", "        on_complete:\n          advances_to: review\n          emit:\n            event: line_item.requested\n            fields:\n              line_item_id: ${join.results.exists(r, r > 1)}\n              line_item_index: 0", 1)
+	updated := strings.Replace(string(nodes), "        on_complete:\n          advances_to: review", "        on_complete:\n          advances_to: review\n          emit:\n            event: line_item.requested\n            fields:\n              line_item_id: join.results.exists(r, r > 1)\n              line_item_index: 0", 1)
 	if updated == string(nodes) {
 		t.Fatal("join fixture mutation did not match")
 	}

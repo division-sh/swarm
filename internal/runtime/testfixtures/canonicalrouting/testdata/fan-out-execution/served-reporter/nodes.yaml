@@ -6,8 +6,8 @@ start-portfolio:
       emit:
         event: portfolio.opened.forwarded
         fields:
-          portfolio_id: ${payload.portfolio_id}
-          threshold: ${payload.threshold}
+          portfolio_id: payload.portfolio_id
+          threshold: payload.threshold
 numeric-registration-reporter:
   execution_type: system_node
   subscribes_to: [account.registered]

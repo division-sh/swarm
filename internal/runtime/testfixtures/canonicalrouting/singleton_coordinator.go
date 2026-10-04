@@ -216,7 +216,7 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
 	case SingletonCoordinatorPilotDefault:
 		return singletonCoordinatorValidWritesYAML()
 	case SingletonCoordinatorPilotDynamicBracketTarget:
-		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index[payload.lead_id]", "key: \"${payload.lead_id}\"", `
+		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index[payload.lead_id]", "key: payload.lead_id", `
             value:
               status: active
               score: 0
@@ -230,19 +230,19 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
               observations: []
 `)
 	case SingletonCoordinatorPilotWrongValueShape:
-		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index", "key: \"${payload.lead_id}\"", `
+		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index", "key: payload.lead_id", `
             value:
               undeclared: true
 `)
 	case SingletonCoordinatorPilotUndeclaredTarget:
-		return singletonCoordinatorFirstMapWriteYAML("set", "entity.missing_index", "key: \"${payload.lead_id}\"", `
+		return singletonCoordinatorFirstMapWriteYAML("set", "entity.missing_index", "key: payload.lead_id", `
             value:
               status: active
               score: 0
               observations: []
 `)
 	case SingletonCoordinatorPilotUnsupportedOperation:
-		return singletonCoordinatorFirstMapWriteYAML("replace", "entity.lead_index", "key: \"${payload.lead_id}\"", `
+		return singletonCoordinatorFirstMapWriteYAML("replace", "entity.lead_index", "key: payload.lead_id", `
             value:
               status: active
               score: 0
@@ -252,7 +252,7 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
 		return singletonCoordinatorDirectWriteYAML() + singletonCoordinatorValidWritesPrefixYAML() + `          - op: update
             target: entity.audit_log
             index: -1
-            value: "${payload.corrected_audit}"
+            value: payload.corrected_audit
 `
 	case SingletonCoordinatorPilotDemandProjection:
 		return `          - source_field: audit
@@ -268,33 +268,33 @@ func singletonCoordinatorValidWritesYAML() string {
 	return singletonCoordinatorDirectWriteYAML() + singletonCoordinatorValidWritesPrefixYAML() + `          - op: update
             target: entity.audit_log
             index: 0
-            value: "${payload.corrected_audit}"
+            value: payload.corrected_audit
 `
 }
 
 func singletonCoordinatorValidWritesPrefixYAML() string {
 	return `          - op: set
             target: entity.lead_index
-            key: "${payload.lead_id}"
+            key: payload.lead_id
             value:
               status: active
               score: 0
               observations: []
           - op: merge
             target: entity.lead_index
-            key: "${payload.lead_id}"
+            key: payload.lead_id
             value:
               score: 1
           - op: append
             target: entity.lead_index.observations
-            key: "${payload.lead_id}"
-            value: "${payload.observation}"
+            key: payload.lead_id
+            value: payload.observation
           - op: append
             target: entity.audit_log
-            value: "${payload.audit}"
+            value: payload.audit
           - op: append
             target: entity.audit_log
-            value: "${payload.followup_audit}"
+            value: payload.followup_audit
 `
 }
 

@@ -7,9 +7,9 @@ producer-node:
       emit:
         event: account.setup
         fields:
-          account_id: ${payload.account_id}
+          account_id: payload.account_id
     account.work.requested:
       emit:
         event: account.ready
         fields:
-          account_id: ${payload.account_id}
+          account_id: payload.account_id

@@ -22,9 +22,15 @@ func projectNodeQueryValue(value yamlsource.Value) (*QuerySpec, error) {
 	var out QuerySpec
 	if err := nodeValueTexts(fields, map[string]*string{
 		"source": &out.Source, "entities": &out.Entities,
-		"filter": &out.Filter, "group_by": &out.GroupBy, "store_as": &out.StoreAs,
+		"group_by": &out.GroupBy, "store_as": &out.StoreAs,
 	}, true); err != nil {
 		return nil, err
+	}
+	if filter, present := fields["filter"]; present {
+		out.Filter, err = projectNodeScalarExpression(filter, "query.filter", true)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if count, present := fields["count"]; present {
 		out.Count, err = nodeValueBool(count, "query.count")

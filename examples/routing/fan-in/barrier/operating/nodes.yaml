@@ -7,8 +7,8 @@ operating-node:
       emit:
         event: operating.reported
         fields:
-          operating_instance_id: ${payload.operating_instance_id}
-          operating_id: ${payload.operating_id}
-          portfolio_id: ${payload.portfolio_id}
-          period_id: ${payload.period_id}
-          revenue: ${payload.revenue}
+          operating_instance_id: payload.operating_instance_id
+          operating_id: payload.operating_id
+          portfolio_id: payload.portfolio_id
+          period_id: payload.period_id
+          revenue: payload.revenue

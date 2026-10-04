@@ -6,5 +6,5 @@ root-node:
     root.check:
       guard:
         id: root_threshold_check
-        check: "payload.score >= policy.threshold"
+        check: payload.score >= policy.threshold
       advances_to: done

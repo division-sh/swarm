@@ -27,7 +27,7 @@ signature:
   invalid_error: signature invalid
   timestamp: {header: X-Time, tolerance: 5m, missing_error: time missing, invalid_error: time invalid, stale_error: time stale}
 challenge:
-  when: {json_path: '$.kind', equals: challenge, normalize: false, missing_error: kind missing, mismatch_error: kind mismatch}
+  when: {json_path: $.kind, equals: challenge, normalize: false, missing_error: kind missing, mismatch_error: kind mismatch}
   response: {json_path: '$.challenge', content_type: text/plain, status: 200, missing_error: challenge missing}
 delivery_condition: {json_path: '$.kind', equals: delivery, normalize: false, missing_error: kind missing, mismatch_error: kind mismatch}
 delivery_id: {header: X-Delivery, required: true, missing_error: id missing}

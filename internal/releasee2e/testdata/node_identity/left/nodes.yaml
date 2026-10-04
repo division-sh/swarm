@@ -7,13 +7,13 @@ worker:
       advances_to: working
       emit:
         event: work.processed
-        fields: {marker: "${payload.marker}", origin: left}
+        fields: {marker: payload.marker, origin: "left"}
     work.processed:
       advances_to: done
     work.routed:
       advances_to: working
       emit:
         event: work.observed
-        fields: {marker: "${payload.marker}", origin: left}
+        fields: {marker: payload.marker, origin: "left"}
     work.observed:
       advances_to: done

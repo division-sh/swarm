@@ -7,8 +7,8 @@ orchestrator:
       emit:
         event: worker.requested
         fields:
-          worker_id: ${payload.worker_id}
-          task_label: ${payload.task_label}
+          worker_id: payload.worker_id
+          task_label: payload.task_label
       advances_to: spawned
 
 assigner:
@@ -20,6 +20,6 @@ assigner:
       emit:
         event: work.assign
         fields:
-          worker_id: ${payload.worker_id}
-          task_label: ${payload.task_label}
+          worker_id: payload.worker_id
+          task_label: payload.task_label
       advances_to: done

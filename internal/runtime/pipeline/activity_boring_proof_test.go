@@ -517,7 +517,7 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
       activity:
         tool: source_scrape
         input:
-          url: ${payload.url}
+          url: payload.url
 `,
 		"tools.yaml": fmt.Sprintf(`source_scrape:
   description: Read a source.

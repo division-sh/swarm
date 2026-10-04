@@ -44,7 +44,7 @@ pins:
   subscribes_to: [inbound.telegram.text_message, chat.initialized]
   event_handlers:
     inbound.telegram.text_message:
-      guard: {check: "payload.conversation_reference != ''"}
+      guard: {check: payload.conversation_reference != ''}
     chat.initialized:
       data_accumulation:
         writes: [initial_text, message_number, enabled]

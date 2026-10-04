@@ -54,7 +54,7 @@ func TestR2MixedInterpolationFormatsSupportedValues(t *testing.T) {
 	}
 }
 
-func TestR2AuthoredMixedInterpolationKeepsTypedSoleExpression(t *testing.T) {
+func TestR2AuthoredInterpolationAlwaysReturnsText(t *testing.T) {
 	for _, tc := range []struct {
 		source string
 		want   any
@@ -62,7 +62,9 @@ func TestR2AuthoredMixedInterpolationKeepsTypedSoleExpression(t *testing.T) {
 		{`v=${null}`, "v=null"},
 		{`v=${[1,2]}`, "v=[1,2]"},
 		{`v=${{"b":2,"a":1}}`, `v={"a":1,"b":2}`},
-		{`${[1,2]}`, []any{int64(1), int64(2)}},
+		{`${[1,2]}`, "[1,2]"},
+		{`${null}`, "null"},
+		{`${true}`, "true"},
 	} {
 		expression, err := admitR2ValueFixture(t, "'"+strings.ReplaceAll(tc.source, "'", "''")+"'")
 		if err != nil {
@@ -72,6 +74,48 @@ func TestR2AuthoredMixedInterpolationKeepsTypedSoleExpression(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(got, tc.want) {
 			t.Fatalf("%s = %#v, %v; want %#v", tc.source, got, err, tc.want)
 		}
+	}
+}
+
+func TestScalar2556SourceEvaluationMatrix(t *testing.T) {
+	payload := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "count", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}}}}
+	for _, tc := range []struct {
+		name, source string
+		want         any
+	}{
+		{"plain", "payload.count + 1", int64(4)},
+		{"literal block", "|-\n  payload.count + 1", int64(4)},
+		{"folded block", ">-\n  payload.count + 1", int64(4)},
+		{"single quote", "'payload.count'", "payload.count"},
+		{"double quote", `"payload.count"`, "payload.count"},
+		{"single interpolation", "'${payload.count}'", "3"},
+		{"double interpolation", `"${payload.count}"`, "3"},
+		{"mixed interpolation", "'n=${payload.count}'", "n=3"},
+		{"null", "null", nil},
+		{"empty text", `""`, ""},
+		{"business literal key", `{literal: "payload.count"}`, map[string]any{"literal": "payload.count"}},
+		{"dynamic null object", `{count: payload.count, absent: null}`, map[string]any{"count": int64(3), "absent": nil}},
+		{"dynamic null list", `[payload.count, null]`, []any{int64(3), nil}},
+		{"ternary", "|-\n  payload.count > 0 ? payload.count : 0", int64(3)},
+		{"map constructor", "|-\n  {\"count\": payload.count}", map[string]any{"count": int64(3)}},
+		{"list constructor", "|-\n  [payload.count]", []any{int64(3)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value, err := admitR2ValueFixture(t, tc.source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := value.Literal
+			if value.HasCELValue() {
+				got, err = EvalValueExpressionWithOptions(value.CEL, ValueContext{Payload: map[string]any{"count": int64(3)}}, ValueExpressionOptions{PayloadType: &payload})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %#v, want %#v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -218,7 +262,7 @@ func TestR2GeneratedCELPreservesTrailingCommentBoundaries(t *testing.T) {
 		{"multiple fragments", "v=${1 // comment\n}:${2}", "v=1:2"},
 		{"unicode around comment", "caf\u00e9=${1 // comment\n}\u2713", "caf\u00e9=1\u2713"},
 		{"leading and trailing whitespace", " ${ 1 // comment\n } ", " 1 "},
-		{"nested container", "n: |-\n  ${1 // comment\n  }\n", map[string]any{"n": int64(1)}},
+		{"nested container", "n: |-\n  1 // comment\n", map[string]any{"n": int64(1)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := strconv.Quote(tc.source)
@@ -235,16 +279,16 @@ func TestR2GeneratedCELPreservesTrailingCommentBoundaries(t *testing.T) {
 			}
 		})
 	}
-	if _, err := admitR2ValueFixture(t, "|-\n  v=${1 // comment}\n"); err == nil {
+	if _, err := admitR2ValueFixture(t, strconv.Quote("v=${1 // comment}")); err == nil {
 		t.Fatal("unterminated line-comment interpolation was admitted")
 	}
 }
 
-func TestR2DynamicContainerPreservesNullAndEscape(t *testing.T) {
+func TestR2DynamicContainerPreservesNullAndBusinessObject(t *testing.T) {
 	for _, source := range []string{
-		`{keep: "${1}", missing: null}`,
-		`["${1}", null]`,
-		`{keep: "${1}", escaped: {literal: {missing: null}}}`,
+		`{keep: 1 + 0, missing: null}`,
+		`[1 + 0, null]`,
+		`{keep: 1 + 0, literal: {missing: null}}`,
 	} {
 		expression, err := admitR2ValueFixture(t, source)
 		if err != nil {
@@ -256,9 +300,9 @@ func TestR2DynamicContainerPreservesNullAndEscape(t *testing.T) {
 		}
 		switch value := got.(type) {
 		case map[string]any:
-			if nested, ok := value["escaped"].(map[string]any); ok {
+			if nested, ok := value["literal"].(map[string]any); ok {
 				if inner, ok := nested["missing"]; !ok || inner != nil {
-					t.Fatalf("%s: escaped null became %#v", source, nested)
+					t.Fatalf("%s: nested null became %#v", source, nested)
 				}
 			} else if missing, ok := value["missing"]; !ok || missing != nil {
 				t.Fatalf("%s: null became %#v", source, value)
@@ -275,10 +319,10 @@ func TestR2DynamicContainerPreservesNullAndEscape(t *testing.T) {
 
 func TestR2GeneratedCELLexicalFormsValidate(t *testing.T) {
 	for _, source := range []string{
-		`${r'\'}`,
-		`${"""a"}b"""}`,
-		`${b"a}b"}`,
-		"${1 // }\n + 2}",
+		`r'\'`,
+		`"""a"}b"""`,
+		`b"a}b"`,
+		"1 // }\n + 2",
 	} {
 		expression, err := admitR2ValueFixture(t, "|-\n  "+strings.ReplaceAll(source, "\n", "\n  ")+"\n")
 		if err != nil {

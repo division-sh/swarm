@@ -6,6 +6,6 @@ test-node:
     check.requested:
       guard:
         id: score_check
-        check: "payload.score >= policy.threshold"
+        check: payload.score >= policy.threshold
       advances_to: done
       emit: check.passed

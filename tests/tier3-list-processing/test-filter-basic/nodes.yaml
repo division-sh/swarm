@@ -6,7 +6,7 @@ filter-node:
     items.submitted:
       filter:
         items_from: payload.items
-        condition: "item.score > 50"
+        condition: item.score > 50
         store_as: entity.filtered
       emit:
         event: items.filtered

@@ -123,9 +123,9 @@ coordinator-node:
         writes:
           - op: set
             target: entity.verticals[payload.vertical_id]
-            key: ${payload.vertical_id}
+            key: payload.vertical_id
             value:
-              status: active
+              status: "active"
               active_jobs: []
 `)
 
@@ -310,7 +310,8 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 			operator: `filter:
         source: payload.job
         predicate: entity.verticals
-        condition: "true"
+        condition: |-
+                     true
         store_as: metadata.filtered`,
 			rejection: `filter field "predicate"`,
 		},
@@ -329,7 +330,8 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 			operator: `filter:
         source: entity.verticals
         items_from: payload.job
-        condition: "true"
+        condition: |-
+                     true
         store_as: metadata.filtered`,
 		},
 		{
@@ -372,7 +374,8 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 		{
 			name: "on complete activity input",
 			operator: `on_complete:
-        - condition: "true"
+        - condition: |-
+                       true
           activity:
             tool: review
             input:

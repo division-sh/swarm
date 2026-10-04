@@ -11,6 +11,6 @@ fan-out-node:
         emit:
           event: task.dispatched
           fields:
-            item: ${task}
-            item_id: ${task.id}
+            item: task
+            item_id: task.id
       advances_to: processing

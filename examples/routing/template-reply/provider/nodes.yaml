@@ -7,6 +7,6 @@ provider-node:
       emit:
         event: provider.replied
         fields:
-          account_id: ${payload.account_id}
+          account_id: payload.account_id
           result:
-            literal: approved
+            "approved"

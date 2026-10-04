@@ -40,7 +40,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	if template {
 		schema = strings.Replace(schema, "name: publication-activity\n", "name: publication-activity\ninstance: case_id\n", 1)
 		writeClosedVariantFile(t, root, "events.yaml", request+"activity.dispatch:\n  key: case_id\n  case_id: text\n  message: text\n")
-		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      emit: {event: activity.dispatch, fields: {case_id: \"${payload.case_id}\", message: \"${payload.message}\"}}\n")
+		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      emit: {event: activity.dispatch, fields: {case_id: payload.case_id, message: payload.message}}\n")
 		connects += fmt.Sprintf("  - {event: activity.dispatch, from: ., to: %s, rename: activity.requested, resolution: select-or-create}\n", flow)
 		writeClosedVariantFile(t, root, "schema.yaml", "name: activity-driver\npins:\n  inputs:\n    - activity.requested\n  outputs:\n    - activity.dispatch\nconnect:\n"+connects)
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
@@ -57,7 +57,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		}
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
-	activity := "producer:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: \"${payload.message}\"}\n"
+	activity := "producer:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: payload.message}\n"
 	effect := "read_only"
 	if approval {
 		activity += "        approval: {decision: approve_send}\n"
@@ -65,7 +65,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		// Approval execution requires existing receiver state. A real upstream
 		// handler acquires it; the approval test must not seed a database row.
 		activity = strings.ReplaceAll(activity, "activity.requested", "activity.execute")
-		activity = "intake:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      data_accumulation:\n        writes: [{target_field: case_id, value: \"${payload.case_id}\"}]\n      emit: {event: activity.execute, fields: {message: \"${payload.message}\"}}\n" + activity
+		activity = "intake:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      data_accumulation:\n        writes: [{target_field: case_id, value: payload.case_id}]\n      emit: {event: activity.execute, fields: {message: payload.message}}\n" + activity
 		declarations := "activity.execute:\n  message: text\n"
 		if !template && flow == "." {
 			declarations = request + declarations
@@ -79,7 +79,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		if event == "send.succeeded" {
 			check += " && payload.result.delivered == true"
 		}
-		local += fmt.Sprintf("    %s:\n      guard: {id: observed, check: %q}\n", event, check)
+		local += fmt.Sprintf("    %s:\n      guard: {id: observed, check: %s}\n", event, check)
 	}
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", activity+local)
 	writeClosedVariantFile(t, root, prefix+"tools.yaml", fmt.Sprintf(`send:
@@ -111,9 +111,9 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		siblingInputs += "    - " + trigger + "\n"
 		siblingTriggerSchemas += trigger + ":\n  activity_id: integer\n"
 		siblingConnects += fmt.Sprintf("  - {event: %s, from: ., to: sibling}\n", trigger)
-		siblingProducers += fmt.Sprintf("produce-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {activity_id: \"${payload.activity_id}\"}}\n", event, trigger, trigger, event)
+		siblingProducers += fmt.Sprintf("produce-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {activity_id: payload.activity_id}}\n", event, trigger, trigger, event)
 		siblingSchemas += event + ":\n  activity_id: integer\n"
-		siblingNode += "    " + event + ":\n      guard: {id: sibling_only, check: 'payload.activity_id > 0'}\n"
+		siblingNode += "    " + event + ":\n      guard: {id: sibling_only, check: payload.activity_id > 0}\n"
 	}
 	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\npins:\n  inputs:\n"+siblingInputs)
 	writeClosedVariantFile(t, root, "sibling/events.yaml", siblingSchemas)

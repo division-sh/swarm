@@ -7,5 +7,5 @@ telegram-responder:
         id: telegram_send_message
         tool: telegram.send_message
         input:
-          chat_id: ${payload.chat_id}
-          text: ${payload.text}
+          chat_id: payload.chat_id
+          text: payload.text

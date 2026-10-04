@@ -81,7 +81,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 			nodes += "collector:\n  execution_type: system_node\n  subscribes_to: [loop.escaped]\n  event_handlers:\n    loop.escaped: {}\n"
 		}
 		if variant == LifecycleStaticLoopNoEmit {
-			schema = strings.Replace(schema, "      emit:\n        event: loop.escaped\n        fields: {revision_id: \"${loop.revision_id}\"}\n", "", 1)
+			schema = strings.Replace(schema, "      emit:\n        event: loop.escaped\n        fields: {revision_id: loop.revision_id}\n", "", 1)
 		}
 	case LifecycleStaticGateTwoGates:
 		gate := schema[strings.Index(schema, "  review:\n"):strings.Index(schema, "  approved: {}")]
@@ -107,7 +107,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	case LifecycleStaticMixedOutput, LifecycleStaticMixedDisconnected:
 		// A real handler outcome shares the gate event. This is a mixed-site
 		// counterexample, not an extra producer to satisfy a gate-only fixture.
-		nodes += "worker:\n  execution_type: system_node\n  subscribes_to: [work.handled]\n  event_handlers:\n    work.handled:\n      emit:\n        event: work.completed\n        fields: {result: {literal: handled}}\n"
+		nodes += "worker:\n  execution_type: system_node\n  subscribes_to: [work.handled]\n  event_handlers:\n    work.handled:\n      emit:\n        event: work.completed\n        fields: {result: \"handled\"}\n"
 		events += "work.handled:\n"
 		schema += "    - work.handled\n"
 		schema += "  outputs: [work.completed]\n"
@@ -144,7 +144,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 			}
 		}
 	case LifecycleStaticGateLoopShared:
-		schema = strings.Replace(schema, "  waiting: {initial: true}", "  waiting:\n    initial: true\n    gate:\n      decision: review_decision\n      outcomes:\n        approve:\n          advances_to: escaped\n          emit:\n            event: loop.escaped\n            fields: {revision_id: {literal: gate}}", 1)
+		schema = strings.Replace(schema, "  waiting: {initial: true}", "  waiting:\n    initial: true\n    gate:\n      decision: review_decision\n      outcomes:\n        approve:\n          advances_to: escaped\n          emit:\n            event: loop.escaped\n            fields: {revision_id: \"gate\"}", 1)
 	case LifecycleStaticGateWrongFlow:
 		events = "work.requested:\n  seed: boolean\n"
 		writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\n")
@@ -166,8 +166,8 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		// Both sites share an event schema but carry their own required revision
 		// field from the active loop, never from the other loop's state.
 		second = strings.Replace(second, "loop.second_revision_id", "loop.revision_id", 1)
-		second = strings.Replace(second, "fields: {", "fields: {revision_id: {literal: second}, ", 1)
-		schema = strings.Replace(schema, declaration, strings.Replace(declaration, "fields: {", "fields: {second_revision_id: {literal: first}, ", 1)+second, 1)
+		second = strings.Replace(second, "fields: {", "fields: {revision_id: \"second\", ", 1)
+		schema = strings.Replace(schema, declaration, strings.Replace(declaration, "fields: {", "fields: {second_revision_id: \"first\", ", 1)+second, 1)
 		schema = strings.Replace(schema, "  drafting: {}", "  drafting: {}\n  drafting_second: {}\n  review_second: {}", 1)
 		for _, event := range []string{"start", "admit", "repeat", "close"} {
 			schema = strings.Replace(schema, "  outputs:\n", "    - second."+event+"\n  outputs:\n", 1)
@@ -179,18 +179,18 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		nodes += "second-controller:\n  execution_type: system_node\n  subscribes_to: [second.start, second.admit, second.repeat, second.close]\n  event_handlers:\n" + operations
 	case LifecycleStaticHandlerCycle:
 		// The handler chain closes independently of the gate's shared output.
-		nodes = strings.Replace(nodes, "      advances_to: review\n", "      advances_to: review\n      emit: {event: work.completed, fields: {result: {literal: handled}}}\n", 1)
-		nodes = strings.Replace(nodes, "      advances_to: done\n", "      advances_to: done\n      emit: {event: work.requested, fields: {seed: {literal: true}}}\n", 1)
+		nodes = strings.Replace(nodes, "      advances_to: review\n", "      advances_to: review\n      emit: {event: work.completed, fields: {result: \"handled\"}}\n", 1)
+		nodes = strings.Replace(nodes, "      advances_to: done\n", "      advances_to: done\n      emit: {event: work.requested, fields: {seed: true}}\n", 1)
 	case LifecycleStaticHandlerSelfCycle:
-		nodes = strings.Replace(nodes, "      advances_to: done\n", "      advances_to: done\n      emit: {event: work.completed, fields: {result: {literal: repeated}}}\n", 1)
+		nodes = strings.Replace(nodes, "      advances_to: done\n", "      advances_to: done\n      emit: {event: work.completed, fields: {result: \"repeated\"}}\n", 1)
 	case LifecycleStaticLoopWrongFlow:
 		events = strings.Replace(events, "loop.escaped:\n  revision_id: text\n", "", 1)
 		writeClosedVariantFile(t, root, "foreign/schema.yaml", "name: foreign\n")
 		writeClosedVariantFile(t, root, "foreign/events.yaml", "loop.escaped:\n  revision_id: text\n")
 	case LifecycleStaticGateMissingField:
-		schema = strings.Replace(schema, "fields: {result: {literal: approved}}", "fields: {}", 1)
+		schema = strings.Replace(schema, "fields: {result: \"approved\"}", "fields: {}", 1)
 	case LifecycleStaticLoopMissingField:
-		schema = strings.Replace(schema, "fields: {revision_id: \"${loop.revision_id}\"}", "fields: {}", 1)
+		schema = strings.Replace(schema, "fields: {revision_id: loop.revision_id}", "fields: {}", 1)
 	case LifecycleStaticGateMalformed:
 		schema = strings.Replace(schema, "decision: review_decision", "decision: review_decision\n      unknown_gate_field: true", 1)
 	case LifecycleStaticLoopMalformed:
@@ -234,7 +234,7 @@ func CopyLifecycleEmitterHandlerFamilies(t testing.TB) string {
       emit: direct
       guard:
         id: guard
-        check: "payload.score > 0"
+        check: payload.score > 0
         on_fail: "escalate:escalated"
 router:
   execution_type: system_node
@@ -250,11 +250,11 @@ template:
       emit: {event: specialized}
       rules:
         high:
-          when: "payload.score > 0"
-          emit: {fields: {bucket: high}}
+          when: payload.score > 0
+          emit: {fields: {bucket: "high"}}
         low:
           else: true
-          emit: {fields: {bucket: low}}
+          emit: {fields: {bucket: "low"}}
 dispatcher:
   execution_type: system_node
   event_handlers:
@@ -263,7 +263,7 @@ dispatcher:
         items_from: payload.items
         as: element
         identity: element
-        emit: {event: item, fields: {id: "${element}"}}
+        emit: {event: item, fields: {id: element}}
 rule-dispatcher:
   execution_type: system_node
   event_handlers:
@@ -275,14 +275,13 @@ rule-dispatcher:
             items_from: payload.items
             as: element
             identity: element
-            emit: {event: item, fields: {id: "${element}"}}
+            emit: {event: item, fields: {id: element}}
 completion:
   execution_type: system_node
   event_handlers:
     request:
       on_complete:
         - id: completed
-          condition: "else"
           emit: direct
 completion-dispatcher:
   execution_type: system_node
@@ -290,12 +289,11 @@ completion-dispatcher:
     request:
       on_complete:
         - id: dispatch
-          condition: "else"
           fan_out:
             items_from: payload.items
             as: element
             identity: element
-            emit: {event: item, fields: {id: "${element}"}}
+            emit: {event: item, fields: {id: element}}
 `
 	for _, node := range []string{"worker", "router", "template", "dispatcher", "rule-dispatcher", "completion", "completion-dispatcher"} {
 		request := "request." + strings.ReplaceAll(node, "-", "_")

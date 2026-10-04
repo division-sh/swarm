@@ -6,5 +6,5 @@ test-node:
     intake.requested:
       guard:
         id: bare_cond_guard
-        check: "type == intake"
+        check: type == intake
       advances_to: done

@@ -6,5 +6,5 @@ test-node:
     check.requested:
       guard:
         id: bad_cel_guard
-        check: "payload.((invalid"
+        check: payload.((invalid
       advances_to: done

@@ -146,11 +146,14 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 		return HandlerRuleEntry{}, err
 	}
 	if condition, present := fields["condition"]; present {
-		out.Condition, err = nodeValueText(condition, "rule.condition")
+		out.Condition, err = projectNodeScalarExpression(condition, "on_complete.condition", true)
 		if err != nil {
 			return HandlerRuleEntry{}, err
 		}
 		out.Condition = strings.TrimSpace(out.Condition)
+		if strings.EqualFold(out.Condition, "else") {
+			return HandlerRuleEntry{}, nodeValueError(condition, fmt.Errorf("expression slot on_complete.condition expects a boolean expression; omit condition for an unconditional completion"))
+		}
 	}
 	for _, entry := range []struct {
 		key     string
@@ -193,7 +196,7 @@ func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlso
 	var err error
 	switch selected {
 	case "when":
-		when, err := nodeValueRequiredText(fields["when"], "rule.when")
+		when, err := projectNodeScalarExpression(fields["when"], "rule.when", true)
 		if err != nil {
 			return err
 		}

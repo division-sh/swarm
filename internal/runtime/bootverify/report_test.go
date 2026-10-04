@@ -2085,7 +2085,8 @@ stages:
 func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       on_complete:
-        - condition: "true"
+        - condition: |-
+                       true
           advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -2100,7 +2101,8 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
         - id: review
-          when: "true"
+          when: |-
+                  true
           advances_to: review
         - id: unmatched
           else: true`)
@@ -2117,10 +2119,12 @@ func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testi
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
         - id: review
-          when: "true"
+          when: |-
+                  true
           advances_to: review
         - id: invalid
-          when: "true"
+          when: |-
+                  true
           advances_to: bogus_state
         - id: unmatched
           else: true`)
@@ -2869,7 +2873,7 @@ func TestRun_RejectsInvalidInterpolatedEmitFieldsExpressions(t *testing.T) {
 emit:
   event: item.scored
   fields:
-    bad: ${accumulated.size()}
+    bad: accumulated.size()
 `)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -2906,7 +2910,7 @@ func TestRun_RejectsUnboundItemInHandlerEmitFields(t *testing.T) {
 emit:
   event: item.scored
   fields:
-    bad: ${item}
+    bad: item
 `)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -4803,7 +4807,7 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	handler.CreateEntity = false
 	handler.Rules = mustBootHandlerFixture(t, `rules:
   - id: ready
-    when: 'entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""'
+    when: entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""
   - else: true
 `).Rules
 	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
@@ -6877,7 +6881,7 @@ reader:
   event_handlers:
     task.assigned:
       guard:
-        check: "entity.priority >= 0"
+        check: entity.priority >= 0
       advances_to: done
 `)
 

@@ -8,10 +8,10 @@ worker:
         check: payload.instance_id != ''
       rules:
         - id: processed_already_settled
-          when: "_entity.current_state == 'awaiting_requested'"
+          when: _entity.current_state == 'awaiting_requested'
           advances_to: done
         - id: started_already_settled
-          when: "_entity.current_state == 'started'"
+          when: _entity.current_state == 'started'
           advances_to: requested_started
         - id: await_started
           else: true
@@ -19,7 +19,7 @@ worker:
     auto.started:
       rules:
         - id: requested_already_settled
-          when: "_entity.current_state == 'requested'"
+          when: _entity.current_state == 'requested'
           advances_to: requested_started
           emit:
             event: auto.processed
@@ -37,7 +37,7 @@ observer:
     auto.processed:
       rules:
         - id: request_and_start_settled
-          when: "_entity.current_state == 'requested_started'"
+          when: _entity.current_state == 'requested_started'
           advances_to: done
         - id: await_requested
           else: true

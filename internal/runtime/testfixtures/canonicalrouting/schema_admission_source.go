@@ -37,12 +37,12 @@ stages:
     timers: [{after: 1s, emit: work.expired}]
     gate:
       decision: approval
-      context: {null_value: null, zero: 0, dynamic: '${payload.note}'}
+      context: {null_value: null, zero: 0, dynamic: payload.note}
       outcomes:
         approve:
           advances_to: done
           input: {comment: {type: text, required: false, label: ''}}
-          emit: {event: work.completed, fields: {record: {note: '${payload.note}', preserved: null}}}
+          emit: {event: work.completed, fields: {record: {note: payload.note, preserved: null}}}
   done: {terminal: true}
 loops:
   revision:

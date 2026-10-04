@@ -42,8 +42,8 @@ work.ready:
       emit:
         event: work.ready
         fields:
-          account_id: ${payload.account_id}
-          values: ${payload.values}
+          account_id: payload.account_id
+          values: payload.values
 `,
 		"account/schema.yaml": `name: account
 instance: account_id
@@ -70,12 +70,15 @@ pins:
 `,
 		"account/nodes.yaml": `collector:
   execution_type: system_node
-  subscribes_to: [work.ready]
+  subscribes_to:
+    - work.ready
   event_handlers:
     work.ready:
       data_accumulation:
         writes:
-          - {target_field: processed_count, value: "${has(entity.processed_count) ? entity.processed_count + 1 : 1}"}
+          - target_field: processed_count
+            value: |-
+              has(entity.processed_count) ? entity.processed_count + 1 : 1
 `,
 	} {
 		writeClosedVariantFile(t, root, path, contents)

@@ -1298,8 +1298,8 @@ telegram-responder:
         tool: telegram.send_message
         approval: {decision: send_telegram_message}
         input:
-          chat_id: ${payload.chat_id}
-          text: ${payload.text}
+          chat_id: payload.chat_id
+          text: payload.text
 telegram-revision:
   execution_type: system_node
   subscribes_to: [telegram_send_message.revision_requested]

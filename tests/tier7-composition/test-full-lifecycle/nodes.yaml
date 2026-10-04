@@ -8,7 +8,7 @@ validation-node:
     order.submitted:
       guard:
         id: amount_check
-        check: "payload.amount >= policy.min_amount"
+        check: payload.amount >= policy.min_amount
       advances_to: validated
       sets_gate: validation_passed
       emit: order.validated
@@ -21,7 +21,7 @@ completion-node:
     order.validated:
       guard:
         id: gate_check
-        check: "_entity.gates.validation_passed == true"
+        check: _entity.gates.validation_passed == true
       advances_to: complete
       emit:
         event: order.finalized

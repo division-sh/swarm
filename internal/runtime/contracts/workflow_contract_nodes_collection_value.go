@@ -37,9 +37,15 @@ func projectNodeFilterValue(value yamlsource.Value) (*FilterSpec, error) {
 	var out FilterSpec
 	if err := nodeValueTexts(fields, map[string]*string{
 		"source": &out.Source, "items_from": &out.ItemsFrom,
-		"condition": &out.Condition, "store_as": &out.StoreAs,
+		"store_as": &out.StoreAs,
 	}, true); err != nil {
 		return nil, err
+	}
+	if condition, present := fields["condition"]; present {
+		out.Condition, err = projectNodeScalarExpression(condition, "filter.condition", true)
+		if err != nil {
+			return nil, err
+		}
 	}
 	out.SourcePath = paths.Parse(out.Source)
 	out.ItemsPath = paths.Parse(out.ItemsFrom)
@@ -77,9 +83,15 @@ func projectNodeCountValue(value yamlsource.Value) (*CountSpec, error) {
 	var out CountSpec
 	if err := nodeValueTexts(fields, map[string]*string{
 		"source": &out.Source, "items_from": &out.ItemsFrom,
-		"condition": &out.Condition, "store_as": &out.StoreAs,
+		"store_as": &out.StoreAs,
 	}, true, "source", "items_from"); err != nil {
 		return nil, err
+	}
+	if condition, present := fields["condition"]; present {
+		out.Condition, err = projectNodeScalarExpression(condition, "count.condition", true)
+		if err != nil {
+			return nil, err
+		}
 	}
 	out.SourcePath = paths.Parse(out.Source)
 	out.ItemsPath = paths.Parse(out.ItemsFrom)

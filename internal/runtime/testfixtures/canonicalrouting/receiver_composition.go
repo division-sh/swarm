@@ -43,7 +43,7 @@ connect:
 ` + seedHandler + "    work.requested:\n" + create + `      advances_to: done
       emit:
         event: work.completed
-        fields: {result: {literal: emitted}}
+        fields: {result: "emitted"}
 `,
 		"sink/schema.yaml": `name: sink
 pins:
@@ -87,7 +87,7 @@ pins:
       data_accumulation:
         writes:
           - target_field: result
-            value: "${payload.result}"
+            value: payload.result
       advances_to: done
 `,
 	}
@@ -135,7 +135,9 @@ pins:
 		"entities.yaml": "work:\n  marker: text\n",
 		"nodes.yaml": `controller:
   execution_type: system_node
-  subscribes_to: [work.seeded, work.requested]
+  subscribes_to:
+    - work.seeded
+    - work.requested
   event_handlers:
     work.seeded:
       create_entity: true
@@ -143,7 +145,9 @@ pins:
     work.requested:
       data_accumulation:
         writes:
-          - {target_field: marker, value: "${'must-not-write'}"}
+          - target_field: marker
+            value: |-
+              'must-not-write'
       advances_to: done
 `,
 	}
@@ -174,7 +178,7 @@ connect:
     work.completed:
       emit:
         event: child.finished
-        fields: {result: "${payload.result}"}
+        fields: {result: payload.result}
 `,
 		"sink/tail/schema.yaml": `name: tail
 stages:
@@ -193,7 +197,7 @@ pins:
       create_entity: true
       data_accumulation:
         writes:
-          - {target_field: result, value: "${payload.result}"}
+          - {target_field: result, value: payload.result}
       advances_to: done
 `,
 	}
@@ -230,7 +234,7 @@ pins:
     work.completed:
       emit:
         event: child.finished
-        fields: {result: "${payload.result}"}
+        fields: {result: payload.result}
 local:
   execution_type: system_node
   subscribes_to: [child.finished]
@@ -239,7 +243,7 @@ local:
       create_entity: true
       data_accumulation:
         writes:
-          - {target_field: result, value: "${payload.result}"}
+          - {target_field: result, value: payload.result}
       advances_to: done
 `)
 	return root
@@ -258,7 +262,7 @@ func CopyReceiverEntitylessRootExport(t testing.TB) string {
     work.requested:
       emit:
         event: child.finished
-        fields: {result: {literal: emitted}}
+        fields: {result: "emitted"}
 `)
 	return root
 }
@@ -274,7 +278,7 @@ func CopyReceiverEntitylessUnrouted(t testing.TB) string {
     work.completed:
       emit:
         event: child.finished
-        fields: {result: "${payload.result}"}
+        fields: {result: payload.result}
 `)
 	return root
 }
@@ -285,7 +289,7 @@ func CopyReceiverMixedAgent(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [work.completed]", "outputs: [work.completed, child.seeded]")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: child.seeded, from: ., to: sink}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.seeded:\n", "child.seeded:\n  seed: boolean\nwork.seeded:\n")
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: active\n", "      advances_to: active\n      emit:\n        event: child.seeded\n        fields: {seed: {literal: true}}\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: active\n", "      advances_to: active\n      emit:\n        event: child.seeded\n        fields: {seed: true}\n")
 	writeClosedVariantFile(t, root, "sink/schema.yaml", `name: sink
 stages:
   waiting: {initial: true}
@@ -347,7 +351,7 @@ connect:
     work.requested:
       emit:
         event: work.completed
-        fields: {result: {literal: emitted}}
+        fields: {result: "emitted"}
 `)
 	return root
 }

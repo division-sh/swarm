@@ -35,7 +35,7 @@ pins:
   event_handlers:
     task.assigned:
       guard:
-        check: "has(entity.priority) && entity.priority >= 0"
+        check: has(entity.priority) && entity.priority >= 0
       advances_to: done
 `)
 	return root
@@ -127,8 +127,8 @@ line_item.requested:
         emit:
           event: line_item.requested
           fields:
-            line_item_id: ${line_item}
-            line_item_index: ${fan_out.index}
+            line_item_id: line_item
+            line_item_index: fan_out.index
       advances_to: active
     ticket.closed:
       join:
@@ -240,7 +240,7 @@ func inboundAdmissionNodes() string {
       data_accumulation:
         writes:
           - target_field: service_id
-            value: {literal: standing}
+            value: "standing"
 `, event)
 	}
 	return out.String()
@@ -270,12 +270,12 @@ widget.started:
   subscribes_to: [widget.scored]
   event_handlers:
     widget.scored:
-      guard: {check: "has(entity.score)"}
+      guard: {check: has(entity.score)}
       data_accumulation:
         source_event: widget.scored
         writes:
           - target_field: score
-            value: "${entity.score + payload.delta}"
+            value: entity.score + payload.delta
       advances_to: done
 `)
 	return root
@@ -343,12 +343,12 @@ ticket.assigned:
   event_handlers:
     ticket.classified:
       guard:
-        check: "entity.category != '' && entity.priority != ''"
+        check: entity.category != '' && entity.priority != ''
       emit:
         event: ticket.assigned
         fields:
-          category: ${entity.category}
-          priority: ${entity.priority}
+          category: entity.category
+          priority: entity.priority
       advances_to: assigned
 assignee:
   execution_type: system_node
@@ -356,7 +356,7 @@ assignee:
   event_handlers:
     ticket.assigned:
       guard:
-        check: "entity.category != ''"
+        check: entity.category != ''
       advances_to: resolved
 `)
 	return root

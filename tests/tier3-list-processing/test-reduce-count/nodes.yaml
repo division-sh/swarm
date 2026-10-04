@@ -6,7 +6,7 @@ count-node:
     items.submitted:
       count:
         items_from: payload.items
-        condition: "item.active == true"
+        condition: item.active == true
         store_as: entity.active_count
       emit:
         event: items.counted

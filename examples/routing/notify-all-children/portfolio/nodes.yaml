@@ -17,7 +17,7 @@ portfolio-coordinator:
       emit:
         event: account.registered
         fields:
-          account_id: ${payload.account_id}
+          account_id: payload.account_id
     portfolio.accounts.register.requested:
       data_accumulation:
         writes:
@@ -30,7 +30,7 @@ portfolio-coordinator:
         emit:
           event: account.registered
           fields:
-            account_id: ${account_id}
+            account_id: account_id
     portfolio.membership.seeded:
       data_accumulation:
         writes:
@@ -44,5 +44,5 @@ portfolio-coordinator:
         emit:
           event: account.notify.requested
           fields:
-            account_id: ${account_id}
-            command: ${payload.command}
+            account_id: account_id
+            command: payload.command

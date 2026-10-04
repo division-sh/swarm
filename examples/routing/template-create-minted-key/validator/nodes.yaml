@@ -7,5 +7,5 @@ validator-node:
       emit:
         event: validation.started
         fields:
-          candidate: ${payload.candidate}
-          validation_case_id: ${payload.validation_case_id}
+          candidate: payload.candidate
+          validation_case_id: payload.validation_case_id

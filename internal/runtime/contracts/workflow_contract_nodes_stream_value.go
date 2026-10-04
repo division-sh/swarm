@@ -39,9 +39,15 @@ func projectNodeFanOutValue(value yamlsource.Value) (*FanOutSpec, error) {
 	}
 	var out FanOutSpec
 	if err := nodeValueTexts(fields, map[string]*string{
-		"items_from": &out.ItemsFrom, "as": &out.As, "identity": &out.Identity,
-	}, true, "identity"); err != nil {
+		"items_from": &out.ItemsFrom, "as": &out.As,
+	}, true); err != nil {
 		return nil, err
+	}
+	if identity, present := fields["identity"]; present {
+		out.Identity, err = projectNodeScalarExpression(identity, "fan_out.identity", false)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := ValidateFanOutAlias(out.As); err != nil {
 		return nil, fmt.Errorf("fan_out.%w", err)

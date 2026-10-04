@@ -2,6 +2,7 @@ package canonicalrouting
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -65,16 +66,16 @@ func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")
 	initiatorNodes := filepath.Join(root, "initiator", "nodes.yaml")
 	applyClosedReplacement(t, initiatorNodes,
-		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: ${payload.account_id}\n",
-		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: ${payload.account_id}\n          provider_request_id: ${payload.provider_request_id}\n")
+		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n",
+		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n          provider_request_id: payload.provider_request_id\n")
 	requesterNodes := filepath.Join(root, "requester", "nodes.yaml")
 	applyClosedReplacement(t, requesterNodes,
-		"          account_id: ${payload.account_id}\n",
-		"          provider_request_id: ${payload.provider_request_id}\n          account_id: ${payload.account_id}\n")
+		"          account_id: payload.account_id\n",
+		"          provider_request_id: payload.provider_request_id\n          account_id: payload.account_id\n")
 	providerNodes := filepath.Join(root, "provider", "nodes.yaml")
 	applyClosedReplacement(t, providerNodes,
-		"        fields:\n          account_id: ${payload.account_id}\n",
-		"        fields:\n          provider_request_id: ${payload.provider_request_id}\n          account_id: ${payload.account_id}\n")
+		"        fields:\n          account_id: payload.account_id\n",
+		"        fields:\n          provider_request_id: payload.provider_request_id\n          account_id: payload.account_id\n")
 }
 
 func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, accountID string) {
@@ -98,9 +99,9 @@ func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, account
       emit:
         event: provider.replied
         fields:
-          provider_request_id: {literal: `+requestKey+`}
-          account_id: {literal: `+accountID+`}
-          result: {literal: approved}
+          provider_request_id: `+requestKey+`
+          account_id: `+accountID+`
+          result: "approved"
 `)
 }
 
@@ -113,7 +114,7 @@ func closedScalarLiteral(t testing.TB, label, value, fallback string) string {
 	if strings.ContainsAny(value, "\r\n{}[],:#&*!|>'\"%@`") {
 		t.Fatalf("template reply %s %q is not a plain YAML scalar", label, value)
 	}
-	return value
+	return strconv.Quote(value)
 }
 
 func writeClosedVariantFile(t testing.TB, root, relativePath, source string) {

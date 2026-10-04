@@ -5,11 +5,11 @@ test-node:
   event_handlers:
     task.submitted:
       on_complete:
-        - condition: "payload.score >= 70"
+        - condition: payload.score >= 70
           advances_to: done
       rules:
         route_a:
-          when: "payload.type == \"a\""
+          when: payload.type == "a"
           advances_to: routed
         unmatched:
           else: true

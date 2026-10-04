@@ -134,7 +134,7 @@ scanner:
         id: source_scrape
         tool: source_scrape
         input:
-          url: ${payload.url}
+          url: payload.url
 `)
 	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), `
 source_scrape:

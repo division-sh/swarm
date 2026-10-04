@@ -8,7 +8,7 @@ import (
 )
 
 func TestProjectNodeDeclarationsValueReachesNestedHandler(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("worker:\n  execution_type: system_node\n  event_handlers:\n    task.requested:\n      emit:\n        event: task.completed\n        fields: {answer: '${payload.answer}'}\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  execution_type: system_node\n  event_handlers:\n    task.requested:\n      emit:\n        event: task.completed\n        fields: {answer: payload.answer}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

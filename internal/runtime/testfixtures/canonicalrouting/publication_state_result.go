@@ -60,9 +60,9 @@ result.rejected:
   subscribes_to: [result.accepted, result.rejected]
   event_handlers:
     result.accepted:
-      guard: {id: accepted, check: "payload.result_kind == 'accepted'"}
+      guard: {id: accepted, check: payload.result_kind == 'accepted'}
     result.rejected:
-      guard: {id: rejected, check: "payload.result_kind == 'rejected'"}
+      guard: {id: rejected, check: payload.result_kind == 'rejected'}
 `
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", `writer:
   execution_type: system_node
@@ -78,15 +78,15 @@ result.rejected:
           - {source_field: result_kind, target_field: result_kind}
       rules:
         accepted:
-          when: "payload.result_kind == 'accepted'"
+          when: payload.result_kind == 'accepted'
           emit:
             event: result.accepted
-            fields: {request_id: "${entity.request_id}", content: "${entity.content}", result_kind: "${entity.result_kind}"}
+            fields: {request_id: entity.request_id, content: entity.content, result_kind: entity.result_kind}
         rejected:
-          when: "payload.result_kind == 'rejected'"
+          when: payload.result_kind == 'rejected'
           emit:
             event: result.rejected
-            fields: {request_id: "${entity.request_id}", content: "${entity.content}", result_kind: "${entity.result_kind}"}
+            fields: {request_id: entity.request_id, content: entity.content, result_kind: entity.result_kind}
         unmatched:
           else: true
 `+local)

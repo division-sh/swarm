@@ -160,7 +160,7 @@ deploy.done:
       emit:
         event: deploy.done
         fields:
-          vertical_id: ${payload.vertical_id}
+          vertical_id: payload.vertical_id
 `)
 	writeClosedVariantFile(t, root, "flows/producer/agents.yaml", `beta-worker:
   model: regular

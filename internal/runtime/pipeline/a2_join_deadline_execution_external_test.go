@@ -71,12 +71,12 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
           advances_to: ready
           data_accumulation:
             writes:
-              - {target_field: final_expected, value: "${join.expected}"}
-              - {target_field: final_completed, value: "${join.completed}"}
-              - {target_field: final_results, value: "${join.results}"}
-              - {target_field: final_reason, value: "${join.close_reason}"}
-              - {target_field: final_missing, value: "${join.missing}"}
-              - {target_field: final_timed_out, value: "${join.timed_out}"}
+              - {target_field: final_expected, value: join.expected}
+              - {target_field: final_completed, value: join.completed}
+              - {target_field: final_results, value: join.results}
+              - {target_field: final_reason, value: join.close_reason}
+              - {target_field: final_missing, value: join.missing}
+              - {target_field: final_timed_out, value: join.timed_out}
     touch:
       data_accumulation:
         writes: [{target_field: marker, value: 1}]

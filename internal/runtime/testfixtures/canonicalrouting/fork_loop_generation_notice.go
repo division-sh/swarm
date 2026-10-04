@@ -56,7 +56,7 @@ connect:
       advances_to: active
       emit:
         event: work.started
-        fields: {token: "${payload.token}"}
+        fields: {token: payload.token}
     root.closed:
       advances_to: done
 `,
@@ -93,23 +93,23 @@ pins:
       emit:
         event: review.requested
         fields:
-          revision_id: "${loop.revision_id}"
-          token: "${payload.token}"
+          revision_id: loop.revision_id
+          token: payload.token
     review.requested:
       loop: {admit: revision, from: working}
       advances_to: reviewing
       data_accumulation:
         writes:
-          - {target_field: observed_revision, value: "${loop.revision_id}"}
-          - {target_field: observed_token, value: "${payload.token}"}
+          - {target_field: observed_revision, value: loop.revision_id}
+          - {target_field: observed_token, value: payload.token}
     review.retry:
       loop: {repeat: revision, from: reviewing}
       advances_to: working
       emit:
         event: review.requested
         fields:
-          revision_id: "${loop.revision_id}"
-          token: "${payload.token}"
+          revision_id: loop.revision_id
+          token: payload.token
     review.closed:
       loop: {close: revision, from: reviewing}
       advances_to: approved

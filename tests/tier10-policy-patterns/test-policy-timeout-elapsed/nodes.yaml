@@ -8,7 +8,7 @@ monitor:
     timer.check:
       guard:
         id: past_deadline
-        check: "payload.elapsed_hours >= policy.timeout_hours"
+        check: payload.elapsed_hours >= policy.timeout_hours
       advances_to: timed_out
       emit:
         event: task.timed_out

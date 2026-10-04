@@ -27,7 +27,7 @@ registry-intake:
             target_field: qualified
       rules:
         - id: qualified_for_investigation
-          when: "payload.qualified == true && policy.investigate == true"
+          when: payload.qualified == true && policy.investigate == true
           advances_to: investigating
           emit:
             event: investigate.requested
@@ -42,7 +42,7 @@ registry-finalize:
     assessment.reported:
       guard:
         id: still_investigating
-        check: "_entity.current_state == 'investigating'"
+        check: _entity.current_state == 'investigating'
         on_fail: discard
       data_accumulation:
         writes:
@@ -56,14 +56,14 @@ registry-finalize:
     investigation.timed_out:
       guard:
         id: still_investigating_timeout
-        check: "_entity.current_state == 'investigating'"
+        check: _entity.current_state == 'investigating'
         on_fail: discard
       data_accumulation:
         writes:
           - target_field: match_score
             value: 0
           - target_field: verdict
-            value: timed_out
+            value: "timed_out"
           - target_field: matches_summary
-            value: Investigation timed out before the agent reported.
+            value: "Investigation timed out before the agent reported."
       advances_to: assessed

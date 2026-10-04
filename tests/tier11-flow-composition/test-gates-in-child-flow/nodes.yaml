@@ -9,7 +9,7 @@ router:
     validate.requested:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
       emit: child/validate.start
     validation.done:
       guard:

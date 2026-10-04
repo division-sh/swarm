@@ -37,13 +37,13 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
           - op: append
             target: entity.findings
             value:
-              summary: ${payload.summary}
+              summary: payload.summary
           - source_field: status
             target_field: status
       emit:
         event: finding.recorded
         fields:
-          status: ${entity.status}
+          status: entity.status
 `,
 				})
 				bundle, ok := semanticview.Bundle(source)

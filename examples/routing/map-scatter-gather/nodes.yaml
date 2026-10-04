@@ -15,10 +15,10 @@ scatter:
         emit:
           event: item.requested
           fields:
-            member_id: ${member}
-            values: ${payload.items[?member].orValue([])}
-            index: ${fan_out.index}
-            count: ${fan_out.count}
+            member_id: member
+            values: payload.items[?member].orValue([])
+            index: fan_out.index
+            count: fan_out.count
 collector:
   execution_type: system_node
   subscribes_to: [item.reported]
@@ -32,6 +32,6 @@ collector:
         on_complete:
           data_accumulation:
             writes:
-              - {target_field: ordered_results, value: "${join.results}"}
+              - {target_field: ordered_results, value: join.results}
           advances_to: complete
         on_deadline: {advances_to: failed}

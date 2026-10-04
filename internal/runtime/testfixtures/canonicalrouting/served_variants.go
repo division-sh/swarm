@@ -27,18 +27,18 @@ stages:
       emit:
         event: item.processed
         fields:
-          item_id: ${payload.item_id}
+          item_id: payload.item_id
 `, `    item.received:
       rules:
         initialize:
-          when: "payload.item_id != 'emit'"
+          when: payload.item_id != 'emit'
           advances_to: waiting
         emit_processed:
-          when: "payload.item_id == 'emit'"
+          when: payload.item_id == 'emit'
           emit:
             event: item.processed
             fields:
-              item_id: ${payload.item_id}
+              item_id: payload.item_id
         unmatched:
           else: true
 `)
@@ -55,7 +55,7 @@ stages:
     item.processed:
       rules:
         complete:
-          when: "has(payload.item_id) && payload.item_id == 'review'"
+          when: has(payload.item_id) && payload.item_id == 'review'
           advances_to: done
         unmatched:
           else: true
@@ -327,7 +327,7 @@ lifecycle-orchestrator:
       emit:
         event: component_scaffold.spawn_requested
         fields:
-          product_id: ${payload.product_id}
+          product_id: payload.product_id
       advances_to: spawning
 component-scaffold:
   execution_type: system_node
@@ -409,8 +409,8 @@ portfolio-node:
       emit:
         event: opco.create_requested
         fields:
-          instance_id: ${payload.instance_id}
-          product_id: ${payload.product_id}
+          instance_id: payload.instance_id
+          product_id: payload.product_id
       advances_to: done
 `)
 }

@@ -27,14 +27,24 @@ func TestPipelineRejectsFabricatedGuardCauseOnBothStores(t *testing.T) {
     observe:
       data_accumulation:
         writes:
-          - {target_field: marker, value: "${'observed'}"}
+          - target_field: marker
+            value: |-
+              'observed'
     kill:
-      guard: {id: declared-kill, check: "false", on_fail: kill}
+      guard:
+        id: declared-kill
+        check: |-
+          false
+        on_fail: kill
     kill_chain:
       guard:
         checks:
-          - {id: leading-pass, check: "true"}
-          - {id: declared-kill, check: "false"}
+          - id: leading-pass
+            check: |-
+              true
+          - id: declared-kill
+            check: |-
+              false
         on_fail: kill
 `,
 	})

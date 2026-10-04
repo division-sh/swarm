@@ -114,20 +114,20 @@ item.ready:
     seed: {create_entity: true}
     batch.ready:
       data_accumulation:
-        writes: [{target_field: items, value: "${payload.items}"}]
+        writes: [{target_field: items, value: payload.items}]
       fan_out:
         items_from: entity.items
         as: key
         emit:
           event: item.ready
           fields:
-            member_id: "${key}"
-            index: "${fan_out.index}"
-            count: "${fan_out.count}"
-            result: "${payload.items[?key].orValue([])}"
+            member_id: key
+            index: fan_out.index
+            count: fan_out.count
+            result: payload.items[?key].orValue([])
     batch.replace:
       data_accumulation:
-        writes: [{target_field: items, value: "${payload.items}"}]
+        writes: [{target_field: items, value: payload.items}]
 `,
 	}
 	if gather {
@@ -725,12 +725,12 @@ func runA2MapToListDuplicateOrdinals(t *testing.T, selected gateRecoveryStoreCas
         emit:
           event: leaf.ready
           fields:
-            member_id: "${payload.member_id + ':' + string(fan_out.index)}"
-            parent_key: "${payload.member_id}"
-            parent_index: "${payload.index}"
-            index: "${fan_out.index}"
-            count: "${fan_out.count}"
-            value: "${entry}"
+            member_id: payload.member_id + ':' + string(fan_out.index)
+            parent_key: payload.member_id
+            parent_index: payload.index
+            index: fan_out.index
+            count: fan_out.count
+            value: entry
 leaf-collector:
   execution_type: system_node
   event_handlers:
@@ -743,7 +743,7 @@ leaf-collector:
         on_complete:
           advances_to: ready
           data_accumulation:
-            writes: [{target_field: leaf_results, value: "${join.results}"}]
+            writes: [{target_field: leaf_results, value: join.results}]
         on_deadline: {advances_to: attention}
 `
 	p := newA2MapFanOutExecutionFromFiles(t, selected, true, files)

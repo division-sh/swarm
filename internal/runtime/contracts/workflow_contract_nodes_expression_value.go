@@ -9,19 +9,21 @@ import (
 )
 
 func projectNodeExpressionValue(value yamlsource.Value) (ExpressionValue, error) {
+	// Quote style is authoritative even when an explicit tag classifies the scalar
+	// as null or numeric. Generic data admission deliberately keeps tag semantics.
+	if scalar, err := value.Scalar(); err == nil {
+		if scalar.Style&(yamlsource.SingleQuotedStyle|yamlsource.DoubleQuotedStyle) != 0 {
+			return decodeInterpolatedScalar(scalar.Value)
+		}
+		if scalar.Tag == "!!str" || scalar.Tag == "" {
+			return CELExpression(scalar.Value), nil
+		}
+		return projectNodeLiteralValue(value)
+	}
 	switch value.Presence() {
 	case yamlsource.PresenceMissing:
 		return ExpressionValue{}, nil
 	case yamlsource.PresenceNull:
-		return projectNodeLiteralValue(value)
-	case yamlsource.PresenceScalar, yamlsource.PresenceEmptyScalar:
-		scalar, err := value.Scalar()
-		if err != nil {
-			return ExpressionValue{}, err
-		}
-		if scalar.Tag == "!!str" || scalar.Tag == "" && scalar.Style == yamlsource.DoubleQuotedStyle {
-			return decodeInterpolatedScalar(scalar.Value)
-		}
 		return projectNodeLiteralValue(value)
 	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
 		return projectNodeExpressionSequenceValue(value)
@@ -30,6 +32,33 @@ func projectNodeExpressionValue(value yamlsource.Value) (ExpressionValue, error)
 	default:
 		return ExpressionValue{}, fmt.Errorf("unsupported expression value at %s: %s", value.Location(), value.Presence())
 	}
+}
+
+// Predicate and identity carriers store CEL source, not ExpressionValue. They
+// still consume the same source classification before their scoped validators.
+func projectNodeScalarExpression(value yamlsource.Value, owner string, predicate bool) (string, error) {
+	scalar, err := value.Scalar()
+	if err != nil {
+		return "", nodeValueError(value, fmt.Errorf("expression slot %s requires a scalar", owner))
+	}
+	quoted := scalar.Style&(yamlsource.SingleQuotedStyle|yamlsource.DoubleQuotedStyle) != 0
+	if predicate && quoted {
+		return "", nodeValueError(value, fmt.Errorf("expression slot %s expects a boolean expression; remove YAML quotes", owner))
+	}
+	if !quoted && value.Presence() == yamlsource.PresenceNull {
+		return "", nodeValueError(value, fmt.Errorf("expression slot %s must not be null", owner))
+	}
+	if strings.TrimSpace(scalar.Value) == "" {
+		return "", nodeValueError(value, fmt.Errorf("expression slot %s requires a non-empty expression", owner))
+	}
+	projected, err := projectNodeExpressionValue(value)
+	if err != nil {
+		return "", nodeValueError(value, fmt.Errorf("expression slot %s: %w", owner, err))
+	}
+	if projected.HasCELValue() {
+		return projected.CEL, nil
+	}
+	return literalCELSource(projected.Literal)
 }
 
 func projectNodeExpressionSequenceValue(value yamlsource.Value) (ExpressionValue, error) {
@@ -66,9 +95,6 @@ func projectNodeExpressionObjectValue(value yamlsource.Value) (ExpressionValue, 
 	fields, err := value.Mapping()
 	if err != nil {
 		return ExpressionValue{}, err
-	}
-	if len(fields) == 1 && fields[0].Name == "literal" {
-		return projectNodeLiteralValue(fields[0].Value)
 	}
 	if err := rejectNodeReservedExpressionShape(fields); err != nil {
 		return ExpressionValue{}, err

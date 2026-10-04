@@ -11,8 +11,8 @@ func CopyForkLoopRetainedJoinSeparateCheckpoint(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `          emit:
             event: join.observed
             fields:
-              revision_id: "${loop.revision_id}"
-              completed: "${join.completed}"
+              revision_id: loop.revision_id
+              completed: join.completed
 `, "")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "subscribes_to: [work.requested, review.requested, review.retry, review.closed]", "subscribes_to: [work.requested, review.requested, review.retry, review.closed, checkpoint.requested]")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "  event_handlers:\n    work.requested:\n", `  event_handlers:
@@ -22,8 +22,8 @@ func CopyForkLoopRetainedJoinSeparateCheckpoint(t testing.TB) string {
       emit:
         event: join.observed
         fields:
-          revision_id: "${loop.revision_id}"
-          completed: {literal: 1}
+          revision_id: loop.revision_id
+          completed: 1
     work.requested:
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - work.requested", "    - work.requested\n    - checkpoint.requested")
@@ -80,61 +80,82 @@ join.observed:
 `,
 		"nodes.yaml": `initializer:
   execution_type: system_node
-  subscribes_to: [work.bootstrap]
+  subscribes_to:
+    - work.bootstrap
   event_handlers:
     work.bootstrap:
       create_entity: true
       emit:
         event: work.requested
         fields:
-          token: "${payload.token}"
+          token: payload.token
 controller:
   execution_type: system_node
-  subscribes_to: [work.requested, review.requested, review.retry, review.closed]
+  subscribes_to:
+    - work.requested
+    - review.requested
+    - review.retry
+    - review.closed
   event_handlers:
     work.requested:
-      loop: {start: revision, from: queued}
+      loop:
+        start: revision
+        from: queued
       data_accumulation:
         writes:
-          - {target_field: members, value: "${[payload.token]}"}
-          - {target_field: window, value: "${loop.revision_id}"}
+          - target_field: members
+            value: |-
+              [payload.token]
+          - target_field: window
+            value: loop.revision_id
       advances_to: working
       emit:
         event: review.requested
         fields:
-          token: "${payload.token}"
-          revision_id: "${loop.revision_id}"
+          token: payload.token
+          revision_id: loop.revision_id
     review.requested:
-      loop: {admit: revision, from: working}
+      loop:
+        admit: revision
+        from: working
       join:
         id: reviews
         stage: working
-        members: {from: state.members, by: payload.token}
+        members:
+          from: state.members
+          by: payload.token
         output: payload.token
         on_complete:
           advances_to: reviewing
           emit:
             event: join.observed
             fields:
-              revision_id: "${loop.revision_id}"
-              completed: "${join.completed}"
-        deadline: {after: 1h, from: stage_entry}
+              revision_id: loop.revision_id
+              completed: join.completed
+        deadline:
+          after: 1h
+          from: stage_entry
         on_deadline:
           advances_to: reviewing
     review.closed:
-      loop: {close: revision, from: reviewing}
+      loop:
+        close: revision
+        from: reviewing
       advances_to: approved
     review.retry:
-      loop: {repeat: revision, from: reviewing}
+      loop:
+        repeat: revision
+        from: reviewing
       data_accumulation:
         writes:
-          - {target_field: window, value: "${loop.revision_id}"}
+          - target_field: window
+            value: loop.revision_id
       advances_to: working
       emit:
         event: review.requested
         fields:
-          token: "${payload.token}"
-          revision_id: "${loop.revision_id}"
+          token: payload.token
+          revision_id: loop.revision_id
 `,
 	} {
 		writeClosedVariantFile(t, root, name, body)

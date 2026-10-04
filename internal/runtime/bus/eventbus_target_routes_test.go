@@ -3574,7 +3574,7 @@ platform_version: '*'
     opco.spinup_requested:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `,
 	}
 }
@@ -3642,7 +3642,7 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
     thing.created:
       guard:
         id: selected_owner
-        check: '_entity.id != ""'
+        check: _entity.id != ""
 `,
 	})
 }

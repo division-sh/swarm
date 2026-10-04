@@ -7,6 +7,6 @@ worker:
       advances_to: working
       emit:
         event: work.processed
-        fields: {marker: "${payload.marker}", origin: right}
+        fields: {marker: payload.marker, origin: "right"}
     work.processed:
       advances_to: done

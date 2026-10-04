@@ -7,5 +7,5 @@ spawner:
       emit:
         event: worker.requested
         fields:
-          instance_id: ${payload.instance_id}
+          instance_id: payload.instance_id
       advances_to: spawned

@@ -7,7 +7,7 @@ child-checker:
       create_entity: true
       guard:
         id: threshold_check
-        check: "payload.score >= policy.threshold"
+        check: payload.score >= policy.threshold
       advances_to: approved
       emit:
         event: check.passed

@@ -6,5 +6,5 @@ test-node:
     check.requested:
       guard:
         id: payload_mismatch_guard
-        check: "payload.nonexistent_field >= 50"
+        check: payload.nonexistent_field >= 50
       advances_to: done

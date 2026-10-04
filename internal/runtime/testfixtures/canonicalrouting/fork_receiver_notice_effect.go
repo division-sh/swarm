@@ -31,7 +31,7 @@ func CopyForkReceiverExecutionOwnership(t testing.TB, receivers []ForkReceiver, 
 		replacement := "      guard:\n        id: payload_observed\n        check: payload.token == 'receiver-proof'\n"
 		if receiver.Policy != ForkReceiverOptionalAbsent && receiver.Policy != ForkReceiverOptionalExisting {
 			applyClosedReplacement(t, filepath.Join(root, path, "entities.yaml"), "  marker: text\n", "  marker: text\n  processed_count: {type: integer, initial: 0}\n")
-			replacement = "          - {target_field: processed_count, value: \"${entity.processed_count + 1}\"}\n"
+			replacement = "          - {target_field: processed_count, value: entity.processed_count + 1}\n"
 			if receiver.Policy == ForkReceiverRequiredExisting || receiver.Policy == ForkReceiverRequiredMissing {
 				replacement = "      data_accumulation:\n        writes:\n" + replacement
 			}
@@ -39,8 +39,8 @@ func CopyForkReceiverExecutionOwnership(t testing.TB, receivers []ForkReceiver, 
 		applyClosedReplacement(t, filepath.Join(root, path, "nodes.yaml"), fmt.Sprintf(`      emit:
         event: receiver.finished
         fields:
-          owner: {literal: %s}
-          token: "${payload.token}"
+          owner: "%s"
+          token: payload.token
 `, receiver.Path), replacement)
 		applyClosedReplacement(t, filepath.Join(root, path, "schema.yaml"), "  outputs:\n    - receiver.finished\n", "")
 		removeClosedVariantFiles(t, root, path+"/events.yaml")

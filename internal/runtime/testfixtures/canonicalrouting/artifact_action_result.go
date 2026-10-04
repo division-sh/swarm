@@ -66,20 +66,21 @@ repo_scaffold.repo_commit_failed:
     repo_scaffold.repo_commit_requested:
       rules:
         ready:
-          when: 'payload.mvp_yaml == "name: Demo\n"'
+          when: |-
+                  payload.mvp_yaml == "name: Demo\n"
           emit:
             event: repo_scaffold.repo_commit_succeeded
             fields:
-              request_id: ${payload.request_id}
-              result_kind: {literal: ready}
+              request_id: payload.request_id
+              result_kind: "ready"
         rejected:
           else: true
           emit:
             event: repo_scaffold.repo_commit_failed
             fields:
-              request_id: ${payload.request_id}
-              request_copy: ${payload.request_id}
-              result_kind: {literal: failed}
+              request_id: payload.request_id
+              request_copy: payload.request_id
+              result_kind: "failed"
     repo_scaffold.repo_commit_succeeded:
       sets_gate: result_callback_observed
     repo_scaffold.repo_commit_failed:
@@ -122,6 +123,6 @@ pins:
     start.requested:
       emit:
         event: repo_scaffold.repo_commit_requested
-        fields: {request_id: "${payload.request_id}", mvp_yaml: "${payload.mvp_yaml}"}
+        fields: {request_id: payload.request_id, mvp_yaml: payload.mvp_yaml}
 `
 }

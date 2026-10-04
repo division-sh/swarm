@@ -20,7 +20,7 @@ func TestStatelessSingletonFixturesContainNoCoordinatorCeremony(t *testing.T) {
 		t.Fatalf("fan-in stream reports declaration = %q, want real field without _unused_reason", entities)
 	}
 	nodes := readCanonicalFixtureFile(t, filepath.Join(stream, "portfolio", "nodes.yaml"))
-	for _, want := range []string{"op: set", "target: entity.reports", "payload.operating_id", "value: ${payload}"} {
+	for _, want := range []string{"op: set", "target: entity.reports", "payload.operating_id", "value: payload"} {
 		if !strings.Contains(nodes, want) {
 			t.Fatalf("fan-in stream nodes missing %q:\n%s", want, nodes)
 		}

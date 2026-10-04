@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type EffectiveValueOrigin string
@@ -63,6 +65,14 @@ func (b *WorkflowContractBundle) EffectiveProvenance() EffectiveProvenanceLedger
 		return EffectiveProvenanceLedger{}
 	}
 	return cloneEffectiveProvenanceLedger(b.effectiveProvenance)
+}
+
+func (b *WorkflowContractBundle) HandlerValueProvenance(node runtimeidentity.ExecutableNode, event, slot string) (EffectiveValueProvenance, bool) {
+	if b == nil {
+		return EffectiveValueProvenance{}, false
+	}
+	path := effectiveNodeProvenancePrefix(node.FlowPath(), node.NodeID()) + "." + nodeProvenanceMapPath("event_handlers", event) + "." + slot
+	return b.effectiveProvenance.Lookup(path)
 }
 
 func cloneEffectiveProvenanceLedger(in EffectiveProvenanceLedger) EffectiveProvenanceLedger {

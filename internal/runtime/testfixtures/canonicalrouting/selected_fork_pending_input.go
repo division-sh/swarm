@@ -52,7 +52,7 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 			case PendingInputOrdinaryRoot:
 				files["schema.yaml"] = strings.ReplaceAll(files["schema.yaml"], "- work.first", "- work.requested")
 				files["events.yaml"] += "work.requested:\n  token: text\n"
-				files["nodes.yaml"] += "emitter:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  produces: [work.first]\n  event_handlers:\n    work.requested:\n      emit:\n        event: work.first\n        fields:\n          token: ${payload.token}\n"
+				files["nodes.yaml"] += "emitter:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  produces: [work.first]\n  event_handlers:\n    work.requested:\n      emit:\n        event: work.first\n        fields:\n          token: payload.token\n"
 			case PendingInputDuplicateEndpoint:
 				files["schema.yaml"] += "    - work.first\n"
 			case PendingInputMixedCompletion:
@@ -95,10 +95,10 @@ func CopySelectedInputValidationProbe(t testing.TB) string {
 	for name, body := range map[string]string{
 		"schema.yaml":       "name: selected-input\npins:\n  inputs:\n    - thing.created\n",
 		"events.yaml":       "thing.created:\n",
-		"nodes.yaml":        "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: '_entity.id != \"\"'\n",
+		"nodes.yaml":        "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
 		"child/schema.yaml": "name: child\npins:\n  inputs:\n    - thing.created\n",
 		"child/events.yaml": "thing.created:\n",
-		"child/nodes.yaml":  "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: '_entity.id != \"\"'\n",
+		"child/nodes.yaml":  "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
 	} {
 		writeClosedVariantFile(t, root, name, body)
 	}

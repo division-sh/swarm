@@ -8,11 +8,11 @@ classifier:
         writes:
           - score
       on_complete:
-        - condition: "payload.score >= policy.high_mark"
+        - condition: payload.score >= policy.high_mark
           advances_to: tier_a
-        - condition: "payload.score >= policy.low_mark"
+        - condition: payload.score >= policy.low_mark
           advances_to: tier_b
           emit:
             event: eval.tier_b
-        - condition: "else"
+        -
           advances_to: tier_c
