@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -58,6 +59,7 @@ func TestHTTPObservationRefusalsStayTypedAndRedacted(t *testing.T) {
 		status               int
 	}{
 		{"auth", `private-server-explanation`, "workspace_gateway_unreachable", http.StatusUnauthorized},
+		{"server_failure", `private-server-explanation`, "workspace_gateway_unreachable", http.StatusServiceUnavailable},
 		{"auth_rpc", `{"jsonrpc":"2.0","id":null,"error":{"code":-32001,"message":"private"}}`, "workspace_gateway_unreachable", http.StatusOK},
 		{"context_auth_rpc", `{"jsonrpc":"2.0","id":1,"error":{"code":-32003,"data":{"runtimeError":{"protocol_error":{"code":"mcp_context_token_not_found","message":"private"}}}}}`, "workspace_gateway_unreachable", http.StatusOK},
 		{"context_authority_rpc", `{"jsonrpc":"2.0","id":1,"error":{"code":-32003,"data":{"runtimeError":{"protocol_error":{"code":"mcp_actor_missing","message":"private"}}}}}`, "managed_capability_mcp_definition_mismatch", http.StatusOK},
@@ -81,6 +83,33 @@ func TestHTTPObservationRefusalsStayTypedAndRedacted(t *testing.T) {
 	server.Close()
 	_, err := testObservation(server.URL).Probe(context.Background())
 	assertObservationFailure(t, err, "workspace_gateway_unreachable")
+}
+
+func TestHTTPObservationDNSFailureRemainsTypedAndHasNoFallback(t *testing.T) {
+	var resolutions, calls atomic.Int32
+	previous := net.DefaultResolver
+	// Keep DNS failure hermetic. This package does not run parallel tests; the
+	// numeric-address control must still use the actual HTTP client below.
+	net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(context.Context, string, string) (net.Conn, error) {
+		resolutions.Add(1)
+		return nil, errors.New("private DNS refusal")
+	}}
+	t.Cleanup(func() { net.DefaultResolver = previous })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26"}}`))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := testObservation("http://missing-workspace-gateway.invalid/mcp?private-query").Probe(ctx)
+	assertObservationFailure(t, err, "workspace_gateway_unreachable")
+	if resolutions.Load() == 0 || ctx.Err() != nil || calls.Load() != 0 {
+		t.Fatalf("DNS failure did not discriminate resolution from timeout/fallback: resolutions=%d calls=%d ctx=%v", resolutions.Load(), calls.Load(), ctx.Err())
+	}
+	if err := testObservation(server.URL).Initialize(ctx); err != nil || calls.Load() != 1 {
+		t.Fatalf("numeric-address HTTP control failed: calls=%d err=%v", calls.Load(), err)
+	}
 }
 
 func TestHTTPObservationDistinguishesValidEmptyFromAbsentInvalidInventory(t *testing.T) {
@@ -146,6 +175,10 @@ func TestHTTPObservationLostCallReplyIsUncertainNotPreModelRefusal(t *testing.T)
 		name    string
 		respond func(http.ResponseWriter, *http.Request)
 	}{
+		{"server_failure_after_effect", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("private-server-explanation"))
+		}},
 		{"disconnect_after_effect", func(w http.ResponseWriter, _ *http.Request) {
 			connection, _, err := w.(http.Hijacker).Hijack()
 			if err != nil {
