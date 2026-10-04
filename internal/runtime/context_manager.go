@@ -778,23 +778,11 @@ func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
 			executableSubjects[subject.ID] = struct{}{}
 			subjects = append(subjects, subject)
 		}
-		declarations, err := ResolveStandingTargetDeclarations(entry.context.Source, entry.context.ProviderTriggerCatalog)
+		declared, err := declaredStandingCapabilitySubjects(entry.context, executableSubjects)
 		if err != nil {
 			return err
 		}
-		for _, declaration := range declarations {
-			for _, binding := range declaration.Ingress {
-				subject, err := binding.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
-					BundleHash: bundleHash, Alias: declaration.Alias, SigningSecret: binding.SigningSecret, SourcePath: declaration.SourcePath,
-				})
-				if err != nil {
-					return fmt.Errorf("derive standing ingress capability subject: %w", err)
-				}
-				if _, executable := executableSubjects[subject.ID]; !executable {
-					subjects = append(subjects, subject)
-				}
-			}
-		}
+		subjects = append(subjects, declared...)
 	}
 	projected, err := projectBundleScopedInstalledSubjects(installed)
 	if err != nil {
@@ -807,6 +795,50 @@ func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
 	}
 	m.setBaseCapabilitySubjectsLocked(normalized)
 	return nil
+}
+
+func validateStandingTargetDeclarationOwner(contextDef *BundleContext, target StandingTarget) error {
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
+	if err != nil {
+		return err
+	}
+	owned := false
+	for _, declaration := range declarations {
+		if declaration.FlowPath != target.FlowPath || runtimeflowidentity.StandingServiceID(declaration.FlowPath) != target.ServiceID || declaration.Alias != target.Alias {
+			continue
+		}
+		for _, binding := range declaration.Ingress {
+			if binding.Provider == target.Provider && binding.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) {
+				owned = true
+			}
+		}
+	}
+	if !owned {
+		return fmt.Errorf("committed standing target %s/%s has no exact declaration owner", target.Alias, target.Provider)
+	}
+	return nil
+}
+
+func declaredStandingCapabilitySubjects(contextDef *BundleContext, executableSubjects map[string]struct{}) ([]packs.Subject, error) {
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
+	if err != nil {
+		return nil, err
+	}
+	var subjects []packs.Subject
+	for _, declaration := range declarations {
+		for _, binding := range declaration.Ingress {
+			subject, err := binding.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
+				BundleHash: contextDef.BundleHash(), Alias: declaration.Alias, SigningSecret: binding.SigningSecret, SourcePath: declaration.SourcePath,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("derive standing ingress capability subject: %w", err)
+			}
+			if _, executable := executableSubjects[subject.ID]; !executable {
+				subjects = append(subjects, subject)
+			}
+		}
+	}
+	return subjects, nil
 }
 
 type bundleScopedInstalledSubject struct {
@@ -968,26 +1000,12 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 		}
 		target, ok := targets[subject.ID]
 		if !ok {
-			current := subject
 			blocked, blockedPresent := ineligible[subject.ID]
-			if blockedPresent {
-				current = blocked.subject
-			}
-			if !blockedPresent || blocked.observeSigning {
-				var err error
-				current, err = evaluateProviderTriggerCapabilitySubject(ctx, current, projection)
-				if err != nil {
-					return nil, err
-				}
-			}
-			enabled := false
-			current.Status = ""
-			current.TriggerAdmission.BindingEnabled = &enabled
-			normalized, err := packs.NormalizeSubjects([]packs.Subject{current})
+			current, err := evaluateIneligibleStandingSubject(ctx, subject, blocked, blockedPresent, projection)
 			if err != nil {
 				return nil, err
 			}
-			evaluated = append(evaluated, normalized[0])
+			evaluated = append(evaluated, current)
 			continue
 		}
 		activationBackedSubject, err := target.CapabilitySubject()
@@ -1019,6 +1037,28 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 		return nil, fmt.Errorf("provider ingress capability projection became stale while credentials were observed")
 	}
 	return normalized, nil
+}
+
+func evaluateIneligibleStandingSubject(ctx context.Context, subject packs.Subject, blocked standingIngressReadback, blockedPresent bool, projection *runtimecredentials.SecretBindingProjection) (packs.Subject, error) {
+	current := subject
+	if blockedPresent {
+		current = blocked.subject
+	}
+	if !blockedPresent || blocked.observeSigning {
+		var err error
+		current, err = evaluateProviderTriggerCapabilitySubject(ctx, current, projection)
+		if err != nil {
+			return packs.Subject{}, err
+		}
+	}
+	enabled := false
+	current.Status = ""
+	current.TriggerAdmission.BindingEnabled = &enabled
+	normalized, err := packs.NormalizeSubjects([]packs.Subject{current})
+	if err != nil {
+		return packs.Subject{}, err
+	}
+	return normalized[0], nil
 }
 
 func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string]string, error) {
@@ -2095,23 +2135,8 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 			if target.BundleHash != bundleHash {
 				continue
 			}
-			declarations, err := ResolveStandingTargetDeclarations(copied.Source, copied.ProviderTriggerCatalog)
-			if err != nil {
+			if err := validateStandingTargetDeclarationOwner(&copied, target); err != nil {
 				return err
-			}
-			owned := false
-			for _, declaration := range declarations {
-				if declaration.FlowPath != target.FlowPath || runtimeflowidentity.StandingServiceID(declaration.FlowPath) != target.ServiceID || declaration.Alias != target.Alias {
-					continue
-				}
-				for _, binding := range declaration.Ingress {
-					if binding.Provider == target.Provider && binding.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) {
-						owned = true
-					}
-				}
-			}
-			if !owned {
-				return fmt.Errorf("committed standing target %s/%s has no exact declaration owner", target.Alias, target.Provider)
 			}
 			copied.StandingTargets = append(copied.StandingTargets, target)
 			delete(byBundleAndKey, key)

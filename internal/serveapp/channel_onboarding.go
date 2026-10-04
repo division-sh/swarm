@@ -51,65 +51,75 @@ func serveChannelOnboardingCatalog(manager *runtime.RuntimeContextManager) (*cha
 			return nil, err
 		}
 		for _, plan := range contextDef.ChannelPlans {
-			profile, ok := plan.OnboardingProfile()
-			if !ok {
-				continue
-			}
-			identity, err := plan.InterfaceIdentity()
+			planned, err := serveChannelCandidatesForPlan(contextDef, bundleIdentity, declarations, plan)
 			if err != nil {
 				return nil, err
 			}
-			generation, err := plan.Generation()
-			if err != nil {
-				return nil, err
-			}
-			posture := channelonboarding.ActivationPosture(profile.ActivationPosture())
-			ceremony := channelonboarding.IdentityCeremony(profile.IdentityCeremony())
-			if posture == channelonboarding.ActivationSessionConnection {
-				// Session candidates become live only when #2341 projects an exact
-				// service-fulfillment target into the runtime context.
-				continue
-			}
-			for _, declaration := range declarations {
-				for _, binding := range declaration.Ingress {
-					if binding.Provider != profile.Provider() {
-						continue
-					}
-					target := runtime.StandingTarget{
-						ServiceID: runtimeflowidentity.StandingServiceID(declaration.FlowPath), FlowPath: declaration.FlowPath,
-						Alias: declaration.Alias, Provider: binding.Provider, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
-					}
-					for _, executable := range contextDef.StandingTargets {
-						if executable.FlowPath == declaration.FlowPath && executable.Provider == binding.Provider {
-							target = executable
-							break
-						}
-					}
-					selector := fmt.Sprintf("ingress:%s:%s", target.FlowPath, target.Provider)
-					coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
-						BundleHash: bundleHash, BundleIdentity: bundleIdentity,
-						PackInventoryGeneration:      contextDef.PackInventoryDigest,
-						RuntimeInstanceID:            contextDef.RuntimeInstanceID,
-						ContextPublicationGeneration: contextDef.PublicationGeneration,
-						PlanGeneration:               generation, TargetGeneration: uint64(target.Generation),
-					}
-					candidates = append(candidates, channelonboarding.Candidate{
-						SourceLabel: contextDef.BundleIdentity.SourceLabel,
-						Provider:    profile.Provider(), Interface: identity, Coordinate: coordinate,
-						Target: channelonboarding.CandidateTarget{
-							Selector: selector, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
-							Alias: target.Alias, Provider: target.Provider, Generation: uint64(target.Generation), PublicationSequence: target.PublicationSequence,
-							AdmissionGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
-						},
-						Posture: posture, Ceremony: ceremony,
-						ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(),
-						ConfirmationOperation: profile.ConfirmationOperation(), ConnectionHealth: profile.ConnectionHealth(), Plan: plan,
-					})
-				}
-			}
+			candidates = append(candidates, planned...)
 		}
 	}
 	return channelonboarding.NewCandidateCatalog(candidates)
+}
+
+func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdentity string, declarations []runtime.StandingTargetDeclaration, plan packs.SatisfactionPlan) ([]channelonboarding.Candidate, error) {
+	profile, ok := plan.OnboardingProfile()
+	if !ok {
+		return nil, nil
+	}
+	identity, err := plan.InterfaceIdentity()
+	if err != nil {
+		return nil, err
+	}
+	generation, err := plan.Generation()
+	if err != nil {
+		return nil, err
+	}
+	posture := channelonboarding.ActivationPosture(profile.ActivationPosture())
+	ceremony := channelonboarding.IdentityCeremony(profile.IdentityCeremony())
+	if posture == channelonboarding.ActivationSessionConnection {
+		// Session candidates require #2341's exact service-fulfillment target.
+		return nil, nil
+	}
+	var candidates []channelonboarding.Candidate
+	for _, declaration := range declarations {
+		for _, binding := range declaration.Ingress {
+			if binding.Provider != profile.Provider() {
+				continue
+			}
+			target := serveChannelDeclarationTarget(contextDef, declaration, binding)
+			coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
+				BundleHash: contextDef.BundleHash(), BundleIdentity: bundleIdentity,
+				PackInventoryGeneration: contextDef.PackInventoryDigest, RuntimeInstanceID: contextDef.RuntimeInstanceID,
+				ContextPublicationGeneration: contextDef.PublicationGeneration,
+				PlanGeneration:               generation, TargetGeneration: uint64(target.Generation),
+			}
+			candidates = append(candidates, channelonboarding.Candidate{
+				SourceLabel: contextDef.BundleIdentity.SourceLabel,
+				Provider:    profile.Provider(), Interface: identity, Coordinate: coordinate,
+				Target: channelonboarding.CandidateTarget{
+					Selector: fmt.Sprintf("ingress:%s:%s", target.FlowPath, target.Provider), ServiceID: target.ServiceID, FlowPath: target.FlowPath,
+					Alias: target.Alias, Provider: target.Provider, Generation: uint64(target.Generation), PublicationSequence: target.PublicationSequence,
+					AdmissionGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
+				},
+				Posture: posture, Ceremony: ceremony,
+				ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(),
+				ConfirmationOperation: profile.ConfirmationOperation(), ConnectionHealth: profile.ConnectionHealth(), Plan: plan,
+			})
+		}
+	}
+	return candidates, nil
+}
+
+func serveChannelDeclarationTarget(contextDef runtime.BundleContext, declaration runtime.StandingTargetDeclaration, binding runtime.StandingIngressBinding) runtime.StandingTarget {
+	for _, executable := range contextDef.StandingTargets {
+		if executable.FlowPath == declaration.FlowPath && executable.Provider == binding.Provider {
+			return executable
+		}
+	}
+	return runtime.StandingTarget{
+		ServiceID: runtimeflowidentity.StandingServiceID(declaration.FlowPath), FlowPath: declaration.FlowPath,
+		Alias: declaration.Alias, Provider: binding.Provider, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
+	}
 }
 
 func rejectWebhookPrebindingWithoutPublicIngress(snapshot serveChannelActivationSnapshot) error {
@@ -135,88 +145,11 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 	declared := []channelonboarding.CompiledActivation{}
 	projection := credentials.BeginSecretBindingProjection()
 	for _, contextDef := range manager.LoadedContexts() {
-		prior := map[string]channelonboarding.CompiledActivation{}
-		if contextDef.ChannelActivationGeneration.Valid() {
-			lease, available, err := manager.AcquireChannelActivationPublication(contextDef.BundleHash(), contextDef.PublicationGeneration)
-			if err != nil {
-				return serveChannelActivationSnapshot{}, err
-			}
-			if available {
-				for _, activation := range lease.Activations() {
-					if activation.Source == channelonboarding.ActivationSourceDeclared {
-						prior[activation.Plan.BindingID()] = activation
-					}
-				}
-				lease.Release()
-			}
+		compiled, err := compileServeDeclaredChannelActivations(ctx, manager, contextDef, credentials, projection)
+		if err != nil {
+			return serveChannelActivationSnapshot{}, err
 		}
-		for _, binding := range channelOnboardingDeclaredPlans(contextDef) {
-			if selector := binding.RegistrationTarget(); selector != "" {
-				_, enabled, err := findContextTarget(contextDef, selector)
-				if err != nil {
-					return serveChannelActivationSnapshot{}, err
-				}
-				if !enabled {
-					declarations, err := runtime.ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
-					if err != nil {
-						return serveChannelActivationSnapshot{}, err
-					}
-					declared := false
-					for _, declaration := range declarations {
-						for _, ingress := range declaration.Ingress {
-							if selector == fmt.Sprintf("ingress:%s:%s", declaration.FlowPath, ingress.Provider) {
-								declared = true
-							}
-						}
-					}
-					if !declared {
-						return serveChannelActivationSnapshot{}, fmt.Errorf("channels.bindings.%s.register has no admitted declaration %q", binding.BindingID(), selector)
-					}
-					// The runtime's admitted target set owns enabledness. A read or
-					// renewal cannot promote a still-declared dormant registration.
-					continue
-				}
-				use, lookup, err := manager.AcquireBundleHash(ctx, contextDef.BundleHash())
-				if err != nil {
-					return serveChannelActivationSnapshot{}, err
-				}
-				if !lookup.Loaded() || use == nil {
-					return serveChannelActivationSnapshot{}, fmt.Errorf("registration source context is no longer loaded")
-				}
-				err = use.Runtime().ValidateStandingIngressCredentials(use.WorkContext())
-				err = errors.Join(err, use.Done())
-				if err != nil {
-					return serveChannelActivationSnapshot{}, err
-				}
-			}
-			coordinate, err := declaredActivationCoordinate(contextDef, binding)
-			if err != nil {
-				return serveChannelActivationSnapshot{}, err
-			}
-			var admissions []channelonboarding.CredentialAdmission
-			if previous, admitted := prior[binding.BindingID()]; admitted {
-				if !previous.Coordinate.Matches(coordinate) {
-					return serveChannelActivationSnapshot{}, fmt.Errorf("%w: declared activation coordinate changed without replacement", channelonboarding.ErrRevisionConflict)
-				}
-				admissions = previous.CredentialAdmissions
-			} else {
-				admissions, err = declaredActivationCredentialAdmissions(ctx, credentials, coordinate, binding)
-			}
-			if err != nil {
-				return serveChannelActivationSnapshot{}, err
-			}
-			current, err := observeChannelActivationAdmissions(ctx, projection, admissions)
-			if err != nil {
-				return serveChannelActivationSnapshot{}, err
-			}
-			if !current {
-				continue
-			}
-			declared = append(declared, channelonboarding.CompiledActivation{
-				Source: channelonboarding.ActivationSourceDeclared, Coordinate: coordinate,
-				Plan: binding, CredentialAdmissions: admissions,
-			})
-		}
+		declared = append(declared, compiled...)
 	}
 	learned := []channelonboarding.CompiledActivation{}
 	prebinding := []servePrebindingActivation{}
@@ -236,52 +169,13 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 		if err != nil {
 			return serveChannelActivationSnapshot{}, err
 		}
-		for _, activation := range activations {
-			candidate, current := catalog.FindExact(activation.Provider, activation.Interface, activation.Coordinate, activation.TargetSelector)
-			if !current {
-				// Historical selected-store rows remain readable but cannot grant
-				// execution or registration authority to a successor publication.
-				continue
-			}
-			compiled, err := channelonboarding.CompileLearnedActivation(candidate, activation)
-			if err != nil {
-				return serveChannelActivationSnapshot{}, err
-			}
-			current, err = channelonboarding.AdmissionResponsibilityCurrent(ctx, store, channelonboarding.AdmissionResponsibility{
-				OperationID: compiled.OnboardingOperationID, OperationRevision: compiled.OnboardingRevision,
-				ActivationRevision: compiled.ActivationRevision, Coordinate: compiled.Coordinate,
-				TargetSelector: candidate.Target.Selector, Provider: candidate.Provider, Credentials: compiled.CredentialAdmissions,
-			}, true)
-			if err != nil {
-				return serveChannelActivationSnapshot{}, err
-			}
-			if !current {
-				continue
-			}
-			executable, err := observeChannelActivationAdmissions(ctx, projection, compiled.CredentialAdmissions)
-			if err != nil {
-				return serveChannelActivationSnapshot{}, err
-			}
-			if executable {
-				learned = append(learned, compiled)
-			}
+		learned, err = compileServeLearnedChannelActivations(ctx, store, catalog, activations, projection)
+		if err != nil {
+			return serveChannelActivationSnapshot{}, err
 		}
-		for _, op := range operations {
-			if !op.Phase.SupportsPrebindingRegistration() {
-				continue
-			}
-			candidate, current := catalog.FindExact(op.Provider, op.Interface, op.Coordinate, op.TargetSelector)
-			if !current {
-				continue
-			}
-			executable, err := observeChannelActivationAdmissions(ctx, projection, op.CredentialAdmissions)
-			if err != nil {
-				return serveChannelActivationSnapshot{}, err
-			}
-			if !executable {
-				continue
-			}
-			prebinding = append(prebinding, servePrebindingActivation{Operation: op, Candidate: candidate})
+		prebinding, err = compileServePrebindingActivations(ctx, catalog, operations, projection)
+		if err != nil {
+			return serveChannelActivationSnapshot{}, err
 		}
 	}
 	merged, err := channelonboarding.MergeCompiledActivations(declared, learned)
@@ -293,6 +187,185 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 		return serveChannelActivationSnapshot{}, err
 	}
 	return serveChannelActivationSnapshot{Activations: merged, Prebinding: prebinding}, nil
+}
+
+func compileServeLearnedChannelActivations(ctx context.Context, store channelonboarding.Store, catalog *channelonboarding.CandidateCatalog, activations []channelonboarding.ConnectedChannelActivation, projection *runtimecredentials.SecretBindingProjection) ([]channelonboarding.CompiledActivation, error) {
+	learned := []channelonboarding.CompiledActivation{}
+	for _, activation := range activations {
+		candidate, current := catalog.FindExact(activation.Provider, activation.Interface, activation.Coordinate, activation.TargetSelector)
+		if !current {
+			// Historical selected-store rows remain readable but cannot grant
+			// execution or registration authority to a successor publication.
+			continue
+		}
+		compiled, err := channelonboarding.CompileLearnedActivation(candidate, activation)
+		if err != nil {
+			return nil, err
+		}
+		current, err = channelonboarding.AdmissionResponsibilityCurrent(ctx, store, channelonboarding.AdmissionResponsibility{
+			OperationID: compiled.OnboardingOperationID, OperationRevision: compiled.OnboardingRevision,
+			ActivationRevision: compiled.ActivationRevision, Coordinate: compiled.Coordinate,
+			TargetSelector: candidate.Target.Selector, Provider: candidate.Provider, Credentials: compiled.CredentialAdmissions,
+		}, true)
+		if err != nil {
+			return nil, err
+		}
+		if !current {
+			continue
+		}
+		executable, err := observeChannelActivationAdmissions(ctx, projection, compiled.CredentialAdmissions)
+		if err != nil {
+			return nil, err
+		}
+		if executable {
+			learned = append(learned, compiled)
+		}
+	}
+	return learned, nil
+}
+
+func compileServePrebindingActivations(ctx context.Context, catalog *channelonboarding.CandidateCatalog, operations []channelonboarding.Operation, projection *runtimecredentials.SecretBindingProjection) ([]servePrebindingActivation, error) {
+	prebinding := []servePrebindingActivation{}
+	for _, op := range operations {
+		if !op.Phase.SupportsPrebindingRegistration() {
+			continue
+		}
+		candidate, current := catalog.FindExact(op.Provider, op.Interface, op.Coordinate, op.TargetSelector)
+		if !current {
+			continue
+		}
+		executable, err := observeChannelActivationAdmissions(ctx, projection, op.CredentialAdmissions)
+		if err != nil {
+			return nil, err
+		}
+		if !executable {
+			continue
+		}
+		prebinding = append(prebinding, servePrebindingActivation{Operation: op, Candidate: candidate})
+	}
+	return prebinding, nil
+}
+
+func compileServeDeclaredChannelActivations(ctx context.Context, manager *runtime.RuntimeContextManager, contextDef runtime.BundleContext, credentials *runtimecredentials.SnapshotOwner, projection *runtimecredentials.SecretBindingProjection) ([]channelonboarding.CompiledActivation, error) {
+	prior, err := priorServeDeclaredActivations(manager, contextDef)
+	if err != nil {
+		return nil, err
+	}
+	declared := []channelonboarding.CompiledActivation{}
+	for _, binding := range channelOnboardingDeclaredPlans(contextDef) {
+		enabled, err := serveDeclaredRegistrationEnabled(ctx, manager, contextDef, binding)
+		if err != nil {
+			return nil, err
+		}
+		if !enabled {
+			continue
+		}
+		coordinate, err := declaredActivationCoordinate(contextDef, binding)
+		if err != nil {
+			return nil, err
+		}
+		var admissions []channelonboarding.CredentialAdmission
+		if previous, admitted := prior[binding.BindingID()]; admitted {
+			if !previous.Coordinate.Matches(coordinate) {
+				return nil, fmt.Errorf("%w: declared activation coordinate changed without replacement", channelonboarding.ErrRevisionConflict)
+			}
+			admissions = previous.CredentialAdmissions
+		} else {
+			admissions, err = declaredActivationCredentialAdmissions(ctx, credentials, coordinate, binding)
+		}
+		if err != nil {
+			return nil, err
+		}
+		current, err := observeChannelActivationAdmissions(ctx, projection, admissions)
+		if err != nil {
+			return nil, err
+		}
+		if !current {
+			continue
+		}
+		declared = append(declared, channelonboarding.CompiledActivation{
+			Source: channelonboarding.ActivationSourceDeclared, Coordinate: coordinate,
+			Plan: binding, CredentialAdmissions: admissions,
+		})
+	}
+	return declared, nil
+}
+
+func priorServeDeclaredActivations(manager *runtime.RuntimeContextManager, contextDef runtime.BundleContext) (map[string]channelonboarding.CompiledActivation, error) {
+	prior := map[string]channelonboarding.CompiledActivation{}
+	if !contextDef.ChannelActivationGeneration.Valid() {
+		return prior, nil
+	}
+	lease, available, err := manager.AcquireChannelActivationPublication(contextDef.BundleHash(), contextDef.PublicationGeneration)
+	if err != nil {
+		return nil, err
+	}
+	if available {
+		for _, activation := range lease.Activations() {
+			if activation.Source == channelonboarding.ActivationSourceDeclared {
+				prior[activation.Plan.BindingID()] = activation
+			}
+		}
+		lease.Release()
+	}
+	return prior, nil
+}
+
+func serveDeclaredRegistrationEnabled(ctx context.Context, manager *runtime.RuntimeContextManager, contextDef runtime.BundleContext, binding packs.OutboundBindingPlan) (bool, error) {
+	selector := binding.RegistrationTarget()
+	if selector == "" {
+		return true, nil
+	}
+	_, enabled, err := findContextTarget(contextDef, selector)
+	if err != nil {
+		return false, err
+	}
+	if !enabled {
+		declarations, err := runtime.ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
+		if err != nil {
+			return false, err
+		}
+		declared := false
+		for _, declaration := range declarations {
+			for _, ingress := range declaration.Ingress {
+				if selector == fmt.Sprintf("ingress:%s:%s", declaration.FlowPath, ingress.Provider) {
+					declared = true
+				}
+			}
+		}
+		if !declared {
+			return false, fmt.Errorf("channels.bindings.%s.register has no admitted declaration %q", binding.BindingID(), selector)
+		}
+		// The runtime's admitted target set owns enabledness. Readback and
+		// renewal cannot promote a still-declared dormant registration.
+		return false, nil
+	}
+	use, lookup, err := manager.AcquireBundleHash(ctx, contextDef.BundleHash())
+	if err != nil {
+		return false, err
+	}
+	if !lookup.Loaded() || use == nil {
+		return false, fmt.Errorf("registration source context is no longer loaded")
+	}
+	err = use.Runtime().ValidateStandingIngressCredentials(use.WorkContext())
+	err = errors.Join(err, use.Done())
+	return err == nil, err
+}
+
+func reconcileServeProviderRegistrations(ctx context.Context, generation runtimepublicingress.Generation, manager *runtime.RuntimeContextManager, store channelonboarding.Store, identities *operatorchannel.Service, credentials *runtimecredentials.SnapshotOwner, controller *runtimepublicingress.ProviderRegistrationController) error {
+	snapshot, err := compileServeChannelActivationSnapshot(ctx, manager, store, identities, credentials)
+	if err != nil {
+		return err
+	}
+	if err := publishServeChannelActivationSnapshot(ctx, manager, snapshot); err != nil {
+		return err
+	}
+	selection, err := resolveServeRegistrationPairs(snapshot, manager)
+	if err != nil {
+		return err
+	}
+	defer selection.Release()
+	return controller.Reconcile(ctx, generation, selection.Pairs)
 }
 
 func observeChannelActivationAdmissions(ctx context.Context, projection *runtimecredentials.SecretBindingProjection, admissions []channelonboarding.CredentialAdmission) (bool, error) {
