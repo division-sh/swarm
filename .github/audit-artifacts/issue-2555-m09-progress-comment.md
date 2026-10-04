@@ -88,7 +88,22 @@ The source primitive census now checks both shared worker model-launch branches
 through the existing completion owner, with fail-closed admission/mode/input
 negative controls; free probes and gateway-owned effects remain distinct.
 Focused CLI/effect controls and API/mock notify-human/credential transport
-controls pass (the latter race x3). Expanded clean-head rerun remains required.
+controls pass (the latter race x3). The complete seven-package clean-head rerun
+at `80d4f8216` is now GREEN, as are exact complexity, protocol/source-census
+race x3 and proof-plan guards. This does not constitute whole-suite closure.
+
+The fresh native race x3 run at that head is RED on the unchanged host request-
+retirement assertion; all seven real-Docker leaves pass three repetitions.
+Abrupt host-child cancellation can beat HTTP retirement. The existing host
+worker now receives cooperative cancellation and joins its work/result before
+bounded exact-child escalation. The original request-retirement, uncertainty,
+one-call and continuity oracles remain; the corrected host control passes
+race x20 locally. Committed-head requalification remains required.
+
+The public dual-store fork-chat and exact replay controls pass, but compiled
+host/boot checks fail before execution on G's stale input-pin fixture. The
+fixture is corrected to the current names-only shape without verifier or
+legacy-reader changes; the compiled transport assertions must be rerun.
 
 **Still open:** public Docker test/default-Linux positive and successor refusal
 on hosted Ubuntu, remaining original 48-row qualification, clean-head full/full,

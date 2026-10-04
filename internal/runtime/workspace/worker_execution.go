@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
@@ -141,6 +142,10 @@ func workerCommand(ctx context.Context, target *Target, dockerBin string) (*exec
 		}
 		cmd := exec.CommandContext(ctx, artifact.path, worker.Argument)
 		cmd.Dir = target.Workdir
+		// The native entry owns interpreter/HTTP cancellation. Let it join that
+		// work and report possible-commit evidence before escalating to disposal.
+		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+		cmd.WaitDelay = 10 * time.Second
 		return cmd, artifact.identity, nil
 	case ExecutionModeDockerContainer:
 		if dockerBin == "" {

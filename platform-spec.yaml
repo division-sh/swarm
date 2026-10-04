@@ -40294,6 +40294,10 @@ managed_agent_capability_surface:
       mismatch or known tool failure. Cancellation after tool dispatch preserves
       typed outcome uncertainty through the native protocol and the parent join;
       it cannot replace possible-commit evidence with bare cancellation. An
+      ordinary host cancellation first asks the native worker to cancel and join
+      its interpreter/HTTP work before returning the observed result. Bounded
+      escalation still owns and joins the exact local child and cannot fabricate
+      an observed outcome or authorize a possibly committed tool retry. An
       uncertain transported tool outcome stops
       the conversation without consuming its completion continuation or producing
       model feedback; another model round cannot mint a replacement call for a
