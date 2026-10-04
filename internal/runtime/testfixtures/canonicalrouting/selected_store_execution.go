@@ -21,13 +21,13 @@ func CopySelectedStoreExecution(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `name: selected-store-execution
 pins:
   inputs:
-    events:
-      - item.received
-      - review.ready
-      - state.seeded
-      - state.closed
+    - item.received
+    - review.ready
+    - state.seeded
+    - state.closed
   outputs:
-    events: [state.seeded, state.closed]
+    - state.seeded
+    - state.closed
 connect:
   - {from: ., event: state.seeded, to: flow-a/1}
   - {from: ., event: state.closed, to: flow-a/1}
@@ -51,9 +51,8 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - state.seeded
-      - state.closed
+    - state.seeded
+    - state.closed
 `)
 		writeClosedVariantFile(t, root, owner.path+"/entities.yaml", owner.entity+":\n  name: text\n")
 		writeClosedVariantFile(t, root, owner.path+"/nodes.yaml", `state-owner:

@@ -49,12 +49,12 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	for _, family := range families {
 		request, result := family+".requested", "result."+family
 		siblingRequest := "sibling." + family + ".requested"
-		siblingInputPins += "      - " + siblingRequest + "\n"
+		siblingInputPins += "    - " + siblingRequest + "\n"
 		siblingRequestSchemas += fmt.Sprintf("%s:\n  case_id: text\n  value: %s\n", siblingRequest, valueType)
 		siblingProducers += fmt.Sprintf("sibling-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: \"${payload.case_id}\", value: \"${payload.value}\"}}\n", family, siblingRequest, siblingRequest, result)
 		connects += fmt.Sprintf("  - {event: %s, from: ., to: sibling}\n", siblingRequest)
-		inputPins += "      - " + request + "\n"
-		outputPins += "      - " + result + "\n"
+		inputPins += "    - " + request + "\n"
+		outputPins += "    - " + result + "\n"
 		connects += fmt.Sprintf("  - {event: %s, from: %s, to: sink}\n", result, scope)
 		requestSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
 		eventSchemas += fmt.Sprintf("%s:\n  case_id: text\n  value: %s\n", result, valueType)
@@ -122,21 +122,21 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		local += "    " + result + ":\n      guard: {id: observed, check: 'int(payload.value) >= 0'}\n"
 	}
 	wildcard := "wildcard:\n  execution_type: system_node\n  subscribes_to: [result.*]\n  event_handlers:\n    result.*:\n      guard: {id: observed, check: 'int(payload.value) >= 0'}\n"
-	sourceSchema := "name: publication-source\npins:\n  inputs:\n    events:\n" + inputPins + "  outputs:\n    events:\n" + outputPins
+	sourceSchema := "name: publication-source\npins:\n  inputs:\n" + inputPins + "  outputs:\n" + outputPins
 	if mode == "root" {
-		sourceSchema = strings.Replace(sourceSchema, "  outputs:\n    events:\n", siblingInputPins+"  outputs:\n    events:\n"+siblingInputPins, 1)
+		sourceSchema = strings.Replace(sourceSchema, "  outputs:\n", siblingInputPins+"  outputs:\n"+siblingInputPins, 1)
 		writeClosedVariantFile(t, root, "schema.yaml", sourceSchema+"connect:\n"+connects)
 		writeClosedVariantFile(t, root, "events.yaml", requestSchemas+eventSchemas+siblingRequestSchemas)
 		writeClosedVariantFile(t, root, "nodes.yaml", handlers+local+wildcard)
 	} else {
-		rootSchema := "name: publication-driver\npins:\n  inputs:\n    events:\n"
+		rootSchema := "name: publication-driver\npins:\n  inputs:\n"
 		if mode == "template" {
 			sourceSchema = strings.Replace(sourceSchema, "name: publication-source\n", "name: publication-source\ninstance: case_id\n", 1)
-			rootSchema += requestSchemasToPins(families) + "  outputs:\n    events:\n"
+			rootSchema += requestSchemasToPins(families) + "  outputs:\n"
 			driver, driverSchemas := "", ""
 			for _, family := range families {
 				request, dispatch := family+".requested", family+".dispatch"
-				rootSchema += "      - " + dispatch + "\n"
+				rootSchema += "    - " + dispatch + "\n"
 				connects += fmt.Sprintf("  - {event: %s, from: ., to: source, rename: %s, resolution: select-or-create}\n", dispatch, request)
 				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
 				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", dispatch, valueType)
@@ -145,14 +145,14 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 			writeClosedVariantFile(t, root, "nodes.yaml", driver)
 			writeClosedVariantFile(t, root, "events.yaml", driverSchemas+siblingRequestSchemas)
 		} else {
-			rootSchema += inputPins + "  outputs:\n    events:\n" + requestSchemasToPins(families)
+			rootSchema += inputPins + "  outputs:\n" + requestSchemasToPins(families)
 			for _, family := range families {
 				request := family + ".requested"
 				connects += fmt.Sprintf("  - {event: %s, from: ., to: source}\n", request)
 			}
 			writeClosedVariantFile(t, root, "events.yaml", requestSchemas+siblingRequestSchemas)
 		}
-		rootSchema = strings.Replace(rootSchema, "  outputs:\n    events:\n", siblingInputPins+"  outputs:\n    events:\n"+siblingInputPins, 1)
+		rootSchema = strings.Replace(rootSchema, "  outputs:\n", siblingInputPins+"  outputs:\n"+siblingInputPins, 1)
 		writeClosedVariantFile(t, root, "schema.yaml", rootSchema+"connect:\n"+connects)
 		writeClosedVariantFile(t, root, "source/schema.yaml", sourceSchema)
 		writeClosedVariantFile(t, root, "source/events.yaml", eventSchemas)
@@ -161,14 +161,14 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 			writeClosedVariantFile(t, root, "source/entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
 		}
 	}
-	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    events:\n"+outputPins)
+	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n"+outputPins)
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
 	// A sibling's local subscriptions are not authority for source publications.
 	siblingEvents := ""
 	for _, result := range results {
 		siblingEvents += result + ":\n  case_id: text\n  value: " + valueType + "\n"
 	}
-	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\npins:\n  inputs:\n    events:\n"+siblingInputPins)
+	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\npins:\n  inputs:\n"+siblingInputPins)
 	writeClosedVariantFile(t, root, "sibling/events.yaml", siblingEvents)
 	writeClosedVariantFile(t, root, "sibling/nodes.yaml", siblingProducers+local)
 	return root
@@ -177,7 +177,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 func requestSchemasToPins(families []string) string {
 	var pins string
 	for _, family := range families {
-		pins += "      - " + family + ".requested\n"
+		pins += "    - " + family + ".requested\n"
 	}
 	return pins
 }

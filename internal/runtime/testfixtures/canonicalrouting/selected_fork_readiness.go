@@ -126,12 +126,12 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	childSchema = []byte(strings.Replace(string(childSchema), "      - worker.ready", "      - worker.inspect\n      - worker.ready", 1))
+	childSchema = []byte(strings.Replace(string(childSchema), "    - worker.ready", "    - worker.inspect\n    - worker.ready", 1))
 	rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "to: worker-flow}", "to: worker-flow, resolution: select}"))
 	if declarations == 0 {
-		childSchema = []byte(strings.Replace(string(childSchema), "  outputs:\n    events: [worker.observed]\n", "", 1))
-		childSchema = []byte(strings.Replace(string(childSchema), "      - worker.ready\n", "", 1))
-		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "[worker.ready, ", "["))
+		childSchema = []byte(strings.Replace(string(childSchema), "  outputs:\n    - worker.observed\n", "", 1))
+		childSchema = []byte(strings.Replace(string(childSchema), "    - worker.ready\n", "", 1))
+		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "    - worker.ready\n", ""))
 		rootSchema = []byte(strings.Replace(string(rootSchema), "  - {event: worker.ready, from: ., to: worker-flow, resolution: select}\n", "", 1))
 		rootEventsPath := filepath.Join(root, "events.yaml")
 		rootEvents, err := os.ReadFile(rootEventsPath)
@@ -144,9 +144,9 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 		}
 	}
 	if frontier == "mixed" || frontier == "mixed_progress" {
-		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), ", worker.inspect", ""))
+		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "    - worker.inspect\n", ""))
 		rootSchema = []byte(strings.Replace(string(rootSchema), "  - {event: worker.inspect, from: ., to: worker-flow, resolution: select}\n", "", 1))
-		childSchema = []byte(strings.Replace(string(childSchema), "      - worker.inspect\n", "", 1))
+		childSchema = []byte(strings.Replace(string(childSchema), "    - worker.inspect\n", "", 1))
 		rootEvents, err := os.ReadFile(filepath.Join(root, "events.yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -157,9 +157,9 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 		}
 	}
 	if strings.HasPrefix(frontier, "activity_loop") {
-		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "worker.inspect]", "worker.inspect, worker.retry]"))
+		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "    - worker.inspect\n", "    - worker.inspect\n    - worker.retry\n"))
 		rootSchema = append(rootSchema, []byte("  - {event: worker.retry, from: ., to: worker-flow, resolution: select}\n")...)
-		childSchema = []byte(strings.Replace(string(childSchema), "    events:\n", "    events:\n      - worker.retry\n", 1))
+		childSchema = []byte(strings.Replace(string(childSchema), "  inputs:\n", "  inputs:\n    - worker.retry\n", 1))
 		childEvents, err := os.ReadFile(filepath.Join(root, "worker-flow/events.yaml"))
 		if err != nil {
 			t.Fatal(err)

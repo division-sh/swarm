@@ -16,7 +16,7 @@ func TestOperationInputProducerResolverMatchesFreshResolution(t *testing.T) {
 		"scatter": operationScatterSource(t),
 		"nil":     nil,
 	}
-	sources["harness"] = testConnectRoutePlanSource([]connectRoutePlanFlow{{id: "worker", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.requested", Source: runtimecontracts.FlowInputPinSourceHarness}}}}, nil)
+	sources["unbound"] = testConnectRoutePlanSource([]connectRoutePlanFlow{{id: "worker", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.requested"}}}}, nil)
 	for name, source := range sources {
 		t.Run(name, func(t *testing.T) {
 			graph, resolver := CompileConnectGraphWithInputProducerResolver(source)

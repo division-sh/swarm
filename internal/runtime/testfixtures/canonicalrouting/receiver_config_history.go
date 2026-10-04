@@ -16,8 +16,7 @@ instance_variables:
     flow_path: json
 pins:
   inputs:
-    events:
-      - deploy.done
+    - deploy.done
 `)
 	return root
 }

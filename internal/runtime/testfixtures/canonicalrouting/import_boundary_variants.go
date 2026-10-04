@@ -61,11 +61,9 @@ connect:
 name: import-boundary-alias
 pins:
   inputs:
-    events:
-      - parent.lead_enriched
+    - parent.lead_enriched
   outputs:
-    events:
-      - parent.lead_captured
+    - parent.lead_captured
 `
 		rootEvents = "\nparent.lead_captured:\n"
 	}

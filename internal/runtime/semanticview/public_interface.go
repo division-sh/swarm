@@ -12,7 +12,7 @@ func SelectedRootInputPin(source Source, event string) (runtimecontracts.Compile
 		return runtimecontracts.CompiledFlowInputPin{}, false
 	}
 	pin, ok := source.FlowInputEventPin(".", event)
-	return pin, ok && pin.Source() != runtimecontracts.FlowInputPinSourceHarness
+	return pin, ok
 }
 
 // SelectedRootInputEndpoints preserves the full internal census while exposing

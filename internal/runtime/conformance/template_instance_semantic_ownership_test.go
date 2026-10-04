@@ -30,7 +30,7 @@ func TestTemplateInstanceSemanticOwnersRemainTypedAndOpaque(t *testing.T) {
 
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.FlowSchemaDocument{}), "Instance", templateFieldType)
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.TemplateInstanceContract{}), "Field", templateFieldType)
-	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.FlowInputPinResolution{}), "Mode", modeType)
+	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.FlowConnect{}), "Resolution", modeType)
 	assertSemanticOwnerMethodResult(t, reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}), "Field", templateFieldType)
 	assertSemanticOwnerMethodResult(t, reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}), "Mode", modeType)
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimebus.TemplateInstanceLifecycleDecision{}), "Action", actionType)
@@ -72,7 +72,6 @@ func TestCompiledRoutingTypesDoNotImplementStringer(t *testing.T) {
 	owners := []any{
 		runtimecontracts.TemplateInstanceField{},
 		runtimecontracts.FlowInputResolutionMode(0),
-		runtimecontracts.FlowOutputSink(0),
 		semanticview.ConnectorImportSource{},
 		runtimebus.TemplateInstanceLifecycleAction(0),
 		events.DeliveryRouteIdentity{},

@@ -26,8 +26,6 @@ func (p FlowOutputPins) EventTypes() []string {
 
 type compiledFlowInputPinValue struct {
 	event               string
-	source              FlowInputPinSource
-	resolution          FlowInputPinResolution
 	context             FlowPinCompilationContext
 	producerEventSchema CompiledEventSchema
 	receiverEventSchema CompiledEventSchema
@@ -67,66 +65,28 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 	if err := validateAuthoredFlowInputPin(pin); err != nil {
 		return CompiledFlowInputPin{}, err
 	}
-	resolution := pin.Resolution.clone()
-	if err := validateCompiledFlowInputResolution(resolution); err != nil {
-		return CompiledFlowInputPin{}, fmt.Errorf("input pin %s resolution: %w", pin.Event, err)
-	}
 	provenance := compiledFlowPinProvenance(context, pin.sourceLine, pin.sourceCol)
 	initialization, err := CompileReceiverInitialization(context.Configuration, pin.Initialize, context.EventSchema)
 	if err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("input pin %s: %w", pin.Event, err)
 	}
-	digest, err := compiledFlowPinDigest("input", context, pin.Event, FlowInputPinSourceCode(pin.Source), "", resolution, context.EventSchema, context.EventSchema, initialization)
+	digest, err := compiledFlowPinDigest("input", context, pin.Event, context.EventSchema, context.EventSchema, initialization)
 	if err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("compile input pin %s digest: %w", pin.Event, err)
 	}
 	storedContext := context
 	storedContext.EventSchema = CompiledEventSchema{}
 	return CompiledFlowInputPin{value: &compiledFlowInputPinValue{
-		event: pin.Event, source: pin.Source, resolution: resolution,
+		event: pin.Event,
 		context: storedContext, producerEventSchema: context.EventSchema, receiverEventSchema: context.EventSchema,
 		provenance: provenance, digest: digest, initialization: initialization,
 	}}, nil
 }
 
 func validateAuthoredFlowInputPin(pin FlowInputEventPin) error {
-	if len(pin.Initialize) > 0 && !pin.Resolution.Empty() {
-		return fmt.Errorf("input initialize requires an ordinary creating connection, not a reply or fan-out pin policy")
-	}
 	event := pin.Event
 	if event == "" || event != strings.TrimSpace(event) || !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
 		return fmt.Errorf("input pin event %q is not an exact local canonical event identity", event)
-	}
-	if !pin.Source.Valid() {
-		return fmt.Errorf("input pin %s has invalid source %q", event, FlowInputPinSourceCode(pin.Source))
-	}
-	return nil
-}
-
-func validateCompiledFlowInputResolution(resolution FlowInputPinResolution) error {
-	if resolution.Empty() {
-		return nil
-	}
-	if !resolution.Mode.Valid() {
-		return fmt.Errorf("mode is required")
-	}
-	for label, value := range map[string]string{
-		"replies_to": resolution.RepliesTo, "correlation_key": resolution.CorrelationKey,
-	} {
-		if value != "" && value != strings.TrimSpace(value) {
-			return fmt.Errorf("%s must be an exact value", label)
-		}
-	}
-	if resolution.RepliesTo != "" && (!eventidentity.IsValidName(resolution.RepliesTo) || strings.ContainsAny(resolution.RepliesTo, "/*")) {
-		return fmt.Errorf("replies_to %q must be an exact local event identity", resolution.RepliesTo)
-	}
-	switch resolution.Mode {
-	case FlowInputResolutionModeCreate, FlowInputResolutionModeSelect, FlowInputResolutionModeSelectOrCreate:
-		return fmt.Errorf("input-pin resolution mode %s is not supported for ordinary instance selection", FlowInputResolutionModeCode(resolution.Mode))
-	case FlowInputResolutionModeFanOut:
-		if resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
-			return fmt.Errorf("mode fan-out may only declare mode")
-		}
 	}
 	return nil
 }
@@ -155,19 +115,6 @@ func (p CompiledFlowInputPin) EventType() string {
 	}
 	return p.value.event
 }
-func (p CompiledFlowInputPin) Source() FlowInputPinSource {
-	if p.value == nil {
-		return FlowInputPinSourceNone
-	}
-	return p.value.source
-}
-func (p CompiledFlowInputPin) Resolution() FlowInputPinResolution {
-	if p.value == nil {
-		return FlowInputPinResolution{}
-	}
-	return p.value.resolution.clone()
-}
-
 func (p CompiledFlowInputPin) FlowID() string {
 	if p.value == nil {
 		return ""
@@ -234,7 +181,7 @@ func (p CompiledFlowInputPin) BindImportedEventSchema(schema CompiledEventSchema
 	if err != nil {
 		return CompiledFlowInputPin{}, err
 	}
-	value.digest, err = compiledFlowPinDigest("input", value.context, value.event, FlowInputPinSourceCode(value.source), "", value.resolution, schema, schema, value.initialization)
+	value.digest, err = compiledFlowPinDigest("input", value.context, value.event, schema, schema, value.initialization)
 	if err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("compile imported input pin %s digest: %w", value.event, err)
 	}
@@ -243,7 +190,6 @@ func (p CompiledFlowInputPin) BindImportedEventSchema(schema CompiledEventSchema
 
 type compiledFlowOutputPinValue struct {
 	event      string
-	sink       FlowOutputSink
 	context    FlowPinCompilationContext
 	provenance CompiledFlowPinProvenance
 	digest     string
@@ -261,12 +207,12 @@ func CompileFlowOutputPin(context FlowPinCompilationContext, pin FlowOutputEvent
 		return CompiledFlowOutputPin{}, err
 	}
 	provenance := compiledFlowPinProvenance(context, pin.sourceLine, pin.sourceCol)
-	digest, err := compiledFlowPinDigest("output", context, pin.Event, "", FlowOutputSinkCode(pin.Sink), FlowInputPinResolution{}, context.EventSchema, CompiledEventSchema{}, ReceiverInitialization{})
+	digest, err := compiledFlowPinDigest("output", context, pin.Event, context.EventSchema, CompiledEventSchema{}, ReceiverInitialization{})
 	if err != nil {
 		return CompiledFlowOutputPin{}, fmt.Errorf("compile output pin %s digest: %w", pin.Event, err)
 	}
 	return CompiledFlowOutputPin{value: &compiledFlowOutputPinValue{
-		event: pin.Event, sink: pin.Sink, context: context, provenance: provenance, digest: digest,
+		event: pin.Event, context: context, provenance: provenance, digest: digest,
 	}}, nil
 }
 
@@ -274,9 +220,6 @@ func validateAuthoredFlowOutputPin(pin FlowOutputEventPin) error {
 	event := pin.Event
 	if event == "" || event != strings.TrimSpace(event) || !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
 		return fmt.Errorf("output pin event %q is not an exact local canonical event identity", event)
-	}
-	if !pin.Sink.Valid() {
-		return fmt.Errorf("output pin %s has invalid sink %q", event, FlowOutputSinkCode(pin.Sink))
 	}
 	return nil
 }
@@ -288,13 +231,6 @@ func (p CompiledFlowOutputPin) EventType() string {
 	}
 	return p.value.event
 }
-func (p CompiledFlowOutputPin) Sink() FlowOutputSink {
-	if p.value == nil {
-		return FlowOutputSinkNone
-	}
-	return p.value.sink
-}
-
 func (p CompiledFlowOutputPin) FlowID() string {
 	if p.value == nil {
 		return ""
@@ -331,7 +267,7 @@ func (p CompiledFlowOutputPin) BindImportedEventSchema(schema CompiledEventSchem
 	value := *p.value
 	value.context.EventSchema = schema
 	var err error
-	value.digest, err = compiledFlowPinDigest("output", value.context, value.event, "", FlowOutputSinkCode(value.sink), FlowInputPinResolution{}, schema, CompiledEventSchema{}, ReceiverInitialization{})
+	value.digest, err = compiledFlowPinDigest("output", value.context, value.event, schema, CompiledEventSchema{}, ReceiverInitialization{})
 	if err != nil {
 		return CompiledFlowOutputPin{}, fmt.Errorf("compile imported output pin %s digest: %w", value.event, err)
 	}
@@ -373,7 +309,7 @@ func compiledFlowPinProvenance(context FlowPinCompilationContext, line, column i
 	}
 }
 
-func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, event, source, sink string, resolution FlowInputPinResolution, producerSchema, receiverSchema CompiledEventSchema, initialization ReceiverInitialization) (string, error) {
+func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, event string, producerSchema, receiverSchema CompiledEventSchema, initialization ReceiverInitialization) (string, error) {
 	key, hasKey := producerSchema.BusinessKey()
 	var initialize any
 	if direction == "input" {
@@ -383,9 +319,6 @@ func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, 
 		Direction            string                 `json:"direction"`
 		FlowPath             string                 `json:"flow_path"`
 		Event                string                 `json:"event"`
-		Source               string                 `json:"source,omitempty"`
-		Sink                 string                 `json:"sink,omitempty"`
-		Resolution           FlowInputPinResolution `json:"resolution"`
 		EventSchemaName      string                 `json:"event_schema_name,omitempty"`
 		EventSchemaDigest    string                 `json:"event_schema_digest,omitempty"`
 		BusinessKeyField     string                 `json:"business_key_field,omitempty"`
@@ -394,8 +327,8 @@ func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, 
 		ReceiverSchemaDigest string                 `json:"receiver_schema_digest,omitempty"`
 		Initialization       any                    `json:"initialization,omitempty"`
 	}{
-		Direction: direction, FlowPath: context.FlowPath, Event: event, Source: source, Sink: sink,
-		Resolution: resolution, EventSchemaName: producerSchema.EventName(),
+		Direction: direction, FlowPath: context.FlowPath, Event: event,
+		EventSchemaName: producerSchema.EventName(),
 		EventSchemaDigest: producerSchema.AcceptanceSchemaDigest(),
 		BusinessKeyField:  key.Field, BusinessKeyType: key.SemanticType, HasEventBusinessKey: hasKey,
 		ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(),
@@ -405,25 +338,6 @@ func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, 
 
 func (p FlowInputEventPin) EventType() string {
 	return p.Event
-}
-
-func (r FlowInputPinResolution) Empty() bool {
-	r = r.normalized()
-	return r.Mode == FlowInputResolutionModeNone &&
-		r.RepliesTo == "" &&
-		r.CorrelationKey == ""
-}
-
-func (r FlowInputPinResolution) normalized() FlowInputPinResolution {
-	return FlowInputPinResolution{
-		Mode:           r.Mode,
-		RepliesTo:      r.RepliesTo,
-		CorrelationKey: r.CorrelationKey,
-	}
-}
-
-func (r FlowInputPinResolution) clone() FlowInputPinResolution {
-	return r
 }
 
 func (p FlowOutputEventPin) EventType() string {
@@ -461,6 +375,8 @@ func (c FlowConnect) normalized() FlowConnect {
 		Rename:        c.Rename,
 		Resolution:    c.Resolution,
 		KeyFrom:       c.KeyFrom,
+		RepliesTo:     c.RepliesTo,
+		CorrelationKey: c.CorrelationKey,
 	}
 }
 

@@ -116,9 +116,8 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - fork.source_message
-      - item.processed
+    - fork.source_message
+    - item.processed
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - external.observed\n", "      - external.observed\n      - fork.source_message\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "events: [external.observed]\n", "events: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
@@ -159,9 +158,8 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - item.agent_hold
-      - item.processed
+    - item.agent_hold
+    - item.processed
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - item.agent_hold\n  outputs:\n    events: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
 	writeClosedVariantFile(t, root, "hold/entities.yaml", "session: {}\n")
@@ -217,12 +215,11 @@ stages:
   ready: {terminal: true}
 pins:
   inputs:
-    events:
-      - event: opco.create_requested
-        initialize:
-          product_id: payload.product_id
-      - opco.product_initialization_requested
-      - opco.product_review_requested
+    - event: opco.create_requested
+      initialize:
+        product_id: payload.product_id
+    - opco.product_initialization_requested
+    - opco.product_review_requested
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
@@ -297,10 +294,9 @@ stages:
   ready: {terminal: true}
 pins:
   inputs:
-    events:
-      - event: opco.create_requested
-        initialize:
-          product_id: payload.product_id
+    - event: opco.create_requested
+      initialize:
+        product_id: payload.product_id
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
@@ -354,8 +350,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - item.received
+    - item.received
 `, `name: routing-root-ingress
 stages:
   new: {initial: true}
@@ -363,12 +358,11 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - item.received
-      - opco.bootstrap_requested
-      - opco.spinup_requested
+    - item.received
+    - opco.bootstrap_requested
+    - opco.spinup_requested
   outputs:
-    events: [opco.create_requested]
+    - opco.create_requested
 connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
 `)

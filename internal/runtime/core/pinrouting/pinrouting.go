@@ -101,7 +101,6 @@ type OutputConsumerClass uint8
 
 const (
 	OutputConsumerNone OutputConsumerClass = iota
-	OutputConsumerHarness
 	OutputConsumerSameFlow
 	OutputConsumerConnect
 	OutputConsumerRootExport
@@ -109,7 +108,6 @@ const (
 
 type OutputConsumerClassification struct {
 	classes     map[OutputConsumerClass]struct{}
-	invalidSink bool
 	connects    []ConnectRoutePlan
 }
 
@@ -118,16 +116,12 @@ func (c OutputConsumerClassification) Has(class OutputConsumerClass) bool {
 	return ok
 }
 
-func (c OutputConsumerClassification) InvalidSink() bool {
-	return c.invalidSink
-}
-
 func (c OutputConsumerClassification) HasRuntimeConsumer() bool {
 	return c.Has(OutputConsumerSameFlow) || c.Has(OutputConsumerConnect)
 }
 
 func (c OutputConsumerClassification) DeliberateNoSubscriber() bool {
-	return (c.Has(OutputConsumerHarness) || c.Has(OutputConsumerRootExport)) && !c.HasRuntimeConsumer()
+	return c.Has(OutputConsumerRootExport) && !c.HasRuntimeConsumer()
 }
 
 func ClassifyOutputConsumer(source semanticview.Source, flowID, eventType string) OutputConsumerClassification {
@@ -179,13 +173,6 @@ func (r *OutputConsumerResolver) classify(flowID, eventType string, routingSourc
 		}
 	}
 	for _, pin := range outputPins {
-		if !pin.Sink().Valid() {
-			classification.invalidSink = true
-			continue
-		}
-		if pin.Sink() == runtimecontracts.FlowOutputSinkHarness {
-			classification.classes[OutputConsumerHarness] = struct{}{}
-		}
 		if routingSource.Empty() {
 			classification.connects = append(classification.connects, graph.PlansFromOutputPin(flowID, pin)...)
 		}
@@ -280,20 +267,13 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 		return Resolution{Envelope: envelope.Normalized()}
 	}
 	consumer := classifyOutputConsumer(input.Source, input.FlowID, input.EventType, input.RoutingSource)
-	if consumer.InvalidSink() || (consumer.Has(OutputConsumerHarness) && consumer.HasRuntimeConsumer()) {
-		return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
-	}
-	if consumer.Has(OutputConsumerHarness) || consumer.Has(OutputConsumerSameFlow) || consumer.Has(OutputConsumerRootExport) {
+	if consumer.Has(OutputConsumerSameFlow) || consumer.Has(OutputConsumerRootExport) {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
 	if len(consumer.connects) > 0 {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
 	return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
-}
-
-func OutputHarnessSink(source semanticview.Source, flowID, eventType string) bool {
-	return ClassifyOutputConsumer(source, flowID, eventType).Has(OutputConsumerHarness)
 }
 
 func descriptorRoute(flowID string, descriptor Descriptor) events.RouteIdentity {

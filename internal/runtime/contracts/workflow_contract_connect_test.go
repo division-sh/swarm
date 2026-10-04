@@ -46,35 +46,15 @@ func TestImportedOutputPinSchemaBindingIsImmutableAndSingleOwner(t *testing.T) {
 }
 
 func TestW2CanonicalPinEvidenceIsImmutable(t *testing.T) {
-	context := FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "collector/schema.yaml"}
-	first, err := CompileFlowInputPin(context, FlowInputEventPin{
-		Event: "work.reported",
-		Resolution: FlowInputPinResolution{
-			Mode: FlowInputResolutionModeReply, RepliesTo: "work.requested", CorrelationKey: "worker_id",
-		},
-	})
-	if err != nil {
-		t.Fatalf("compile first input pin: %v", err)
-	}
-	second, err := CompileFlowInputPin(context, FlowInputEventPin{
-		Event: "work.reported",
-		Resolution: FlowInputPinResolution{
-			Mode: FlowInputResolutionModeReply, RepliesTo: "work.requested", CorrelationKey: "worker_id",
-		},
-	})
-	if err != nil {
-		t.Fatalf("compile second input pin: %v", err)
-	}
-	if first.Digest() == "" || first.Digest() != second.Digest() {
-		t.Fatalf("equivalent input pin digests = %q/%q, want one canonical identity", first.Digest(), second.Digest())
-	}
-
-	readback := first.Resolution()
-	readback.CorrelationKey = "changed"
-	if got := first.Resolution().CorrelationKey; got != "worker_id" {
-		t.Fatalf("resolution readback mutation escaped into compiled owner: %#v", got)
-	}
-
+ context := FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "collector/schema.yaml"}
+ first, err := CompileFlowInputPin(context, FlowInputEventPin{Event: "work.reported"})
+ if err != nil { t.Fatal(err) }
+ second, err := CompileFlowInputPin(context, FlowInputEventPin{Event: "work.reported"})
+ if err != nil { t.Fatal(err) }
+ if first.Digest() == "" || first.Digest() != second.Digest() { t.Fatal("equivalent pins lost canonical identity") }
+ readback := first.Provenance()
+ readback.SourceFile = "changed"
+ if first.Provenance().SourceFile != context.SourceFile { t.Fatal("readback mutation changed compiled pin") }
 }
 
 func TestW2CompiledResolutionRejectsFieldsOutsideClosedMode(t *testing.T) {

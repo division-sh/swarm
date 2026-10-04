@@ -11,10 +11,9 @@ func CopyServedReceiverInitialization(t testing.TB) string {
 		"schema.yaml": `name: served-receiver-initialization
 pins:
   inputs:
-    events:
-      - work.requested
+    - work.requested
   outputs:
-    events: [work.ready]
+    - work.ready
 connect:
   - {event: work.ready, from: ., to: account, resolution: select-or-create}
 `,
@@ -57,14 +56,13 @@ instance_variables:
     attributes: json
 pins:
   inputs:
-    events:
-      - event: work.ready
-        initialize:
-          count: payload.values.count
-          label: payload.values.label
-          ratio: payload.values.ratio
-          active: payload.values.active
-          attributes: payload.values.attributes
+    - event: work.ready
+      initialize:
+        active: payload.values.active
+        attributes: payload.values.attributes
+        count: payload.values.count
+        label: payload.values.label
+        ratio: payload.values.ratio
 `,
 		"account/entities.yaml": `account_state:
   account_id: {type: text, _unused_reason: receiver instance identity}

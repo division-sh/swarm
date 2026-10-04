@@ -82,7 +82,7 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 			t.Fatalf("unsupported template instance second pin %d", opts.SecondPin)
 		}
 		secondConnect += "    resolution: " + mode + resolutionFrom + "\n"
-		secondPin = "      - " + secondEvent + "\n"
+		secondPin = "    - " + secondEvent + "\n"
 	}
 
 	writeClosedVariantFile(t, root, "schema.yaml", `name: template-instance-route
@@ -95,8 +95,7 @@ connect:
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
 pins:
   outputs:
-    events:
-      - deploy.done
+    - deploy.done
 `, "deploy.done:\n  key: "+producerField+"\n  "+producerField+": string\n", "", "")
 
 	consumerNodes := "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n" + secondHandler
@@ -121,8 +120,7 @@ pins:
 instance: vertical_id
 pins:
   inputs:
-    events:
-      - deploy.done
+    - deploy.done
 `+secondPin,
 		"",
 		"deployment:\n  vertical_id:\n    type: string\n",
@@ -143,10 +141,9 @@ func CopyStaticAndTemplateAgentRoute(t testing.TB) string {
 	writeClosedVariantFile(t, root, "flows/producer/schema.yaml", `name: producer
 pins:
   inputs:
-    events:
-      - deploy.requested
+    - deploy.requested
   outputs:
-    events: [deploy.done]
+    - deploy.done
 `)
 	writeClosedVariantFile(t, root, "flows/producer/events.yaml", `deploy.requested:
   vertical_id: string

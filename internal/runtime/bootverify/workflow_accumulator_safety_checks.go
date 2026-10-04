@@ -104,14 +104,13 @@ func (p accumulatorProducerPaths) hasAny() bool {
 
 func (p accumulatorProducerPaths) message(flowID, nodeID, eventType string) string {
 	return fmt.Sprintf(
-		"Flow %s node %s handler %s accumulates event %s but no accepted producer/source path was found in the authored bundle.\n\nChecked producer source classes:\n- Boundary/external source: %s\n- Parent connect: %s\n- Validation-only harness input: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add an accepted production producer path for %s\n- Remove the accumulator if the event is not produced\n- For a validation fixture only, set source: harness on the input pin; this will remain non-production-valid",
+		"Flow %s node %s handler %s accumulates event %s but no accepted producer/source path was found in the authored bundle.\n\nChecked producer source classes:\n- Boundary/external source: %s\n- Parent connect: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add an accepted production producer path for %s\n- Remove the accumulator if the event is not produced",
 		accumulatorFlowLabel(flowID),
 		strings.TrimSpace(nodeID),
 		strings.TrimSpace(eventType),
 		strings.TrimSpace(eventType),
 		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress),
 		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerBoundaryParentConnect),
-		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection),
 		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerPlatformSource),
 		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerInternalTopology),
 		strings.TrimSpace(eventType),

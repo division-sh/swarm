@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testcatalog"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -68,7 +69,7 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 		fixtures[fixture.RelativePath] = fixture
 	}
 	wantDispositionCounts := map[string]int{
-		"harness": 88, "negative_removal": 36, "dead_removal": 46, "retired_handler_action": 1, "connected_creation": 4,
+		"root_export": 88, "negative_removal": 36, "dead_removal": 46, "retired_handler_action": 1, "connected_creation": 4,
 		"same_flow": 7, "external": 3, "historical_connect": 7, "retired_pin_grant_fixture": 5,
 	}
 	gotDispositionCounts := map[string]int{}
@@ -109,14 +110,14 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 			}
 			emits := emittedEventsInYAML(raw)
 			schemaPath := filepath.Join(filepath.Dir(path), "schema.yaml")
-			outputSinks := outputPinSinksInYAML(readProducerRoutingProofYAML(t, schemaPath))
+			outputPins := admittedProducerRoutingOutputPins(t, schemaPath)
 			switch row.Disposition {
 			case "connected_creation":
 				wantTargets := map[string]string{"B104": "worker-flow", "B105": "worker-flow", "B106": "worker-flow", "B183": "worker"}
 				wantTarget, exact := wantTargets[row.ID]
-				sink, hasOutput := outputSinks[row.Event]
-				if !exact || !hasOutput || sink != "" || !containsProducerRoutingValue(emits, row.Event) {
-					t.Fatalf("connected creation event=%q emits=%v sinks=%v row=%s", row.Event, emits, outputSinks, row.ID)
+				_, hasOutput := outputPins[row.Event]
+				if !exact || !hasOutput || !containsProducerRoutingValue(emits, row.Event) {
+					t.Fatalf("connected creation event=%q emits=%v pins=%v row=%s", row.Event, emits, outputPins, row.ID)
 				}
 				bundle := loadProducerRoutingFixture(t, filepath.ToSlash(filepath.Dir(row.Path)))
 				connects := bundle.CompositionConnects()
@@ -136,13 +137,15 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 					t.Fatalf("unexpected handler-action retirement: %#v", row)
 				}
 				requireRetiredActionHistoricalFixture(t, repoRoot)
-			case "harness":
-				if outputSinks[row.Event] != "harness" || !containsProducerRoutingValue(emits, row.Event) {
-					t.Fatalf("harness migration event=%q emits=%v sinks=%v", row.Event, emits, outputSinks)
+			case "root_export":
+				_, exported := outputPins[row.Event]
+				_, selectedRoot := fixtures[filepath.ToSlash(filepath.Dir(row.Path))]
+				if !selectedRoot || !exported || !containsProducerRoutingValue(emits, row.Event) {
+					t.Fatalf("root export migration event=%q emits=%v pins=%v selected_root=%t", row.Event, emits, outputPins, selectedRoot)
 				}
 			case "negative_removal", "dead_removal":
-				if _, exists := outputSinks[row.Event]; exists {
-					t.Fatalf("removed event %q still has an output pin", row.Event)
+				if err := retiredProducerRoutingOutputError(outputPins, row.Event); err != nil {
+					t.Fatal(err)
 				}
 				// These two emits are the direct evidence for their original negative
 				// classifications; only their unrelated output authority was removed.
@@ -430,9 +433,9 @@ func TestProducerRoutingRetirementExcludedDeadOutputs(t *testing.T) {
 			if containsProducerRoutingValue(emittedEventsInYAML(raw), tc.event) {
 				t.Fatalf("dead event %q is still emitted", tc.event)
 			}
-			schema := readProducerRoutingProofYAML(t, filepath.Join(repoRoot, filepath.Dir(tc.path), "schema.yaml"))
-			if _, exists := outputPinSinksInYAML(schema)[tc.event]; exists {
-				t.Fatalf("dead event %q still has an output pin", tc.event)
+			pins := admittedProducerRoutingOutputPins(t, filepath.Join(repoRoot, filepath.Dir(tc.path), "schema.yaml"))
+			if err := retiredProducerRoutingOutputError(pins, tc.event); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
@@ -593,25 +596,65 @@ func emittedEventsInYAML(document map[string]any) []string {
 	return eventsFound
 }
 
-func outputPinSinksInYAML(document map[string]any) map[string]string {
-	out := map[string]string{}
-	pins, _ := document["pins"].(map[string]any)
-	outputs, _ := pins["outputs"].(map[string]any)
-	eventsList, _ := outputs["events"].([]any)
-	for _, value := range eventsList {
-		switch pin := value.(type) {
-		case string:
-			out[strings.TrimSpace(pin)] = ""
-		case map[string]any:
-			eventType, _ := pin["event"].(string)
-			if strings.TrimSpace(eventType) == "" {
-				eventType, _ = pin["name"].(string)
-			}
-			sink, _ := pin["sink"].(string)
-			out[strings.TrimSpace(eventType)] = strings.TrimSpace(sink)
+func admittedProducerRoutingOutputPins(t testing.TB, path string) map[string]struct{} {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pins, err := producerRoutingOutputPins(data)
+	if err != nil {
+		t.Fatalf("admit output evidence %s: %v", path, err)
+	}
+	return pins
+}
+
+func producerRoutingOutputPins(data []byte) (map[string]struct{}, error) {
+	snapshot, err := yamlsource.Load(data)
+	if err != nil {
+		return nil, err
+	}
+	schema, err := runtimecontracts.AdmitFlowSchemaValue(snapshot.Document("schema.yaml").Root())
+	if err != nil {
+		return nil, err
+	}
+	pins := map[string]struct{}{}
+	for _, pin := range schema.Pins.Outputs.EventPins {
+		pins[pin.Event] = struct{}{}
+	}
+	return pins, nil
+}
+
+func retiredProducerRoutingOutputError(pins map[string]struct{}, event string) error {
+	if _, exists := pins[event]; exists {
+		return fmt.Errorf("removed event %q still has an output pin", event)
+	}
+	return nil
+}
+
+func TestProducerRoutingLedgerDetectsRestoredScalarOutput(t *testing.T) {
+	for _, restored := range []bool{false, true} {
+		source := "name: negative-proof\npins:\n  outputs: [work.retained]\n"
+		if restored {
+			source = strings.Replace(source, "[work.retained]", "[work.retained, work.removed]", 1)
+		}
+		pins, err := producerRoutingOutputPins([]byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detected := retiredProducerRoutingOutputError(pins, "work.removed") != nil; detected != restored {
+			t.Fatalf("restored scalar output detected=%t want=%t", detected, restored)
 		}
 	}
-	return out
+	for _, alternate := range []string{
+		"pins: {outputs: {events: [work.removed]}}",
+		"pins: {outputs: [{event: work.removed, sink: harness}]}",
+		"pins: {outputs: [{name: work.removed}]}",
+	} {
+		if _, err := producerRoutingOutputPins([]byte(alternate)); err == nil {
+			t.Fatalf("ledger admitted alternate output spelling %s", alternate)
+		}
+	}
 }
 
 func hasRetiredProducerRoutingYAML(raw []byte) (bool, error) {

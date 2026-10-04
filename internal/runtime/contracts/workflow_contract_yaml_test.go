@@ -549,33 +549,19 @@ func TestFlowConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
 }
 
 func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		specimen canonicalrouting.InputPinSourceSnippet
-		want     FlowInputPinSource
-	}{
-		{name: "empty", specimen: canonicalrouting.InputPinSourceDefault, want: FlowInputPinSourceNone},
-		{name: "harness", specimen: canonicalrouting.InputPinSourceHarness, want: FlowInputPinSourceHarness},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var doc FlowSchemaDocument
-			if err := decodeNodeTestSnippet(t, canonicalrouting.InputPinSourceParserSnippet(t, tc.specimen), &doc); err != nil {
-				t.Fatalf("yaml.Unmarshal: %v", err)
-			}
-			if got := doc.Pins.Inputs.EventPins[0].Source; got != tc.want {
-				t.Fatalf("Source = %s, want %s", FlowInputPinSourceCode(got), FlowInputPinSourceCode(tc.want))
-			}
-		})
-	}
-
-	var retired FlowSchemaDocument
-	if err := decodeNodeTestSnippet(t, canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceExternal), &retired); err == nil || !strings.Contains(err.Error(), "input event pin source must be public, harness, or omitted") {
-		t.Fatalf("retired source accepted: %v", err)
-	}
 	var doc FlowSchemaDocument
-	err := decodeNodeTestSnippet(t, canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceInvalid), &doc)
-	if err == nil || !strings.Contains(err.Error(), "input event pin source must be") {
-		t.Fatalf("yaml.Unmarshal error = %v, want closed source-enum rejection", err)
+	if err := decodeNodeTestYAML([]byte("pins: {inputs: [work.requested]}"), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Pins.Inputs.EventPins[0].Event != "work.requested" {
+		t.Fatal("names-only input lost")
+	}
+	for _, source := range []string{"harness", "external", "null", "{}", "[]", "''"} {
+		var invalid FlowSchemaDocument
+		err := decodeNodeTestYAML([]byte("pins: {inputs: [{event: work.requested, source: "+source+"}]}"), &invalid)
+		if err == nil || !strings.Contains(err.Error(), `field "source" is not supported`) {
+			t.Fatalf("source %s: %v", source, err)
+		}
 	}
 }
 
@@ -588,34 +574,24 @@ func TestFlowSchemaDocumentDecodeRejectsRetiredAddressBeforeNestedFields(t *test
 }
 
 func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T) {
-
 	var doc FlowSchemaDocument
-	snippet := canonicalrouting.InputPinResolutionModesSnippet(t)
-	if err := decodeNodeTestSnippet(t, snippet, &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+	if err := decodeNodeTestSnippet(t, canonicalrouting.InputPinResolutionModesSnippet(t), &doc); err != nil {
+		t.Fatal(err)
 	}
-	pins := doc.Pins.Inputs.EventPins
-	if len(pins) != 5 {
-		t.Fatalf("input EventPins len = %d, want 5", len(pins))
+	if len(doc.Pins.Inputs.EventPins) != 3 {
+		t.Fatalf("inputs: %#v", doc.Pins.Inputs.EventPins)
 	}
-	create := doc.Connect[0]
-	if got, want := create.Resolution, FlowInputResolutionModeCreate; got != want {
-		t.Fatalf("create Resolution = %q, want %q", got, want)
+	if got := doc.Connect[0]; got.Resolution != FlowInputResolutionModeCreate || got.KeyFrom != FlowInputInstanceSourceGeneratedUUIDPath {
+		t.Fatalf("create: %#v", got)
 	}
-	if got, want := create.KeyFrom, FlowInputInstanceSourceGeneratedUUIDPath; got != want {
-		t.Fatalf("create KeyFrom = %q, want %q", got, want)
+	if got := doc.Connect[1]; got.Resolution != FlowInputResolutionModeSelect || got.KeyFrom != "" {
+		t.Fatalf("select: %#v", got)
 	}
-	if got := doc.Connect[1].KeyFrom; got != "" {
-		t.Fatalf("select default KeyFrom = %q, want omitted", got)
+	if got := doc.Connect[2]; got.Resolution != FlowInputResolutionModeSelectOrCreate || got.KeyFrom != "payload.external_account_id" {
+		t.Fatalf("select-or-create: %#v", got)
 	}
-	if got, want := doc.Connect[2].KeyFrom, "payload.external_account_id"; got != want {
-		t.Fatalf("select-or-create KeyFrom = %q, want %q", got, want)
-	}
-	if got, want := pins[3].Resolution.Mode, FlowInputResolutionModeFanOut; got != want {
-		t.Fatalf("fan-out mode = %q, want %q", got, want)
-	}
-	if got, want := pins[4].Resolution.RepliesTo, "provider.requested"; got != want {
-		t.Fatalf("reply replies_to = %q, want %q", got, want)
+	if got := doc.Connect[3]; got.RepliesTo != "provider.requested" || got.CorrelationKey != "provider_request_id" {
+		t.Fatalf("reply: %#v", got)
 	}
 }
 
@@ -678,39 +654,18 @@ pins:
 
 func TestFlowSchemaDocumentDecode_PreservesClosedOutputPinSinkEnum(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := decodeNodeTestYAML([]byte(`
-name: harness-output
-pins:
-  outputs:
-    events:
-      - event: work.completed
-        sink: harness
-`), &doc)
-	if err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+	if err := decodeNodeTestYAML([]byte("pins: {outputs: [work.completed]}"), &doc); err != nil {
+		t.Fatal(err)
 	}
-	if got := doc.Pins.Outputs.EventPins[0].Sink; got != FlowOutputSinkHarness {
-		t.Fatalf("Sink = %q, want %q", got, FlowOutputSinkHarness)
+	if doc.Pins.Outputs.EventPins[0].Event != "work.completed" {
+		t.Fatal("names-only output lost")
 	}
-
-	for _, tc := range []struct {
-		name string
-		sink string
-	}{
-		{name: "unknown", sink: "external"},
-		{name: "empty", sink: `""`},
-		{name: "null", sink: "null"},
-		{name: "mapping", sink: "{kind: harness}"},
-		{name: "sequence", sink: "[harness]"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var invalid FlowSchemaDocument
-			raw := "name: harness-output\npins:\n  outputs:\n    events:\n      - event: work.completed\n        sink: " + tc.sink + "\n"
-			err := decodeNodeTestYAML([]byte(raw), &invalid)
-			if err == nil || !(strings.Contains(err.Error(), `output event pin sink must be "harness"`) || strings.Contains(err.Error(), `["sink"]`)) {
-				t.Fatalf("yaml.Unmarshal error = %v, want closed sink-enum rejection", err)
-			}
-		})
+	for _, sink := range []string{"harness", "external", "null", "{}", "[]", "''"} {
+		var invalid FlowSchemaDocument
+		err := decodeNodeTestYAML([]byte("pins: {outputs: [{event: work.completed, sink: "+sink+"}]}"), &invalid)
+		if err == nil {
+			t.Fatalf("retired output mapping accepted: sink=%s", sink)
+		}
 	}
 }
 
@@ -1862,10 +1817,8 @@ func TestFlowPinsDecode_PreservesCanonicalScalarEventEntries(t *testing.T) {
 	if err := decodeNodeTestYAML([]byte(`stages:
   pending: {initial: true}
 pins:
-  inputs:
-    events: [check.requested]
-  outputs:
-    events: [check.passed]
+  inputs: [check.requested]
+  outputs: [check.passed]
 `), &schema); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -1881,15 +1834,16 @@ func TestW2RejectsAuthoredPinName(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		raw  string
+		want string
 	}{
-		{name: "input", raw: "pins:\n  inputs:\n    events:\n      - name: work_requested\n        event: work.requested\n"},
-		{name: "output", raw: "pins:\n  outputs:\n    events:\n      - name: work_completed\n        event: work.completed\n"},
+		{name: "input", raw: "pins:\n  inputs:\n    - name: work_requested\n      event: work.requested\n", want: `field "name" is not supported`},
+		{name: "output", raw: "pins:\n  outputs:\n    - name: work_completed\n      event: work.completed\n", want: "must be a scalar text"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
 			err := decodeNodeTestYAML([]byte(tc.raw), &schema)
-			if err == nil || !strings.Contains(err.Error(), tc.name+`s event pin field "name" is not supported`) || !strings.Contains(err.Error(), "Valid fields: event") {
-				t.Fatalf("source admission error = %v, want pin-name rejection with current vocabulary", err)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("source admission error = %v, want pin-name rejection", err)
 			}
 		})
 	}
@@ -1901,12 +1855,12 @@ func TestW2RejectsRetiredPinMetadataAndNonLocalEvents(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "input carries", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n        carries:\n          work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: `event pin field "carries" is not supported`},
-		{name: "output key", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n        key: work_id\n", want: `event pin field "key" is not supported`},
-		{name: "output carries", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n        carries: [work_id]\n", want: `event pin field "carries" is not supported`},
-		{name: "qualified input", raw: "pins:\n  inputs:\n    events: [producer/work.requested]\n", want: "exact local canonical event identity"},
-		{name: "wildcard input", raw: "pins:\n  inputs:\n    events: ['work.*']\n", want: "exact local canonical event identity"},
-		{name: "qualified output", raw: "pins:\n  outputs:\n    events: [consumer/work.completed]\n", want: "exact local canonical event identity"},
+		{name: "input carries", raw: "pins:\n  inputs:\n    - event: work.requested\n      carries:\n        work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: `event pin field "carries" is not supported`},
+		{name: "output key", raw: "pins:\n  outputs:\n    - event: work.completed\n      key: work_id\n", want: "must be a scalar text"},
+		{name: "output carries", raw: "pins:\n  outputs:\n    - event: work.completed\n      carries: [work_id]\n", want: "must be a scalar text"},
+		{name: "qualified input", raw: "pins:\n  inputs: [producer/work.requested]\n", want: "exact local canonical event identity"},
+		{name: "wildcard input", raw: "pins:\n  inputs: ['work.*']\n", want: "exact local canonical event identity"},
+		{name: "qualified output", raw: "pins:\n  outputs: [consumer/work.completed]\n", want: "exact local canonical event identity"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
@@ -1926,17 +1880,18 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 	}{
 		{name: "null pins", raw: "pins: null\n", want: "mapping, got null"},
 		{name: "empty pins", raw: "pins: {}\n", want: "pins must be a non-empty mapping"},
-		{name: "null inputs", raw: "pins:\n  inputs: null\n", want: "mapping, got null"},
-		{name: "empty outputs", raw: "pins:\n  outputs: {}\n", want: "pins.outputs must be a non-empty mapping"},
-		{name: "null input events", raw: "pins:\n  inputs:\n    events: null\n", want: "is null, want sequence"},
-		{name: "empty output events", raw: "pins:\n  outputs:\n    events: []\n", want: "non-empty sequence"},
-		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n", want: "mapping requires a non-default source, resolution or initialize"},
-		{name: "optionless output mapping", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n", want: "mapping requires a non-default sink"},
-		{name: "duplicate event", raw: "pins:\n  inputs:\n    events: [work.requested, work.requested]\n", want: "declared more than once"},
-		{name: "retired read grant", raw: "pins:\n  inputs:\n    reads: [entity.status, entity.status]\n", want: `field "reads" is not supported`},
-		{name: "retired write grant", raw: "pins:\n  outputs:\n    writes: [{field: entity.status}]\n", want: `field "writes" is not supported`},
+		{name: "null inputs", raw: "pins:\n  inputs: null\n", want: "is null, want sequence"},
+		{name: "empty outputs", raw: "pins:\n  outputs: {}\n", want: "is empty_mapping, want sequence"},
+		{name: "retired input wrapper", raw: "pins:\n  inputs:\n    events: [work.requested]\n", want: "is mapping, want sequence"},
+		{name: "retired output wrapper", raw: "pins:\n  outputs:\n    events: [work.completed]\n", want: "is mapping, want sequence"},
+		{name: "empty output list", raw: "pins:\n  outputs: []\n", want: "non-empty sequence"},
+		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    - event: work.requested\n", want: "mapping requires non-empty initialize"},
+		{name: "optionless output mapping", raw: "pins:\n  outputs:\n    - event: work.completed\n", want: "must be a scalar text"},
+		{name: "duplicate event", raw: "pins:\n  inputs: [work.requested, work.requested]\n", want: "declared more than once"},
+		{name: "retired read grant", raw: "pins:\n  inputs:\n    reads: [entity.status, entity.status]\n", want: "is mapping, want sequence"},
+		{name: "retired write grant", raw: "pins:\n  outputs:\n    writes: [{field: entity.status}]\n", want: "is mapping, want sequence"},
 		{name: "unknown pin direction", raw: "pins:\n  ingress:\n    events: [work.requested]\n", want: "is not supported"},
-		{name: "unknown input field", raw: "pins:\n  inputs:\n    aliases: [work.requested]\n", want: "is not supported"},
+		{name: "unknown input field", raw: "pins:\n  inputs:\n    - event: work.requested\n      aliases: [work.requested]\n", want: `field "aliases" is not supported`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
@@ -1947,7 +1902,7 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		})
 	}
 	var schema FlowSchemaDocument
-	if err := decodeNodeTestSnippet(t, canonicalrouting.W2EmptyResolutionParserSnippet(t), &schema); err == nil || !strings.Contains(err.Error(), "input pin resolution must be a non-empty mapping") {
+	if err := decodeNodeTestSnippet(t, canonicalrouting.W2EmptyResolutionParserSnippet(t), &schema); err == nil || !strings.Contains(err.Error(), "inputs event pin field \"resolution\" is not supported") {
 		t.Fatalf("empty resolution error = %v, want explicit-empty rejection", err)
 	}
 }

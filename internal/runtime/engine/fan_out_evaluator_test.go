@@ -56,7 +56,7 @@ func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobli
 		handler.FanOut.Emit.Fields["note"] = admitted.Emit.Fields["note"]
 		itemFields["note"] = rc.EventFieldSpec{Type: "text"}
 	}
-	schema := rc.FlowSchemaDocument{Pins: rc.FlowPins{Outputs: rc.FlowOutputPins{EventPins: []rc.FlowOutputEventPin{{Event: "item.ready", Sink: rc.FlowOutputSinkHarness}}}}}
+	schema := rc.FlowSchemaDocument{Pins: rc.FlowPins{Outputs: rc.FlowOutputPins{EventPins: []rc.FlowOutputEventPin{{Event: "item.ready"}}}}}
 	catalog := map[string]rc.EventCatalogEntry{
 		"batch.ready": requiredEventPayload(map[string]rc.EventFieldSpec{"items": {Type: "[integer]"}}),
 		"item.ready":  requiredEventPayload(itemFields),

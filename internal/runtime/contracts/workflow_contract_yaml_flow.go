@@ -28,19 +28,6 @@ var ruleFieldOptions = map[string]struct{}{
 var inputEventPinFieldOptions = map[string]struct{}{
 	"initialize": {},
 	"event":      {},
-	"source":     {},
-	"resolution": {},
-}
-
-var outputEventPinFieldOptions = map[string]struct{}{
-	"event": {},
-	"sink":  {},
-}
-
-var inputEventPinResolutionFieldOptions = map[string]struct{}{
-	"mode":            {},
-	"replies_to":      {},
-	"correlation_key": {},
 }
 
 var computeFieldOptions = map[string]struct{}{

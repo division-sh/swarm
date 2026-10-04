@@ -17,23 +17,18 @@ import (
 )
 
 type verifyCommandResult struct {
-	BundleHash              string                          `json:"bundle_hash"`
-	SourceLabel             string                          `json:"source_label"`
-	Members                 []sourceartifact.MemberEvidence `json:"members"`
-	Manifest                *sourceartifact.Manifest        `json:"manifest,omitempty"`
-	OK                      bool                            `json:"ok"`
-	SourceRoot              string                          `json:"source_root"`
-	ValidationScope         string                          `json:"validation_scope"`
-	LiveReadiness           string                          `json:"live_readiness"`
-	HarnessInjectedInputs   int                             `json:"harness_injected_inputs"`
-	HarnessObservedOutputs  int                             `json:"harness_observed_outputs"`
-	HarnessInputProvenance  []string                        `json:"harness_input_provenance,omitempty"`
-	HarnessOutputProvenance []string                        `json:"harness_output_provenance,omitempty"`
-	ProductionValid         bool                            `json:"production_valid"`
-	Errors                  []verifyFindingOutput           `json:"errors"`
-	Warnings                []verifyFindingOutput           `json:"warnings"`
-	LintEvidence            []verifyFindingOutput           `json:"lint_evidence"`
-	PackInventory           packInventoryReadback           `json:"pack_inventory"`
+	BundleHash      string                          `json:"bundle_hash"`
+	SourceLabel     string                          `json:"source_label"`
+	Members         []sourceartifact.MemberEvidence `json:"members"`
+	Manifest        *sourceartifact.Manifest        `json:"manifest,omitempty"`
+	OK              bool                            `json:"ok"`
+	SourceRoot      string                          `json:"source_root"`
+	ValidationScope string                          `json:"validation_scope"`
+	LiveReadiness   string                          `json:"live_readiness"`
+	Errors          []verifyFindingOutput           `json:"errors"`
+	Warnings        []verifyFindingOutput           `json:"warnings"`
+	LintEvidence    []verifyFindingOutput           `json:"lint_evidence"`
+	PackInventory   packInventoryReadback           `json:"pack_inventory"`
 }
 
 type verifyFindingOutput struct {
@@ -126,12 +121,8 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
 			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
 			if out != nil {
-				if result.HarnessInjectedInputCount > 0 || result.HarnessObservedOutputCount > 0 {
-					fmt.Fprintf(out, "verify ok: source=%s -- %s; not production-valid\n", output.SourceLabel, harnessValidationSummary(result))
-				} else {
-					fmt.Fprintf(out, "verify ok: source=%s\n", output.SourceLabel)
-				}
-				fmt.Fprintln(out, "validation: structural; live readiness: not evaluated (production_valid describes harness independence only)")
+				fmt.Fprintf(out, "verify ok: source=%s\n", output.SourceLabel)
+				fmt.Fprintln(out, "validation: structural; live readiness: not evaluated")
 				writePackInventory(out, packReadback)
 			}
 		}, func() ([]string, error) {
@@ -143,40 +134,24 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 	return 0
 }
 
-func harnessValidationSummary(result runtime.WorkflowContractValidationResult) string {
-	parts := make([]string, 0, 2)
-	if result.HarnessInjectedInputCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d harness-injected input%s at [%s]", result.HarnessInjectedInputCount, pluralSuffix(result.HarnessInjectedInputCount), strings.Join(result.HarnessInputDeclarations, ", ")))
-	}
-	if result.HarnessObservedOutputCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d harness-observed output%s at [%s]", result.HarnessObservedOutputCount, pluralSuffix(result.HarnessObservedOutputCount), strings.Join(result.HarnessOutputDeclarations, ", ")))
-	}
-	return strings.Join(parts, ", ")
-}
-
 func verifyCommandOutput(ok bool, sourceRoot string, result runtime.WorkflowContractValidationResult, packInventory packInventoryReadback, artifact *sourceartifact.AdmittedSourceArtifact) verifyCommandResult {
 	var manifest *sourceartifact.Manifest
 	if metadata, present := artifact.RootManifest(); present {
 		manifest = &metadata
 	}
 	return verifyCommandResult{
-		BundleHash:              artifact.BundleHash(),
-		SourceLabel:             artifact.HumanLabel(),
-		Members:                 artifact.MemberTable(),
-		Manifest:                manifest,
-		OK:                      ok,
-		SourceRoot:              sourceRoot,
-		ValidationScope:         "structural",
-		LiveReadiness:           "not_evaluated",
-		HarnessInjectedInputs:   result.HarnessInjectedInputCount,
-		HarnessObservedOutputs:  result.HarnessObservedOutputCount,
-		HarnessInputProvenance:  append([]string(nil), result.HarnessInputDeclarations...),
-		HarnessOutputProvenance: append([]string(nil), result.HarnessOutputDeclarations...),
-		ProductionValid:         result.ProductionValid,
-		Errors:                  verifyFindingOutputs(result.BootReport.Errors()),
-		Warnings:                verifyFindingOutputs(result.BootReport.Warnings()),
-		LintEvidence:            verifyFindingOutputs(result.BootReport.LintEvidence()),
-		PackInventory:           packInventory,
+		BundleHash:      artifact.BundleHash(),
+		SourceLabel:     artifact.HumanLabel(),
+		Members:         artifact.MemberTable(),
+		Manifest:        manifest,
+		OK:              ok,
+		SourceRoot:      sourceRoot,
+		ValidationScope: "structural",
+		LiveReadiness:   "not_evaluated",
+		Errors:          verifyFindingOutputs(result.BootReport.Errors()),
+		Warnings:        verifyFindingOutputs(result.BootReport.Warnings()),
+		LintEvidence:    verifyFindingOutputs(result.BootReport.LintEvidence()),
+		PackInventory:   packInventory,
 	}
 }
 
@@ -259,7 +234,6 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	}
 	opts := runtime.StructuralWorkflowContractValidationOptions()
 	opts.ModelAliases = configResult.Config.LLM.Models
-	opts.AllowHarnessInputs, opts.AllowHarnessOutputs = true, true
 	opts.ProviderTriggerCatalog = metadata.ProviderTriggers
 	opts.ChannelPlans = metadata.ChannelPlans
 	return opts, nil

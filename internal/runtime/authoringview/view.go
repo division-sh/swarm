@@ -274,10 +274,6 @@ type InputPinView struct {
 	Event                    string            `json:"event"`
 	ResolvedEvent            string            `json:"resolved_event"`
 	FlowPath                 string            `json:"flow_path,omitempty"`
-	Source                   string            `json:"source,omitempty"`
-	ResolutionMode           string            `json:"resolution_mode,omitempty"`
-	ResolutionRepliesTo      string            `json:"resolution_replies_to,omitempty"`
-	ResolutionCorrelationKey string            `json:"resolution_correlation_key,omitempty"`
 	ProducerSchemaDigest     string            `json:"producer_schema_digest,omitempty"`
 	ReceiverSchemaDigest     string            `json:"receiver_schema_digest,omitempty"`
 	BusinessKey              string            `json:"business_key,omitempty"`
@@ -291,7 +287,6 @@ type OutputPinView struct {
 	Event         string `json:"event"`
 	ResolvedEvent string `json:"resolved_event"`
 	FlowPath      string `json:"flow_path,omitempty"`
-	Sink          string `json:"sink,omitempty"`
 	SchemaDigest  string `json:"schema_digest,omitempty"`
 	BusinessKey   string `json:"business_key,omitempty"`
 	PinDigest     string `json:"pin_digest"`
@@ -1078,7 +1073,6 @@ func singletonCoordinatorView(singleton runtimecontracts.SingletonCoordinatorCon
 func inputPinViews(source semanticview.Source, flowID string, pins []runtimecontracts.CompiledFlowInputPin) []InputPinView {
 	out := make([]InputPinView, 0, len(pins))
 	for _, pin := range pins {
-		resolution := pin.Resolution()
 		provenance := pin.Provenance()
 		producerSchema, _ := pin.ProducerEventSchema()
 		receiverSchema, _ := pin.ReceiverEventSchema()
@@ -1086,9 +1080,7 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 		item := InputPinView{
 			Initialize: pin.Initialization().Bindings(),
 			Event:      pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
-			FlowPath: pin.FlowPath(), Source: runtimecontracts.FlowInputPinSourceCode(pin.Source()),
-			ResolutionMode:      runtimecontracts.FlowInputResolutionModeCode(resolution.Mode),
-			ResolutionRepliesTo: resolution.RepliesTo, ResolutionCorrelationKey: resolution.CorrelationKey,
+			FlowPath: pin.FlowPath(),
 			ProducerSchemaDigest: producerSchema.AcceptanceSchemaDigest(), ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(),
 			BusinessKey: businessKey.Field, PinDigest: pin.Digest(),
 			SourceFile: provenance.SourceFile, SourceLine: provenance.SourceLine, SourceColumn: provenance.SourceColumn,
@@ -1106,7 +1098,7 @@ func outputPinViews(source semanticview.Source, flowID string, pins []runtimecon
 		businessKey, _ := schema.BusinessKey()
 		out = append(out, OutputPinView{
 			Event: pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
-			FlowPath: pin.FlowPath(), Sink: runtimecontracts.FlowOutputSinkCode(pin.Sink()),
+			FlowPath: pin.FlowPath(),
 			SchemaDigest: schema.AcceptanceSchemaDigest(), BusinessKey: businessKey.Field, PinDigest: pin.Digest(),
 			SourceFile: provenance.SourceFile, SourceLine: provenance.SourceLine, SourceColumn: provenance.SourceColumn,
 		})

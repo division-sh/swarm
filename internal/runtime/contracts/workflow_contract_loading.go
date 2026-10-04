@@ -106,7 +106,7 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 			if !ok {
 				return nil, fmt.Errorf("admitted schema source %q is missing", source.Schema)
 			}
-			schema, err = projectFlowSchemaValue(document.Root())
+			schema, err = AdmitFlowSchemaValue(document.Root())
 			if err != nil {
 				return nil, fmt.Errorf("decode %s: %w", source.Schema, err)
 			}

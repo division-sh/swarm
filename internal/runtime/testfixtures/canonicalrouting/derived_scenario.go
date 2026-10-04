@@ -24,10 +24,9 @@ func writeNovelDerivedScenarioBundle(t testing.TB, rootInput bool) string {
 name: derived-novel-flow
 pins:
   inputs:
-    events:
-      - fulfillment.requested
+    - fulfillment.requested
   outputs:
-    events: [fulfillment.requested]
+    - fulfillment.requested
 connect:
   - {event: fulfillment.requested, from: ., to: fulfillment}
 `
@@ -42,8 +41,7 @@ fulfillment.requested:
 		"fulfillment/schema.yaml": `name: fulfillment
 pins:
   inputs:
-    events:
-      - fulfillment.requested
+    - fulfillment.requested
 `,
 		"fulfillment/events.yaml": `
 fulfillment.requested:

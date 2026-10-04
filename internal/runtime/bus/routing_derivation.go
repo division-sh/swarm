@@ -1457,8 +1457,6 @@ func routeFlowInputProducerIsExternal(resolution runtimecontracts.FlowInputProdu
 		return true
 	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect):
 		return true
-	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection):
-		return true
 	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerPlatformSource):
 		return true
 	default:

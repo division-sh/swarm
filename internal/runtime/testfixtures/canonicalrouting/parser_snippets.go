@@ -15,7 +15,7 @@ func ConnectionAdmissionCases() []ConnectionAdmissionCase {
 	for _, mode := range []string{"create", "select", "select-or-create"} {
 		out = append(out,
 			ConnectionAdmissionCase{Name: "edge/" + mode, Source: "connect: [{event: work.requested, from: ., to: worker, resolution: " + mode + "}]\n", Mode: mode},
-			ConnectionAdmissionCase{Name: "retired-pin/" + mode, Source: "pins: {inputs: {events: [{event: work.requested, resolution: {mode: " + mode + "}}]}}\n", WantError: "input-pin resolution mode " + mode + " is not supported for ordinary instance selection"},
+			ConnectionAdmissionCase{Name: "retired-pin/" + mode, Source: "pins: {inputs: [{event: work.requested, resolution: {mode: " + mode + "}}]}\n", WantError: `field "resolution"`},
 		)
 	}
 	for _, choice := range []string{
@@ -29,18 +29,18 @@ func ConnectionAdmissionCases() []ConnectionAdmissionCase {
 	}
 	for name, source := range map[string]string{
 		"scalar":     "work.requested",
-		"reply":      "{event: work.requested, resolution: {mode: reply, replies_to: work.sent}}",
 		"initialize": "{event: work.requested, initialize: {priority: payload.priority}}",
 	} {
-		out = append(out, ConnectionAdmissionCase{Name: "retained/" + name, Source: "pins: {inputs: {events: [" + source + "]}}\n"})
+		out = append(out, ConnectionAdmissionCase{Name: "retained/" + name, Source: "pins: {inputs: [" + source + "]}\n"})
 	}
+	out = append(out, ConnectionAdmissionCase{Name: "edge/reply", Source: "connect: [{event: work.replied, from: provider, to: requester, replies_to: work.sent}]\n"})
 	// These are parser-only rejection specimens, never positive fixtures.
 	for _, retired := range []string{
 		"{mode: fan-in}",
 		"{mode: fan-in, aggregation: stream, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}",
 		"{mode: fan-in, aggregation: barrier, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}",
 	} {
-		out = append(out, ConnectionAdmissionCase{Name: "retired-pin/" + retired, Source: "pins: {inputs: {events: [{event: work.requested, resolution: " + retired + "}]}}\n", WantError: "*"})
+		out = append(out, ConnectionAdmissionCase{Name: "retired-pin/" + retired, Source: "pins: {inputs: [{event: work.requested, resolution: " + retired + "}]}\n", WantError: `field "resolution"`})
 	}
 	return out
 }
@@ -153,12 +153,12 @@ pins:
 
 func W2EmptyResolutionParserSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
-	return NewParserSnippet(t, "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution: {}\n")
+	return NewParserSnippet(t, "pins:\n  inputs:\n    - event: work.requested\n      resolution: {}\n")
 }
 
 func ReceiverInitializeParserSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
-	return NewParserSnippet(t, "events:\n  - event: work.requested\n    initialize: {count: payload.settings.count}\n")
+	return NewParserSnippet(t, "- event: work.requested\n  initialize: {count: payload.settings.count}\n")
 }
 
 func W2MappingKeyParserSnippet(t testing.TB, id W2MappingKeySnippet) ParserSnippet {
@@ -203,20 +203,12 @@ connect:
   - {event: validation.requested, from: ., to: worker, resolution: create, key_from: generated.uuid}
   - {event: account.selected, from: ., to: worker, resolution: select}
   - {event: account.requested, from: ., to: worker, resolution: select-or-create, key_from: payload.external_account_id}
+  - {event: provider.replied, from: provider, to: requester, replies_to: provider.requested, correlation_key: provider_request_id}
 pins:
   inputs:
-    events:
-      - validation.requested
-      - account.selected
-      - account.requested
-      - event: operating.requested
-        resolution:
-          mode: fan-out
-      - event: provider.replied
-        resolution:
-          mode: reply
-          replies_to: provider.requested
-          correlation_key: payload.provider_request_id
+    - validation.requested
+    - account.selected
+    - account.requested
 `)
 }
 

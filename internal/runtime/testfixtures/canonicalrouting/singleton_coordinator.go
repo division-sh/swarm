@@ -86,13 +86,12 @@ func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonC
 		writeStatelessCountJoinSingletonCoordinatorFlow(t, root)
 		return
 	}
-	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\npins:\n  inputs:\n    events: [lead.observed]\n  outputs:\n    events: [lead.observed]\nconnect:\n  - event: lead.observed\n    from: .\n    to: coordinator\n")
+	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\npins:\n  inputs:\n    - lead.observed\n  outputs:\n    - lead.observed\nconnect:\n  - event: lead.observed\n    from: .\n    to: coordinator\n")
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
 stages: []
 pins:
   inputs:
-    events:
-      - lead.observed
+    - lead.observed
 `)
 	writeSingletonCoordinatorFile(t, root, "types.yaml", `
 types:
@@ -155,8 +154,7 @@ stages:
   failed: {terminal: true}
 pins:
   inputs:
-    events:
-      - {event: job.received, source: harness}
+    - job.received
 `)
 	writeSingletonCoordinatorFile(t, root, "coordinator/types.yaml", singletonCoordinatorTypesYAMLForFixture())
 	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", "coordinator_state: {}\n")

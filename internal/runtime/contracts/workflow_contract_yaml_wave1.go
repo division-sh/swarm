@@ -53,6 +53,8 @@ var projectFlowIngressDeliveryIDFields = map[string]struct{}{
 }
 
 var flowConnectFieldOptions = map[string]struct{}{
+	"replies_to": {},
+	"correlation_key": {},
 	"resolution": {},
 	"key_from":   {},
 	"event":      {},

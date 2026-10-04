@@ -11,13 +11,12 @@ func CopyHandlerRuleSelectionProof(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `name: handler-rule-selection-proof
 pins:
   inputs:
-    events:
-      - rules.selected
-      - rules.fallback
-      - rules.evaluation_failed
-      - complete.selected
-      - complete.no_match
-      - direct
+    - rules.selected
+    - rules.fallback
+    - rules.evaluation_failed
+    - complete.selected
+    - complete.no_match
+    - direct
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `rules.selected:
 rules.fallback:
@@ -80,8 +79,7 @@ stages:
     terminal: true
 pins:
   inputs:
-    events:
-      - item.completed
+    - item.completed
 `
 	joinEntities := `join_state:
   expected:
@@ -143,8 +141,7 @@ stages:
     terminal: true
 pins:
   inputs:
-    events:
-      - timer.cancel
+    - timer.cancel
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel:
 `)
@@ -170,8 +167,7 @@ func CopyTemplateOutputRootConnect(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root
 pins:
   inputs:
-    events:
-      - deploy.done
+    - deploy.done
 connect:
   - event: deploy.done
     from: producer
@@ -192,8 +188,7 @@ connect:
 instance: producer_id
 pins:
   outputs:
-    events:
-      - deploy.done
+    - deploy.done
 `, "deploy.done:\n", "producer_state:\n  producer_id: string\n", "")
 	return root
 }

@@ -51,13 +51,12 @@ loops:
     escape: {advances_to: exhausted}
 pins:
   inputs:
-    events:
-      - work.requested
-      - work.bootstrap
-      - review.retry
-      - review.closed
+    - work.requested
+    - work.bootstrap
+    - review.retry
+    - review.closed
   outputs:
-    events: [join.observed]
+    - join.observed
 `,
 		"entities.yaml": `work:
   members: {type: "[text]"}

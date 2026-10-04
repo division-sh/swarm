@@ -458,8 +458,8 @@ func resolveStandingInputEndpointWithCensus(source semanticview.Source, census s
 	}
 	// The caller already compiled this flow's provider admission plan. Its exact
 	// raw output needs a production pin, not a second inferred producer claim.
-	pin, present := source.FlowInputEventPin(flowID, endpoint.PinName)
-	if !present || pin.Source() == runtimecontracts.FlowInputPinSourceHarness {
+	_, present := source.FlowInputEventPin(flowID, endpoint.PinName)
+	if !present {
 		return semanticview.AuthoredEventEndpoint{}, fmt.Errorf("event endpoint %q in flow %s is not a production input of its admitted provider ingress", eventName, flowID)
 	}
 	return endpoint, nil

@@ -54,7 +54,7 @@ effect-revision:
 stages: []
 pins:
   inputs:
-    events: [observer.requested]
+    - observer.requested
 `)
 	writeClosedVariantFile(t, root, "observers/entities.yaml", "observer: {}\n")
 	writeClosedVariantFile(t, root, "observers/nodes.yaml", `start:

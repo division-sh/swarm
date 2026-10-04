@@ -31,9 +31,6 @@ func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) 
 	if got, want := inputPin.EventType(), "account.ready"; got != want {
 		t.Fatalf("input pin event = %q, want %q", got, want)
 	}
-	if !inputPin.Resolution().Empty() {
-		t.Fatalf("ordinary policy leaked into input pin: %#v", inputPin.Resolution())
-	}
 
 	outputPins := source.FlowOutputEventPins("producer")
 	if len(outputPins) != 2 {

@@ -113,7 +113,7 @@ func TestRequiredAgentRoleDoesNotEstablishOutputConsumer(t *testing.T) {
 
 func TestConcreteInstanceConsumerUsesExactAdmittedIdentity(t *testing.T) {
 	for _, declared := range []bool{true, false} {
-		source := testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil)
+		source := testPinRoutingSource(nil)
 		bundle, _ := semanticview.Bundle(source)
 		child := &bundle.FlowTree.Root.Children[0]
 		child.Schema.Instance = mustTemplateInstanceField(t, "instance_id")

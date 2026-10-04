@@ -207,16 +207,6 @@ func NewSchemaDocumentMappingDiagnostic(cause error) *LoaderDiagnostic {
 	)
 }
 
-func NewOutputEventPinOptionsRequiredDiagnostic(cause error) *LoaderDiagnostic {
-	return NewExpectedShapeDiagnostic(
-		"contract_loader.output_event_pin_options_required",
-		"schema.yaml.pins.outputs.events",
-		"output event pin mappings require a non-default sink.",
-		"Use `events: [item.processed]` unless the validation-only `sink: harness` option is required.",
-		cause,
-	)
-}
-
 func NewOptionalDeclarationFileEmptyDiagnostic(fileName string) *LoaderDiagnostic {
 	fileName = strings.TrimSpace(fileName)
 	return NewExpectedShapeDiagnostic(
@@ -293,18 +283,6 @@ func diagnoseLoaderShapeError(err error) (*LoaderDiagnostic, bool) {
 	}
 	if strings.Contains(raw, "flow schema document must be a mapping") {
 		return NewSchemaDocumentMappingDiagnostic(err), true
-	}
-	if strings.Contains(raw, "input event pin mapping requires a non-default source, resolution or initialize") {
-		return NewExpectedShapeDiagnostic(
-			"contract_loader.input_event_pin_options_required",
-			"schema.yaml.pins.inputs.events",
-			"input event pin mappings require a non-default source, resolution or initialize.",
-			"Use `events: [item.received]` unless `source`, retained `resolution` or `initialize` is required.",
-			err,
-		), true
-	}
-	if strings.Contains(raw, "output event pin mapping requires a non-default sink") {
-		return NewOutputEventPinOptionsRequiredDiagnostic(err), true
 	}
 	if isKnownContractLoaderShapeError(raw) {
 		return NewExpectedShapeDiagnostic(

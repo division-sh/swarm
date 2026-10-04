@@ -34,8 +34,8 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 		writeClosedVariantFile(t, root, "support/prompts/backend.md", "Handle support events.\n")
 		writeClosedVariantFile(t, root, "support/agents.yaml", agentBody)
 	} else {
-		writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages: []\npins:\n  outputs:\n    events: [item.created]\nconnect:\n  - {event: item.created, from: ., to: extras}\n")
-		writeClosedVariantFile(t, root, "support/extras/schema.yaml", "name: extras\nstages: []\npins:\n  inputs:\n    events: [item.created]\n")
+		writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages: []\npins:\n  outputs:\n    - item.created\nconnect:\n  - {event: item.created, from: ., to: extras}\n")
+		writeClosedVariantFile(t, root, "support/extras/schema.yaml", "name: extras\nstages: []\npins:\n  inputs:\n    - item.created\n")
 		writeClosedVariantFile(t, root, "support/extras/prompts/backend.md", "Handle support events.\n")
 		writeClosedVariantFile(t, root, "support/extras/agents.yaml", agentBody)
 	}
@@ -85,7 +85,7 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 		t.Fatalf("unsupported event-metadata authority variant %d", variant)
 	}
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: event-metadata-authority\npins:\n  inputs:\n    events: [task.start, external.requested]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: event-metadata-authority\npins:\n  inputs:\n    - task.start\n    - external.requested\n")
 	if agents != "" {
 		writeClosedVariantFile(t, root, "agents.yaml", agents)
 	}
@@ -355,9 +355,9 @@ func CopyVerifyStateSchemaFloat(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-state-schema-float\npins:\n  inputs:\n    events: [task.assigned]\n  outputs:\n    events: [task.assigned]\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-state-schema-float\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
 	removeClosedVariantFiles(t, root, "entities.yaml", "nodes.yaml", "events.yaml")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [task.assigned]\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - task.assigned\n")
 	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", "accumulator:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n  state_schema:\n    fields:\n      composite: float\n")
@@ -369,7 +369,7 @@ func CopyVerifyAccumulatorEntityProjection(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\nstages:\n  collecting: {initial: true}\n  complete: {terminal: true}\npins:\n  inputs:\n    events: [score.dimension_complete]\n  outputs:\n    events:\n      - event: score.completed\n        sink: harness\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\nstages:\n  collecting: {initial: true}\n  complete: {terminal: true}\npins:\n  inputs:\n    - score.dimension_complete\n  outputs:\n    - score.completed\n")
 	writeClosedVariantFile(t, root, "types.yaml", "types:\n  DimensionScore:\n    dimension: text\n    tier: integer\n    score: integer\n    evidence: text\n    confidence: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "vertical:\n  scores:\n    type: list<DimensionScore>\n    materialize_from: scorer.dimensions_received\n")
 	writeClosedVariantFile(t, root, "events.yaml", "score.dimension_complete:\n  expected_dimensions: integer\n  vertical_id: string\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\nscore.completed:\n")
@@ -398,9 +398,9 @@ func CopyVerifyModelAlias(t testing.TB, variant VerifyModelAliasVariant) string 
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-model-alias\npins:\n  inputs:\n    events: [task.assigned]\n  outputs:\n    events: [task.assigned]\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-model-alias\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
 	removeClosedVariantFiles(t, root, "entities.yaml", "nodes.yaml", "events.yaml")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [task.assigned]\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - task.assigned\n")
 	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
 	writeClosedVariantFile(t, root, "child/agents.yaml", fmt.Sprintf("worker:\n  type: factory\n  role: worker\n  intent: prompts/worker.md\n  model: %s\n  subscriptions: [task.assigned]\n", model))
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")

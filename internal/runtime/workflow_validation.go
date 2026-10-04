@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -12,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -35,8 +33,6 @@ type WorkflowContractValidationOptions struct {
 	ValidateLLMModelResolution     bool
 	LLMProfile                     llmselection.Profile
 	ModelAliases                   llmselection.ModelAliases
-	AllowHarnessInputs             bool
-	AllowHarnessOutputs            bool
 	ProviderTriggerCatalog         *providertriggers.CatalogSnapshot
 	ChannelPlans                   []packs.SatisfactionPlan
 	ChannelActivationPublication   channelonboarding.ChannelActivationPublication
@@ -49,11 +45,6 @@ type WorkflowContractValidationResult struct {
 	GeneratedEmitSchemaErrors        []error
 	GeneratedToolSchemaClosureErrors []error
 	CapabilitySubjects               []packs.Subject
-	HarnessInjectedInputCount        int
-	HarnessObservedOutputCount       int
-	HarnessInputDeclarations         []string
-	HarnessOutputDeclarations        []string
-	ProductionValid                  bool
 	mockConnectorResponses           *providerconnectors.MockResponsePlan
 	bootEffectReachability           runtimebootverify.SourceBootEffectReachability
 }
@@ -89,7 +80,6 @@ func StructuralWorkflowContractValidationOptions() WorkflowContractValidationOpt
 // ValidateWorkflowContractSurface is the canonical verify/boot contract-validation entrypoint
 // for prompt guards, bootverify errors, tool implementation validation, and explicit emit-schema coverage.
 func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.Source, opts WorkflowContractValidationOptions) (result WorkflowContractValidationResult, err error) {
-	result = WorkflowContractValidationResult{ProductionValid: true}
 	reportBlocks := false
 	defer func() {
 		if err != nil && opts.Purpose == runtimebootverify.StructuralValidation && !reportBlocks {
@@ -105,25 +95,6 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	}
 	if opts.Purpose != runtimebootverify.StructuralValidation && !opts.ExecutionPosture.Valid() {
 		return result, fmt.Errorf("runtime execution posture is required")
-	}
-	if invalidSinks := workflowInvalidOutputSinkDeclarations(source); len(invalidSinks) > 0 {
-		result.ProductionValid = false
-		return result, fmt.Errorf("output pin sink is invalid at %s; the only supported non-empty value is harness", strings.Join(invalidSinks, ", "))
-	}
-	harnessInputs := workflowHarnessInputDeclarations(source)
-	result.HarnessInputDeclarations = append([]string(nil), harnessInputs...)
-	result.HarnessInjectedInputCount = len(harnessInputs)
-	harnessOutputs := workflowHarnessOutputDeclarations(source)
-	result.HarnessOutputDeclarations = append([]string(nil), harnessOutputs...)
-	result.HarnessObservedOutputCount = len(harnessOutputs)
-	if len(harnessInputs) > 0 || len(harnessOutputs) > 0 {
-		result.ProductionValid = false
-	}
-	if len(harnessInputs) > 0 && !opts.AllowHarnessInputs {
-		return result, fmt.Errorf("production validation rejects test-only input source: harness at %s; replace it with a real producer before booting", strings.Join(harnessInputs, ", "))
-	}
-	if len(harnessOutputs) > 0 && !opts.AllowHarnessOutputs {
-		return result, fmt.Errorf("production validation rejects test-only output sink: harness at %s; replace it with a real consumer before booting", strings.Join(harnessOutputs, ", "))
 	}
 	if opts.Purpose == runtimebootverify.StructuralValidation {
 		// Validate supplied source schemas without selecting actors or requiring
@@ -250,81 +221,6 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	}
 
 	return result, nil
-}
-
-func workflowHarnessInputDeclarations(source semanticview.Source) []string {
-	if source == nil {
-		return nil
-	}
-	var declarations []string
-	for flowID := range source.FlowSchemaEntries() {
-		for _, pin := range source.FlowInputEventPins(flowID) {
-			if pin.Source() != runtimecontracts.FlowInputPinSourceHarness {
-				continue
-			}
-			location := strings.TrimSpace(pin.EventType())
-			if flowID != "" && flowID != "." {
-				location = strings.TrimSpace(flowID) + "." + location
-			}
-			declarations = append(declarations, location)
-		}
-	}
-	sort.Strings(declarations)
-	return declarations
-}
-
-func workflowHarnessOutputDeclarations(source semanticview.Source) []string {
-	if source == nil {
-		return nil
-	}
-	var declarations []string
-	flowIDs := make([]string, 0, len(source.FlowSchemaEntries()))
-	for flowID := range source.FlowSchemaEntries() {
-		if strings.TrimSpace(flowID) != "" {
-			flowIDs = append(flowIDs, flowID)
-		}
-	}
-	for _, flowID := range flowIDs {
-		for _, pin := range source.FlowOutputEventPins(flowID) {
-			if pin.Sink() != runtimecontracts.FlowOutputSinkHarness {
-				continue
-			}
-			location := strings.TrimSpace(pin.EventType())
-			if flowID != "" && flowID != "." {
-				location = strings.TrimSpace(flowID) + "." + location
-			}
-			declarations = append(declarations, location)
-		}
-	}
-	sort.Strings(declarations)
-	return declarations
-}
-
-func workflowInvalidOutputSinkDeclarations(source semanticview.Source) []string {
-	if source == nil {
-		return nil
-	}
-	var declarations []string
-	flowIDs := make([]string, 0, len(source.FlowSchemaEntries()))
-	for flowID := range source.FlowSchemaEntries() {
-		if strings.TrimSpace(flowID) != "" {
-			flowIDs = append(flowIDs, flowID)
-		}
-	}
-	for _, flowID := range flowIDs {
-		for _, pin := range source.FlowOutputEventPins(flowID) {
-			if pin.Sink().Valid() {
-				continue
-			}
-			location := strings.TrimSpace(pin.EventType())
-			if flowID != "" && flowID != "." {
-				location = strings.TrimSpace(flowID) + "." + location
-			}
-			declarations = append(declarations, location)
-		}
-	}
-	sort.Strings(declarations)
-	return declarations
 }
 
 func unsignedRawAdmissionFindings(declarations []StandingTargetDeclaration) []runtimebootverify.Finding {

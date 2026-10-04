@@ -20,7 +20,7 @@ import (
 func TestResolveRejectsCompleteParentAddressWithoutConsumer(t *testing.T) {
 	parent := events.RouteIdentity{FlowID: "root", FlowInstance: "root/inst-1", EntityID: "parent-ent"}
 	result := Resolve(ResolutionInput{
-		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done",
+		Source: testPinRoutingSource(nil), FlowID: "child", EventType: "child.done",
 	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, parent), time.Time{}))
 	if result.Failure != FailureTargetRequiredMissing || !result.Target.Empty() {
 		t.Fatalf("resolution = %#v, want no consumer despite complete parent address", result)
@@ -29,7 +29,7 @@ func TestResolveRejectsCompleteParentAddressWithoutConsumer(t *testing.T) {
 
 func TestResolveFailsClosedWithoutCanonicalConsumer(t *testing.T) {
 	result := Resolve(ResolutionInput{
-		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done",
+		Source: testPinRoutingSource(nil), FlowID: "child", EventType: "child.done",
 	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.Failure != FailureTargetRequiredMissing {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetRequiredMissing)
@@ -38,7 +38,7 @@ func TestResolveFailsClosedWithoutCanonicalConsumer(t *testing.T) {
 
 func TestResolveAllowsSelectedRootExportWithoutInventingRoute(t *testing.T) {
 	result := Resolve(ResolutionInput{
-		Source: testRootPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: ".", EventType: "root.ready",
+		Source: testRootPinRoutingSource(nil), FlowID: ".", EventType: "root.ready",
 	}, eventtest.RunCreatingRootIngress("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if !result.Failure.Empty() || !result.Event.TargetRoute().Empty() || len(result.Event.TargetRoutes()) != 0 {
 		t.Fatalf("resolution = %#v, want targetless accepted external observation", result)
@@ -51,7 +51,7 @@ func TestResolveRejectsPayloadDescriptionsAsConsumerAuthority(t *testing.T) {
 			entry := runtimecontracts.EventCatalogEntry{}
 			entry.Payload = runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"destination": {Type: "text", Description: consumer}}}
 			result := Resolve(ResolutionInput{
-				Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, map[string]runtimecontracts.EventCatalogEntry{"child.done": entry}), FlowID: "child", EventType: "child.done",
+				Source: testPinRoutingSource(map[string]runtimecontracts.EventCatalogEntry{"child.done": entry}), FlowID: "child", EventType: "child.done",
 			}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 			if result.Failure != FailureTargetRequiredMissing {
 				t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetRequiredMissing)
@@ -61,7 +61,7 @@ func TestResolveRejectsPayloadDescriptionsAsConsumerAuthority(t *testing.T) {
 }
 
 func TestResolveAllowsTypedSameFlowConsumerWithoutInventingRoute(t *testing.T) {
-	source := testRootPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil)
+	source := testRootPinRoutingSource(nil)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("bundle source missing")
@@ -83,20 +83,9 @@ func TestResolveAllowsTypedSameFlowConsumerWithoutInventingRoute(t *testing.T) {
 	}
 }
 
-func TestResolveHarnessSinkCreatesNoRuntimeRoute(t *testing.T) {
-	source := testRootPinRoutingSource(runtimecontracts.FlowOutputSinkHarness, nil)
-	if !OutputHarnessSink(source, ".", "root.ready") {
-		t.Fatal("typed harness sink not found")
-	}
-	result := Resolve(ResolutionInput{Source: source, FlowID: ".", EventType: "root.ready"}, eventtest.RunCreatingRootIngress("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	if !result.Failure.Empty() || !result.Event.TargetRoute().Empty() || len(result.Event.TargetRoutes()) != 0 {
-		t.Fatalf("resolution = %#v, want targetless validation observation", result)
-	}
-}
-
 func TestResolveFailsClosedOnIncompleteParentRoute(t *testing.T) {
 	result := Resolve(ResolutionInput{
-		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done",
+		Source: testPinRoutingSource(nil), FlowID: "child", EventType: "child.done",
 	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "root", EntityID: "parent-ent"}), time.Time{}))
 	if result.Failure != FailureTargetRequiredMissing {
 		t.Fatalf("Failure = %q, want no consumer independently of incomplete address", result.Failure)
@@ -331,7 +320,7 @@ func loadFilesystemAgentOwnedByFlowSource(t *testing.T, mode string) semanticvie
 }
 
 func TestPinDeclaredOutputRecognizesExactRootOutputOnly(t *testing.T) {
-	source := testRootPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil)
+	source := testRootPinRoutingSource(nil)
 	if !PinDeclaredOutput(source, ".", "root.ready") {
 		t.Fatal("root output pin was not recognized")
 	}
@@ -340,11 +329,11 @@ func TestPinDeclaredOutputRecognizesExactRootOutputOnly(t *testing.T) {
 	}
 }
 
-func testPinRoutingSource(sink runtimecontracts.FlowOutputSink, events map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
+func testPinRoutingSource(events map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child", SchemaFile: "child/schema.yaml"},
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
-			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done", Sink: sink}},
+			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
 		Path: "child",
 	}
@@ -364,11 +353,11 @@ func testPinRoutingSource(sink runtimecontracts.FlowOutputSink, events map[strin
 	return semanticview.Wrap(bundle)
 }
 
-func testRootPinRoutingSource(sink runtimecontracts.FlowOutputSink, catalog map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
+func testRootPinRoutingSource(catalog map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
 	if catalog == nil {
 		catalog = map[string]runtimecontracts.EventCatalogEntry{"root.ready": {}}
 	}
-	pin := runtimecontracts.FlowOutputEventPin{Event: "root.ready", Sink: sink}
+	pin := runtimecontracts.FlowOutputEventPin{Event: "root.ready"}
 	rootSchema := runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{pin}}}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema:  &rootSchema,

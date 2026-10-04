@@ -39,11 +39,11 @@ func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *te
 	}
 }
 
-func TestAuthoredEventEndpointCensusReportsHarnessSinkWithoutConsumer(t *testing.T) {
+func TestAuthoredEventEndpointCensusReportsUnconsumedPrivateOutput(t *testing.T) {
 	bundle := endpointCensusBundle(nil)
 	schema := bundle.FlowSchemas["worker"]
 	schema.Pins.Outputs.EventPins = []runtimecontracts.FlowOutputEventPin{{
-		Event: "work.completed", Sink: runtimecontracts.FlowOutputSinkHarness,
+		Event: "work.completed",
 	}}
 	bundle.FlowSchemas["worker"] = schema
 	bundle.FlowTree.ByID["worker"].Schema = schema
@@ -51,14 +51,14 @@ func TestAuthoredEventEndpointCensusReportsHarnessSinkWithoutConsumer(t *testing
 		t.Fatal(err)
 	}
 
-	source := withCompiledTestPins(t, Wrap(bundle), nil, map[string][]runtimecontracts.FlowOutputEventPin{"worker": {{Event: "work.completed", Sink: runtimecontracts.FlowOutputSinkHarness}}})
+	source := withCompiledTestPins(t, Wrap(bundle), nil, map[string][]runtimecontracts.FlowOutputEventPin{"worker": {{Event: "work.completed"}}})
 	census := BuildAuthoredEventEndpointCensus(source)
 	outputs := census.OutputPins()
-	if len(outputs) != 1 || outputs[0].Sink != "harness" {
-		t.Fatalf("output endpoints = %#v, want harness sink readback", outputs)
+	if len(outputs) != 1 || outputs[0].PinName != "work.completed" {
+		t.Fatalf("output endpoints = %#v, want private pin readback", outputs)
 	}
 	if got := census.MatchingConsumers("worker", "work.completed"); len(got) != 0 {
-		t.Fatalf("matching consumers = %#v, want harness to create none", got)
+		t.Fatalf("matching consumers = %#v, an output declaration must not manufacture consumers", got)
 	}
 }
 

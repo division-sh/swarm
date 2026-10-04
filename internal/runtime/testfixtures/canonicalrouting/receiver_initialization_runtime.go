@@ -9,7 +9,7 @@ func CopyTemplateInstanceEmpireStyle(t testing.TB) string {
 		"schema.yaml": `name: test
 pins:
   outputs:
-    events: [opco.spinup_created]
+    - opco.spinup_created
 connect:
   - event: opco.spinup_created
     from: .
@@ -43,10 +43,9 @@ instance_variables:
     product_id: string
 pins:
   inputs:
-    events:
-      - event: opco.spinup_created
-        initialize:
-          product_id: payload.product_id
+    - event: opco.spinup_created
+      initialize:
+        product_id: payload.product_id
 stages:
   initializing: {initial: true}
   ready: {terminal: true}
@@ -85,7 +84,7 @@ func CopyTemplateInstanceActivationConfigSubscriber(t testing.TB) string {
 		"schema.yaml": `name: test
 pins:
   outputs:
-    events: [opco.spinup_created]
+    - opco.spinup_created
 connect:
   - event: opco.spinup_created
     from: .
@@ -119,10 +118,9 @@ instance_variables:
     product_id: string
 pins:
   inputs:
-    events:
-      - event: opco.spinup_created
-        initialize:
-          product_id: payload.product_id
+    - event: opco.spinup_created
+      initialize:
+        product_id: payload.product_id
 stages:
   initializing: {initial: true}
   ready: {terminal: true}

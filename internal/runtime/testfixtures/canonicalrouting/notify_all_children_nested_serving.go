@@ -28,13 +28,11 @@ stages:
 instance: account_id
 pins:
   inputs:
-    events:
-      - account.registered
-      - account.notify.requested
+    - account.registered
+    - account.notify.requested
   outputs:
-    events:
-      - account.task.requested
-      - account.tasks.completed
+    - account.task.requested
+    - account.tasks.completed
 connect:
   - event: account.task.requested
     from: .
@@ -101,11 +99,9 @@ stages:
   completed: {terminal: true}
 pins:
   inputs:
-    events:
-      - account.task.requested
+    - account.task.requested
   outputs:
-    events:
-      - account.task.completed
+    - account.task.completed
 `)
 	writeClosedVariantFile(t, root, "account/task/entities.yaml", `task_state:
   account_id: text

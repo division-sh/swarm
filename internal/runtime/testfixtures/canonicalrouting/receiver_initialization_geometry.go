@@ -34,9 +34,9 @@ func CopyReceiverInitializationGeometry(t testing.TB) string {
 		"schema.yaml": `name: receiver-initialization-geometry
 pins:
   inputs:
-    events: [work.requested]
+    - work.requested
   outputs:
-    events: [worker.requested]
+    - worker.requested
 connect:
   - {event: worker.requested, from: ., to: worker, resolution: select-or-create}
 `,
@@ -73,11 +73,12 @@ auto_emit_on_create:
   event: worker.ready
 pins:
   inputs:
-    events:
-      - event: worker.requested
-        initialize: {label: payload.label, count: payload.count}
+    - event: worker.requested
+      initialize:
+        count: payload.count
+        label: payload.label
   outputs:
-    events: [leaf.requested]
+    - leaf.requested
 connect:
   - {event: leaf.requested, from: ., to: leaf, resolution: select-or-create}
 `,
@@ -118,9 +119,10 @@ auto_emit_on_create:
   event: leaf.ready
 pins:
   inputs:
-    events:
-      - event: leaf.requested
-        initialize: {label: payload.label, count: payload.count}
+    - event: leaf.requested
+      initialize:
+        count: payload.count
+        label: payload.label
 `,
 		"worker/leaf/events.yaml": `leaf.ready:
   worker_id: text

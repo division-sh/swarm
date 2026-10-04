@@ -67,7 +67,15 @@ func (p pinEntry) MarshalYAML() (any, error) {
 func main() {
 	root := flag.String("root", ".", "repository checkout")
 	write := flag.Bool("write", false, "apply the complete planned corpus rewrite")
+	goSources := flag.Bool("go-sources", false, "rewrite canonical positive Go fixture producers")
 	flag.Parse()
+	if *goSources {
+		if err := runGoSources(*root, *write); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(*root, *write); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -170,7 +178,14 @@ func retirementDirectories(root string, inputs map[string][]byte) ([]string, err
 }
 
 func schemaFile(name string) bool {
-	return path.Base(name) == "schema.yaml" || path.Base(name) == "schema.yml"
+	switch name {
+	case "internal/runtime/cataloge2e/testdata/terminal-retirement/root-schema.yaml",
+		"internal/runtime/cataloge2e/testdata/terminal-retirement/timer-schema.yaml",
+		"internal/runtime/cataloge2e/testdata/terminal-retirement/inspect-loop-schema.yaml":
+		return true
+	default:
+		return path.Base(name) == "schema.yaml" || path.Base(name) == "schema.yml"
+	}
 }
 
 func retiredArtifact(name string) bool {

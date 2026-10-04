@@ -1,0 +1,174 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/division-sh/swarm/internal/yamlsource"
+)
+
+// Negative/parser snippets and exact mutation strings are migrated explicitly,
+// not normalized by this one-shot positive-producer rewrite.
+var manualGoSources = map[string]bool{
+	"parser_snippets.go":         true,
+	"negative.go":                true,
+	"schema_admission_source.go": true,
+	"harness_injection.go":       true,
+	"arrival_join_guard_sources.go": true,
+	"publication_sites.go":          true,
+}
+
+func runGoSources(root string, write bool) error {
+	directory := "internal/runtime/testfixtures/canonicalrouting"
+	files, err := os.ReadDir(filepath.Join(root, directory))
+	if err != nil {
+		return err
+	}
+	var plan []change
+	for _, entry := range files {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || manualGoSources[name] {
+			continue
+		}
+		name = filepath.ToSlash(filepath.Join(directory, name))
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			return err
+		}
+		after, err := rewriteGoSource(name, data)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(data, after) {
+			plan = append(plan, change{Path: name, After: after})
+		}
+	}
+	if write {
+		if err := applyPlan(root, plan, nil); err != nil {
+			return err
+		}
+	}
+	return json.NewEncoder(os.Stdout).Encode(plan)
+}
+
+func rewriteGoSource(name string, data []byte) ([]byte, error) {
+	positions := token.NewFileSet()
+	file, err := parser.ParseFile(positions, name, data, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+	var edits []struct {
+		start, end int
+		value      string
+	}
+	fragments := map[*ast.BasicLit]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		if declaration, ok := node.(*ast.FuncDecl); ok && declaration.Name.Name == "RetiredFanInCoordinatorSchema" {
+			markLiteralFragments(declaration, fragments)
+		}
+		if _, ok := node.(*ast.BinaryExpr); ok {
+			markLiteralFragments(node, fragments)
+		}
+		if call, ok := node.(*ast.CallExpr); ok {
+			if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
+				if pkg, ok := selector.X.(*ast.Ident); ok && pkg.Name == "strings" {
+					markLiteralFragments(call, fragments)
+				}
+			}
+		}
+		return true
+	})
+	var rewriteErr error
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING || fragments[literal] || rewriteErr != nil {
+			return true
+		}
+		text, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			rewriteErr = err
+			return false
+		}
+		after, err := rewriteGoPinLiteral([]byte(text))
+		if err != nil {
+			rewriteErr = fmt.Errorf("%s: %w", positions.Position(literal.Pos()), err)
+			return false
+		}
+		if !bytes.Equal([]byte(text), after) {
+			value := strconv.Quote(string(after))
+			if strings.HasPrefix(literal.Value, "`") && !bytes.ContainsRune(after, '`') {
+				value = "`" + string(after) + "`"
+			}
+			edits = append(edits, struct {
+				start, end int
+				value      string
+			}{positions.Position(literal.Pos()).Offset, positions.Position(literal.End()).Offset, value})
+		}
+		return true
+	})
+	if rewriteErr != nil {
+		return nil, rewriteErr
+	}
+	if len(edits) == 0 {
+		return data, nil
+	}
+	for i := len(edits) - 1; i >= 0; i-- {
+		edit := edits[i]
+		data = append(append(append([]byte{}, data[:edit.start]...), edit.value...), data[edit.end:]...)
+	}
+	return format.Source(data)
+}
+
+func markLiteralFragments(node ast.Node, fragments map[*ast.BasicLit]bool) {
+	ast.Inspect(node, func(child ast.Node) bool {
+		if literal, ok := child.(*ast.BasicLit); ok {
+			fragments[literal] = true
+		}
+		return true
+	})
+}
+
+func rewriteGoPinLiteral(data []byte) ([]byte, error) {
+	doc, err := parse(data)
+	if err != nil {
+		// Most Go strings are paths, CEL, or partial non-schema templates.
+		// They do not participate in this closed source rewrite.
+		return data, nil
+	}
+	pins, err := lookupValue(doc.root, "pins")
+	if err != nil {
+		return nil, err
+	}
+	if pins.Presence() != yamlsource.PresenceMapping {
+		return data, nil
+	}
+	fields, err := pins.Mapping()
+	if err != nil {
+		return nil, err
+	}
+	wrapped := false
+	for _, field := range fields {
+		wrapped = wrapped || field.Value.Presence() == yamlsource.PresenceMapping
+	}
+	if !wrapped {
+		return data, nil
+	}
+	converted, replies, err := rewritePins("generated-positive", pins)
+	if err != nil {
+		return nil, err
+	}
+	if len(replies) != 0 {
+		return nil, fmt.Errorf("reply needs an explicit paired-connect rewrite")
+	}
+	doc.edit["pins"] = converted
+	return render(doc)
+}

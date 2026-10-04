@@ -728,26 +728,6 @@ func mustConcreteRoutingSource(t *testing.T, flowID, flowInstance string) events
 	return source
 }
 
-func TestProviderBindingDoesNotSubscribeHarnessInput(t *testing.T) {
-	repoRoot := canonicalrouting.RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot,
-		canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection),
-		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
-	if err != nil {
-		t.Fatalf("load harness injection artifact: %v", err)
-	}
-	authorization := runtimeprovideroutput.MustAuthorization(
-		"test", "worker/work.requested", "provider.test", "1.0.0",
-		"sha256:"+strings.Repeat("a", 64),
-		triggergeneration.FromCanonicalBytes([]byte("generation-test")),
-	)
-	plans, issues := compileConnectPlans(providerBoundGraphSource{semanticview.Wrap(bundle), authorization})
-	if len(plans) != 0 || len(issues) != 0 {
-		t.Fatalf("plans = %#v issues = %#v, want harness excluded without lowering issues", plans, issues)
-	}
-}
 
 func TestProviderConnectUsesCanonicalRenamedIdentitySource(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
@@ -971,11 +951,11 @@ func TestBundleAdmissionRejectsRetiredJoinRoutingPolicies(t *testing.T) {
 		resolution string
 		field      string
 	}{
-		{name: "fan-in", resolution: "          mode: fan-in\n", field: "fan-in"},
-		{name: "aggregation", resolution: "          mode: reply\n          aggregation: stream\n", field: "aggregation"},
-		{name: "window", resolution: "          mode: reply\n          window: payload.period_id\n", field: "window"},
-		{name: "dedup_by", resolution: "          mode: reply\n          dedup_by: [payload.operating_id]\n", field: "dedup_by"},
-		{name: "singleton", resolution: "          mode: reply\n          singleton: portfolio\n", field: "singleton"},
+		{name: "fan-in", resolution: "      resolution: fan-in\n", field: "resolution"},
+		{name: "aggregation", resolution: "      aggregation: stream\n", field: "aggregation"},
+		{name: "window", resolution: "      window: payload.period_id\n", field: "window"},
+		{name: "dedup_by", resolution: "      dedup_by: [payload.operating_id]\n", field: "dedup_by"},
+		{name: "singleton", resolution: "      singleton: portfolio\n", field: "singleton"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
@@ -984,11 +964,11 @@ func TestBundleAdmissionRejectsRetiredJoinRoutingPolicies(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			before := "      - account.ready\n"
+			before := "    - account.ready\n"
 			if strings.Count(string(raw), before) != 1 {
 				t.Fatal("exact account.ready input unavailable for retirement specimen")
 			}
-			after := "      - event: account.ready\n        resolution:\n" + tc.resolution
+			after := "    - event: account.ready\n" + tc.resolution
 			if err := os.WriteFile(path, []byte(strings.Replace(string(raw), before, after, 1)), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -1670,7 +1650,7 @@ func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeRouteLowering(t *t
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "input pin resolution field \"from\" is not supported") {
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "inputs event pin field \"from\" is not supported") {
 				t.Fatalf("bundle load error = %v, want canonical rejection before CompileConnectGraph", err)
 			}
 		})

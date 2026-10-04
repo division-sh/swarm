@@ -63,7 +63,7 @@ func TestVerifyAgentMessageRetirementSupportedCLI(t *testing.T) {
 					t.Fatalf("verify JSON: %v code=%d stdout=%s stderr=%s", err, code, &stdout, &stderr)
 				}
 				if mutation == "positive" {
-					if code != 0 || !result.OK || !result.ProductionValid {
+					if code != 0 || !result.OK {
 						t.Fatalf("positive declared-event fixture failed: code=%d errors=%+v stderr=%s", code, result.Errors, &stderr)
 					}
 					return
@@ -137,7 +137,7 @@ func TestVerifyPermissionBundleShapeAdmission(t *testing.T) {
 					t.Fatalf("verify JSON: %v, code=%d stdout=%s stderr=%s", err, code, &stdout, &stderr)
 				}
 				if tc.valid {
-					if code != 0 || !result.OK || !result.ProductionValid {
+					if code != 0 || !result.OK {
 						t.Fatalf("valid declaration rejected: code=%d, %+v, stderr=%s", code, result.Errors, &stderr)
 					}
 				} else if code == 0 || result.OK || len(result.Errors) == 0 || !strings.Contains(fmt.Sprint(result.Errors), "permission_bundles") {

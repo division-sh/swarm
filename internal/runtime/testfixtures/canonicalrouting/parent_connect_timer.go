@@ -15,11 +15,9 @@ stages:
       - {id: work_ready, after: 40ms, emit: work.ready}
 pins:
   inputs:
-    events:
-      - work.requested
+    - work.requested
   outputs:
-    events:
-      - work.ready
+    - work.ready
 `)
 	writeClosedVariantFile(t, root, "producer/entities.yaml", "test_entity: {}\n")
 	return root

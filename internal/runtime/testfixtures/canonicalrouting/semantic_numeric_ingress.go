@@ -17,7 +17,7 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events: [numeric.requested]
+    - numeric.requested
 `,
 		"events.yaml": `numeric.requested:
   value: integer

@@ -33,13 +33,14 @@ stages:
   done: {terminal: true}
 pins:
   inputs:
-    events:
-      - work.requested
-      - root.closed
-      - review.retry
-      - review.closed
+    - work.requested
+    - root.closed
+    - review.retry
+    - review.closed
   outputs:
-    events: [work.started, review.retry, review.closed]
+    - work.started
+    - review.retry
+    - review.closed
 connect:
   - {event: work.started, from: ., to: review}
   - {event: review.retry, from: ., to: review}
@@ -73,10 +74,9 @@ loops:
     escape: {advances_to: exhausted}
 pins:
   inputs:
-    events:
-      - work.started
-      - review.retry
-      - review.closed
+    - work.started
+    - review.retry
+    - review.closed
 `,
 		"review/entities.yaml": "work:\n  observed_revision: {type: text, initial: ''}\n  observed_token: {type: text, initial: ''}\n",
 		"review/events.yaml": `review.requested:
