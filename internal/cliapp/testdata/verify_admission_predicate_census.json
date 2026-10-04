@@ -393,7 +393,13 @@
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRecoverySnapshot",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21",
-    "body_sha256": "4bf1e0630a3ca05f5e75ec1902b2cd41fd3d3d0258ca3cf2d9b6865090ca4a30"
+    "body_sha256": "f078c79dc8a4f28e6b4fd20556132f5163fb023db50f487f29c780fb344eb026"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRetainedChannels",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "body_sha256": "4ce50d7a52c5d3ce9a948c689b1c6c5ca05b24674342b19abbb592b89e14c5ff"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifySelectedStore",
