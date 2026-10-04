@@ -24,18 +24,26 @@ import (
 // Artifact admission below is private setup. This proves the public fork and
 // readback boundary, not the publication-to-fork journey owned by #2376/#2322.
 func TestSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T) {
-	proveSelectedForkPublicChangedTargetExecutionBothStores(t, false, false)
+	proveSelectedForkPublicChangedTargetExecutionBothStores(t, selectedForkProofOptions{})
 }
 
 func TestSelectedForkPublicChangedTargetAfterResetBothStores(t *testing.T) {
-	proveSelectedForkPublicChangedTargetExecutionBothStores(t, true, false)
+	proveSelectedForkPublicChangedTargetExecutionBothStores(t, selectedForkProofOptions{reset: true})
 }
 
 func TestSelectedForkPublicNativeMCPReadBothStores(t *testing.T) {
-	proveSelectedForkPublicChangedTargetExecutionBothStores(t, false, true)
+	proveSelectedForkPublicChangedTargetExecutionBothStores(t, selectedForkProofOptions{nativeRead: true})
 }
 
-func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset, nativeRead bool) {
+type selectedForkProofOptions struct {
+	reset       bool
+	nativeRead  bool
+	docker      bool
+	gatewayLoss bool
+}
+
+func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, options selectedForkProofOptions) {
+	reset, nativeRead := options.reset, options.nativeRead
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			supervisors := make(chan *processLifecycleSupervisor, 1)
@@ -57,7 +65,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 			writeSelectedForkAgentProofFixture(t, root, "loaded-decoy", "[receiver.closed]", "SOURCE CONFIGURATION MUST NOT EXECUTE IN THE FORK", "return {'text': 'Source-only delivery.', 'usage': {'input_tokens': 2, 'output_tokens': 2}}")
-			rt := startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, root, true)
+			rt, gatewayFault := startSelectedForkTransportProofRuntime(t, backend, root, options)
 			if reset {
 				_, rt.Postgres, rt.SQLite = selectedRuntimeStoreForTest(t, projectServeRuntimePersistence(selected))
 				supervisor := <-supervisors
@@ -172,10 +180,18 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset
 			if err != nil || fact.BundleHash() == rt.BundleHash {
 				t.Fatalf("admit distinct target fixture: hash=%q err=%v", fact.BundleHash(), err)
 			}
-			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
+			params := map[string]any{
 				"source_run_id": seed.RunID, "fork_event_id": frontier, "bundle_hash": fact.BundleHash(),
 				"allow_source_freeze": true, "idempotency_key": "public-selected-changed-target",
-			})
+			}
+			if options.gatewayLoss {
+				requireSelectedForkGatewayLossBeforeModel(t, rt, params, gatewayFault, seed.RunID)
+				if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
+					t.Fatal("failed selected target changed source domain")
+				}
+				return
+			}
+			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("public fork lost execution/source evidence: %+v", fork)
 			}

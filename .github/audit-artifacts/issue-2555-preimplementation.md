@@ -1035,5 +1035,32 @@ validity to remain unprobed, exactly one informational/skipped gateway finding
 in JSON, and no private test session or database acquisition. Both modes pass
 (4.899s, captured before commit). This closes that wording observation gap,
 not the hosted Docker path, paid doctor, final-head qualification or L06.
+
+## Independent selected-fork Docker gateway proof
+
+`TestSelectedForkRealDockerGatewayTransportBothStores` adds the remaining
+L06/A08 selected gateway-loss branch through public `run.fork` on an internal
+retained MockOnly H composition, not public live serve. Both stores execute a
+real Docker native worker against the isolated selected gateway. The reachable
+control consumes the exact selected static resource in two completions and
+retains the original source/domain/public-control assertions.
+
+The loss case disconnects only the exact fork target after its activation
+probe and before its provider-turn observation. It requires matching activation
+and provider-turn run identity, a refused fork, one exact settled dead-letter
+delivery, and identical typed `workspace_gateway_unreachable` failure bytes
+through public `agent.delivery_diagnostics`. Provider attempts, agent turns and
+delivered agent success must remain zero; source domain state remains unchanged.
+The aggregate mutation error is not credited as the turn-failure projection.
+
+The focused both-store root passes on server2 before this proof commit
+(46.246s). Initial proof-oracle/schema mistakes and local host transport failures
+remain retained. Vemew's unchanged emission and held-HTTP controls also fail
+gateway reachability, so the server2 result uses explicit bridge and is not
+implicit-default Ubuntu Q01 acceptance. Ordinary unprovisioned-suite skips earn
+no Docker credit; the finite root deferral requires this separate execution.
+No runtime code, timeout, production authority, firewall or tier is changed.
+Same-head focused/race qualification still follows this commit; final E-crossed
+activation and the one final full remain blocked on #2525 actual merge.
 The new root is consumed by the existing mandatory release-rest partition;
 no planner, timeout, tier, runtime or production assertion changes are made.
