@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -17,12 +19,15 @@ import (
 )
 
 type standingBindingCredentials struct {
+	alias           string
+	plan            providertriggers.InboundAdmissionPlan
 	enabled         bool
 	blockReason     runtimerunlifecycle.StandingBindingBlockReason
 	operationID     string
 	recoveryCommand string
 	signingKey      string
 	credentialKeys  []string
+	admissions      []channelonboarding.CredentialAdmission
 	missing         []string
 }
 
@@ -204,8 +209,9 @@ func (rt *Runtime) observeStandingBindingCredentials(ctx context.Context, projec
 		return standingBindingCredentials{}, err
 	}
 	sealed := map[string]channelonboarding.CredentialAdmission{}
-	result := standingBindingCredentials{enabled: true, signingKey: binding.SigningSecret}
+	result := standingBindingCredentials{alias: declaration.Alias, plan: binding.AdmissionPlan, enabled: true, signingKey: binding.SigningSecret}
 	if current, present := learned[selector]; present {
+		result.admissions = append([]channelonboarding.CredentialAdmission(nil), current.admissions...)
 		keys = map[string]string{}
 		for _, credential := range current.admissions {
 			keys[credential.Role] = credential.StoreKey
@@ -433,6 +439,99 @@ func (rt *Runtime) ValidateStandingIngressCredentials(ctx context.Context) error
 		return err
 	}
 	return admission.projection.ValidateCurrent(ctx)
+}
+
+// Request and readiness consume the same frozen binding; current presence is
+// never an admission. The validator also fences selected replacement mid-use.
+func (rt *Runtime) standingIngressCredentialScope(target InboundTarget) (standingBindingCredentials, *runtimecredentials.SecretBindingProjection, func(context.Context) error, error) {
+	rt.standingCredentialMu.Lock()
+	admission := rt.standingCredentialAdmission
+	if admission == nil {
+		rt.standingCredentialMu.Unlock()
+		return standingBindingCredentials{}, nil, nil, fmt.Errorf("standing ingress has no frozen credential admission")
+	}
+	credential, found := admission.bindings[standingIngressSelector(target.FlowPath, target.Provider)]
+	if !found || credential.alias != target.Alias || !credential.plan.Generation().Equal(target.AdmissionPlan.Generation()) || credential.signingKey != target.SigningSecret || target.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
+		rt.standingCredentialMu.Unlock()
+		return standingBindingCredentials{}, nil, nil, fmt.Errorf("standing ingress target contradicts its frozen credential admission")
+	}
+	rt.standingCredentialMu.Unlock()
+	validate := func(ctx context.Context) error {
+		rt.standingCredentialMu.Lock()
+		defer rt.standingCredentialMu.Unlock()
+		current := rt.standingCredentialAdmission
+		if current == nil {
+			return fmt.Errorf("standing ingress credential admission was withdrawn")
+		}
+		selected, found := current.bindings[standingIngressSelector(target.FlowPath, target.Provider)]
+		if !found || selected.enabled != credential.enabled || selected.signingKey != credential.signingKey || selected.alias != credential.alias || !selected.plan.Generation().Equal(credential.plan.Generation()) || selected.operationID != credential.operationID || !reflect.DeepEqual(selected.credentialKeys, credential.credentialKeys) || !reflect.DeepEqual(selected.admissions, credential.admissions) {
+			return fmt.Errorf("selected standing ingress credential admission was replaced")
+		}
+		if err := admission.projection.ValidateCurrentKeys(ctx, credential.credentialKeys); err != nil {
+			return err
+		}
+		for _, evidence := range credential.admissions {
+			_, current, err := admission.projection.ObserveAdmittedActivationCredential(ctx, runtimecredentials.ValueEvidence{Key: evidence.StoreKey, Seal: evidence.ValueSeal}, evidence.Receipt)
+			if err != nil {
+				return err
+			}
+			if !current {
+				return &runtimecredentials.SecretBindingProjectionStaleError{Key: evidence.StoreKey}
+			}
+		}
+		return nil
+	}
+	return credential, admission.projection, validate, nil
+}
+
+func (rt *Runtime) AdmitInboundCredentials(ctx context.Context, target InboundTarget) (runtimecredentials.SecretBinding, func(context.Context) error, error) {
+	credential, projection, validate, err := rt.standingIngressCredentialScope(target)
+	if err != nil {
+		return runtimecredentials.SecretBinding{}, nil, err
+	}
+	if !credential.enabled {
+		return runtimecredentials.SecretBinding{}, nil, fmt.Errorf("standing ingress binding is not credential-enabled")
+	}
+	if err := validate(ctx); err != nil {
+		return runtimecredentials.SecretBinding{}, nil, err
+	}
+	var binding runtimecredentials.SecretBinding
+	if target.AdmissionPlan.RequiresSecret() {
+		binding, err = projection.FrozenSecretBinding(credential.signingKey)
+	}
+	return binding, validate, err
+}
+
+func (rt *Runtime) evaluateStandingIngressAdmission(ctx context.Context, target StandingTarget, subject packs.Subject, presence *runtimecredentials.SecretBindingProjection) (packs.Subject, func(context.Context) error, error) {
+	credential, _, validate, err := rt.standingIngressCredentialScope(InboundTarget{
+		BundleHash: target.BundleHash, FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
+	})
+	if err != nil {
+		return packs.Subject{}, nil, err
+	}
+	current, err := evaluateStandingIngressCapabilitySubject(ctx, target, subject, presence)
+	if err != nil {
+		return packs.Subject{}, nil, err
+	}
+	enabled := credential.enabled
+	if err := validate(ctx); err != nil {
+		var stale *runtimecredentials.SecretBindingProjectionStaleError
+		if !errors.As(err, &stale) {
+			return packs.Subject{}, nil, err
+		}
+		enabled = false
+		if credential.operationID != "" {
+			current.TriggerAdmission.BindingBlockReason = string(runtimerunlifecycle.StandingBindingRecoveryRequired)
+			current.TriggerAdmission.RecoveryOperationID = credential.operationID
+			current.TriggerAdmission.RecoveryCommand = credential.recoveryCommand
+		}
+	}
+	current.Status = ""
+	current.TriggerAdmission.BindingEnabled = &enabled
+	if !enabled {
+		validate = nil
+	}
+	return current, validate, nil
 }
 
 // Explicit connect is the only in-process credential-producing activation

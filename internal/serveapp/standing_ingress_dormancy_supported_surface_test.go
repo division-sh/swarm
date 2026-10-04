@@ -342,10 +342,8 @@ imports:
     - provider: telegram
       event: inbound.telegram.text_message
 pins:
-  inputs:
-    events: [inbound.telegram.text_message]
-  outputs:
-    events: [inbound.telegram.text_message]
+  inputs: [inbound.telegram.text_message]
+  outputs: [inbound.telegram.text_message]
 `)
 	writeStandingCandidateFile(t, filepath.Join(root, "telegram-chat", "schema.yaml"), `name: telegram-chat
 imports:

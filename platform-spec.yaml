@@ -12886,6 +12886,12 @@ flow_model:
         A service retained by another enabled binding remains active; only the dormant binding loses its authority.
         Ordinary secrets set and diagnostic reads cannot change the frozen decision. Provision then restart is the
         ordinary activation path; explicit channel connect is the existing credential-producing in-process boundary.
+        Webhook authentication and final publication consume the same exact binding-scoped frozen admission, revalidating
+        its required roles and learned seal/receipt evidence before body processing, authentication and publication.
+        Capability readback may show current credential presence but never reports an enabled or READY binding from
+        that presence alone; stale admitted authority is non-executable without disabling an independently current
+        sibling. Declaration-only authority requires fresh runtime admission; retained learned authority preserves its
+        existing recovery-required operation and command. Neither requests nor readback reseal, refresh or admit replacements.
         That boundary refreshes only its selected binding: frozen observations for every other binding, including
         consumers of shared keys, must remain current before and after credential admission. An unrelated binding's
         provisioning, deletion or rotation is not adopted through a sibling connect.

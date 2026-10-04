@@ -39,15 +39,16 @@ func (s *blockingCredentialSnapshotStore) Snapshot(ctx context.Context, key stri
 	return s.Store.(runtimecredentials.Snapshotter).Snapshot(ctx, key)
 }
 
-func TestRuntimeContextManagerEvaluatesExactTargetCredentialAtReadTime(t *testing.T) {
+func TestRuntimeContextManagerReadbackSeparatesPresenceFromFrozenAdmission(t *testing.T) {
 	ctx := context.Background()
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	freezeTestStandingCredentialAdmission(t, contextDef, store)
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +78,9 @@ func TestRuntimeContextManagerEvaluatesExactTargetCredentialAtReadTime(t *testin
 	if err := store.Set(ctx, "webhook_signing.acme", secretValue); err != nil {
 		t.Fatal(err)
 	}
+	assertEffectiveTargetStatus(packs.StatusNotReady, packs.RequirementStatusBound)
+	// A separately admitted runtime may enable it; a diagnostic read may not.
+	freezeTestStandingCredentialAdmission(t, contextDef, store)
 	assertEffectiveTargetStatus(packs.StatusReady, packs.RequirementStatusBound)
 	boundSubjects, err := manager.EvaluatedCapabilitySubjects(ctx, owner)
 	if err != nil {
@@ -241,6 +245,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	}}
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	contextDef.PackInventoryDigest = bundle.PackInventory.Digest()
+	freezeTestStandingCredentialAdmission(t, contextDef, identityInboundCredentialStore{})
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
@@ -565,7 +570,31 @@ func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *prov
 		SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
 	}}
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	freezeTestStandingCredentialAdmission(t, contextDef, identityInboundCredentialStore{})
 	return contextDef
+}
+
+func freezeTestStandingCredentialAdmission(t *testing.T, contextDef BundleContext, store runtimecredentials.Store) {
+	t.Helper()
+	owner, err := runtimecredentials.NewSnapshotOwner(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission := &standingCredentialAdmission{bindings: map[string]standingBindingCredentials{}, projection: owner.BeginSecretBindingProjection()}
+	for _, target := range contextDef.StandingTargets {
+		binding := standingBindingCredentials{alias: target.Alias, plan: target.AdmissionPlan, enabled: true, signingKey: target.SigningSecret}
+		if target.AdmissionPlan.RequiresSecret() {
+			observed, err := admission.projection.ObserveActivationCredential(context.Background(), target.SigningSecret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding.enabled = observed.Present
+			binding.credentialKeys = []string{target.SigningSecret}
+		}
+		admission.bindings[standingIngressSelector(target.FlowPath, target.Provider)] = binding
+	}
+	contextDef.Runtime.Options.SourceArtifactFact = contextDef.SourceArtifactFact
+	contextDef.Runtime.standingCredentialAdmission = admission
 }
 
 func applyRuntimeAdmissionCatalog(t testing.TB, contextDef *BundleContext, catalog *providertriggers.CatalogSnapshot) {
