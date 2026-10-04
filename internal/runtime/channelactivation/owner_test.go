@@ -90,6 +90,44 @@ func TestAdmittedReplacementRechecksAfterDrainAndNeverRevivesStalePredecessor(t 
 	}
 }
 
+func TestAdmittedCurrentPublicationRefreshPreservesInFlightLease(t *testing.T) {
+	publication := testEmptyPublication(t)
+	owner, err := NewOwner(publication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := false
+	admit := func(context.Context, channelonboarding.ChannelActivationPublication) error {
+		if stale {
+			return errors.New("credential admission changed")
+		}
+		return nil
+	}
+	if err := owner.ReplaceAdmittedContext(context.Background(), publication, admit); err != nil {
+		t.Fatal(err)
+	}
+	lease, available := owner.AcquirePresentation()
+	if !available {
+		t.Fatal("current admitted publication is unavailable")
+	}
+	defer lease.Release()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := owner.ReplaceAdmittedContext(ctx, publication, admit); err != nil {
+		t.Fatalf("unchanged valid publication waited for its own in-flight work: %v", err)
+	}
+	if owner.current != lease.snapshot || !lease.live() {
+		t.Fatal("unchanged refresh replaced or revoked the admitted snapshot")
+	}
+	stale = true
+	if err := owner.ReplaceAdmittedContext(context.Background(), publication, admit); err == nil {
+		t.Fatal("same generation bypassed credential currentness")
+	}
+	if err := lease.ValidateAdmission(context.Background()); err == nil {
+		t.Fatal("stale in-flight authority passed its effect admission backstop")
+	}
+}
+
 func TestOwnerRejectsDeclaredOnlyPublication(t *testing.T) {
 	publication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(nil)
 	if err != nil {
