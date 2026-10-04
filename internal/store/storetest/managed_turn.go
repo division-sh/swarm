@@ -254,7 +254,7 @@ func managedTurnFixtureSurface(t testing.TB, authority runtimeeffects.Authority,
 	}
 	transport := "api"
 	if adapter == "mock_python" {
-		transport = "in_process"
+		transport = "cli"
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
 		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: runtimeMode,

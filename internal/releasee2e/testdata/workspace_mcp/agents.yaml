@@ -1,0 +1,8 @@
+worker:
+  role: transport-proof
+  intent: {inline: "Emit work.completed with the exact input marker through the admitted gateway."}
+  model: regular
+  flow_data_access: [marker.txt]
+  subscriptions: [work.ready]
+  emit_events: [work.completed]
+  mock: {kind: python, module: mocks/worker.py}

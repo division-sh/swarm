@@ -531,7 +531,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 	if err != nil {
 		return nil, err
 	}
-	gateway, cleanup, err := startSelectedContractAgentRuntimeGateway(executor, turns, work, nil)
+	gateway, cleanup, err := startSelectedContractAgentRuntimeGateway(executor, turns, work, nil, nil)
 	if err != nil {
 		return nil, err
 	}

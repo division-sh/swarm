@@ -28,7 +28,7 @@ const (
 
 	TransportAPI   = "api"
 	TransportCLI   = "cli"
-	TransportMock  = "in_process"
+	TransportMock  = "cli"
 	TransportLocal = "local"
 
 	ProviderContractRuntimeModeAPI             = "api"

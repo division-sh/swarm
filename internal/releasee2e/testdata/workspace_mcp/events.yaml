@@ -1,0 +1,6 @@
+work.requested:
+  marker: text
+work.ready:
+  marker: text
+work.completed:
+  marker: text

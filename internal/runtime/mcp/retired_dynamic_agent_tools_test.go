@@ -11,7 +11,8 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -39,6 +40,7 @@ func TestSelectedRetiredDynamicAgentToolsNeverReachCLIOrMCPListProjection(t *tes
 			})
 			executor := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{WorkflowSource: source})
 			actor := models.AgentConfig{ID: "worker", ExecutionMode: "live", Tools: []string{name}}
+			actor.Identity = agentidentitytest.RootRuntime(t, actor.ID, "retired-tool-test")
 			registry := runtimemcp.NewTurnContextRegistry(models.ActorFromContext)
 			gateway := runtimemcp.NewGateway(executor, "retired-tool-test", runtimemcp.GatewayHooks{
 				WithActor:          models.WithActor,
@@ -46,11 +48,31 @@ func TestSelectedRetiredDynamicAgentToolsNeverReachCLIOrMCPListProjection(t *tes
 				ResolveTurnContext: registry.ResolveTurnContext,
 			})
 			ctx := models.WithActor(context.Background(), actor)
-			ctx = runtimeeffects.WithAuthority(ctx, retiredToolConversationForkAuthority())
-			token := registry.RegisterConversationForkSandboxTurnContext(ctx, time.Minute, []string{name})
+			if definitions := executor.ToolDefinitionsForActor(actor); len(definitions) != 0 {
+				t.Fatalf("selected catalog retained %s: %+v", name, definitions)
+			}
+			// The selected workflow catalogue is a managed-agent projection, not
+			// the forensic fork sandbox's separate canonical stub policy.
+			plan, err := actor.Identity.Plan()
+			if err != nil {
+				t.Fatal(err)
+			}
+			surface, err := managedcapabilities.New(managedcapabilities.Plan{
+				ActorPlan: plan, RuntimeMode: "startup_probe", Provider: "claude", Transport: "cli", ProviderContract: "retired-tool-test",
+				Authority: managedcapabilities.Authority{
+					Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(),
+					ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: actor.ID,
+					StartupOwnerID: "retired-tool-test", StartupGeneration: 1,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface)
 			if token == "" {
 				t.Fatal("register CLI/MCP turn context")
 			}
+			defer registry.UnregisterTurnContext(token)
 
 			body := `{"jsonrpc":"2.0","id":"list","method":"tools/list","params":{}}`
 			req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
@@ -77,26 +99,5 @@ func TestSelectedRetiredDynamicAgentToolsNeverReachCLIOrMCPListProjection(t *tes
 				t.Fatalf("CLI/MCP tools/list projection retained %s: %#v", name, response.Result.Tools)
 			}
 		})
-	}
-}
-
-func retiredToolConversationForkAuthority() runtimeeffects.Authority {
-	forkTurnID := uuid.NewString()
-	return runtimeeffects.Authority{
-		Kind:            runtimeeffects.AuthorityConversationForkChat,
-		ID:              forkTurnID,
-		ExecutionOwner:  "retired-tool-test",
-		LeaseExpiresAt:  time.Now().UTC().Add(time.Minute),
-		FenceGeneration: 1,
-		ExecutionMode:   runtimeeffects.ExecutionModeLive,
-		ForkChat: runtimeeffects.ConversationForkChatAuthority{
-			ForkTurnID:          forkTurnID,
-			ForkID:              uuid.NewString(),
-			SourceRunID:         uuid.NewString(),
-			BundleHash:          "bundle-v2:sha256:" + strings.Repeat("a", 64),
-			ActorTokenID:        "retired-tool-test",
-			RequestOccurrenceID: uuid.NewString(),
-			RequestHash:         "retired-tool-test",
-		},
 	}
 }

@@ -17,7 +17,9 @@ func (r *ClaudeCLIRuntime) resolveClaudeState(ctx context.Context, actor actors.
 	if !ok {
 		return nil, failures.Wrap(failures.ClassLifecycleConflict, "claude_provider_state_owner_missing", "claude-cli-adapter", "resolve_provider_state", nil, fmt.Errorf("workspace does not own Claude provider state"))
 	}
-	target, err := resolver.ResolveClaudeWorkspace(ctx, actor, request, head)
+	// Fork backing is admitted before completion preparation. Its read-only
+	// currency check still belongs to this runtime's selected-store controller.
+	target, err := resolver.ResolveClaudeWorkspace(effects.WithController(ctx, r.completionController), actor, request, head)
 	if err != nil {
 		return nil, failures.Wrap(failures.ClassLifecycleConflict, "claude_provider_state_unavailable", "claude-cli-adapter", "resolve_provider_state", nil, err)
 	}

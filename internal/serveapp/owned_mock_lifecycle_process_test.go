@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -276,7 +277,23 @@ func TestOwnedLifecycleStartupEvidence(t *testing.T) {
 
 func startOwnedMockLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
 	t.Helper()
-	process := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), t.TempDir(), opts)
+	root := t.TempDir()
+	// The process cleanup registered below joins children before this restores
+	// removal permission on its intentionally sealed data projection directories.
+	t.Cleanup(func() {
+		if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return os.Chmod(path, 0o700)
+			}
+			return nil
+		}); err != nil {
+			t.Errorf("release retained proof directories: %v", err)
+		}
+	})
+	process := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), root, opts)
 	process.waitForReadyLine()
 	return "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc", servedTestProcessRuntime(t, process)
 }
