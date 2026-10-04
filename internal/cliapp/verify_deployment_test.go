@@ -206,11 +206,11 @@ func TestVerifyFreshSQLiteSchemaAccountsAbsenceWithoutClaimingPossession(t *test
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
 	}
-	assertVerifyFreshStoreAccounting(t, code, result)
+	assertVerifyFreshStoreAccounting(t, code, result, bootverify.AdmissionFailed)
 	if data, err := os.ReadFile(storePath); err != nil || len(data) != 0 {
 		t.Fatalf("inspection initialized the fresh database: bytes=%d err=%v", len(data), err)
 	}
-	for _, sidecar := range []string{"-wal", "-shm", ".startup.lock"} {
+	for _, sidecar := range []string{"-wal", "-shm", ".startup.lock", ".possession"} {
 		if _, err := os.Stat(storePath + sidecar); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("fresh inspection created %s: %v", sidecar, err)
 		}
@@ -237,14 +237,14 @@ func TestVerifyFreshPostgresSchemaAccountsAbsenceWithoutClaimingPossession(t *te
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
 	}
-	assertVerifyFreshStoreAccounting(t, code, result)
+	assertVerifyFreshStoreAccounting(t, code, result, bootverify.AdmissionPassed)
 	var tables int
 	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'`).Scan(&tables); err != nil || tables != 0 {
 		t.Fatalf("verification initialized fresh PostgreSQL: tables=%d err=%v", tables, err)
 	}
 }
 
-func assertVerifyFreshStoreAccounting(t *testing.T, code int, result verifyCommandResult) {
+func assertVerifyFreshStoreAccounting(t *testing.T, code int, result verifyCommandResult, possession bootverify.AdmissionObservationStatus) {
 	t.Helper()
 	seen := map[string]bool{}
 	for _, observation := range result.Observations {
@@ -254,10 +254,10 @@ func assertVerifyFreshStoreAccounting(t *testing.T, code int, result verifyComma
 				t.Fatalf("fresh store inspection failed: %+v", observation)
 			}
 		case "startup_process_possession":
-			if observation.Status != bootverify.AdmissionNotRun {
-				t.Fatalf("fresh schema fabricated possession: %+v", observation)
+			if observation.Status != possession {
+				t.Fatalf("fresh schema fabricated or skipped independent possession: %+v", observation)
 			}
-		case "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "pending_reset_admission", "retained_route_admission", "selected_fork_recovery_admission", "retained_actor_admission":
+		case "startup_authority_lineage", "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "pending_reset_admission", "retained_route_admission", "selected_fork_recovery_admission", "retained_actor_admission", "selected_fork_source_dependencies", "retained_actor_provider_dependencies":
 			if observation.Status != bootverify.AdmissionNotApplicable || !strings.Contains(observation.Reason, "canonical schema inspection") {
 				t.Fatalf("proven absent domain mistaken for unavailable or observed rows: %+v", observation)
 			}
@@ -266,7 +266,7 @@ func assertVerifyFreshStoreAccounting(t *testing.T, code int, result verifyComma
 		}
 		seen[observation.CheckID] = true
 	}
-	if len(seen) != 11 || code == 0 || result.OK || result.AdmissionComplete {
+	if len(seen) != 14 || code == 0 || result.OK || result.AdmissionComplete {
 		t.Fatalf("fresh-store accounting: seen=%v exit=%d result=%+v", seen, code, result)
 	}
 	preparation := false

@@ -29,14 +29,17 @@ type admissionInspectionPort interface {
 	Close() error
 	InspectSnapshot(context.Context, func(context.Context) error) error
 	InspectSchema(context.Context, store.SchemaBootstrapRequest) (store.SchemaInspection, error)
+	ProbePossession(context.Context) (startupownership.PossessionObservation, error)
 	authorityInspectionPort
 	ActiveNonStandingRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error)
+	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
 	InspectDeliveryRecovery(context.Context, correlation.SourceArtifactFact) (deliverylifecycle.RecoveryInventory, error)
 	ReadTimerObligations(context.Context, timerobligation.Scope, time.Time) (timerobligation.Snapshot, error)
 	ReadResetInventory(context.Context) (destructivereset.Inventory, error)
 	InspectPendingResetOperations(context.Context) ([]destructivereset.Operation, error)
 	ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+	InspectSelectedForkRecovery(context.Context, runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error)
 	ListSelectedContractRouteRecoveryRecords(context.Context) ([]manager.SelectedContractRouteRecoveryRecord, error)
 	ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error)
 	StandingRunRestartDisposition(context.Context, string) (runlifecycle.StandingRestartDisposition, error)
@@ -48,7 +51,8 @@ type admissionInspectionPort interface {
 }
 
 // AdmissionInspection is a read purpose, not an unactivated runtime owner.
-// Its only read surfaces are scoped to one consistent inspection callback.
+// Its reads are scoped to one consistent callback; momentary possession is a
+// separate, joined observation outside that MVCC snapshot.
 type AdmissionInspection struct {
 	store admissionInspectionPort
 }
@@ -68,7 +72,7 @@ func openInspectionStore(ctx context.Context, req AuthorityRequest) (admissionIn
 	case storebackend.BackendSQLite:
 		selected, err = storeconstruction.OpenSQLiteRuntimeReadOnly(req.Selection.SQLitePath)
 	case storebackend.BackendPostgres:
-		selected, _, err = storeconstruction.OpenPostgres(req.PostgresDSN)
+		selected, err = storeconstruction.OpenPostgresReadOnly(req.PostgresDSN)
 	default:
 		return nil, errors.New("selected store backend is required")
 	}
@@ -104,6 +108,16 @@ func (s *AdmissionInspection) Close() error {
 		return nil
 	}
 	return s.store.Close()
+}
+
+func (s *AdmissionInspection) ProbePossession(ctx context.Context) (startupownership.PossessionObservation, error) {
+	if s == nil || s.store == nil || ctx == nil {
+		return startupownership.PossessionObservation{}, errors.New("selected admission inspection and bounded context are required")
+	}
+	if err := ctx.Err(); err != nil {
+		return startupownership.PossessionObservation{}, err
+	}
+	return s.store.ProbePossession(ctx)
 }
 
 // AdmissionSnapshot cannot expose writes, raw SQL, process possession or a
@@ -173,6 +187,24 @@ func (s *AdmissionSnapshot) GetSourceArtifact(ctx context.Context, hash string) 
 	}
 	defer done()
 	return s.store.GetSourceArtifact(ctx, hash)
+}
+
+func (s *AdmissionSnapshot) LoadRunBundleAvailability(ctx context.Context, runID string) (runbundle.Availability, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return runbundle.Availability{}, err
+	}
+	defer done()
+	return s.store.LoadRunBundleAvailability(ctx, runID)
+}
+
+func (s *AdmissionSnapshot) InspectSelectedForkRecovery(ctx context.Context, entry runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return runfork.SelectedForkRecoveryInspection{}, err
+	}
+	defer done()
+	return s.store.InspectSelectedForkRecovery(ctx, entry)
 }
 
 func (s *AdmissionSnapshot) InspectDeliveryRecovery(ctx context.Context, source correlation.SourceArtifactFact) (deliverylifecycle.RecoveryInventory, error) {
@@ -269,6 +301,15 @@ func (s *AdmissionSnapshot) LoadAgents(ctx context.Context) ([]manager.Persisted
 	}
 	defer done()
 	return s.store.LoadAgents(ctx)
+}
+
+func (s *AdmissionSnapshot) ObserveOrdinaryRunSource(ctx context.Context, source correlation.SourceArtifactFact, runID string) (bool, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer done()
+	return s.store.ObserveOrdinaryRunSource(ctx, source, runID)
 }
 
 func (s *AdmissionSnapshot) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.RunScopedFlowInstance, error) {

@@ -77,7 +77,7 @@ func verifyDeploymentBoundedObservation(ctx context.Context, budget time.Duratio
 		defer cancel()
 		err := inspect(bounded)
 		if bounded.Err() != nil {
-			return bounded.Err()
+			return errors.Join(bounded.Err(), err)
 		}
 		return err
 	})
@@ -93,7 +93,7 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 		err = inspect(ctx)
 	}
 	if ctx.Err() != nil {
-		err = ctx.Err()
+		err = errors.Join(ctx.Err(), err)
 	}
 	observation.FinishedAt = time.Now().UTC()
 	if err == nil {
@@ -117,6 +117,15 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 }
 
 func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult) {
+	backend, workspaces, workspaceOK := inspectVerifySourceAdmission(ctx, cfg, source, opts, result)
+	inspectVerifyListeners(ctx, repo, cfg, result)
+	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)
+	inspectVerifyPublicIngress(ctx, result, "source:"+result.BootReport.SourceArtifactHash)
+	inspectVerifySelectedStore(ctx, repo, paths, cfg, source, opts, workspaces, workspaceOK, result)
+	result.BootReport.Sort()
+}
+
+func inspectVerifySourceAdmission(ctx context.Context, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult) (WorkspaceBackendSelection, workspace.Resolver, bool) {
 	subject := "source:" + result.BootReport.SourceArtifactHash
 	verifyDeploymentObservation(ctx, result, "declared_model_admission", "internal/runtime.ValidateDeclaredAgentModelAdmission", subject, failures.ClassSchemaInvalid, func(context.Context) error {
 		return runtime.ValidateDeclaredAgentModelAdmission(executionposture.Live, cfg.Config, source)
@@ -190,19 +199,15 @@ func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePl
 		return err
 	})
 	verifyDeploymentObservation(ctx, result, "declared_provider_prompt_admission", "internal/runtime.ManagedProviderStartupPrompt", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
-		blueprints, err := manager.StaticAgentMaterializationBlueprints(source)
+		blueprints, err := manager.ResolveStaticTopologyBlueprints(manager.AgentManagerOptions{
+			ExecutionPosture: executionposture.Live, LLMBackend: opts.LLMProfile.ID,
+			ModelAliases: opts.ModelAliases, RequireModelResolution: true,
+		}, source)
 		if err != nil {
 			return err
 		}
-		for _, blueprint := range blueprints {
+		for _, actor := range blueprints {
 			if err := ctx.Err(); err != nil {
-				return err
-			}
-			actor, err := manager.ResolveAgentMaterializationBlueprint(manager.AgentManagerOptions{
-				ExecutionPosture: executionposture.Live, LLMBackend: opts.LLMProfile.ID,
-				ModelAliases: opts.ModelAliases, RequireModelResolution: true,
-			}, blueprint)
-			if err != nil {
 				return err
 			}
 			if _, err := runtime.ManagedProviderStartupPrompt(actor.Config); err != nil {
@@ -229,10 +234,6 @@ func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePl
 		}
 		return nil
 	})
-	inspectVerifyListeners(ctx, repo, cfg, result)
-	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)
-	inspectVerifyPublicIngress(ctx, result, subject)
-	inspectVerifySelectedStore(ctx, repo, paths, cfg, source, result)
 	verifyDeploymentObservation(ctx, result, "managed_provider_catalog_admission", "internal/runtime/llm.CompileManagedCapabilityAdmission", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
 		if providerErr != nil {
 			return providerErr
@@ -244,18 +245,14 @@ func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePl
 		if err != nil {
 			return failures.New(failures.ClassDependencyUnavailable, "mcp_catalog_observation_incomplete", "verify", "managed_provider_catalog_admission", map[string]any{"reason": err.Error()})
 		}
-		blueprints, err := manager.StaticAgentMaterializationBlueprints(source)
+		blueprints, err := manager.ResolveStaticTopologyBlueprints(manager.AgentManagerOptions{
+			ExecutionPosture: executionposture.Live, LLMBackend: opts.LLMProfile.ID,
+			ModelAliases: opts.ModelAliases, RequireModelResolution: true,
+		}, source)
 		if err != nil {
 			return err
 		}
-		for _, blueprint := range blueprints {
-			actor, err := manager.ResolveAgentMaterializationBlueprint(manager.AgentManagerOptions{
-				ExecutionPosture: executionposture.Live, LLMBackend: opts.LLMProfile.ID,
-				ModelAliases: opts.ModelAliases, RequireModelResolution: true,
-			}, blueprint)
-			if err != nil {
-				return err
-			}
+		for _, actor := range blueprints {
 			contract, err := providers.ResolveAgentProviderContract(actor.Config)
 			if err != nil {
 				return err
@@ -273,6 +270,7 @@ func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePl
 		return nil
 	})
 	result.BootReport.Sort()
+	return backend, workspaceInspection, workspaceOK
 }
 
 func inspectVerifyPublicIngress(ctx context.Context, result *runtime.WorkflowContractValidationResult, subject string) {

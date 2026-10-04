@@ -128,7 +128,15 @@ func prevalidateSQLiteDatabasePath(path string, createDatabase bool) error {
 }
 
 func acquireSQLitePossessionCoordinate(path string) (*os.File, os.FileInfo, error) {
-	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
+	return openSQLitePossessionCoordinate(path, true)
+}
+
+func openSQLitePossessionCoordinate(path string, create bool) (*os.File, os.FileInfo, error) {
+	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
+	if create {
+		flags |= unix.O_CREAT
+	}
+	fd, err := unix.Open(path, flags, 0o600)
 	if err != nil {
 		if errors.Is(err, unix.ELOOP) {
 			return nil, nil, sqlitePriorOwnerAmbiguous("SQLite possession coordinate must not be a symbolic link")
@@ -153,14 +161,15 @@ func acquireSQLitePossessionCoordinate(path string) (*os.File, os.FileInfo, erro
 		return nil, nil, errors.Join(err, coordinate.Close())
 	}
 	if err := unix.Flock(int(coordinate.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		identityErr := proveSQLitePossessionIdentity(path, info, true, "SQLite possession coordinate changed during observation")
 		closeErr := coordinate.Close()
 		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
 			return nil, nil, errors.Join(&runtimestartupownership.AcquisitionError{
 				Failure: runtimestartupownership.AcquisitionTakeoverRequired,
 				Detail:  "selected store is held by another process",
-			}, closeErr)
+			}, identityErr, closeErr)
 		}
-		return nil, nil, errors.Join(fmt.Errorf("acquire SQLite selected-store possession: %w", err), closeErr)
+		return nil, nil, errors.Join(fmt.Errorf("acquire SQLite selected-store possession: %w", err), identityErr, closeErr)
 	}
 	current, err := os.Lstat(path)
 	if err != nil || !isSafeSQLitePossessionCoordinate(current) || !os.SameFile(info, current) {
@@ -173,7 +182,7 @@ func acquireSQLitePossessionCoordinate(path string) (*os.File, os.FileInfo, erro
 }
 
 func openSQLiteDatabaseIdentity(path string, create bool) (*os.File, os.FileInfo, error) {
-	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
 	if create {
 		flags |= unix.O_CREAT
 	}
@@ -210,6 +219,85 @@ func openSQLiteDatabaseIdentity(path string, create bool) (*os.File, os.FileInfo
 		), database.Close())
 	}
 	return database, info, nil
+}
+
+// CaptureSQLiteInspectionIdentity binds non-creating inspection to the same
+// database/coordinate identities checked by retained possession.
+func CaptureSQLiteInspectionIdentity(path string) (*SQLiteBackendIdentity, error) {
+	canonical, err := canonicalSQLiteSelectedPath(path)
+	if err != nil {
+		return nil, err
+	}
+	database, info, err := openSQLiteDatabaseIdentity(canonical, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := database.Close(); err != nil {
+		return nil, err
+	}
+	coordinateInfo, err := os.Lstat(canonical + sqlitePossessionSuffix)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err == nil && !isSafeSQLitePossessionCoordinate(coordinateInfo) {
+		return nil, sqlitePriorOwnerAmbiguous("SQLite possession coordinate must be one owner-only unaliased regular file")
+	}
+	return &SQLiteBackendIdentity{reference: &sqliteFilePossession{
+		databasePath: canonical, databaseInfo: info,
+		coordinatePath: canonical + sqlitePossessionSuffix, coordinateInfo: coordinateInfo,
+	}}, nil
+}
+
+func probeSQLitePossession(ctx context.Context, selectedPath string, identity *SQLiteBackendIdentity) (available bool, resultErr error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	path, err := canonicalSQLiteSelectedPath(selectedPath)
+	if err != nil {
+		return false, err
+	}
+	if err := requireSupportedLocalFilesystem(filepath.Dir(path)); err != nil {
+		return false, err
+	}
+	if err := prevalidateSQLiteDatabasePath(path, false); err != nil {
+		return false, err
+	}
+	database, databaseInfo, err := openSQLiteDatabaseIdentity(path, false)
+	if err != nil {
+		return false, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, database.Close(), ctx.Err()) }()
+	if identity == nil {
+		return false, errors.New("SQLite possession observation requires opened backend identity")
+	}
+	reference, ok := identity.reference.(*sqliteFilePossession)
+	if !ok || reference.databaseInfo == nil || !os.SameFile(databaseInfo, reference.databaseInfo) {
+		return false, sqlitePriorOwnerAmbiguous("SQLite selected-store identity changed after inspection opened")
+	}
+	if reference.coordinateInfo == nil {
+		return false, errors.New("SQLite possession coordinate was missing when inspection opened")
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	coordinate, coordinateInfo, err := openSQLitePossessionCoordinate(path+sqlitePossessionSuffix, false)
+	if err != nil {
+		return false, errors.Join(err, proveSQLitePossessionIdentity(path, databaseInfo, false, "SQLite selected-store file identity changed"))
+	}
+	defer func() { resultErr = errors.Join(resultErr, releaseSQLitePossessionCoordinate(coordinate)) }()
+	if !os.SameFile(coordinateInfo, reference.coordinateInfo) {
+		return false, sqlitePriorOwnerAmbiguous("SQLite possession coordinate changed after inspection opened")
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := proveSQLitePossessionIdentity(path, databaseInfo, false, "SQLite selected-store file identity changed"); err != nil {
+		return false, err
+	}
+	if err := proveSQLitePossessionIdentity(path+sqlitePossessionSuffix, coordinateInfo, true, "SQLite possession coordinate identity changed"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func sqlitePriorOwnerAmbiguous(detail string) error {

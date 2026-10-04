@@ -21,12 +21,31 @@ func (b *Backend) InspectSnapshot(ctx context.Context, inspect func(context.Cont
 	if inspect == nil {
 		return errors.New("postgres inspection callback is required")
 	}
+	if b.inspectionDialer != nil {
+		return b.withInspectionIO(ctx, func(native context.Context, cleanup func() error) error {
+			return b.RunReadTransaction(native, func(_ context.Context, tx *sql.Tx) (err error) {
+				defer func() { err = errors.Join(err, cleanup()) }()
+				return b.inspectTransaction(ctx, tx, inspect)
+			})
+		})
+	}
 	return b.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		active := &atomic.Bool{}
-		active.Store(true)
-		defer active.Store(false)
-		return inspect(context.WithValue(ctx, inspectionContextKey{}, inspectionSnapshot{backend: b, tx: tx, active: active}))
+		return b.inspectTransaction(ctx, tx, inspect)
 	})
+}
+
+func (b *Backend) inspectTransaction(ctx context.Context, tx *sql.Tx, inspect func(context.Context) error) error {
+	active := &atomic.Bool{}
+	active.Store(true)
+	defer active.Store(false)
+	return inspect(context.WithValue(ctx, inspectionContextKey{}, inspectionSnapshot{backend: b, tx: tx, active: active}))
+}
+
+func (b *Backend) inspectionSQLContext(ctx context.Context) context.Context {
+	if b.inspectionDialer != nil {
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
 }
 
 func (b *Backend) inspectionTransaction(ctx context.Context) (*sql.Tx, error) {

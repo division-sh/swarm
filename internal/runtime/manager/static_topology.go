@@ -31,32 +31,7 @@ func (am *AgentManager) CompileStaticTopologyDesiredAgents(source semanticview.S
 	if err != nil {
 		return nil, err
 	}
-	byIdentity := make(map[string]runtimeagenttopology.DesiredAgent, len(blueprints))
-	for _, blueprint := range blueprints {
-		revision, err := agentConfigPlanRevision(blueprint.Config, blueprint.Identity)
-		if err != nil {
-			return nil, err
-		}
-		desired := runtimeagenttopology.DesiredAgent{Identity: blueprint.Identity, Source: coordinate, ConfigRevision: revision}
-		key, err := desired.Key()
-		if err != nil {
-			return nil, err
-		}
-		if previous, ok := byIdentity[key]; ok && previous != desired {
-			return nil, fmt.Errorf("static declaration %s compiles to conflicting desired records", blueprint.Identity.Description())
-		}
-		byIdentity[key] = desired
-	}
-	out := make([]runtimeagenttopology.DesiredAgent, 0, len(byIdentity))
-	for _, desired := range byIdentity {
-		out = append(out, desired)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		left, _ := out[i].Key()
-		right, _ := out[j].Key()
-		return left < right
-	})
-	return out, nil
+	return desiredAgentsFromBlueprints(blueprints, coordinate)
 }
 
 // FinalizeCommittedAgentReadiness makes every committed agent delivery's exact
@@ -281,43 +256,53 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 		if owner.BundleHash != static.BundleHash {
 			continue
 		}
-		identityPlan, err := identity.Plan()
+		desired, changed, err := projectStaticTopologyActor(current, desiredByKey, admission)
 		if err != nil {
 			return err
 		}
-		key, err := identityPlan.Fingerprint()
-		if err != nil {
-			return err
-		}
-		blueprint, present := desiredByKey[key]
-		if !present {
-			if err := am.commitStaticTopologyReconciliation(ctx, current, nil, admission); err != nil {
-				return err
-			}
+		if !changed {
 			continue
 		}
-		desired, err := blueprint.Materialize(identity.RunID)
-		if err != nil {
-			return err
-		}
-		desired.Topology = admission
-		currentRevision, err := lifecycleConfigRevision(current)
-		if err != nil {
-			return err
-		}
-		desiredRevision, err := lifecycleConfigRevision(desired)
-		if err != nil {
-			return err
-		}
-		if currentRevision == desiredRevision && current.Topology.Equal(admission) && current.LifecyclePhase != AgentLifecycleFailed {
-			continue
-		}
-		if err := am.commitStaticTopologyReconciliation(ctx, current, &desired, admission); err != nil {
+		if err := am.commitStaticTopologyReconciliation(ctx, current, desired, admission); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func projectStaticTopologyActor(current PersistedAgent, desiredByKey map[string]staticAgentBlueprint, admission runtimeagenttopology.Admission) (*PersistedAgent, bool, error) {
+	identity, err := current.Config.ConcreteIdentity()
+	if err != nil {
+		return nil, false, err
+	}
+	identityPlan, err := identity.Plan()
+	if err != nil {
+		return nil, false, err
+	}
+	key, err := identityPlan.Fingerprint()
+	if err != nil {
+		return nil, false, err
+	}
+	blueprint, present := desiredByKey[key]
+	if !present {
+		return nil, true, nil
+	}
+	desired, err := blueprint.Materialize(identity.RunID)
+	if err != nil {
+		return nil, false, err
+	}
+	desired.Topology = admission
+	currentRevision, err := lifecycleConfigRevision(current)
+	if err != nil {
+		return nil, false, err
+	}
+	desiredRevision, err := lifecycleConfigRevision(desired)
+	if err != nil {
+		return nil, false, err
+	}
+	changed := currentRevision != desiredRevision || !current.Topology.Equal(admission) || current.LifecyclePhase == AgentLifecycleFailed
+	return &desired, changed, nil
 }
 
 func (am *AgentManager) retireRemovedStaticTopology(
@@ -999,6 +984,15 @@ func sourceSetContainsCoordinate(plan runtimeagenttopology.SourceSetPlan, coordi
 }
 
 func (am *AgentManager) resolvedStaticTopologyBlueprints(source semanticview.Source) ([]staticAgentBlueprint, error) {
+	return ResolveStaticTopologyBlueprints(AgentManagerOptions{
+		ExecutionPosture: am.executionPosture, LLMBackend: am.llmBackend,
+		ModelAliases: am.modelAliases, RequireModelResolution: am.requireModelResolution,
+	}, source)
+}
+
+// ResolveStaticTopologyBlueprints is the runless declaration compiler used by
+// startup topology and deployment admission, including required flow agents.
+func ResolveStaticTopologyBlueprints(options AgentManagerOptions, source semanticview.Source) ([]AgentMaterializationBlueprint, error) {
 	ordinary, err := staticAgentBlueprintRecords(source)
 	if err != nil {
 		return nil, err
@@ -1009,7 +1003,7 @@ func (am *AgentManager) resolvedStaticTopologyBlueprints(source semanticview.Sou
 	}
 	byIdentity := map[string]staticAgentBlueprint{}
 	for _, blueprint := range append(ordinary, required...) {
-		if err := am.resolveAgentModel(&blueprint.Config); err != nil {
+		if err := resolveAgentModel(&blueprint.Config, options.ExecutionPosture, options.LLMBackend, options.ModelAliases, options.RequireModelResolution); err != nil {
 			return nil, err
 		}
 		key, err := blueprint.Identity.Fingerprint()
@@ -1057,15 +1051,27 @@ func desiredAgentsFromBlueprints(blueprints []staticAgentBlueprint, coordinate r
 	if err := coordinate.Validate(); err != nil {
 		return nil, err
 	}
-	out := make([]runtimeagenttopology.DesiredAgent, 0, len(blueprints))
+	byIdentity := make(map[string]runtimeagenttopology.DesiredAgent, len(blueprints))
 	for _, blueprint := range blueprints {
 		revision, err := agentConfigPlanRevision(blueprint.Config, blueprint.Identity)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, runtimeagenttopology.DesiredAgent{
+		desired := runtimeagenttopology.DesiredAgent{
 			Identity: blueprint.Identity, Source: coordinate, ConfigRevision: revision,
-		})
+		}
+		key, err := desired.Key()
+		if err != nil {
+			return nil, err
+		}
+		if previous, ok := byIdentity[key]; ok && previous != desired {
+			return nil, fmt.Errorf("static declaration %s compiles to conflicting desired records", blueprint.Identity.Description())
+		}
+		byIdentity[key] = desired
+	}
+	out := make([]runtimeagenttopology.DesiredAgent, 0, len(byIdentity))
+	for _, desired := range byIdentity {
+		out = append(out, desired)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		left, _ := out[i].Key()

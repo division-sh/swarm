@@ -2,6 +2,7 @@ package cliapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,17 +10,21 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
-func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, result *runtime.WorkflowContractValidationResult) {
+func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
 	subject := "project:" + repo
 	var selected *storeselected.AdmissionInspection
 	var schemaRequest store.SchemaBootstrapRequest
@@ -78,10 +83,36 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	})
 	if !opened {
 		blockVerifyStoreTail(result, subject, "selected store access did not complete")
+		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+			CheckID: "startup_process_possession", Owner: "internal/store/selected.AdmissionInspection.ProbePossession", Subject: subject,
+			Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotRun,
+			Reason: "selected store access did not complete", Dependencies: []string{"selected_store_access"},
+		})
 		return
 	}
+	if verifyDeploymentBoundedObservation(ctx, storeBudget, result, "startup_process_possession", "internal/store/selected.AdmissionInspection.ProbePossession", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+		possession, err := selected.ProbePossession(ctx)
+		if err != nil {
+			var acquisition *startupownership.AcquisitionError
+			if errors.As(err, &acquisition) {
+				return failures.Wrap(failures.ClassLifecycleConflict, "verify_possession_refused", "verify", "possession", nil, err)
+			}
+			return err
+		}
+		if !possession.Available {
+			return failures.New(failures.ClassLifecycleConflict, "verify_possession_refused", "verify", "possession", map[string]any{"reason": "selected store possession is currently held"})
+		}
+		return possession.Validate()
+	}) {
+		result.BootReport.Observations[len(result.BootReport.Observations)-1].Reason = "momentary possession was available and released; this is not authority, MVCC evidence, or a guarantee of later boot acquisition"
+		result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+			ID: "startup_process_acquisition", Owner: "internal/runtime/startupownership.Store.AcquireProcessCapability", Subject: subject,
+			Reason: "boot must independently acquire and retain possession and record its authority; verification leaves no capability or lock",
+		})
+	}
 	tailAccounted := false
-	verifyDeploymentBoundedObservation(ctx, storeBudget, result, "selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+	var retained *verifyRetainedAdmissionInventory
+	schemaOK := verifyDeploymentBoundedObservation(ctx, storeBudget, result, "selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		_, err := selected.Inspect(ctx, schemaRequest, func(snapshot *storeselected.AdmissionSnapshot) error {
 			fresh, err := snapshot.RequiresSchemaPreparation()
 			if err != nil {
@@ -96,7 +127,7 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 				})
 				return nil
 			}
-			inspectVerifyRecoverySnapshot(ctx, snapshot, cfg, result)
+			retained = inspectVerifyRecoverySnapshot(ctx, snapshot, repo, paths, cfg, source, opts, result)
 			tailAccounted = true
 			return nil
 		})
@@ -105,11 +136,29 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	if !tailAccounted {
 		blockVerifyStoreTail(result, subject, "selected store schema inspection did not complete")
 	}
+	if retained != nil {
+		inspectVerifyRetainedDependencies(ctx, retained, schemaOK, cfg, source, opts, workspaces, workspaceOK, result)
+	}
 }
 
-func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult) {
+type verifyRetainedAdmissionInventory struct {
+	forks    []runforkexecution.InspectedSelectedForkRecovery
+	actors   manager.RetainedActorInspection
+	forksOK  bool
+	actorsOK bool
+}
+
+func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult) *verifyRetainedAdmissionInventory {
+	retained := &verifyRetainedAdmissionInventory{}
 	hash := result.BootReport.SourceArtifactHash
 	subject := "source:" + hash
+	verifyDeploymentObservation(ctx, result, "startup_authority_lineage", "internal/runtime/startupownership.AdmitAuthorityInspection", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+		inspection, err := snapshot.InspectAuthority(ctx)
+		if err != nil {
+			return err
+		}
+		return startupownership.AdmitAuthorityInspection(inspection)
+	})
 	verifyDeploymentObservation(ctx, result, "pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
 		return runbundle.AdmitPinnedSources(ctx, snapshot, hash, []string{hash})
 	})
@@ -149,16 +198,45 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		_, err := manager.InspectSelectedContractRouteRecoveries(ctx, snapshot)
 		return err
 	})
-	for _, pending := range []struct{ id, owner string }{
-		{"startup_process_possession", "internal/runtime/startupownership.InspectAuthority"},
-		{"selected_fork_recovery_admission", "internal/runtime/runforkexecution"},
-		{"retained_actor_admission", "internal/runtime/manager"},
-	} {
-		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
-			CheckID: pending.id, Owner: pending.owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
-			Status: bootverify.AdmissionNotRun, Reason: "required retained-state observer has not completed",
+	retained.forksOK = verifyDeploymentObservation(ctx, result, "selected_fork_recovery_admission", "internal/runtime/runforkexecution.InspectSelectedForkRecoveries", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+		forks, err := runforkexecution.InspectSelectedForkRecoveries(ctx, snapshot, runforkexecution.SourceArtifactSelectedContractSourceLoader{
+			RepoRoot: repo, PlatformSpecPath: paths.PlatformSpecPath,
 		})
-	}
+		if err != nil {
+			return err
+		}
+		retained.forks = forks
+		for _, fork := range forks {
+			result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+				ID: "selected_fork_recovery_settlement", Owner: "internal/runtime/runforkexecution.SelectedContractExecutionOwner.RecoverSelectedForkContexts",
+				Subject: "fork:" + fork.Entry.Binding.ForkRunID,
+				Reason:  "boot must independently admit current process ownership and settle the inspected " + string(fork.Evidence.Plan.Disposition) + " plan; inspection never fences, resumes or hydrates",
+			})
+		}
+		return nil
+	})
+	retained.actorsOK = verifyDeploymentObservation(ctx, result, "retained_actor_admission", "internal/runtime/manager.InspectRetainedActors", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+		fact, err := correlation.NewSourceArtifactFact(hash)
+		if err != nil {
+			return err
+		}
+		inspection, err := manager.InspectRetainedActors(ctx, snapshot, source, fact, manager.AgentManagerOptions{
+			ExecutionPosture: executionposture.Live, LLMBackend: opts.LLMProfile.ID,
+			ModelAliases: opts.ModelAliases, RequireModelResolution: true,
+		})
+		if err != nil {
+			return err
+		}
+		retained.actors = inspection
+		if inspection.Observed != 0 {
+			result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+				ID: "retained_actor_reconciliation_and_hydration", Owner: "internal/runtime/manager.AgentManager.PrepareStaticTopologyForStartup",
+				Subject: subject, Reason: "boot must independently acquire lifecycle authority, reconcile projected declarations and hydrate only owned actors; no actor is created by verification",
+			})
+		}
+		return nil
+	})
+	return retained
 }
 
 func blockVerifyStoreTail(result *runtime.WorkflowContractValidationResult, subject, reason string) {
@@ -170,11 +248,13 @@ func accountVerifyStoreTail(result *runtime.WorkflowContractValidationResult, su
 		{"pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources"},
 		{"retained_source_integrity", "internal/runtime/startuprecovery.Inspect"},
 		{"startup_recovery_admission", "internal/runtime.InspectStartupRecoveryAdmission"},
-		{"startup_process_possession", "internal/runtime/startupownership.InspectAuthority"},
+		{"startup_authority_lineage", "internal/runtime/startupownership.AdmitAuthorityInspection"},
 		{"pending_reset_admission", "internal/runtime/destructivereset.InspectPendingOperations"},
 		{"retained_route_admission", "internal/runtime/manager.InspectSelectedContractRouteRecoveries"},
 		{"selected_fork_recovery_admission", "internal/runtime/runforkexecution"},
 		{"retained_actor_admission", "internal/runtime/manager"},
+		{"selected_fork_source_dependencies", "internal/runtime.ValidateWorkflowContractSurface"},
+		{"retained_actor_provider_dependencies", "internal/runtime/llm.CompileManagedCapabilityAdmission"},
 	} {
 		observation := bootverify.AdmissionObservation{
 			CheckID: blocked.id, Owner: blocked.owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
@@ -182,11 +262,7 @@ func accountVerifyStoreTail(result *runtime.WorkflowContractValidationResult, su
 		}
 		if fresh {
 			observation.Dependencies = []string{"selected_store_schema"}
-			if blocked.id == "startup_process_possession" {
-				observation.Reason = "fresh schema does not prove that process possession is available"
-			} else {
-				observation.Status = bootverify.AdmissionNotApplicable
-			}
+			observation.Status = bootverify.AdmissionNotApplicable
 		}
 		result.BootReport.Observations = append(result.BootReport.Observations, observation)
 	}
