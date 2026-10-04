@@ -21,11 +21,10 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			var db *sql.DB
 			if backend == "sqlite" {
 				unsetStoreSelectorEnv(t)
-				stubServeRuntimeWorkspaceLifecycle(t)
 				opts.ConfigPath = writeMockAgentRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "receiver.sqlite"))
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 			} else {
-				_, selected, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+				_, selected, _ := installServeRuntimeEmptyPostgresTestStores(t, nil)
 				db = selected
 				opts.ConfigPath = writeMockAgentRuntimeConfig(t, "postgres", "")
 				opts.StoreMode, opts.StoreModeSet = backendselection.BackendPostgres.String(), true
