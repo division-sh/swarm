@@ -277,9 +277,11 @@ JSON/Markdown with failures, incomplete/canceled/missing evidence, coverage,
 confirmed core escapes, unclassified candidates and known/unknown lag.
 
 Full-only failed roots are CANDIDATES, not automatically confirmed regressions.
-Confirmed escape rate is confirmed regressions missed by actually successful core
-proof divided by fully classified eligible regression findings; also expose the
-unclassified/coverage denominator so an unclassified week cannot be zero escapes.
+Review-cycle-1 correction: report reviewed regression and confirmed escape counts
+separately. Escape rate is explicitly unmeasured/N/A, including a known escape;
+the independent comparable escape/non-escape population and longitudinal rate
+acceptance remain open under #2535. Never divide confirmed escapes by themselves
+or count unknown findings as non-escapes.
 Use existing issue/review attribution when present; absent causal attribution means
 unknown, never infer that the latest merge introduced a failure. Lag requires a
 confirmed introducing commit on the detected master lineage; count first-parent
@@ -293,6 +295,16 @@ required summary or creating a success receipt.
 Keep nightly+manual cadence. Collect/review roughly a week under #2535; neither
 auto-tighten cadence nor claim operational cadence acceptance from synthetic data.
 Unavailable historic artifacts are explicit unknowns, not fabricated history.
+Hosted observations fetch complete history; causal enrichment is retrospective
+through the existing report command, archived full/core plan and command evidence,
+successful exact core run metadata and reviewed attribution. The checked-in command
+guide names the complete collection/replay procedure and source-alias refusal.
+PR core commands retain their actual execution identity. Only the existing merged
+qualification observer may associate them with an exact master landing after
+independent tree/PR/protected-check/run/attempt/digest validation; a caller-supplied
+SHA or master replay receipt alone is insufficient. No new provenance owner.
+Real archived-artifact replay and shallow-history rejection must be proven; no
+claim that unattended observations alone classify regressions.
 
 ## Systematic consumption census
 

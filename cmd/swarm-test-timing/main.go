@@ -57,6 +57,7 @@ type config struct {
 	priorCorePlanPath     string
 	priorCoreEvidenceRoot string
 	priorCoreRunPath      string
+	priorCoreLandingSHA   string
 	validatePublish       bool
 	assertExecution       bool
 	warmProducts          bool
@@ -111,6 +112,7 @@ func main() {
 	flag.StringVar(&cfg.priorCorePlanPath, "prior-core-plan", "", "optional preceding actual core proof plan")
 	flag.StringVar(&cfg.priorCoreEvidenceRoot, "prior-core-evidence-root", "", "optional preceding core command evidence")
 	flag.StringVar(&cfg.priorCoreRunPath, "prior-core-run", "", "optional successful preceding Actions run metadata")
+	flag.StringVar(&cfg.priorCoreLandingSHA, "prior-core-landing-sha", "", "optional master landing verified by the existing merged-proof owner")
 	flag.BoolVar(&cfg.validatePublish, "validate-publish-diff", false, "fail unless changed-files contains only the generated model")
 	flag.BoolVar(&cfg.assertExecution, "assert-execution-sha", false, "fail unless the checked-out commit matches the run plan")
 	flag.Parse()

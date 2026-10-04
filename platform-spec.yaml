@@ -22528,9 +22528,17 @@ test_specification:
         Daily/manual full cadence is unchanged. Observations retain failed/incomplete attempt evidence without
         weakening required checks. A full-only failure is an unclassified candidate until independent attribution;
         confirmed core escape requires actual preceding successful core proof and a causal introducing commit
-        on the detected first-parent master lineage. Unknown provenance/lag remains unknown, and zero eligible
-        classified findings reports N/A rather than zero percent. Publication and measured fleet/cadence acceptance
-        remain open under #2535.
+        on the detected first-parent master lineage. Hosted observations fetch complete history but do not invent
+        reviewed attribution or preceding core execution. Retrospective reporting consumes archived full/core
+        plans, exact-attempt command artifacts, successful core run metadata and independently reviewed causal
+        attribution; shallow, foreign or unavailable history cannot establish lag.
+        PR core evidence retains its original execution source; an optional master landing is admitted only by the
+        existing merged-proof observer with exact association/tree/check/run/attempt/digest validation, never by
+        caller renaming or a replay receipt without actual command evidence. Reviewed regression and confirmed
+        escape counts are distinct. Escape rate remains explicitly unmeasured/N/A until #2535 defines and proves
+        an independent comparable escape/non-escape population; confirmed escapes are not their own denominator.
+        Unknown provenance/lag remains unknown. Publication and measured fleet/cadence acceptance remain open
+        under #2535.
       master_replay: >-
         Schedule, manual dispatch and unverified master execute full. Master may reuse one exactly associated merged PR only when its
         qualified execution tree equals the pushed tree, the current PR tier is satisfied, and the current App 15368

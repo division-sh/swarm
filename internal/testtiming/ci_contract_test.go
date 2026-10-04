@@ -26,6 +26,10 @@ func TestCIJobCollectionWaitsOnlyForTerminalEvidence(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &workflow); err != nil {
 		t.Fatal(err)
 	}
+	checkout := workflow.Jobs["timing-budget"].Steps[0]
+	if checkout.Uses != "actions/checkout@v4" || checkout.With["fetch-depth"] != 0 || checkout.With["ref"] != "${{ needs.ci-plan.outputs.execution_sha }}" {
+		t.Fatal("cadence observation requires complete history at the exact execution source")
+	}
 	step := findWorkflowStep(workflow.Jobs["timing-budget"].Steps, "Evaluate complete plan-bound evidence")
 	if step == nil {
 		t.Fatal("missing timing evaluation")

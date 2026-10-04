@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
+	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testtiming"
 )
 
@@ -58,6 +60,10 @@ func observeFullCadence(cfg config) error {
 }
 
 func cadenceMasterLineage(ctx context.Context, repo, head string) []string {
+	shallow, err := exec.CommandContext(ctx, "git", "-C", repo, "rev-parse", "--is-shallow-repository").Output()
+	if err != nil || strings.TrimSpace(string(shallow)) != "false" {
+		return nil
+	}
 	data, err := exec.CommandContext(ctx, "git", "-C", repo, "rev-list", "--first-parent", "refs/remotes/origin/master").Output()
 	if err != nil {
 		return nil
@@ -72,7 +78,7 @@ func cadenceMasterLineage(ctx context.Context, repo, head string) []string {
 }
 
 func readCadenceCore(cfg config) (*testtiming.CadenceCoreProof, error) {
-	if cfg.priorCorePlanPath == "" && cfg.priorCoreEvidenceRoot == "" && cfg.priorCoreRunPath == "" {
+	if cfg.priorCorePlanPath == "" && cfg.priorCoreEvidenceRoot == "" && cfg.priorCoreRunPath == "" && cfg.priorCoreLandingSHA == "" {
 		return nil, nil
 	}
 	if cfg.priorCorePlanPath == "" || cfg.priorCoreEvidenceRoot == "" || cfg.priorCoreRunPath == "" {
@@ -86,19 +92,26 @@ func readCadenceCore(cfg config) (*testtiming.CadenceCoreProof, error) {
 	if err != nil {
 		return nil, err
 	}
-	var run struct {
-		ID         int64  `json:"id"`
-		Attempt    int    `json:"run_attempt"`
-		Status     string `json:"status"`
-		Conclusion string `json:"conclusion"`
-		HeadSHA    string `json:"head_sha"`
-	}
+	var run testplanning.QualifiedRun
 	if err := json.Unmarshal(raw, &run); err != nil {
 		return nil, err
 	}
-	if run.Status != "completed" || run.Conclusion != "success" || run.HeadSHA != plan.HeadSHA {
+	if plan.Profile != testplanning.ProfileCore || plan.Venue != testplanning.VenueCI || run.ID < 1 || run.RunAttempt < 1 || run.Status != "completed" || run.Conclusion != "success" {
+		return nil, fmt.Errorf("preceding core workflow was not a successful bound CI core attempt")
+	}
+	if cfg.priorCoreLandingSHA != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		observed, actual, err := observeMergedQualification(ctx, config{repository: "division-sh/swarm", branchRef: "refs/heads/master", headSHA: cfg.priorCoreLandingSHA})
+		if err != nil {
+			return nil, fmt.Errorf("preceding core master landing: %w", err)
+		}
+		if observed.Digest != plan.Digest || actual.ID != run.ID || actual.RunAttempt != run.RunAttempt || actual.HeadSHA != run.HeadSHA {
+			return nil, fmt.Errorf("preceding core archive is not the exact observed merged qualification")
+		}
+	} else if run.HeadSHA != plan.HeadSHA {
 		return nil, fmt.Errorf("preceding core workflow was not successfully completed on the plan source; source aliases require independent attribution, not guessed credit")
 	}
 	evidence, problems := readEvidenceTree(cfg.priorCoreEvidenceRoot)
-	return &testtiming.CadenceCoreProof{CadenceAttempt: testtiming.CadenceAttempt{Plan: plan, RunID: run.ID, Attempt: run.Attempt, Evidence: evidence, LoadProblems: problems}, SuccessfulRun: true}, nil
+	return &testtiming.CadenceCoreProof{CadenceAttempt: testtiming.CadenceAttempt{Plan: plan, RunID: run.ID, Attempt: run.RunAttempt, Evidence: evidence, LoadProblems: problems}, SuccessfulRun: true, LandedHeadSHA: cfg.priorCoreLandingSHA}, nil
 }
