@@ -155,13 +155,6 @@ func verifyCommandOutput(ok bool, sourceRoot string, result runtime.WorkflowCont
 	}
 }
 
-func pluralSuffix(count int) string {
-	if count == 1 {
-		return ""
-	}
-	return "s"
-}
-
 func verifyValidationResultHasBlockingBootFindings(result runtime.WorkflowContractValidationResult, opts runtime.WorkflowContractValidationOptions) bool {
 	if len(result.BootReport.Errors()) > 0 {
 		return true

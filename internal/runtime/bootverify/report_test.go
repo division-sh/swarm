@@ -7457,19 +7457,6 @@ func renameFlowHandlerEvent(t *testing.T, bundle *runtimecontracts.WorkflowContr
 	renameFlowInputPinEvent(t, bundle, flowID, oldEventType, newEventType)
 }
 
-func addFlowInputPin(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID string, pin runtimecontracts.FlowInputEventPin) {
-	t.Helper()
-	flowView, ok := bundle.FlowViewByID(flowID)
-	if !ok || flowView == nil {
-		t.Fatalf("flow view %s missing", flowID)
-	}
-	flowView.Schema.Pins.Inputs.EventPins = append(flowView.Schema.Pins.Inputs.EventPins, pin)
-	schema := bundle.FlowSchemas[flowID]
-	schema.Pins.Inputs.EventPins = append(schema.Pins.Inputs.EventPins, pin)
-	bundle.FlowSchemas[flowID] = schema
-	recompileBootverifySemantics(t, bundle)
-}
-
 func loadNamesOnlyBootverifyBundle(t *testing.T, root string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
