@@ -25,10 +25,8 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -367,7 +365,6 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	switch backend {
 	case "sqlite":
 		unsetStoreSelectorEnv(t)
-		stubServeRuntimeWorkspaceLifecycle(t)
 		storeLocation = filepath.Join(t.TempDir(), "memory.sqlite")
 		opts.ConfigPath = writeStandingMockRuntimeConfig(t, "sqlite", storeLocation)
 		opts.StoreMode = "sqlite"
@@ -385,17 +382,12 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		}
 		openStore()
 		oldBuildStores := buildStoresForServe
-		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
-			return serveRuntimeWorkspaceStub{}, nil
-		}
 		t.Cleanup(func() {
 			buildStoresForServe = oldBuildStores
-			cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace
 		})
 		prepareRestart = openStore
 		opts.ConfigPath = writeStandingMockRuntimeConfig(t, "postgres", "")
@@ -405,7 +397,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		t.Fatalf("unsupported backend %q", backend)
 	}
 
-	retainedRoot := t.TempDir()
+	retainedRoot := ownedMockLifecycleRoot(t)
 	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
