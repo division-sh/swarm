@@ -21,7 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-func TestSelectedForkRealDockerGatewayTransportBothStores(t *testing.T) {
+func TestSelectedForkDockerGatewayTransportBothStores(t *testing.T) {
 	if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") != "1" {
 		t.Skip("real Docker selected-fork transport proof; a skip earns no credit")
 	}
