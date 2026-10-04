@@ -226,27 +226,10 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	}
 	start := time.Now()
 	response, raw, usage, dispatch, executeErr := executeMockCompletionWithExecutor(ctx, actor, session.Tools, requestJSON, providerModel, len(request.ToolResults) != 0, managed, func(ctx context.Context, request pythonmodule.Request) (pythonmodule.Result, error) {
-		result, err := workspace.RunWorker(ctx, target, r.cfg.Workspace.DockerBin, worker.Request{Mode: "model", Module: &request})
-		if err != nil {
-			return pythonmodule.Result{}, err
-		}
-		if result.Module == nil {
-			return pythonmodule.Result{}, &workspace.WorkerExecutionError{Started: true, Observed: true, ModelStarted: result.ModelStarted, Err: runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mock_worker_result_missing", "mock-python-adapter", "execute_completion", nil)}
-		}
-		return *result.Module, nil
+		return r.executeWorkspaceMockModel(ctx, target, request)
 	})
 	latency := time.Since(start)
-	if response != nil {
-		if surface, ok := managedcapabilities.FromContext(ctx); ok {
-			observed, observationErr := observeAllBindings(surface, managedcapabilities.BindingMCPProvider, evidenceMCPVisible, managedcapabilities.EvidenceConfirmed, "")
-			if observationErr != nil {
-				executeErr = errors.Join(executeErr, observationErr)
-			} else {
-				response.CapabilitySurface = &observed
-				ctx = managedcapabilities.WithContext(ctx, observed)
-			}
-		}
-	}
+	ctx, executeErr = observeMockCompletionSurface(ctx, response, executeErr)
 	turn := enrichTurnRecord(ctx, session, AgentTurnRecord{
 		AgentID: session.AgentID, SessionID: session.ID, RequestPayload: requestJSON, ResponseRaw: raw,
 		ParseOK: executeErr == nil, Latency: latency,
@@ -296,6 +279,33 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		r.persistConversation(handoffCtx, lease, session)
 	}
 	return response, errors.Join(settlementErr, err)
+}
+
+func (r *MockRuntime) executeWorkspaceMockModel(ctx context.Context, target *workspace.Target, request pythonmodule.Request) (pythonmodule.Result, error) {
+	result, err := workspace.RunWorker(ctx, target, r.cfg.Workspace.DockerBin, worker.Request{Mode: "model", Module: &request})
+	if err != nil {
+		return pythonmodule.Result{}, err
+	}
+	if result.Module == nil {
+		return pythonmodule.Result{}, &workspace.WorkerExecutionError{Started: true, Observed: true, ModelStarted: result.ModelStarted, Err: runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mock_worker_result_missing", "mock-python-adapter", "execute_completion", nil)}
+	}
+	return *result.Module, nil
+}
+
+func observeMockCompletionSurface(ctx context.Context, response *Response, executeErr error) (context.Context, error) {
+	if response == nil {
+		return ctx, executeErr
+	}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return ctx, executeErr
+	}
+	observed, err := observeAllBindings(surface, managedcapabilities.BindingMCPProvider, evidenceMCPVisible, managedcapabilities.EvidenceConfirmed, "")
+	if err != nil {
+		return ctx, errors.Join(executeErr, err)
+	}
+	response.CapabilitySurface = &observed
+	return managedcapabilities.WithContext(ctx, observed), executeErr
 }
 
 func (r *MockRuntime) persistConversation(ctx context.Context, lease *sessions.Lease, session *Session) {
