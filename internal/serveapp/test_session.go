@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
@@ -44,6 +45,14 @@ func loadRuntimeCompositionBundles(ctx context.Context, req runtimeCompositionRe
 func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute func(context.Context, cliapp.TestSessionEndpoint) error) (retErr error) {
 	if in.Bundle == nil || in.Bundle.SourceArtifact == nil || in.PlatformPackBase == nil || execute == nil {
 		return fmt.Errorf("private test session requires admitted source, pack base and execution callback")
+	}
+	backend := strings.TrimSpace(in.WorkspaceBackend)
+	if backend == "" {
+		backend = "host"
+	}
+	preference, err := cliapp.ResolveWorkspaceBackend(backend, true, nil)
+	if err != nil {
+		return err
 	}
 	cfg, err := cliapp.DefaultRuntimeConfig()
 	if err != nil {
@@ -89,7 +98,8 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 	called := false
 	code := buildRuntimeComposition(ctx, runtimeCompositionRequest{
 		Purpose: executionposture.MockOnly, ProviderIngress: false,
-		Repo: privateRoot, Options: opts,
+		WorkspacePreference: preference,
+		Repo:                privateRoot, Options: opts,
 		Config:           cliapp.RuntimeConfigLoadResult{Config: cfg, Source: "private-test-session"},
 		AdmittedBundle:   in.Bundle,
 		ResolvedPaths:    cliapp.CLISourcePlatformSpecPaths{SourceRoot: in.SourceRoot, PlatformSpecPath: in.PlatformSpecPath},

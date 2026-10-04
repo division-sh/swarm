@@ -55,35 +55,21 @@ func TestClaudeContinuationCharacterization(t *testing.T) {
 			}
 			base := effecttest.New()
 			var registered, unregistered int
-			var listed managedcapabilities.Surface
+			binding, turns := nativeCLIProbeFixture(t, []ToolDefinition{{Name: "read_flow_data"}})
+			register := turns.registerSurface
+			turns.registerSurface = func(ctx context.Context, ttl time.Duration, surface managedcapabilities.Surface) string {
+				registered++
+				return register(ctx, ttl, surface)
+			}
+			turns.unregister = func(string) { unregistered++ }
 			runtime := NewClaudeCLIRuntimeWithOptions(cfg,
 				claudeSettledTestRegistry{Registry: sessions.NewInMemoryRegistry(0), effects: base}, "characterization",
 				workspaceResolverStub{target: &workspace.Target{Container: "characterization", Workdir: "/workspace"}}, nil, nil,
 				ClaudeCLIRuntimeOptions{
 					CompletionController: liveTestCompletionController(base, base, base, base),
 					ProviderCredentials:  testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "test-token"),
-					ToolGateway:          testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
-					MCPTurnContextStore: mcpTurnContextStoreStub{
-						registerSurface: func(_ context.Context, _ time.Duration, surface managedcapabilities.Surface) string {
-							registered++
-							var evidence []managedcapabilities.DeliveryEvidence
-							for _, tool := range surface.Tools {
-								for _, binding := range tool.Bindings {
-									if binding.Kind == managedcapabilities.BindingMCPTool {
-										evidence = append(evidence, managedcapabilities.DeliveryEvidence{BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: evidenceMCPListed, Status: managedcapabilities.EvidenceConfirmed})
-									}
-								}
-							}
-							var err error
-							listed, err = surface.Observe(evidence...)
-							if err != nil {
-								t.Fatal(err)
-							}
-							return "characterization-token"
-						},
-						resolve:    func(string) (managedcapabilities.Surface, bool) { return listed, true },
-						unregister: func(string) { unregistered++ },
-					},
+					ToolGateway:          binding,
+					MCPTurnContextStore:  turns,
 				})
 			var tools []ToolDefinition
 			if tc.native {
@@ -98,11 +84,6 @@ func TestClaudeContinuationCharacterization(t *testing.T) {
 			actor, _ := actors.ActorFromContext(ctx)
 			actor.NativeTools.FileIO = tc.native
 			ctx = actors.WithActor(ctx, actor)
-			if tc.mode == "timeout" {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, 500*time.Millisecond)
-				defer cancel()
-			}
 			response, err := conv.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent(actor.ID)})
 			settlements := base.CompletionSettlementsForAdapter("claude_cli")
 			if tc.mode != "success" {
@@ -156,6 +137,9 @@ func characterizationArgs(t *testing.T, root string, index int) []string {
 func TestClaudeContinuationSubprocess(t *testing.T) {
 	if os.Getenv("CLAUDE_CHARACTERIZATION_HELPER") != "1" {
 		return
+	}
+	if code, handled := runCLIProbeDockerFixture(); handled {
+		os.Exit(code)
 	}
 	_, _ = io.ReadAll(os.Stdin)
 	root := os.Getenv("CLAUDE_CHARACTERIZATION_ROOT")

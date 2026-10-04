@@ -1,0 +1,20 @@
+intake:
+  execution_type: system_node
+  subscribes_to: [work.requested]
+  produces: [work.ready]
+  event_handlers:
+    work.requested:
+      create_entity: true
+      advances_to: working
+      data_accumulation:
+        writes:
+          - {source_field: marker, target_field: marker}
+      emit:
+        event: work.ready
+        fields: {marker: "${payload.marker}"}
+completion:
+  execution_type: system_node
+  subscribes_to: [work.completed]
+  event_handlers:
+    work.completed:
+      advances_to: complete
