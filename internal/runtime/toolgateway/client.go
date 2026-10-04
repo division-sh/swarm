@@ -30,6 +30,17 @@ type ListedDefinition struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
+type observationRPCError struct {
+	Code int `json:"code"`
+	Data struct {
+		RuntimeError struct {
+			Protocol *struct {
+				Code string `json:"code"`
+			} `json:"protocol_error"`
+		} `json:"runtimeError"`
+	} `json:"data"`
+}
+
 func (o HTTPObservation) Probe(ctx context.Context) ([]ListedDefinition, error) {
 	if err := o.Initialize(ctx); err != nil {
 		return nil, err
@@ -116,6 +127,10 @@ func (o HTTPObservation) rpc(ctx context.Context, method string, params any, res
 		return o.unavailable("connect_or_timeout", 0)
 	}
 	defer resp.Body.Close()
+	return o.consumeRPCResponse(method, resp, result)
+}
+
+func (o HTTPObservation) consumeRPCResponse(method string, resp *http.Response, result any) error {
 	if resp.StatusCode != http.StatusOK {
 		if method == "tools/call" && resp.StatusCode >= http.StatusInternalServerError {
 			return o.uncertain("server_failure_after_dispatch", nil)
@@ -142,19 +157,10 @@ func (o HTTPObservation) rpc(ctx context.Context, method string, params any, res
 		return o.mismatch("gateway_response_invalid")
 	}
 	var envelope struct {
-		JSONRPC string          `json:"jsonrpc"`
-		ID      int             `json:"id"`
-		Result  json.RawMessage `json:"result"`
-		Error   *struct {
-			Code int `json:"code"`
-			Data struct {
-				RuntimeError struct {
-					Protocol *struct {
-						Code string `json:"code"`
-					} `json:"protocol_error"`
-				} `json:"runtimeError"`
-			} `json:"data"`
-		} `json:"error"`
+		JSONRPC string               `json:"jsonrpc"`
+		ID      int                  `json:"id"`
+		Result  json.RawMessage      `json:"result"`
+		Error   *observationRPCError `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.JSONRPC != "2.0" {
 		if method == "tools/call" {
@@ -163,19 +169,7 @@ func (o HTTPObservation) rpc(ctx context.Context, method string, params any, res
 		return o.mismatch("gateway_response_invalid")
 	}
 	if envelope.Error != nil {
-		if envelope.Error.Code == -32001 {
-			return o.unavailable("authentication_refused", resp.StatusCode)
-		}
-		if envelope.Error.Code == -32003 && envelope.Error.Data.RuntimeError.Protocol != nil {
-			switch envelope.Error.Data.RuntimeError.Protocol.Code {
-			case "mcp_context_token_missing", "mcp_context_token_not_found", "mcp_context_token_stale_epoch":
-				return o.unavailable("context_authentication_refused", resp.StatusCode)
-			}
-		}
-		if method == "tools/call" && envelope.Error.Code != -32003 && envelope.Error.Code != -32600 && envelope.Error.Code != -32601 && envelope.Error.Code != -32602 {
-			return o.uncertain("unclassified_rpc_failure", nil)
-		}
-		return o.mismatch("gateway_context_or_definition_refused")
+		return o.rpcResponseFailure(method, resp.StatusCode, envelope.Error)
 	}
 	if envelope.ID != 1 {
 		if method == "tools/call" {
@@ -190,6 +184,22 @@ func (o HTTPObservation) rpc(ctx context.Context, method string, params any, res
 		return o.mismatch("gateway_result_invalid")
 	}
 	return nil
+}
+
+func (o HTTPObservation) rpcResponseFailure(method string, httpStatus int, failure *observationRPCError) error {
+	if failure.Code == -32001 {
+		return o.unavailable("authentication_refused", httpStatus)
+	}
+	if failure.Code == -32003 && failure.Data.RuntimeError.Protocol != nil {
+		switch failure.Data.RuntimeError.Protocol.Code {
+		case "mcp_context_token_missing", "mcp_context_token_not_found", "mcp_context_token_stale_epoch":
+			return o.unavailable("context_authentication_refused", httpStatus)
+		}
+	}
+	if method == "tools/call" && failure.Code != -32003 && failure.Code != -32600 && failure.Code != -32601 && failure.Code != -32602 {
+		return o.uncertain("unclassified_rpc_failure", nil)
+	}
+	return o.mismatch("gateway_context_or_definition_refused")
 }
 
 func (o HTTPObservation) uncertain(status string, cause error) error {
