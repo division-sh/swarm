@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -110,7 +109,7 @@ func NewExecutorWithOptions(bus EventPublisher, opts ExecutorOptions) *Executor 
 		exec.mcpClient = runtimemcp.NewClient(exec.credentials)
 	}
 	if exec.mcpClient != nil {
-		for _, err := range exec.mcpClient.Refresh(context.Background(), exec.workflowSource) {
+		for _, err := range exec.mcpClient.Refresh(context.Background(), exec.workflowSource, runtimemcp.DiscoveryOptions{}) {
 			processWarn("tool-executor", "mcp discovery warning: %v", err)
 		}
 	}
@@ -273,38 +272,15 @@ func (e *Executor) toolDefinitionsForActor(actor models.AgentConfig, source sema
 	if client != nil {
 		discovered = client.DiscoveredTools()
 	}
-	entries, err := executionToolsForActor(source, actor, discovered)
+	definitions, err := admittedActorToolDefinitions(source, actor, discovered, e.emitRegistry,
+		func(name string) toolAuthorizationDecision { return e.toolAuthorizationDecision(actor, name) },
+		func(name string) bool { return e.nativeToolAdmittedForTool(context.Background(), actor, name) },
+		func(_ string, component string, format string, args ...any) { processWarn(component, format, args...) })
 	if err != nil {
 		processWarn("tool-executor", "failed to load actor-scoped contract tool definitions: %v", err)
 		return nil
 	}
-	names := make([]string, 0, len(entries))
-	for name := range entries {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	filtered := make([]llm.ToolDefinition, 0, len(names))
-	for _, name := range names {
-		entry := entries[name]
-		if !e.toolAuthorizationDecision(actor, name).allowed {
-			continue
-		}
-		if !e.nativeToolAdmittedForTool(context.Background(), actor, name) {
-			continue
-		}
-		filtered = append(filtered, llm.ToolDefinition{
-			Name:        name,
-			Description: entry.Description(),
-			Usage:       entry.Usage(),
-			Schema:      entry.InputSchema(),
-		})
-	}
-	if e.emitRegistry != nil {
-		filtered = append(filtered, e.emitRegistry.GenerateEmitToolsForActor(actor, func(_ string, component string, format string, args ...any) {
-			processWarn(component, format, args...)
-		})...)
-	}
-	return filtered
+	return definitions
 }
 
 func (e *Executor) ToolDefinitionsForActorInContext(ctx context.Context, actor models.AgentConfig) []llm.ToolDefinition {
@@ -359,6 +335,14 @@ func (e *Executor) filterToolDefinitionsForActorInContext(ctx context.Context, a
 }
 
 func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	return actorToolCapabilities(names, requestAllowed,
+		func(name string) toolAuthorizationDecision { return e.toolAuthorizationDecision(actor, name) },
+		func(name string) (bool, string) {
+			return e.nativeToolAdmissionForTool(context.Background(), actor, name)
+		})
+}
+
+func actorToolCapabilities(names []string, requestAllowed map[string]struct{}, authorize func(string) toolAuthorizationDecision, native func(string) (bool, string)) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	seen := map[string]struct{}{}
 	for _, raw := range names {
@@ -370,7 +354,7 @@ func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []st
 			continue
 		}
 		seen[name] = struct{}{}
-		decision := e.toolAuthorizationDecision(actor, name)
+		decision := authorize(name)
 		cap := toolcapabilities.Capability{
 			Name:               name,
 			Kind:               toolKindPolicy(name),
@@ -392,7 +376,7 @@ func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []st
 			cap.DenialReason = "tool_not_allowed"
 		}
 		if decision.allowed && isNativeFallbackToolName(name) {
-			if admitted, reason := e.nativeToolAdmissionForTool(context.Background(), actor, name); !admitted {
+			if admitted, reason := native(name); !admitted {
 				cap.Visible = false
 				cap.Callable = false
 				if strings.TrimSpace(reason) == "" {
@@ -431,7 +415,13 @@ func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName 
 	e.mu.RLock()
 	source := e.workflowSource
 	allowInternalLegacy := e.allowInternalLegacyEntityTools
+	emits := e.emitRegistry
 	e.mu.RUnlock()
+	return sourceToolAuthorizationDecision(source, actor, toolName, emits, allowInternalLegacy)
+}
+
+func sourceToolAuthorizationDecision(source semanticview.Source, actor models.AgentConfig, toolName string, emits *EmitRegistry, allowInternalLegacy bool) toolAuthorizationDecision {
+	toolName = normalizeNativeToolName(toolName)
 	if _, legacy := legacyEntityToolSurfaceNames[toolName]; legacy && !allowInternalLegacy {
 		return toolAuthorizationDecision{
 			ownership: toolOwnershipPlatformBuiltin,
@@ -455,7 +445,7 @@ func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName 
 			}
 		}
 	}
-	decision := classifyToolAuthorization(actor, toolName, e.emitRegistry)
+	decision := classifyToolAuthorization(actor, toolName, emits)
 	if decision.allowed {
 		return decision
 	}

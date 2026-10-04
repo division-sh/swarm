@@ -60,7 +60,7 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 				env = append(env, goldenPostgresPass+"="+store.passwordEnv)
 			}
 			writeReleaseFile(t, filepath.Join(home, ".config/swarm/swarm.yaml"), "connection:\n  api_token_file: "+filepath.Join(root, "api-token")+"\n")
-			for _, args := range [][]string{{"verify", contracts, "--config", configPath}, {"secrets", "set", "CLAUDE_CODE_OAUTH_TOKEN", "--stdin", "--config", configPath}} {
+			for _, args := range [][]string{{"verify", contracts, "--config", configPath, "--portable"}, {"secrets", "set", "CLAUDE_CODE_OAUTH_TOKEN", "--stdin", "--config", configPath}} {
 				result := runReleaseCommand(t, goldenStartupTimeout, root, env, releaseE2EOAuthToken+"\n", binary, args...)
 				if result.err != nil {
 					t.Fatalf("public prerequisite %v: %v\n%s", args, result.err, result.output)

@@ -17,8 +17,17 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
+type CheckMode uint8
+
+const (
+	CheckSource CheckMode = iota + 1
+	CheckDeployment
+	CheckMixed
+)
+
 type Check struct {
 	ID       string
+	Mode     CheckMode
 	Severity string
 	Run      func(*checkerContext) []Finding
 }
@@ -32,6 +41,7 @@ type checkerContext struct {
 	mcpDiscoveryLoaded bool
 	mcpDiscoveredTools map[string]runtimemcp.DiscoveredTool
 	mcpDiscoveryErrors []error
+	mcpObservation     *AdmissionObservation
 
 	permissionLoaded   bool
 	permissionFindings []Finding
@@ -134,8 +144,9 @@ type checkerContext struct {
 	namespaceLoaded   bool
 	namespaceFindings []Finding
 
-	credentialLoaded   bool
-	credentialFindings []Finding
+	credentialLoaded      bool
+	credentialFindings    []Finding
+	credentialObservation *AdmissionObservation
 
 	mcpLoaded   bool
 	mcpFindings []Finding
@@ -187,80 +198,77 @@ type checkerContext struct {
 
 	flowBoundaryCreateEntityLoaded   bool
 	flowBoundaryCreateEntityFindings []Finding
-
-	deprecatedLoaded   bool
-	deprecatedFindings []Finding
 }
 
 var bootCheckRegistry = []Check{
-	{ID: "declared_agent_name_valid", Severity: SeverityHardInvalidity, Run: checkDeclaredAgentNameValid},
-	{ID: "event_chain_integrity", Severity: "warning", Run: checkEventChainIntegrity},
-	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
-	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
-	{ID: "legacy_qualified_subscription", Severity: SeverityHardInvalidity, Run: checkLegacyQualifiedSubscription},
-	{ID: "semantic_drift_dead_event_schema", Severity: "warning", Run: checkSemanticDriftDeadEventSchema},
-	{ID: "entity_writer_coverage", Severity: SeverityHardInvalidity, Run: checkEntityWriterCoverage},
-	{ID: "payload_field_coverage", Severity: "error", Run: checkPayloadFieldCoverage},
-	{ID: "entity_write_target_compliance", Severity: SeverityHardInvalidity, Run: checkEntityWriteTargetCompliance},
-	{ID: "contained_state_operation_compliance", Severity: SeverityHardInvalidity, Run: checkContainedStateOperationCompliance},
-	{ID: "semantic_drift_payload_completeness", Severity: "error", Run: checkSemanticDriftPayloadCompleteness},
-	{ID: "condition_payload_alignment", Severity: "error", Run: checkConditionPayloadAlignment},
-	{ID: "condition_policy_alignment", Severity: "error", Run: checkConditionPolicyAlignment},
-	{ID: "state_machine_coherence", Severity: "error", Run: checkStateMachineCoherence},
-	{ID: "semantic_drift_unreachable_state", Severity: "warning", Run: checkSemanticDriftUnreachableState},
-	{ID: "node_state_schema_typed_counterpart", Severity: SeverityHardInvalidity, Run: checkNodeStateSchemaTypedCounterpart},
-	{ID: "accumulator_entity_projection", Severity: SeverityHardInvalidity, Run: checkAccumulatorEntityProjection},
-	{ID: "accumulator_handler_isolation", Severity: SeverityHardInvalidity, Run: checkAccumulatorHandlerIsolation},
-	{ID: "accumulator_input_producer_path", Severity: SeverityHardInvalidity, Run: checkAccumulatorInputProducerPath},
-	{ID: "required_agents_match", Severity: "error", Run: checkRequiredAgentsMatch},
-	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
-	{ID: policySheetLookupCheckID, Severity: SeverityHardInvalidity, Run: checkPolicySheetLookupValueRows},
-	{ID: policySheetValidationCheckID, Severity: SeverityHardInvalidity, Run: checkPolicySheetValidationValueRows},
-	{ID: computeModuleCheckID, Severity: SeverityHardInvalidity, Run: checkComputeModuleValueRows},
-	{ID: fanOutValidationCheckID, Severity: SeverityHardInvalidity, Run: checkFanOutValidation},
-	{ID: joinValidationCheckID, Severity: SeverityHardInvalidity, Run: checkJoinValidation},
-	{ID: loopValidationCheckID, Severity: SeverityHardInvalidity, Run: checkLoopValidation},
-	{ID: stageGateValidationCheckID, Severity: SeverityHardInvalidity, Run: checkStageGateValidation},
-	{ID: collectionItemSemanticsCheckID, Severity: SeverityHardInvalidity, Run: checkCollectionItemSemantics},
-	{ID: "tool_resolution", Severity: SeverityHardInvalidity, Run: checkToolResolution},
-	{ID: "required_mcp_tool_availability", Severity: SeverityHardInvalidity, Run: checkRequiredMCPToolAvailability},
-	{ID: "platform_tool_usage_hints", Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},
-	{ID: "generated_tool_schema_closure", Severity: SeverityHardInvalidity, Run: checkGeneratedToolSchemaClosure},
-	{ID: "intent_resolution", Severity: SeverityHardInvalidity, Run: checkIntentResolution},
-	{ID: "produces_drift", Severity: "warning", Run: checkProducesDrift},
-	{ID: "invalid_field_detection", Severity: "error", Run: checkInvalidFieldDetection},
-	{ID: "policy_conflict_detection", Severity: "warning", Run: checkPolicyConflictDetection},
-	{ID: "event_cycle_detection", Severity: "error", Run: checkEventCycleDetection},
-	{ID: "dialect_compliance", Severity: "error", Run: checkDialectCompliance},
-	{ID: "single_node_per_event", Severity: "error", Run: checkSingleNodePerEvent},
-	{ID: "data_accumulation_source_alignment", Severity: "error", Run: checkDataAccumulationSourceAlignment},
-	{ID: "phantom_produces", Severity: "warning", Run: checkPhantomProduces},
-	{ID: "native_tools_valid", Severity: "error", Run: checkNativeToolsValid},
-	{ID: "mcp_server_reachable", Severity: "warning", Run: checkMCPServerReachable},
-	{ID: "platform_namespace_violation", Severity: "error", Run: checkPlatformNamespaceViolation},
-	{ID: "workspace_class_exists", Severity: "error", Run: checkWorkspaceClassExists},
-	{ID: "credential_key_exists", Severity: "warning", Run: checkCredentialKeyExists},
-	{ID: "agent_permission_validation", Severity: "error", Run: checkAgentPermissionValidation},
-	{ID: "transition_reference_validation", Severity: "error", Run: checkTransitionReferenceValidation},
-	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
-	{ID: "data_accumulation_expression_validation", Severity: "error", Run: checkDataAccumulationExpressionValidation},
-	{ID: "emit_field_expression_validation", Severity: "error", Run: checkEmitFieldExpressionValidation},
-	{ID: "executable_reader_expression_validation", Severity: "error", Run: checkExecutableReaderExpressionValidation},
-	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
-	{ID: "entity_reader_coverage", Severity: SeverityLintEvidence, Run: checkEntityReaderCoverage},
-	{ID: "primary_entity_validation", Severity: "error", Run: checkPrimaryEntityValidation},
-	{ID: "template_instance_validation", Severity: "error", Run: checkTemplateInstanceValidation},
-	{ID: "singleton_coordinator_validation", Severity: "error", Run: checkSingletonCoordinatorValidation},
-	{ID: "cross_surface_named_type_use", Severity: SeverityLintEvidence, Run: checkCrossSurfaceNamedTypeUse},
-	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
-	{ID: "event_runtime_wiring_validation", Severity: "error", Run: checkEventRuntimeWiringValidation},
-	{ID: "timer_validation", Severity: "error", Run: checkTimerValidation},
-	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
-	{ID: "composition_connect_validation", Severity: "error", Run: checkCompositionConnectValidation},
-	{ID: "input_pin_wiring", Severity: SeverityHardInvalidity, Run: checkInputPinWiring},
-	{ID: "pin_target_resolution", Severity: "error", Run: checkPinTargetResolution},
-	{ID: "flow_boundary_create_entity_validation", Severity: "error", Run: checkFlowBoundaryCreateEntityValidation},
-	{ID: "flow_data_access_validation", Severity: "error", Run: checkFlowDataAccessValidation},
+	{ID: "declared_agent_name_valid", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkDeclaredAgentNameValid},
+	{ID: "event_chain_integrity", Mode: CheckSource, Severity: "warning", Run: checkEventChainIntegrity},
+	{ID: "event_consumer_exists", Mode: CheckSource, Severity: "warning", Run: checkEventConsumerExists},
+	{ID: "event_producer_exists", Mode: CheckSource, Severity: "warning", Run: checkEventProducerExists},
+	{ID: "legacy_qualified_subscription", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkLegacyQualifiedSubscription},
+	{ID: "semantic_drift_dead_event_schema", Mode: CheckSource, Severity: "warning", Run: checkSemanticDriftDeadEventSchema},
+	{ID: "entity_writer_coverage", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkEntityWriterCoverage},
+	{ID: "payload_field_coverage", Mode: CheckSource, Severity: "error", Run: checkPayloadFieldCoverage},
+	{ID: "entity_write_target_compliance", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkEntityWriteTargetCompliance},
+	{ID: "contained_state_operation_compliance", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkContainedStateOperationCompliance},
+	{ID: "semantic_drift_payload_completeness", Mode: CheckSource, Severity: "error", Run: checkSemanticDriftPayloadCompleteness},
+	{ID: "condition_payload_alignment", Mode: CheckSource, Severity: "error", Run: checkConditionPayloadAlignment},
+	{ID: "condition_policy_alignment", Mode: CheckSource, Severity: "error", Run: checkConditionPolicyAlignment},
+	{ID: "state_machine_coherence", Mode: CheckSource, Severity: "error", Run: checkStateMachineCoherence},
+	{ID: "semantic_drift_unreachable_state", Mode: CheckSource, Severity: "warning", Run: checkSemanticDriftUnreachableState},
+	{ID: "node_state_schema_typed_counterpart", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkNodeStateSchemaTypedCounterpart},
+	{ID: "accumulator_entity_projection", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorEntityProjection},
+	{ID: "accumulator_handler_isolation", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorHandlerIsolation},
+	{ID: "accumulator_input_producer_path", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkAccumulatorInputProducerPath},
+	{ID: "required_agents_match", Mode: CheckSource, Severity: "error", Run: checkRequiredAgentsMatch},
+	{ID: "handler_field_compliance", Mode: CheckSource, Severity: "error", Run: checkHandlerFieldCompliance},
+	{ID: policySheetLookupCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkPolicySheetLookupValueRows},
+	{ID: policySheetValidationCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkPolicySheetValidationValueRows},
+	{ID: computeModuleCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkComputeModuleValueRows},
+	{ID: fanOutValidationCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkFanOutValidation},
+	{ID: joinValidationCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkJoinValidation},
+	{ID: loopValidationCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkLoopValidation},
+	{ID: stageGateValidationCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkStageGateValidation},
+	{ID: collectionItemSemanticsCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkCollectionItemSemantics},
+	{ID: "tool_resolution", Mode: CheckMixed, Severity: SeverityHardInvalidity, Run: checkToolResolution},
+	{ID: "required_mcp_tool_availability", Mode: CheckDeployment, Severity: SeverityHardInvalidity, Run: checkRequiredMCPToolAvailability},
+	{ID: "platform_tool_usage_hints", Mode: CheckMixed, Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},
+	{ID: "generated_tool_schema_closure", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkGeneratedToolSchemaClosure},
+	{ID: "intent_resolution", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkIntentResolution},
+	{ID: "produces_drift", Mode: CheckSource, Severity: "warning", Run: checkProducesDrift},
+	{ID: "invalid_field_detection", Mode: CheckMixed, Severity: "error", Run: checkInvalidFieldDetection},
+	{ID: "policy_conflict_detection", Mode: CheckSource, Severity: "warning", Run: checkPolicyConflictDetection},
+	{ID: "event_cycle_detection", Mode: CheckSource, Severity: "error", Run: checkEventCycleDetection},
+	{ID: "dialect_compliance", Mode: CheckSource, Severity: "error", Run: checkDialectCompliance},
+	{ID: "single_node_per_event", Mode: CheckSource, Severity: "error", Run: checkSingleNodePerEvent},
+	{ID: "data_accumulation_source_alignment", Mode: CheckSource, Severity: "error", Run: checkDataAccumulationSourceAlignment},
+	{ID: "phantom_produces", Mode: CheckSource, Severity: "warning", Run: checkPhantomProduces},
+	{ID: "native_tools_valid", Mode: CheckSource, Severity: "error", Run: checkNativeToolsValid},
+	{ID: "mcp_server_reachable", Mode: CheckDeployment, Severity: "warning", Run: checkMCPServerReachable},
+	{ID: "platform_namespace_violation", Mode: CheckSource, Severity: "error", Run: checkPlatformNamespaceViolation},
+	{ID: "workspace_class_exists", Mode: CheckSource, Severity: "error", Run: checkWorkspaceClassExists},
+	{ID: "credential_key_exists", Mode: CheckDeployment, Severity: "warning", Run: checkCredentialKeyExists},
+	{ID: "agent_permission_validation", Mode: CheckSource, Severity: "error", Run: checkAgentPermissionValidation},
+	{ID: "transition_reference_validation", Mode: CheckSource, Severity: "error", Run: checkTransitionReferenceValidation},
+	{ID: "condition_expression_validation", Mode: CheckSource, Severity: "error", Run: checkConditionExpressionValidation},
+	{ID: "data_accumulation_expression_validation", Mode: CheckSource, Severity: "error", Run: checkDataAccumulationExpressionValidation},
+	{ID: "emit_field_expression_validation", Mode: CheckSource, Severity: "error", Run: checkEmitFieldExpressionValidation},
+	{ID: "executable_reader_expression_validation", Mode: CheckSource, Severity: "error", Run: checkExecutableReaderExpressionValidation},
+	{ID: "expression_field_reference_validation", Mode: CheckSource, Severity: "warning", Run: checkExpressionFieldReferenceValidation},
+	{ID: "entity_reader_coverage", Mode: CheckSource, Severity: SeverityLintEvidence, Run: checkEntityReaderCoverage},
+	{ID: "primary_entity_validation", Mode: CheckSource, Severity: "error", Run: checkPrimaryEntityValidation},
+	{ID: "template_instance_validation", Mode: CheckSource, Severity: "error", Run: checkTemplateInstanceValidation},
+	{ID: "singleton_coordinator_validation", Mode: CheckSource, Severity: "error", Run: checkSingletonCoordinatorValidation},
+	{ID: "cross_surface_named_type_use", Mode: CheckSource, Severity: SeverityLintEvidence, Run: checkCrossSurfaceNamedTypeUse},
+	{ID: "transition_ownership_validation", Mode: CheckSource, Severity: "error", Run: checkTransitionOwnershipValidation},
+	{ID: "event_runtime_wiring_validation", Mode: CheckSource, Severity: "error", Run: checkEventRuntimeWiringValidation},
+	{ID: "timer_validation", Mode: CheckSource, Severity: "error", Run: checkTimerValidation},
+	{ID: "gate_schema_validation", Mode: CheckSource, Severity: "error", Run: checkGateSchemaValidation},
+	{ID: "composition_connect_validation", Mode: CheckSource, Severity: "error", Run: checkCompositionConnectValidation},
+	{ID: "input_pin_wiring", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkInputPinWiring},
+	{ID: "pin_target_resolution", Mode: CheckSource, Severity: "error", Run: checkPinTargetResolution},
+	{ID: "flow_boundary_create_entity_validation", Mode: CheckSource, Severity: "error", Run: checkFlowBoundaryCreateEntityValidation},
+	{ID: "flow_data_access_validation", Mode: CheckSource, Severity: "error", Run: checkFlowDataAccessValidation},
 }
 
 func checkDeclaredAgentNameValid(c *checkerContext) []Finding {
@@ -280,9 +288,8 @@ func checkDeclaredAgentNameValid(c *checkerContext) []Finding {
 }
 
 var supplementalChecks = []Check{
-	{ID: "impl.platform_metadata_validation", Severity: "error", Run: checkPlatformMetadataValidation},
-	{ID: "impl.deprecated_contract_alias", Severity: "warning", Run: checkDeprecatedContractAlias},
-	{ID: "agent_prompt_lint_structural", Severity: SeverityHardInvalidity, Run: checkPromptSchemaGuardStructural},
+	{ID: "impl.platform_metadata_validation", Mode: CheckSource, Severity: "error", Run: checkPlatformMetadataValidation},
+	{ID: "agent_prompt_lint_structural", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkPromptSchemaGuardStructural},
 }
 
 func newCheckerContext(ctx context.Context, source semanticview.Source, opts Options) *checkerContext {
@@ -374,7 +381,6 @@ func checkAgentPermissionValidation(c *checkerContext) []Finding {
 	return uniqueFindings(append(c.permissions(), c.permissionWarnings()...))
 }
 func checkPlatformMetadataValidation(c *checkerContext) []Finding  { return c.platformMetadata() }
-func checkDeprecatedContractAlias(c *checkerContext) []Finding     { return c.deprecatedAliases() }
 func checkPromptSchemaGuardStructural(c *checkerContext) []Finding { return c.promptSchemaGuard() }
 func checkCrossSurfaceNamedTypeUse(c *checkerContext) []Finding {
 	return c.crossSurfaceNamedTypeUse()
@@ -467,14 +473,6 @@ func (c *checkerContext) platformMetadata() []Finding {
 		})
 	}
 	return c.platformMetaFindings
-}
-
-func (c *checkerContext) deprecatedAliases() []Finding {
-	if c.deprecatedLoaded {
-		return c.deprecatedFindings
-	}
-	c.deprecatedLoaded = true
-	return c.deprecatedFindings
 }
 
 func (c *checkerContext) workspace() []Finding {

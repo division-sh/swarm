@@ -3,6 +3,7 @@ package cliapp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -326,6 +327,19 @@ func TestMalformedPackBodiesFailBeforeEveryCLIPublishingSurface(t *testing.T) {
 				var stdout, stderr bytes.Buffer
 				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
 				combined := stdout.String() + stderr.String()
+				if surface == "verify" {
+					var result verifyCommandResult
+					if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+						t.Fatal(err)
+					}
+					combined = ""
+					for _, finding := range result.Errors {
+						combined += finding.Message + "\n"
+					}
+					if result.OK || result.AdmissionComplete {
+						t.Fatal("malformed pack became complete admission")
+					}
+				}
 				if code == 0 || !strings.Contains(combined, tc.wantErr) {
 					t.Fatalf("%s code=%d stdout=%s stderr=%s, want %q", surface, code, stdout.String(), stderr.String(), tc.wantErr)
 				}

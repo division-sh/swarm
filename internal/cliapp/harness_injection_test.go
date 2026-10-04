@@ -16,10 +16,11 @@ func TestVerifyNamesOnlyRootInterfaceHasNoHarnessClassification(t *testing.T) {
 	if code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr); code != 0 {
 		t.Fatalf("verify exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "validation: structural; live readiness: not evaluated") || strings.Contains(stdout.String(), "harness") || strings.Contains(stdout.String(), "production-valid") {
+	if !strings.Contains(stdout.String(), "portable structural checks passed; deployment admission not evaluated") || strings.Contains(stdout.String(), "harness") || strings.Contains(stdout.String(), "production-valid") {
 		t.Fatalf("verify retains retired classification: %s", stdout.String())
 	}
 	opts := defaultVerifyCommandOptions()
+	opts.portable = true
 	opts.sourceRoot, opts.configPath, opts.output.asJSON = root, writeTestVerifyRuntimeConfig(t), true
 	stdout.Reset()
 	stderr.Reset()

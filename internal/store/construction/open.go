@@ -14,19 +14,24 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
-	db, err := sql.Open("postgres", dsn)
+	cfg, err := pq.NewConfig(dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
+	connector, err := pq.NewConnectorConfig(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open postgres: %w", err)
+	}
+	db := sql.OpenDB(connector)
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	backend, err := postgresbackend.New(db)
+	backend, err := postgresbackend.NewWithInspectionConfig(db, cfg)
 	if err != nil {
 		_ = db.Close()
 		return nil, nil, err
@@ -76,14 +81,34 @@ func OpenSQLiteRuntimeWithOwnershipBinding(path string) (*private.SQLiteRuntimeS
 }
 
 func OpenSQLiteRuntimeReadOnly(path string) (*private.SQLiteRuntimeStore, error) {
+	identity, err := storestartupownership.CaptureSQLiteInspectionIdentity(path)
+	if err != nil {
+		return nil, err
+	}
 	schema, backend, err := storeschema.OpenSQLiteReadOnlyForInspection(path)
 	if err != nil {
 		return nil, err
 	}
-	store, err := private.ComposeSQLiteRuntimeStore(schema, backend)
+	store, err := private.ComposeSQLiteRuntimeStoreWithBackendIdentity(schema, backend, identity)
 	if err != nil {
 		_ = schema.Close()
 		return nil, err
+	}
+	return store, nil
+}
+
+func OpenPostgresReadOnly(dsn string) (*private.PostgresStore, error) {
+	cfg, err := pq.NewConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open PostgreSQL inspection: %w", err)
+	}
+	backend, err := postgresbackend.OpenForInspection(cfg)
+	if err != nil {
+		return nil, err
+	}
+	store, err := private.ComposePostgresStore(backend)
+	if err != nil {
+		return nil, errors.Join(err, backend.Close())
 	}
 	return store, nil
 }

@@ -83,7 +83,7 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), RepoRoot(), []string{"verify", verifyFixture, "--config", verifyConfig, "--json"}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), RepoRoot(), []string{"verify", verifyFixture, "--portable", "--config", verifyConfig, "--json"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -97,12 +97,12 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), RepoRoot(), []string{"verify", verifyFixture, "--config", verifyConfig, "--quiet"}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), RepoRoot(), []string{"verify", verifyFixture, "--portable", "--config", verifyConfig, "--quiet"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify --quiet code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if got := stdout.String(); got != "ok\n" {
-		t.Fatalf("verify --quiet stdout = %q, want ok", got)
+	if got := stdout.String(); !strings.HasPrefix(got, "portable structural checks passed; deployment admission not evaluated\n") || !strings.Contains(got, "not_run: credential_key_exists @") {
+		t.Fatalf("verify --quiet hid unobserved readiness: %q", got)
 	}
 }
 
@@ -364,7 +364,7 @@ func TestCLIOutputNoColorForSharedRendererConsumers(t *testing.T) {
 		{
 			name: "verify",
 			args: func(t *testing.T) []string {
-				return []string{"verify", outputModeVerifyFixture(t), "--config", writeTestVerifyRuntimeConfig(t)}
+				return []string{"verify", outputModeVerifyFixture(t), "--portable", "--config", writeTestVerifyRuntimeConfig(t)}
 			},
 			repo: func(*testing.T) string { return RepoRoot() },
 		},

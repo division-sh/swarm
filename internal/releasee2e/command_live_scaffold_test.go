@@ -57,7 +57,7 @@ func TestCommandLiveUneditedScaffoldReadiness(t *testing.T) {
 					t.Fatalf("scaffold generated deployment configuration %s: %v", name, err)
 				}
 			}
-			verify := runReleaseCommand(t, time.Minute, project, env, "", binary, "verify", "--json")
+			verify := runReleaseCommand(t, time.Minute, project, env, "", binary, "verify", "--portable", "--json")
 			assertFullLifecycleVerifySuccess(t, verify)
 			for _, command := range [][]string{{"describe", "--json"}, {"test"}} {
 				result := runReleaseCommand(t, time.Minute, project, env, "", binary, command...)

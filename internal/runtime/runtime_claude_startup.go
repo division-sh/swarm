@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -87,9 +86,11 @@ func validateSelectedBackendCredentialForDeclaredAgents(ctx context.Context, cfg
 	return validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
 }
 
-func validateSelectedBackendModelAliasesForDeclaredAgents(posture executionposture.Posture, cfg *config.Config, source semanticview.Source) error {
+// ValidateDeclaredAgentModelAdmission shares scoped model selection between
+// read-only deployment admission and boot, without constructing agent runtimes.
+func ValidateDeclaredAgentModelAdmission(posture executionposture.Posture, cfg *config.Config, source semanticview.Source) error {
 	if cfg == nil {
-		return nil
+		return fmt.Errorf("admitted configuration is required for llm model alias validation")
 	}
 	if source == nil {
 		return fmt.Errorf("semantic source is required for llm model alias validation")
@@ -541,6 +542,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 		runtime llm.Runtime
 		probe   llm.StartupVisibleToolSurfaceProber
 		catalog preparedProviderCatalogTarget
+		prompt  string
 	}
 	targets := make([]preflightTarget, 0)
 	for _, candidate := range preflightConfigs {
@@ -567,7 +569,35 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 		if !ok {
 			return nil, fmt.Errorf("managed provider startup probe is required for agent %s", strings.TrimSpace(resolved.Actor.ID))
 		}
-		targets = append(targets, preflightTarget{config: resolved.Actor, plan: candidate.plan, runtime: resolved.Runtime, probe: startupProbe, catalog: catalogTarget})
+		prompt, err := ManagedProviderStartupPrompt(resolved.Actor)
+		if err != nil {
+			return nil, fmt.Errorf("resolve startup prompt for agent %s: %w", strings.TrimSpace(resolved.Actor.ID), err)
+		}
+		if authority.prepared == nil {
+			if tools == nil {
+				return nil, fmt.Errorf("tool executor is required for claude cli runtime")
+			}
+			definitions, capabilities, err := func() ([]llm.ToolDefinition, toolcapabilities.Set, error) {
+				_, definitions, capabilities, release, err := startupToolPlan(runtimeactors.WithActor(ctx, resolved.Actor), resolved.Actor, resolved.Runtime, tools)
+				if err != nil {
+					return nil, toolcapabilities.Set{}, err
+				}
+				defer release()
+				return clonePreparedProviderTools(definitions, capabilities)
+			}()
+			if err != nil {
+				return nil, fmt.Errorf("build managed capability startup inputs for agent %s: %w", resolved.Actor.ID, err)
+			}
+			contract, err := llm.RequireProviderContractForProfile(resolved.Selection.Profile, resolved.Runtime)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := llm.CompileManagedCapabilityAdmission(resolved.Actor, contract, definitions, capabilities); err != nil {
+				return nil, fmt.Errorf("build managed capability startup inputs for agent %s: %w", resolved.Actor.ID, err)
+			}
+			catalogTarget.tools, catalogTarget.capabilities = definitions, capabilities
+		}
+		targets = append(targets, preflightTarget{config: resolved.Actor, plan: candidate.plan, runtime: resolved.Runtime, probe: startupProbe, catalog: catalogTarget, prompt: prompt})
 	}
 	if len(targets) == 0 {
 		return nil, nil
@@ -577,9 +607,6 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 	}
 	if turnStore == nil {
 		return nil, fmt.Errorf("mcp turn context store is required for claude cli runtime")
-	}
-	if tools == nil && authority.prepared == nil {
-		return nil, fmt.Errorf("tool executor is required for claude cli runtime")
 	}
 	if err := gatewayBinding.Validate(); err != nil {
 		return nil, fmt.Errorf("tool gateway binding is invalid for claude cli runtime: %w", err)
@@ -599,20 +626,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 				return nil
 			}
 			agentCtx := runtimeactors.WithActor(ctx, agentCfg)
-			var sessionTools []llm.ToolDefinition
-			var capabilities toolcapabilities.Set
-			if authority.prepared != nil {
-				frozen := target.catalog
-				sessionTools, capabilities = frozen.tools, frozen.capabilities
-			} else {
-				var release func()
-				var err error
-				agentCtx, sessionTools, capabilities, release, err = startupToolPlan(agentCtx, agentCfg, modelRuntime, tools)
-				if err != nil {
-					return fmt.Errorf("build managed capability startup inputs for agent %s: %w", agentID, err)
-				}
-				defer release()
-			}
+			sessionTools, capabilities := target.catalog.tools, target.catalog.capabilities
 			probeID := uuid.NewString()
 			capabilityAuthority, effectAuthority, err := authority.probeAuthority(agentCtx, probeID, managedProviderPreflightAgent{config: agentCfg, plan: target.plan})
 			if err != nil {
@@ -628,15 +642,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 			agentCtx = managedcapabilities.WithContext(agentCtx, surface)
 			agentCtx = runtimeeffects.WithAuthority(agentCtx, effectAuthority)
 			agentCtx = runtimeeffects.WithController(agentCtx, authority.EffectController)
-			providerPrompt, err := agentCfg.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
-			if err != nil {
-				return fmt.Errorf("resolve startup prompt for agent %s: %w", agentID, err)
-			}
-			systemPrompt, err := providerPrompt.Text()
-			if err != nil {
-				return fmt.Errorf("render startup prompt for agent %s: %w", agentID, err)
-			}
-			probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, systemPrompt, sessionTools)
+			probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, target.prompt, sessionTools)
 			if err != nil {
 				return fmt.Errorf("claude cli startup probe failed for agent %s: %w", agentID, err)
 			}

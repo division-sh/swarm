@@ -359,6 +359,15 @@ func TestSQLitePossessionSubprocessContentionAndSIGKILLReclaim(t *testing.T) {
 		}
 	})
 	waitForSQLitePossessionChild(t, cmd, readyPath, &childOutput)
+	identity, err := CaptureSQLiteInspectionIdentity(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelProbe()
+	if free, err := probeSQLitePossession(probeCtx, path, identity); free || !isSQLitePossessionFailure(err, runtimestartupownership.AcquisitionTakeoverRequired) {
+		t.Fatalf("external holder looked free to inspection: %t %v", free, err)
+	}
 
 	coordinatePath := path + sqlitePossessionSuffix
 	before, err := os.Stat(coordinatePath)
@@ -385,6 +394,9 @@ func TestSQLitePossessionSubprocessContentionAndSIGKILLReclaim(t *testing.T) {
 	status, ok := exitErr.Sys().(syscall.WaitStatus)
 	if !ok || !status.Signaled() || status.Signal() != syscall.SIGKILL {
 		t.Fatalf("child wait status=%v, want SIGKILL; output:\n%s", exitErr.Sys(), childOutput.String())
+	}
+	if free, err := probeSQLitePossession(probeCtx, path, identity); !free || err != nil {
+		t.Fatalf("external crash release was not observed: %t %v", free, err)
 	}
 
 	successor, err := acquireSQLiteFilePossession(path)

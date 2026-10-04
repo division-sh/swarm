@@ -2,7 +2,20 @@
 
 package startupownership
 
-import runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+import (
+	"context"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+)
+
+func CaptureSQLiteInspectionIdentity(string) (*SQLiteBackendIdentity, error) {
+	_, err := acquireSQLiteFilePossession("")
+	return nil, err
+}
+
+func probeSQLitePossession(context.Context, string, *SQLiteBackendIdentity) (bool, error) {
+	_, err := acquireSQLiteFilePossession("")
+	return false, err
+}
 
 func acquireSQLiteFilePossession(string) (sqlitePossession, error) {
 	return nil, &runtimestartupownership.AcquisitionError{

@@ -152,20 +152,31 @@ func admitSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, req runcontrol.Sel
 	return nil
 }
 
-func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) (runfork.SelectedForkRecoveryResult, error) {
-	runID := req.Entry.Binding.ForkRunID
-	result := runfork.SelectedForkRecoveryResult{RunID: runID}
+type selectedRecoveryRecord struct {
+	runfork.SelectedForkRecoveryResult
+	binding      runfork.RunForkSelectedContractBinding
+	preparation  runfork.SelectedForkPreparationBinding
+	state        string
+	failure      *failures.Envelope
+	hasExecution bool
+}
+
+// This is the retained-evidence reader for both boot recovery and verification.
+// Only the mutation caller requests a row lock; no authority is fabricated here.
+func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, entry runfork.SelectedForkRecoveryEntry, sqlite, lock bool) (selectedRecoveryRecord, error) {
+	runID := entry.Binding.ForkRunID
+	result := selectedRecoveryRecord{SelectedForkRecoveryResult: runfork.SelectedForkRecoveryResult{RunID: runID}}
 	binding, err := loadRunForkSelectedContractBinding(ctx, tx, runID)
 	if err != nil {
 		return result, err
 	}
-	if binding.Owner != req.Entry.Binding.Owner || binding.BindingID != req.Entry.Binding.BindingID ||
-		binding.ForkRunID != req.Entry.Binding.ForkRunID || binding.SourceRunID != req.Entry.Binding.SourceRunID ||
-		binding.ForkPoint.Kind != req.Entry.Binding.ForkPoint.Kind ||
-		binding.ForkPoint.Revision != req.Entry.Binding.ForkPoint.Revision ||
-		binding.ForkPoint.EventID != req.Entry.Binding.ForkPoint.EventID ||
-		binding.ContractSelection != req.Entry.Binding.ContractSelection ||
-		!binding.CreatedAt.Equal(req.Entry.Binding.CreatedAt) || snapshot.BundleHash != req.Entry.BundleHash {
+	if binding.Owner != entry.Binding.Owner || binding.BindingID != entry.Binding.BindingID ||
+		binding.ForkRunID != entry.Binding.ForkRunID || binding.SourceRunID != entry.Binding.SourceRunID ||
+		binding.ForkPoint.Kind != entry.Binding.ForkPoint.Kind ||
+		binding.ForkPoint.Revision != entry.Binding.ForkPoint.Revision ||
+		binding.ForkPoint.EventID != entry.Binding.ForkPoint.EventID ||
+		binding.ContractSelection != entry.Binding.ContractSelection ||
+		!binding.CreatedAt.Equal(entry.Binding.CreatedAt) || snapshot.BundleHash != entry.BundleHash {
 		return result, fmt.Errorf("selected recovery binding changed")
 	}
 	wantOrigin, err := runlifecycle.ForkMaterializationRunOrigin(binding.SourceRunID, binding.ForkPoint.Kind, binding.ForkPoint.Revision, binding.ForkPoint.EventID)
@@ -180,7 +191,7 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,
 		declaration_plan_fingerprint,declaration_plan
 		FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation DESC LIMIT 1`
-	if !sqlite {
+	if !sqlite && lock {
 		query += ` FOR UPDATE`
 	}
 	var state, fingerprint string
@@ -252,25 +263,22 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		}
 		failure = &envelope
 	}
-	if state == "closed" && failure == nil {
-		activated, err := selectedForkActivatedOperationTx(ctx, tx, runID, binding.BindingID, binding.ForkPoint, !sqlite)
-		if err != nil {
-			return result, err
-		}
-		if activated {
-			active, err := selectedForkActiveEffectsTx(ctx, tx, result.ExecutionID)
-			if err != nil {
-				return result, err
-			}
-			if active {
-				return result, fmt.Errorf("closed selected execution retains unsettled effects")
-			}
-			result.Disposition = runfork.SelectedForkRecoveryControlOnly
-			if snapshot.State.Terminal() {
-				result.Disposition = runfork.SelectedForkRecoveryTerminal
-			}
-			return result, nil
-		}
+	result.binding, result.preparation = binding, preparation
+	result.state, result.failure, result.hasExecution = state, failure, true
+	return result, nil
+}
+
+func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) (runfork.SelectedForkRecoveryResult, error) {
+	record, err := loadSelectedRecoveryRecordTx(ctx, tx, snapshot, req.Entry, sqlite, true)
+	result := record.SelectedForkRecoveryResult
+	if err != nil || !record.hasExecution {
+		return result, err
+	}
+	runID, binding, preparation := result.RunID, record.binding, record.preparation
+	state, failure := record.state, record.failure
+	settled, complete, err := settledSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
+	if err != nil || complete {
+		return settled, err
 	}
 	current, err := storestartup.PreparedProcessCurrent(ctx, tx, preparation.Coordinates, preparation.ProcessGeneration, sqlite, false)
 	if err != nil {
@@ -287,8 +295,81 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 	if !predecessor {
 		return result, fmt.Errorf("selected recovery preparation is not a recorded predecessor")
 	}
+	plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
+	if err != nil {
+		return result, err
+	}
+	result = plan.SelectedForkRecoveryResult
+	if result.Disposition == runfork.SelectedForkRecoveryResumeFiniteFeed && state != "closed" {
+		res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions
+			SET state='closed',fence_generation=fence_generation+1,lease_expires_at=NULL,terminal_at=$2,updated_at=$2
+			WHERE execution_id=$1 AND state=$3 AND failure IS NULL`, result.ExecutionID, req.Effects.Now(), state)
+		if err := requireExactlyOneMutation(res, err, "fence selected finite-feed predecessor"); err != nil {
+			return result, err
+		}
+	}
+	if result.Disposition != runfork.SelectedForkRecoveryFailed {
+		return result, nil
+	}
+	failure = plan.failure
+	failureRaw, err := json.Marshal(failure)
+	if err != nil {
+		return result, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='failed',fence_generation=fence_generation+1,lease_expires_at=NULL,failure=$2,terminal_at=$3,updated_at=$3 WHERE execution_id=$1`, result.ExecutionID, string(failureRaw), req.Effects.Now()); err != nil {
+		return result, err
+	}
+	result.Effects, err = owner.RecoverSelectedForkEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
+	if err != nil {
+		return result, err
+	}
+	if binding.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision {
+		if err := settleInterruptedSelectedFiniteFeedOperationTx(ctx, tx, binding, snapshot.BundleHash, *failure,
+			result.Effects.OutcomeUncertain != 0 || failure.Class == failures.ClassOutcomeUncertain, req.Effects.Now(), !sqlite); err != nil {
+			return result, err
+		}
+	}
+	if !snapshot.State.Terminal() {
+		if _, _, err := owner.MarkTerminalTx(ctx, attempt, runlifecycle.TerminalRequest{RunID: runID, State: runlifecycle.StateFailed, Failure: failure, EndedAt: req.Effects.Now()}); err != nil {
+			return result, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='closed' WHERE execution_id=$1 AND state='failed'`, result.ExecutionID); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func settledSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord, sqlite, lock bool) (runfork.SelectedForkRecoveryResult, bool, error) {
+	result := record.SelectedForkRecoveryResult
+	if record.state != "closed" || record.failure != nil {
+		return result, false, nil
+	}
+	activated, err := selectedForkActivatedOperationTx(ctx, tx, result.RunID, record.binding.BindingID, record.binding.ForkPoint, !sqlite && lock)
+	if err != nil || !activated {
+		return result, false, err
+	}
+	active, err := selectedForkActiveEffectsTx(ctx, tx, result.ExecutionID)
+	if err != nil {
+		return result, false, err
+	}
+	if active {
+		return result, false, fmt.Errorf("closed selected execution retains unsettled effects")
+	}
+	result.Disposition = runfork.SelectedForkRecoveryControlOnly
+	if snapshot.State.Terminal() {
+		result.Disposition = runfork.SelectedForkRecoveryTerminal
+	}
+	return result, true, nil
+}
+
+// Planning consumes only recorded facts. Process authority, fencing, effect
+// settlement and terminal mutations remain exclusively in boot recovery.
+func planSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord, sqlite, lock bool) (selectedRecoveryRecord, error) {
+	result := record
+	runID, binding, state, failure := result.RunID, record.binding, record.state, record.failure
 	if binding.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision && !snapshot.State.Terminal() {
-		resume, err := selectedFiniteFeedRecoveryOperationTx(ctx, tx, binding, snapshot.BundleHash, !sqlite)
+		resume, err := selectedFiniteFeedRecoveryOperationTx(ctx, tx, binding, snapshot.BundleHash, !sqlite && lock)
 		if err != nil {
 			return result, err
 		}
@@ -316,14 +397,6 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 			return result, nil
 		}
 		if resume != nil && (state == "prepared" || state == "running" || state == "closed") && failure == nil {
-			if state != "closed" {
-				res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions
-					SET state='closed',fence_generation=fence_generation+1,lease_expires_at=NULL,terminal_at=$2,updated_at=$2
-					WHERE execution_id=$1 AND state=$3 AND failure IS NULL`, result.ExecutionID, req.Effects.Now(), state)
-				if err := requireExactlyOneMutation(res, err, "fence selected finite-feed predecessor"); err != nil {
-					return result, err
-				}
-			}
 			result.Disposition = runfork.SelectedForkRecoveryResumeFiniteFeed
 			result.Resume = &runfork.SelectedForkFiniteFeedResume{Operation: resume.Request, ForkRunStatus: string(snapshot.State), Pins: pins, AgentTopologies: topologies}
 			return result, nil
@@ -369,31 +442,7 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		}
 		failure = &envelope
 	}
-	failureRaw, err = json.Marshal(failure)
-	if err != nil {
-		return result, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='failed',fence_generation=fence_generation+1,lease_expires_at=NULL,failure=$2,terminal_at=$3,updated_at=$3 WHERE execution_id=$1`, result.ExecutionID, string(failureRaw), req.Effects.Now()); err != nil {
-		return result, err
-	}
-	result.Effects, err = owner.RecoverSelectedForkEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
-	if err != nil {
-		return result, err
-	}
-	if binding.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision {
-		if err := settleInterruptedSelectedFiniteFeedOperationTx(ctx, tx, binding, snapshot.BundleHash, *failure,
-			result.Effects.OutcomeUncertain != 0 || failure.Class == failures.ClassOutcomeUncertain, req.Effects.Now(), !sqlite); err != nil {
-			return result, err
-		}
-	}
-	if !snapshot.State.Terminal() {
-		if _, _, err := owner.MarkTerminalTx(ctx, attempt, runlifecycle.TerminalRequest{RunID: runID, State: runlifecycle.StateFailed, Failure: failure, EndedAt: req.Effects.Now()}); err != nil {
-			return result, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='closed' WHERE execution_id=$1 AND state='failed'`, result.ExecutionID); err != nil {
-		return result, err
-	}
+	result.failure = failure
 	result.Disposition = runfork.SelectedForkRecoveryFailed
 	return result, nil
 }

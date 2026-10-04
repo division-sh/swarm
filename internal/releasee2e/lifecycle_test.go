@@ -62,7 +62,8 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 
 	env := releaseProcessEnv(fakeBin, fakeRoot, home)
 	contracts := filepath.Join(releaseRoot, "contracts")
-	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts)
+	// Source preflight precedes credentials, store creation and the managed CLI test transport.
+	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts, "--portable")
 	if verify.err != nil {
 		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -304,7 +305,7 @@ func assertReleaseDockerEvidence(t *testing.T, records []fakeDockerRecord) {
 func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 	required := map[string]int{
 		"docker_version":   0,
-		"network_inspect":  0,
+		"network_list":     0,
 		"image_inspect":    0,
 		"cli_preflight":    0,
 		"container_create": 0,

@@ -1,0 +1,3644 @@
+[
+  {
+    "owner": "internal/channelonboarding/retained_inspection.go::InspectPendingTeardowns",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "567b9c4d3e1bb2d3a51c6e507bc2cc5f78c56ca2823c1708006426dc3e7c56da"
+  },
+  {
+    "owner": "internal/channelonboarding/retained_inspection.go::InspectRetainedActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "25e5b507fb7514273d0cdcb85ec8f23538ea2affef935d5dec8f0cb573ac2ef5"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Recover",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "02d056f50364e805c7a13e596ff6480c0e9b6dc75daa10eb0c932ac4dd3fcad9"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RetireContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "ecc2c236e6e3cafa78e932374c89455b43c951f22eb3be02507922aede1bd7ed"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RetireInterface",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "24bf9d1b6e7b9b15a112bb8d2cb7559d301ecf8dc995442c8ef1a6540e789af5"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RevokeProof",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "c084c71089ed03171da0d32fa30bf3976e20b5733a733160005681811f8b2b48"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Unbind",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "035bf661ebc5fc9b87e2a90c43dd035ef7ebc6a44d59b0218f0f9e3aecbfe3df"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.complete",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "616282d0e2b5f38e69b8caec452bce02de13805197a8c6da593b85281fc0c08d"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.exactTeardownReplay",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "10839fee7202d465f2eb4c3e2467b671f3bf42ae2ca8bf475acc4e3c9d75e18a"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.releaseScopedCredentials",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "ec1e3baa74341497bd378a9afe333c9abb3d3349948da5cca048d44cb4136d6d"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retainedCredentialEvidence",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "6729fd53a30ef06561e3ba0f14c0cef15169e322eb5297a8d555ed62d97d1d25"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retireAuthority",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "eccdfd36aca61d25a431311fe90dbeb67b77103e61020dd216eee8fd14e6f620"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::NewDestructiveService",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "9f14c1c072caa84172fe02c6cb8db923ff496c43ba9e8ec37aeb269b8035f8c6"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::ReserveTeardownRequest.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "d9f566bffa19edc1bf2b4ad1010bcd9e23ec1f5ff8985e7384f85bc25fde2929"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::TeardownKind.Valid",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "70b13e271dce38d063d4964f95c89263c38d7e8910fbc9b13c4e7e730c628728"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::TeardownPhase.Terminal",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "c2a08450675ba535548a217aeedbcd80316b4e07cd59c2c0646c10ca2150df0e"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::TeardownScope.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "22397c063f82f64fd5085fa90c8f4e93899a9dfbbe1d68156c59c4481edccacb"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::TeardownScope.normalized",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "c796e57bc1db099bd1fbd1a468473705406fd6cc5f1383b6072394b83285aaef"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::teardownScopeMatchesOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "f721fdd2b90727837635573c79032bbe04d0e9a6237b548f0503b9619f30496f"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.add",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "b9110ceb8b709dec846a3e9cb17e1ca688e7edc4e091faf7ba9e24c80a563429"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.addCapabilitySubjects",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "72708c0fdbec2053d4b1f866520189c235ecfeba3a51755b9dbddb9e54322538"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.addWithOwner",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "1bbfa8c85007bdb847e366b017bada72dd74a8a5bf5aee544a14ad0498abb322"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.checkContractSecrets",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "23d8ac03a33f0b114f9a356ebc20b09ba21a9207333356bc1313975d2f7f5742"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.checkGatewayEnv",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "04890909aa6dce79eeec9536381e543c67aa2a656910a5310deffd7066ddab22"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.checkListener",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "6b65543c8a0669ef2a3138f90b6d5806a57ada11907c44b5ca09458047bbcb38"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.checkWorkspace",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "bd2e6d266ecf433b6213f1614c534ed6ab516290746bb2593a2f3f5475000d6f"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::LocalPreflightReport.BlockerSummary",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "8e1b1595612592b0252800b5e1c534f6f2490169f71582bb5127e4bec189cc80"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::LocalPreflightReport.HasBlockers",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "b2c69bb937729dc11d94a7f56b99a37c2f6e8e385ea5760ac204a79ddbb260eb"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::LocalPreflightReport.finalize",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "319b350262a99bdd7145513b5aa975e7d4cf9b5117217f15bf0cc36a0241a527"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::RunServeLocalClaudeCLIPreflight",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "6c3ef2a61090b3156b021bb1f8e2b0ef93977f4ce99a1e3e8191c3aa6b76362f"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::WriteLocalPreflightText",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "ea8d4e2e52a42dbebdbde6cc70cc30ec019cd3c803f629c29493048da2d314db"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::WriteWorkspaceBackendDecisionFailure",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "3c23621c3b72b5f0a5ba09fbe5414e5ebb32cf0b81825d08affc7aabcf2720c9"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::WriteWorkspacePrerequisiteFailure",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "e48d02da2ecc0056788ee61087ec719e25dbe59ae434ff340e67140ee4c84f38"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::appendContractSecretEffectReachability",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "973fbf25549ff4b2fd08430b362ec24a404276f52952ddb3102198d287ee25c1"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::findingCode",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "7e39783195af1b703b538b0eda840c66f130356916d8989aa8b5535260eaae3c"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::formatLocalPreflightFinding",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "20424d84a5f1ee20e3451de61c1e18399da2feb78b3032598faaca284cb02050"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::loadLocalPreflightCapabilitySource",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "c8ca06e507c6b7ee570d1cbd48bcd4e28f3c219a6b3ff9c41abdeb44a702bdcb"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::loadLocalPreflightSource",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "2ae2155fa78b1812b86b4c06fda7a1b3b45c7cd8adce5de42bbccf206c514a8e"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::localPreflightCommandSeverityForContractSecrets",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "bd34b030d8105837360c4fafd65ecf348a6e13638eededfd74f32c4a293d9544"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::localPreflightSeverityRank",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "ed5e47d7c4a1954909dc1c1ef3103a9659aae262c142d8d0159ed975dac0acb1"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::localPreflightTypedSeverity",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "ecdbb8fcbc85b63d9351d198893d85837b6c603811c6c90c7699441c5a7a998f"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::lookupEnvValue",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "af8a5cdf97c1e2e1756f4521845538a4379b2abbd5a41dc532017cf0492d0516"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::returnLocalPreflightResult",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "389e6be6a10cc7903bf5919124e43d05cc1ce666affb3f694695287e0c24cb6c"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::runLocalClaudeCLIPreflight",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "b6d59c14deee0e044a14c240aa66801299d41c3e7c6be900cc17a2f651bd3413"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::serveLocalPreflightMode",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "52e95a17e1638b988e8c2dfd8d41563c4e3afc904ed550e2ce900e22932f95cd"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::sourceDeclaresAgents",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "16c8a0dc439474ec4a1e03dc953c679ea80932ffa7e09b48e840510aed4b86d7"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::workspaceBackendDecisionDiagnostic",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "3bee1e2778f26c368c440594f1baef917bea30b07375e8125cd8dc406c6be1ac"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::workspacePrerequisiteDiagnostic",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "f82432bd38dc3c6bd7cd1d3aebdfbd15c5eea3aefffc65c4fb8d8f7e373c9a93"
+  },
+  {
+    "owner": "internal/cliapp/local_preflight.go::writeLocalPreflightJSON",
+    "audit_rows": "A15,A16,A17,A18,A27",
+    "proof_families": "P13,P14,P15,P16",
+    "body_sha256": "229aa662d6a4661cdd2eb661181996c195742fc79588d66e01c736fff35de610"
+  },
+  {
+    "owner": "internal/cliapp/serve_admission.go::ResolveServePublicIngressMode",
+    "audit_rows": "A02,A26",
+    "proof_families": "P02,P16",
+    "body_sha256": "69355b660c852ac3c4adb1a4761ea2ae5277bf9c9c12c756861e5611115b3904"
+  },
+  {
+    "owner": "internal/cliapp/serve_admission.go::ValidateServeAPIAuthBinding",
+    "audit_rows": "A02,A26",
+    "proof_families": "P02,P16",
+    "body_sha256": "e87f90e7a3a62c6fa53d41afce743422dd92e23181fa1627f4f25c9ce4fbfd5a"
+  },
+  {
+    "owner": "internal/cliapp/serve_preflight_shared.go::ListenServeHTTPListener",
+    "audit_rows": "A02,A18,A26,A27",
+    "proof_families": "P02,P15,P16",
+    "body_sha256": "f7a41fdac651420eab88e73e9295dc28b72a7ae62ce93c78b18ec083af3dc7fb"
+  },
+  {
+    "owner": "internal/cliapp/serve_preflight_shared.go::ListenServeHTTPListenerInContext",
+    "audit_rows": "A02,A18,A26,A27",
+    "proof_families": "P02,P15,P16",
+    "body_sha256": "eab36864894da7b750b59938369e547c923cac69818aedac54b06e08bc1ea1bd"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifyDeclaredProviderAdmission",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "945020deea4f725d542ea1a1c2b086ecd0fa3f76be0f6d0a31099ee88e7731e9"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifyDeployment",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "d241f3f7061ef5b5a5dc294b10c378e6796f741e3be9e3d0cdb998eb8ef4c2a0"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifyListeners",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "0cc52df641050ae66b965e777e936c5c9185741d6c456984b373b4a0defebf85"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifyManagedCatalogAdmission",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "39e2be2b528783561ca954b65e49c3285d6d78901a67847aec4f5e710ff5b828"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifyPublicIngress",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "4a61c7d06fb8d71e63fdac11b094bc3376b333488bb9d79082b298f8560a1c07"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifySourceAdmission",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "a84ec5f07305e1b53979251150ffbb70025ea06822a487ada8d9099c3d53bb15"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::inspectVerifyWorkspaceAdmission",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "12ce0639995161b8c9a5ca5ff11acdf17e44bb826defca5d9cce9e6ffca7a0af"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentBoundedObservation",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "6192cfd856168d3b61e07dc16dc6f5e0a9760a9ae46e9633be87af1c6052c2ab"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentObservation",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "7d454382aee554c698be9d423c2138c269470c37b16abacb0adf45ebda999536"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentWorkflowOptions",
+    "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
+    "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24",
+    "body_sha256": "43fd0e1525169dd1c5177d95e0b6cda379383a86c9e92357e0f485e617620f16"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::accountVerifyStoreTail",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "body_sha256": "70542e0f45c2f90f956228dc6189ff3f4f428754cfb338eb76e20e416a0fe1bb"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::blockVerifyStoreTail",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "body_sha256": "ac54664affc5d34a5ffb76d69a0641f5b8c9c2d1a217ee6ce5f2243b822aab45"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRecoverySnapshot",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "body_sha256": "f078c79dc8a4f28e6b4fd20556132f5163fb023db50f487f29c780fb344eb026"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRetainedChannels",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "body_sha256": "4ce50d7a52c5d3ce9a948c689b1c6c5ca05b24674342b19abbb592b89e14c5ff"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifySelectedStore",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "body_sha256": "92a991e5c319af6b3f059128671eb4afe34e65f49c78606af448e39e916deb15"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::prepareVerifySelectedStoreInspection",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "body_sha256": "62fcd3c10ab77f2ae7d290f80584d60afbe8ab9fcd3f3e3d68537b5f7d08a8ff"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_workspace.go::inspectVerifyWorkspaceDependencies",
+    "audit_rows": "A15,A16,A17",
+    "proof_families": "P13,P14,P15",
+    "body_sha256": "8691436fdf2638a62d8c78ceffffc13a5146d1c9b793adab02d69f562ec777e6"
+  },
+  {
+    "owner": "internal/cliapp/verify_retained_dependencies.go::appendVerifyForkAdmissionReport",
+    "audit_rows": "A11,A12,A13,A14,A22,A24,A25",
+    "proof_families": "P09,P10,P11,P12,P15,P20,P21",
+    "body_sha256": "89c39df27882a40fd9bae8416f3711ade0ac721b5171a0b9882f6c067b19ac86"
+  },
+  {
+    "owner": "internal/cliapp/verify_retained_dependencies.go::inspectVerifyRetainedActorConfiguration",
+    "audit_rows": "A11,A12,A13,A14,A22,A24,A25",
+    "proof_families": "P09,P10,P11,P12,P15,P20,P21",
+    "body_sha256": "ff13babcbbc69ed3dcef7cf746c78054aa7adcc0fc2815c18aa816bc5f7b4254"
+  },
+  {
+    "owner": "internal/cliapp/verify_retained_dependencies.go::inspectVerifyRetainedDependencies",
+    "audit_rows": "A11,A12,A13,A14,A22,A24,A25",
+    "proof_families": "P09,P10,P11,P12,P15,P20,P21",
+    "body_sha256": "4a8893714921e8f5ee606bfea4b7a5c4cd8038d0b441a2e66187de98ca69983d"
+  },
+  {
+    "owner": "internal/cliapp/verify_retained_dependencies.go::inspectVerifyRetainedForkDependencies",
+    "audit_rows": "A11,A12,A13,A14,A22,A24,A25",
+    "proof_families": "P09,P10,P11,P12,P15,P20,P21",
+    "body_sha256": "b8954329cb686e9b97a43e1e47a75b4670dd07326fcdbdff0f586cac05b6a35e"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::admitStructuralSource",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "7968359102482c79b9e7dc2cc2834c100a49b2c644576af2b993dcfe775ec0b9"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::defaultVerifyCommandOptions",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "6130bc86cc80a845c5e998bc7dc8f16ec3e61bfd2586e9c733a21c8bc4b4f1ba"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::renderVerifyAdmissionRefusal",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "e26408d284e5795166afc46913d8bd3b6779c981e43b345b9d231ac0ad8abf23"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::renderVerifyCommandResult",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "d10702b5fa32cb72fafc2f966a3e8b4432d898e56afc77f8295e457aa20d56ef"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::runVerifyCommandWithOutput",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "f0d1894c1e543914660817f182b3281e88f554ae31f0a47e8ccac8aac24e4547"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::trimmedStringSlice",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "72757cc3d27601b7c5df28488d1b0ea5d7a1f107d5bb9f4261397146a2e41899"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionExitCode",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "cc10ada2d44a7de2895f8fd16c85c5b5426659790079ca273b9b8a62abf734fb"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextLines",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "f7089c4894c63c42b9f66e8615dd0f09bff5de5e9cdd22ee207cf102b62233d3"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextSubject",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "aecc2c80e08ce5a446aaeb54ddb00e183a5a829329398646cd38025fb5e6dbd4"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::verifyBundleResultWithOptions",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "bb2529b531543c93c2a4e00268c58ccec604cbf13c201e0703cadba4a5710cd4"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::verifyCommandOutput",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "0fc6359ca1000c34d0f6733d0ac524dd7f79a908266d8219f20f793cccfafcb0"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::verifyFindingOutputs",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "38fda618fa248c51b9610545e6ca1a039d6ff8c3618654fb84f0cc01131c6395"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::verifyWorkflowContractValidationOptions",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "b305c4c04f48605005000baadf3ab2518db111ed903dc75473b9f295c0b84274"
+  },
+  {
+    "owner": "internal/cliapp/verify_runtime.go::writeVerifyFindings",
+    "audit_rows": "A01,A28,A29,A30",
+    "proof_families": "P01,P02,P23,P24",
+    "body_sha256": "60885a73ad113735ef3811a77484a3589bfe98d1728a0d422ee2d0f1118c715a"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::*workspaceBackendDecisionError.Error",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "c614cdc42f4d3a6c9e2f932b0644573852910e042244dfbabfe712138b4d1024"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::DecideWorkspaceBackend",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "d33ea6f48ceaa2b71e576bfc4455bf7fdf0ac848bbdf91d0687a9e9494f8848b"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::ResolveWorkspaceBackend",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "c15e155ae4e563a924809d13704a6b13490f67c90ce3d0e8bf9d4fd10bc7f15f"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::WorkspaceCapabilityReason.String",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "b73b83875b4e7da91ce99672c0257fe33dfd1a89230ae78b05bbe4869afd479a"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::WorkspaceCapabilityReason.isExec",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "ecd64d8654eb177c3c7d59143c63efa2a5f903ec5d162ae61675528c7e83cf30"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::classifyWorkspaceBackendRequirement",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "bbf10d8aefd04ddd122ed27c22cc2d70a5c996578368c1c136aa78c446c05adc"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::nativeToolEnabled",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "7eb919c88e7e4611dca4dbbc7f71b2d9cf18cf7f77ac0044c6ab9b1d19cb2a0c"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::normalizeWorkspaceBackend",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "82853977966099b419e9f2d9e923dbc3e13cfef7b1a38f96cea3d2a0415c1d26"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::resolveWorkspaceBackendFromInput",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "1b35ebf9479e1108eb9771ee7b5cc35a8ca8817754b678bd8788aaa8e9b19b74"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::runtimeConfigAllowExecOnHost",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "d9926b688f09769ab4ecab63c4006f3ed263ad7456e26f36e1829daa8713130e"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::runtimeConfigWorkspaceBackend",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "288de78df47ebf476b70cc2eb47b42dfab1449c11099e2552fc2d9dfbc977cdd"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::uniqueWorkspaceCapabilityReasons",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "8e989028d7613fb4b89b3f3f49f482bc1fa0ff95fdb3761003046b0090bc8e8b"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::workspaceBackendAgentLabel",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "35aae7d872f7af4513a08195c8aba3dee6a9fe3560ae9319c00ae065c3917ac6"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::workspaceBackendDecisionDetail",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "f5197a154133617d46b11244a2653c2d4f22eed005ca014eadd4cc6ec8a0e247"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::workspaceBackendExecReasonSummary",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "8e0e260edf6a481c39089d182fb364f6a3d9e9357fc977129be24d1724d0aa6e"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::workspaceBackendExecReasonsAreClaudeOnly",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "9c9c967fa1d826d1533d9480660a63b0b85f399bb96b6fd02a01016c1fe00d0b"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::workspaceBackendHasReason",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "47afb563b744da3e67918ee0d3b856d8210ef689692ddd5acf25d6ced570fa8c"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::workspaceBackendReasonSummary",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "1fa19a09673986a455a73b920c5f4c630058602c48a63d79d9b668cc305a475a"
+  },
+  {
+    "owner": "internal/cliapp/workspace_backend.go::workspaceExecClassTool",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "c6e50b64e43bb54fa8c9aa50fe0d81d7d4cde72e20c4b3d733486311b83c5813"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::AdmissionExecutionObligation.validIdentity",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "a2d6c0990bffe428cdd7d4532c1f28e22b3f69c1c2b6cf4b2f338fc7000f472e"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::AdmissionObservation.decision",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "3e3a7e008c9127c022af905f7a7f9c84df1cde5bd4180c93b44c69ada7738d02"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::AdmissionObservation.validIdentity",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "610bb196cb87023a5d461ee5842edbfec1aca876770cccc394913c36051e8bca"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::Report.AdmissionDecision",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "63e313f5c0f1614ed533d2258e393cb9f00c7ad588696d2f098125cc3167d96b"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::admissionExcludedWarning",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "3e8d0144ef3a3a3bb616a45d75157957c1855b9f12fc3a8c938372205a9b2686"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_report.go::admissionFailurePriority",
+    "audit_rows": "A28,A29,A30",
+    "proof_families": "P23,P24",
+    "body_sha256": "08d2ca58a9bfa244bf9cb837898fec5cf892ba6d55346c0b053e6f05732b8951"
+  },
+  {
+    "owner": "internal/runtime/llm/cli_runtime_boot.go::ValidateClaudeCLIRuntimeConfig",
+    "audit_rows": "A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "724fad34ce6f39b11ceaa8b6cf81b0ff10d411bdc15730474690ab8275ad2e78"
+  },
+  {
+    "owner": "internal/runtime/llm/cli_runtime_boot.go::ValidateProviderAdmissionEnvironment",
+    "audit_rows": "A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "2be0033b0f30ce9a5e9436596fc3198ea8962b8915132dd4315e9ae9a9b9c27a"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::*ProviderAdmissionRegistry.Admit",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "c9b55ca1782d139eeccd818065d448c8cb3818e1f68523f121660209b865a2de"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::*ProviderAdmissionRegistry.policy",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "9b4361e0c0995e4ee826c864c9eee1c1fee328eb4db4304ae52cf2e3d968d274"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::*llmProviderAdmissionController.Admit",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "3a06cc843f33e4b05138046732cc7039d40459d802558cf2645ac90859213122"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::*llmProviderAdmissionController.acquireConcurrency",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "1fe718792a42c301e93767f6b7a4b88cdd630641781215c547a534a451b91b10"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::*llmProviderAdmissionController.admitRate",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "ff8f449fa211cb7fcc23171b7d7889ea6a9f8c9661107171bee80a69040a8652"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::*llmProviderAdmissionController.concurrencyBucket",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "c8b5a0990df469a2e6d98db2c89062ac84037b111dc62abcac3fba437432a071"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::*llmProviderAdmissionController.rateBucket",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "0a893248eac688362dbc8816a944a63eb6d7e237d05128ac7834e2c3f904abc5"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::*llmProviderRateBucket.cancelReservation",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "4cddb6c7a08cbe7a1fc2b1b6034863fa60d5f056e552529dabf30cd972647506"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::*llmProviderRateBucket.reserve",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "39a9265017bf652f3d03bf6618f37298519b2dca3473641f6b0a7b7e3be10493"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::NewProviderAdmissionRegistry",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "8db17e1a80f19e77a9d310259e0fceab50e7272a82bfdefd50b13edfd4e3aa19"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::admitProviderRequest",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "5f25ba3497a7372fc5d93e39753e0974b5dd9168a004ac08a7459905dca18626"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::concurrencyPolicyForModel",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "d1d5ce47a695112e87b54a97880b47dddcf5560ac9c5308834438c88ec412891"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::llmProviderAdmissionBucketKey",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "f342a5434226e917a9bcdafc07066acce185b7798c4ad020f20f08f2119c5699"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::newLLMProviderAdmissionController",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "7008415b462653a5ee9c02145854e550fef2bb3fe3d8299d6a37f473feda078d"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::newLLMProviderAdmissionRateLimitedError",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "0a736ac50e54dea951426abfab2a7611ce68b97fcbae9bbe923c9a8f4bb8af9e"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::noopProviderAdmissionRelease",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "a7d3e94b158514bf004792aa6537f83adb68aab78583f01c9c1cda68b488cbe9"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::ratePolicyForModel",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "b0fa0a20013e85e8462c9310c6951bf71bd37272c8c9121cbcdd5abec4dc77fd"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::resolveAdmissionModel",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "73a9bb30a076057589c9f318f8b04b56aba939b623e3ffdcfe121285a206d803"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_admission.go::resolveProviderModelForCall",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "420c9d3bc06ae35fba9e59c5c520fcec5a69bac849dc6ade679e807ccc439b9e"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::NativeToolCapabilitiesForRuntime",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "d03f55000e88e99ea231eb37b6fcff9da7a9f6c71d9dd747994ff17a95d20b82"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::PersistConversationSnapshotForRuntime",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "cf44f874b0b4d4a9f908655590e3af5f57055c9b1dc874d5b9affcd07835bb53"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::ProviderContract.Validate",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "7fe25c68b6cd0f46f24b7f12362f878b3282696d18309c769e855fe84c84872d"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::ProviderContractForProfile",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "b0abc0595a141603db427e24768b66619a600ce67ed6d8212ec5e8983f27e1e7"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::ProviderContractForRuntime",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "d8fa0eafa0ab7a4cb9791187c7ed1ebfe1576589542bc2c2b5a8b03617833e33"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::RequireProviderContract",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "39fbdab8187a468d0118ed64d52ee89562b67c0174671aff37bf5d0b47ecf487"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::RequireProviderContractForProfile",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "40dc64ad871239d81931c758a69e7abd0883d36374ff23f6f3eedce81273a88b"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::RuntimeEnforcesProviderNativeTools",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "dc3f812072b3e3640aef13ffa5993c2c158714fb67335ce3f926d1838d837e21"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::StartupVisibleToolSurfaceProberForRuntime",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "904654f5987071f96852eb11e696572291861c072fa986e78281dfebabfc1886"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_contract.go::contractForProfile",
+    "audit_rows": "A11,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "4eef1daad3bc77fddbf3e17cb15edc3df9a1fd7c5302f44b0a23a8050c8a4500"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::IsMissingProviderCredential",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "a8f3863a58b85a073413d2815b7cfa3bcc7d6b1c71f9eff47b7a41e5a23b2966"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::MissingProviderCredentialError.Error",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "c7ceaf5e6d854704fdc4d642fd1260f1928138ec72775370735837e67d4d6d84"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::NewProviderCredentialResolver",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "7870483eab1581495fc7d2b8f0d9b2102dc9ce51113646053bcb51eda8891d7b"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::NewProviderCredentialResolverWithEnvLookup",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "eb789d74f3db5d0c46dae59d2f14f797ad8996bab17b6ae2bab924ec13927d77"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialKey",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "f484e71494e324d30ff8ec824f2fe2b2d6836477fc99e8da8d22dd198ab57520"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.Inspect",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "c24dab0748fc5d25ae7ba19c609498ea73803123e9046c222957065b92dc2347"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.Resolve",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "7a62e8f57bcb27cc00a8fdd72417e408836bb33671a28aceacfa0eb4eef6baac"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.envPresent",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "7f2666b90ffe55c460b76f5b363f5a791e86e02a8107c8346e0b4675cc0be562"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.storeValue",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "ff6f4da2254491098d3ee6832139a08f782eef885df3b752895d36a9f0258e6c"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::inspectProviderCredentialStore",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "8e4fc67f86f9d43de5e0fe4710f39cbcb2212008d69799aea5bee9a2dfa82b69"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::providerCredentialReadError.Error",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "e2cad58ea81e3fad5e4c72aa302a60337b5001391013bd0d3f66b0c71e8f8505"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::providerCredentialReadError.Unwrap",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "d0e6fe1eca2fc2ac1fb242a550ef75f60ab8993c55cbb714d02d0b99eb731bfc"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::providerCredentialReadFailure",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "b8ba4169b245e6897d9a4ae880b8a21a876e64ee39221844e196e814f3c713e6"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.InstallStartupTopology",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "9083cb8cf5d19290acab1c3639a49b39fc23e55bac2c0bff72fb3d35d51ec384"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.MaterializeAdmittedAgent",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "16cc8611ab32831ea47bf4357dcf2cc0fda2ac6bb878975594b8ee1bfac9e3b1"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.MaterializeAdmittedAgentForExecution",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "3df7b36ef1efd1ae2099492ee61b081703df1c1dad46f74dfbb7c8dda14e4365"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.PublishEvent",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "7027e819a5f3fedf462d9eb9e3269a80f7c401691b086a012d7898483dcd1957"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.SetReceiverExecution",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "a331bc76e31e17bc5af2b729ba8c9f07681f9a1bba65fbf49723d8c7c07386f3"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.WaitForQuiescence",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "aa7d147962191f535d17d0931f885f6b80dec18f74bd32d62f94e6f8b408503e"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.adoptPersistedAgentForLifecycle",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "20185117755b1effc715588a8488a976207cb3d251be663c198138f284796493"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.adoptPersistedAgentLifecycleOnly",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "6d0f5ee7592dc0a80639f8891c35af8f46a35fcc6bab7737a57ae0681ee22cda"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.bindRuntimeOperationContext",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "7fe39909c34f39755d1472e66084c82877a32d0ca4d278c34575f830920bcaaa"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.buildAgent",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "0f4dd021276213d24bbe367747e5d2ae23e80e13bba2cef2a2cbfc986905de5c"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.completeCommittedRouteTransition",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "6e3e3c5c853e99129dc8dc0b0d9e06ac053a4482bb48730d232dc4c8bd1e6cf4"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.completeStaticSourceSet",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "4a99d7d3ad768e7d352c2f0cd08b2838164c7fe8e8fad4fb9df1409dba3e5cb2"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.ensureExecutableAgentLifecycle",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "e3585e89ac0b19dcd8a0c622da2112b819319ed66fd470ee06e79ad13fe8d3f1"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.reconfigureAgentIdentityExactWithTopology",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "2594289963dafe097e5457f9faae927d0d6f4c6bcce6d1db8b1775b4deb0c553"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.registerExecutableAgentLifecycle",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "d314e6bdd863df612ddcbb4ea8a18679c8f161f9a899d515199b7f397bcdbf58"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.resolveAgentModel",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "e7593ed09f6ec51ccae73b4fbe4e8abc665aa709d55f2d32f84bd737dc5753aa"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.runtimeContext",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "3ea3837d242e890c7f9eb62a3a9cbce49f8d1af9b1a89a23fe9d67b228776de9"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.runtimePlatformControlEventContext",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "73ba2a109b270fde75ca24454bb79b95624e5610965e4c106562f53edfc4fb19"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.spawnAgentInternal",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "4c7e805ae34befde75c371762a672d2c2549923085c48ae8793c127bc2befcc8"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.spawnAgentInternalForSource",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "6077eed542d90d155742884ed5bd21070f872b1a1bb1cc0dd333f7a8bad72ef0"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.spawnAgentInternalForSourceWithTopology",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "706378143b4e3fbbe259baa6c688ad52b7a950286a15233d302c0d9cc87bb88a"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.staticTopologyAdmission",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "d7705e19277fbf8052239ece90d1005db1ae3438d7513a90a025fcd2e6f14901"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.teardownIdentity",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "e5221563c1985af41e92020cdab47e1fb750cd9630b503fb288a7bb74bb7a995"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.teardownIdentityWithTopology",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "0979ff18a93be079d6e3e0c225e38967774e8c4de10a6cc86eac457b7a1efa09"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.validateNativeToolAdmission",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "9bbe507ddaa54ed0b0d5aecddb8d9b63f9fe277a78452e44e1ff41c8fc0f1fc6"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.validatePersistedAgentExecution",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "67984760896422dc3db77ef27cd7a5a4a69339eaa570e2280129acf6f16ccec8"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::NewAgentManager",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "034bd89affc4db32823f9728fec0907bb121bab424ffa57b4da5b4f866f30c35"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::NewAgentManagerWithOptions",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "7686da8574a64f2bed874876a43bf3cc60840cf8c19f5c3a92babe69d28459f4"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::ValidateAgentBuildConfiguration",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "9bc8dac3106cfc66a311f79574a5b6098dbeb40e125b2791c2dd47ec5fc9a3d7"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::ValidatePersistedAgentExecution",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "1569eecefd4905d0ec9f3a7c828cc43c49423e9e180b681e75875d66141fdb72"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::bindCanonicalAgentPrompt",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "3ce28163312931f5c0e78cb606c3f864bfced8ad9a6a6f02bee642de101163fd"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::lifecycleOnlyAgent.ID",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "67c5b5bb27d726cfc8a1cc473f8472a2154a8a73dba1eed3a92581871f97c3af"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::lifecycleOnlyAgent.OnEvent",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "cbd3849615ce4c77ecd004507916b21bbd976f8b3e105a59e2c382ce61bea713"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::lifecycleOnlyAgent.Subscriptions",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "7d65d4276c8da67d344a8f87c9901216c3722106be3f2fa689c704a6b8213cd1"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::lifecycleOnlyAgent.Type",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "c90109cb2e174c314288f2fde1ae5a228092ad66026be3a216503f26bda797df"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::normalizeManagerLLMBackend",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "aea67e17f78a60b66c53f78710be4abf58b664d4782af643c37aa0c23d866fac"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::reconfigureSessionMutationPlan",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "7d8804bf220493fc91f038199ca8de1d80ead2bf03826de48326e221e712ce93"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::requireAdmittedAgentIdentity",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "853e9946f6ae1d887cb6a1bbfddab10272cdb2149ae6c7872bc56f54d7316ef3"
+  },
+  {
+    "owner": "internal/runtime/manager/agent_manager.go::resolveAgentModel",
+    "audit_rows": "A11,A23,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "99d0564a1724ccd93aa71f80794541535bf2bce57387fef8de39e69c619cc5ef"
+  },
+  {
+    "owner": "internal/runtime/manager/recovery_inspection.go::InspectRecoverableStateSnapshot",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "333fe71b0cfb9959f44aefa15608dc652d99e5b6ac9989da56a9aa4b0582b890"
+  },
+  {
+    "owner": "internal/runtime/manager/recovery_inspection.go::managerRecoveryReads.GlobalWorkPresence",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "2c2f4d99dc7b0440800ca85e5ec5246856944ca2d7cd16f130d85cf7d00cea53"
+  },
+  {
+    "owner": "internal/runtime/manager/recovery_inspection.go::managerRecoveryReads.InspectDynamicFlowRuntimeReadinessForSource",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "f4374e096061f2b85b9a929503a7a9b4b9e19ec82b003acd5efeb13d776f01be"
+  },
+  {
+    "owner": "internal/runtime/manager/recovery_inspection.go::managerRecoveryReads.ListFlowInstanceRoutes",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "9ee32ec8995b4b87155fb5c283a7a7c3ea90dcacf2ffe64afe41543c6553bf37"
+  },
+  {
+    "owner": "internal/runtime/manager/recovery_inspection.go::managerRecoveryReads.ListSelectedContractRouteRecoveryRecords",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "7773052e6cb74c783e41166ee87447f2ded941565bd7cb6e2458c7f9083b3642"
+  },
+  {
+    "owner": "internal/runtime/manager/recovery_inspection.go::managerRecoveryReads.LoadAgents",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "6b50562918c7ac323c33f75ca35c57e5d677dd24d64d62f2e8401e199273c50d"
+  },
+  {
+    "owner": "internal/runtime/manager/retained_actor_inspection.go::InspectRetainedActors",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "34ea0bc0caaee6328ca2caef79a210a4544fa3fce887225e4004484c48eb19a3"
+  },
+  {
+    "owner": "internal/runtime/manager/retained_actor_inspection.go::inspectRetainedActorHydrationConfiguration",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "b40b4fcbe3749949b5842ae549464f8e12890b1ac639622260b917528783610f"
+  },
+  {
+    "owner": "internal/runtime/manager/retained_actor_inspection.go::projectRetainedActorDeclaration",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "adf24029b1a531677eb384a5651f63c3a7dbd87dd0bf84574de9bd196469715f"
+  },
+  {
+    "owner": "internal/runtime/manager/retained_actor_inspection.go::retainedActorDeclarationAdmission",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "97ebb4dc4c179d768cc6473a80164f33f788917a7aa20c6f5c0af6cb899ab76c"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.CompileStaticTopologyDesiredAgents",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "856143a02009e6f68382077579f8659ad9d814dd52b024506a9a9f0710c17cb0"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.FinalizeCommittedAgentReadiness",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "68f5e8a80b944fa33cc8fce6b70b056d57ff801e8e4121fc3233be1ff8e32e83"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.HydrateStaticTopologyForStartup",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "0ace9ba1544227cbb9b46cce137b8ea93136022853a78119f5de412ad50bd2d2"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.PreRunAgentMaterializationBlueprints",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "c1541328afca5b68c17162f424931b0b693b2968fc99c69f95625e195d1c6269"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.PrepareDurableTopologySourceSetRebind",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "cf2d201fa0d0f2ec1b4c6bf07da39bea6b0176eaeb817a972bcac3221b8f5209"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.PrepareStaticTopologyForStartup",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "a19542f2aaa7fc9f9b5680e52733f2810a39793f3513ecf945c491b8e69c8ff0"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.ReconcileStaticTopologyForStartup",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "cc94fe9db0ebd0fb58f77fa5a3dfeabfbcf24ba4b6249be682c178fe61092ac2"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.commitStaticTopologyReconciliation",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "bb0905193cb9c044e5cc67ed4e6f847703f9ac74f9d59cfb5b8f6db6c95e95fb"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.committedRouteFinalizeError",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "060f488ad89a8bfa1dbcf9bfff3cd9c59380d4aff33dbbdbc95d7f7a38b8181a"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.hydratePersistedAgentExecutions",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "aa2f81eee57e7d75a137e20c01e15d283ec0a2f61f7ea91a6e1bca71895998ee"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.resolvedStaticTopologyBlueprints",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "91c2e82045c4013ceaebc22e99bca6cbbf77ca22c71e726c6a354e98f005e6aa"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.resolvedStaticTopologyRecords",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "1c4ab681311212ef96f112e9c74f8fc486a3da61f7415b59e86280d6c8937ee5"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.retireRemovedStaticTopology",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "173eb9c27d5d3e48c6be431b230000b401eba5e03be7fdd2e112016a76d268fd"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.Abort",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "9684f961901a21a00d8a736836e2080e6476678451c71e72c6bb8f2322a53a8e"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.Commit",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "893c166b864b6a5076028671aaf22be644e92f4a20b557ef626f69568547b8f0"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.RetainForRetry",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "486ac9b879a7380f83a61bb32024407a359dbdf28fcdb7902b599464754c9346"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.release",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "c6b26aa29d0ff3cc462802bcd289d6ab6dd3affe2fd4f8b0ce72ceb814b5eff0"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::ResolveStaticTopologyBlueprints",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "75d51deff823e29f072635185ee9c2d0a0e8d95098ac77d6eb21a8d3daa7f901"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::desiredAgentsFromBlueprints",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "6b52f68e30a10a1d2d6745d2680362d0b2bbed34096fb1a2d6c413fffe6bd73f"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::desiredAgentsFromRecords",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "885125d815d07123482a5840cbefe2f951181a4ce353457fec9bca3fecad7b62"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::isAgentRetirementPending",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "ef8019fb5a457a2368c190678db882063727b2b237e9fe5dfee4204cc0e463b3"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::lifecycleStateMatchesCell",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "5f473327cb95773c2c915c512c66a4c8cc3a88b7be5c2ba9c6dfb4934c014494"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::projectStaticTopologyActor",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "89b079c1152fc6c686a7d4bfdb08f5038b2a7d109717d157218de1e0e9b9666b"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::sameProcessExecutionOwner",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "4c68da63e60117de65113748cacd741fe23724912d8a9e7def437984d90c64c6"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::sourceSetBindingIsAdjacent",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "e1cdb5b2f253fc75b5964f3f943011c7d9d22712abab250c9e9588426d70d77d"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::sourceSetContainsCoordinate",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "fde1894b3920a6b8964c01fef881252b248bcc4ac20da8a86ed7db563cb3c0c7"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::validateDurableSourceSetLifecycleState",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "7757ceeb3e622d25607daf0a84af9cbfe5cb144c1f279053ebc74d26371550bd"
+  },
+  {
+    "owner": "internal/runtime/manager/static_topology.go::verifySourceSetDesiredAgents",
+    "audit_rows": "A11,A24",
+    "proof_families": "P09,P20,P21",
+    "body_sha256": "a4c5fb3ec27dd7cbe684fda1e3f5bb47d534be012c5080316814f0d215545d19"
+  },
+  {
+    "owner": "internal/runtime/runbundle/startup_admission.go::AdmitPinnedSources",
+    "audit_rows": "A21",
+    "proof_families": "P17,P18",
+    "body_sha256": "c61e992371198f3e5b8cae20bc9effc384e27cff558281ed1925506e73c80be0"
+  },
+  {
+    "owner": "internal/runtime/runforkexecution/recovery.go::SelectedContractExecutionOwner.RecoverSelectedForkContexts",
+    "audit_rows": "A22,A24",
+    "proof_families": "P03,P20,P21",
+    "body_sha256": "2edb90c19f0a942db191c27afa5a51cb781534289162e4203c66b8c913303d54"
+  },
+  {
+    "owner": "internal/runtime/runforkexecution/recovery.go::admitSelectedRecoverySource",
+    "audit_rows": "A22,A24",
+    "proof_families": "P03,P20,P21",
+    "body_sha256": "ca74be994bc2f8974acc559d76fe2f5dc3e4be18a23dc311207346b329f8944a"
+  },
+  {
+    "owner": "internal/runtime/runforkexecution/recovery.go::selectedRecoveryActionFor",
+    "audit_rows": "A22,A24",
+    "proof_families": "P03,P20,P21",
+    "body_sha256": "f144fa349ec9036ba39f3e9c86d18372b1c3c22b9ad709af6d886d95f0742a2b"
+  },
+  {
+    "owner": "internal/runtime/runforkexecution/recovery_inspection.go::InspectSelectedForkRecoveries",
+    "audit_rows": "A22,A24",
+    "proof_families": "P03,P20,P21",
+    "body_sha256": "be07d22f9a585e072fa9c697116f5f894e4845aeb73b70c9ed634e1ea868a13c"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*PreparedSourceSetGenerationRefresh.Abort",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "519bb8623cc32f7adac82c45224f4e4707e1dd95161950b43c61bbfcc759b888"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*PreparedSourceSetGenerationRefresh.Commit",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "da383b942953beec0e9339903e23c5e25edcdca56a9c86d831a4e68f94c65efb"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*PreparedSourceSetGenerationRefresh.RetainForRetry",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "f62f957b4b76ae12f73d30af0f61dd569c8c9299699816138e5cecd382299fed"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*PreparedStartup.Start",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "86424775fab99beea6f710e0c74a7b44540d0f8439e15c86c12942cde4d7585d"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.CloseAdmission",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "207a6667432f6c7b39fef8cafdd475bf4c500a78f7a16eb354c0ac7665f08a09"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.CurrentStartupGrantEvidence",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "d6fafb394d58fa2c9ac6e6268af3d800f294fda2178409ecd4977330f3ab9dae"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.InstallStartupGrant",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "a60535a47523be5f150767cc772839a7cc4e911c3ef3a89299846fa7801a2969"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.PreflightDynamicTopologyStartup",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "0a7f67c3e631a62361663b9458cbbe041da3b3600cd85adde9df3662d96c39e2"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.PrepareAuthorActivityCatalog",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "0bb676370a38bd2b21949818cea2cc96b326fe075de28537e24791b7de3d2975"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.PrepareSourceSetGenerationRefresh",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "482ef05ed39b702d078d0347f051292b88d3da38ab1c320d8dc555d90ec29951"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.PrepareStart",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "83fd9728e402341f0c6ca42ce9dcd52be15b00ed36acf2d659a61b2b79f23f34"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.PrepareStartupLifecycle",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "c941e13f3345fba798e3db6b43170867d3a8372536e94693b91be06dc32ea844"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.ReplaceChannelActivations",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "05872cf5d0ea078fe9d62324282c35b5f975ec926fc7aa3067fc55b710ed5eeb"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.ReplaceChannelActivationsContext",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "95a67739dd6c8e27fae203cd6fb853d73fc91617125066906fd8720dd4caed4a"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.Shutdown",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "bb3744de6a38d465f52625ad781c63929ebdecef0ddeb8c535ed1af9e5337306"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.ShutdownWithOptions",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "a2a8e3dfafb35c81d9515c10d4717fe9514d94533b081125a15be69fff58dd78"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.Start",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "ccee4d36128d54d45edf220c14b96f735ebc56c9f944b9e69699c1707b925d71"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.Wait",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "7c4495b3a4f0568e8bbe0625bde8fe7a261bcd2f6e138305454a729c22cbf871"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.WorkOccurrence",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "4659cea6af80878e940a08fc0d4c3e0fea197db409d8731887dabbe329c4d86c"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.authorActivityContext",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "764c2ea2b778be82d935af3bc468a8739aa5760a40bbc78ea7b48f7c0cbecaf7"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.emitBootProgress",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "9abfda8178662d07078966b6dbb7b56c80aa2dc40ee428bc95454339e210fb62"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.prepareStartLocked",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "c0ce4a099390d78c0e4e2f6d81c880cbac6e582ca457b58d068c5e2bdae19cc0"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.prepareStartupLifecycleLocked",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "0fc7d966c85f1ef7f15568f52b47733d75b2e0947cb3141c9bdd41a6f0ffb613"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.publishBootCompleted",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "067e28792f41111669d911ff0295f8c840e9f6f3e918b1c36a4523d71f41b343"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.recordStartupManagerRecoveryFailure",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "a4d0579ee3f28aea261d1730c65f40c423d3c045964ca685b964ee2554b4e51e"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.releaseAuthorActivityCatalog",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "66d9be3201d329e94cc3d332e2bebf916029b45ff04cc8517012384f6ab82a7e"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.releaseAutonomousStartupProducers",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "a2f25f30af8526d59ca5e52f3a9de4c331ce84d756ce5a749efd09cc366c3048"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.replaceFanOutServing",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "6bb3e4deb992bb3999ae11cd7a83f76813c8a991e47fb22103be4bacb7dc3d0e"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.shutdownAdmissionClosed",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "5e89cad929a3d2a1356386124e640b3f4d65f5c2f81d433074bf9f17dd1ff389"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.startOutboxSweeper",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "f3abe414cfefc35a34b6d27cb9b2021135de928ba93aa6f16eeb950c8f13dafb"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.startSystemNodesAndWaitForSubscriptions",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "da00f7d8993d4a3f1d11ff0a7e131714d86d9df0b3af57fa087c7b09e905662a"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.stopWithOptions",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "fc26b7d1e75790aecea0345ee41100b6db839ade0d9940ab807f19a55ff64983"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.verifyBootPublished",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "07f2ad2703f1f461808ff2122612cdb24b2a2bc5308bc227394ca1181da1ec5c"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::AuthorActivityEventDescriptors",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "6b1425175250c557600d155f5e9dc7cd5f617ea178d29194e5f0b063f0c0402f"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::CanonicalBootProgressName",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "1d89d16ef798b84acae3c6a6f30921dceb8eec79688bb438e469ec66df0feec1"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::DefaultShutdownOptions",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "ea65bdc43ab15cd91170f5aaf74a1aa54cc664fd9837d731837c71089676fd91"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::NewRuntime",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "f4c241d7782d448453fa95a2e83f6845a3508d51a0e712de4a1de0d1e8363fab"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::RuntimeDeps.Validate",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "f8463e5329c8f3b6dfedb36017a1e2b69e66910d4321482c12bab750739f060f"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::RuntimeDeps.validated",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "8ceb54088d56e9e8def3e0493795351cfb99da9e614f2971ba28450424c1d125"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::bindRuntimeStorePayloadAdmitter",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "ab922c8225fa3fb01e21abcca83d5489bfe6ff45bf3a29d7ee5553143f5cded1"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::bootWarningsFatal",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "2dad51db44d2e7f3ddc8f8d87cdbfae8c11f29f28fddb0e1fb9cc95c43a04f7b"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::bootWorkflowTimerDuration",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "e7ecdb26b4a0875a6f7f4a78bcc18374fe0e234631b717b6c50b7814cacf2d20"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::bootWorkflowTimerRenderedDelay",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "ae80cfa1f75927ab018020845e4b6e5632395b8863e36e52a97c6d0d7b1e555a"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::bootWorkflowTimerSchedule",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "11f49bfa243e1ed3dad373291911c56c4bcd5c6498d76b368622c296e2127df0"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::connectorPackWorkflowModule.SemanticSource",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "8d544341c7b8c87331eb9a47eaaad2470a78e462c6e91d2d9ec93f1999e2366b"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::ensureBootWorkflowSchedules",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "6de7b6856897f78310ec40d3719bbca7a3233910c9cde135af69d29a3f4e196e"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::ensureWorkflowBootWiring",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "0d6c063798e9ff8c76f7b59b8fa61c9963c4b505022101f08ac8d45ccece5144"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::ensureWorkflowBootWiringWithModelAliases",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "1c45932162e9434184fc971476c3288cab17d43575e90515182a5232a343d9dd"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::newRuntime",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "1cee67d9739fd1c7525cdd7395b356bbd18e61ad3d89d500a9a419b016cd7da7"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "46deb35a8e985946728d41c56cba8693b081f6110edb80396628e5667af62c3b"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::runtimeBackgroundNodeName",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "5a3d773fc6035f83f92e2e8e4bff12663b557833188fb3e50ca898b86152a980"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::runtimeEnvBool",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "62781cc1dd7f9c5fbc0e05531d645552eaf1ac5c4ddc3b89adb4a98bb2ff00ad"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::runtimeThrottleSuppressPrefixes",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "bd194d9b19bd3b273088af26b045223aedc7a8044d96700d76904fd218a66e5a"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::runtimeTruncateString",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "6bc81b425008e05391b4a2a96229f17e7f9e57a4b80dc330706b8c57c96e4526"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::sortedNonEmptyStrings",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "4348cc80d2fca7709a356ed5bbe0b17133facac471f9ae972f066d0b420f953e"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::validatedRuntimeDeps.payloadAdmitter",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "f52f2d58873f5c02969cc163f9228a4d795b4e3e72664086c8bd239477149f42"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::workflowTimerPayloadMap",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "a101eff4f67dfe8030b4d6cf53e1df94009bbbbccb77f9b30749539901756c48"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::ManagedProviderPreflightAuthority.probeAuthority",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "a7c9131cbafa1c72e7ed904af4e35ddd17a88b03a4bdd4de4b9001845e946b90"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::ManagedProviderPreflightAuthority.validate",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "a29f1af2a73367aacdffc4107004ada62be585d660a5d07816cceb4be9e89590"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::ValidateDeclaredAgentModelAdmission",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "b5f8b0e99b2d16fbab3fc2a18429926b9e572dde8e966f55fd85e65bb9c65985"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::ValidateManagedProviderPreflight",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "a9677ae9326bdf34f22eb87ef358055881e3634e4197918ba255b0d85cf91d97"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::ValidatePreparedSelectedForkProviderPreflight",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "a13a25b02b5393bc43989b7c2325616a44a8343ef191edacc6dfd85b11fb8fbb"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::equalSortedStrings",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "117a49631e3d351323a895d36ac35d880b63fa4cff0d7ae585e839f7f8a7f8af"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::isClaudeCLIBackend",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "575d5b8f8383c3410f7f00cd89f6ca1b6e2fa188788fbf2827db19e47e8af942"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::managedProviderPreflightAgentConfigs",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "9afd8e41def4fbe8104d6471769293cd3e765567151b04e86f47453aa5220c96"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::schemaAllowsEmptyObjectArguments",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "d2f432cbec3ff9748d8c585dd34790082658b1cada976b2c61f8a0f27904d889"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::schemaRequiredFieldNames",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "599c5b33127974c3ea1392b6d7a73ed0ab8c1c32624b69b1ab1d492c8bba4d6e"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::selectStartupCallableTool",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "09f7abd5388b4e27a0000b5dc13a06da76a185ed41ef336a58915eb205d9781d"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::startupCallMCP",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "6f430c5d0ad2ccdb39757e6a8107694f9763fd0df179e153c6a78237966b89f8"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::startupProbeMCPToolsCall",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "996bb1a0f3a034c7d175a14c6fbfc38780c3e758ce2c1120c32b1de83be52550"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::startupProbeMCPToolsList",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "8d78c2452a16b72545b0a7aa46afb9b662c5e0d36555c986f642410dd8ef5345"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::startupSessionToolNames",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "8d2cd9dcd6d48cf2cb75ab07eea130877497568b39b61eca7b97ff8d72b504dc"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::startupSurfaceCanonicalNames",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "7d7592d1296f09799f62d6b4c0a04c6d02a1f68007f6d1ea88de1379857ec110"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::startupToolNames",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "f6022bbb0496cb8cfcb48a1820f102b5b936b3e3c0a5380c015aa2fc78f8af60"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::startupToolPlan",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "6ec1928629dc03b766339b8d8282f601733ad84b385da90d601fa5006e8e8fef"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::validateActiveMockDescriptors",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "22a891c964eace23fbe638a0a0026d41ac97f76b6805cf107baf518419e0f5aa"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::validateClaudeManagedAgentWorkspaces",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "ef2264efe7baccc3087350c719899b4076009c068fd3f9e1c07173a2b94a5d4c"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::validateClaudeStartupConfig",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "5255fd2e6c7e74903827f2839c551957086241d7aea921add0d8d1c70c81b1f0"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::validateClaudeStartupConfigForActiveAgents",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "468a700815da557daca9d2be2fe44d7649008730406b6650a9c538e506c0d7d1"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::validateClaudeStartupRequirements",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "2e387d4fc9320aef8d612645b7625864cfd89a2d2d940f8f48e5bb649eea9f34"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::validateManagedProviderPreflightConfigs",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "354d5df66aad0ef7a8e063bb9bbbbdcd345048ffb38b3f6680031ba93ea87587"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredential",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "3b3ba7ced9d1993d66696420a16a9e4be0af79e379137e4fbd50dc5144bed2ff"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredentialForActiveAgents",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "7696137fa16b31aa872ef88942a03666a1c81dc0995ebf32fee40b38271619a1"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredentialForDeclaredAgents",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "261d7acf01dff7c8cac9a24af6a715d9ffce720f0285b4274913909686de66a9"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::workflowSourceDeclaresAgents",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "91faccc93bd803f92d346731ef448c9f66f94347cdf60e66b3c2317ed6615367"
+  },
+  {
+    "owner": "internal/runtime/runtime_claude_startup.go::workflowSourceOrManagerDeclaresAgents",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "bc44ed4a83d0583476678c7c057d23b90bc9b86102add35bb116494cfe5a12b9"
+  },
+  {
+    "owner": "internal/runtime/runtime_prepared_catalog.go::*PreparedSelectedForkProviderCatalog.Actors",
+    "audit_rows": "A11,A13,A25",
+    "proof_families": "P09,P11,P15,P21",
+    "body_sha256": "82d144eb60930123adb2e6614754e3f5cde3555f9312ef2cfd7b35742dee7dae"
+  },
+  {
+    "owner": "internal/runtime/runtime_prepared_catalog.go::*PreparedSelectedForkProviderCatalog.Fingerprint",
+    "audit_rows": "A11,A13,A25",
+    "proof_families": "P09,P11,P15,P21",
+    "body_sha256": "1b061177a91e1cd431d4142bd70b3b197bb7a7bf0b5edb5942dbe5e7a74c3186"
+  },
+  {
+    "owner": "internal/runtime/runtime_prepared_catalog.go::*PreparedSelectedForkProviderCatalog.ValidateActors",
+    "audit_rows": "A11,A13,A25",
+    "proof_families": "P09,P11,P15,P21",
+    "body_sha256": "be406c63bc6a23b033fb62ed4551330f91ba034e1b6cad4c9629683a8fb990d8"
+  },
+  {
+    "owner": "internal/runtime/runtime_prepared_catalog.go::ManagedProviderStartupPrompt",
+    "audit_rows": "A11,A13,A25",
+    "proof_families": "P09,P11,P15,P21",
+    "body_sha256": "c3d809fdde48beebe98c32cbbce6288cbe66b8840585dfddb1f5b7ec73ebe576"
+  },
+  {
+    "owner": "internal/runtime/runtime_prepared_catalog.go::PrepareSelectedForkProviderCatalog",
+    "audit_rows": "A11,A13,A25",
+    "proof_families": "P09,P11,P15,P21",
+    "body_sha256": "f27202f014c8ec356dc8d7ac020b58ac8e8536e7d82a081c9fe52a35fef06364"
+  },
+  {
+    "owner": "internal/runtime/runtime_prepared_catalog.go::clonePreparedProviderActor",
+    "audit_rows": "A11,A13,A25",
+    "proof_families": "P09,P11,P15,P21",
+    "body_sha256": "4d6e58e97c740d47f7cfd1b519b237f822f2780f9f56f223b29487747d82d222"
+  },
+  {
+    "owner": "internal/runtime/runtime_prepared_catalog.go::clonePreparedProviderTools",
+    "audit_rows": "A11,A13,A25",
+    "proof_families": "P09,P11,P15,P21",
+    "body_sha256": "38a63d00f7014a12f0d6d2063717c2b7b1af23b37397b083adc47a9f90c530a0"
+  },
+  {
+    "owner": "internal/runtime/runtime_prepared_catalog.go::preparedProviderCatalogTarget.snapshot",
+    "audit_rows": "A11,A13,A25",
+    "proof_families": "P09,P11,P15,P21",
+    "body_sha256": "c4542cbc5d2141a7b90e02dcc93cb8ebc319bd360fe991fb74b17604502cdd28"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.inspectDeliveryRecoveryInventory",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "26303d14183136b371a57b69e38496a2bc4215ce4b4b8b2ce3141eacce3c17ea"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.inspectStartupRecoverySnapshot",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "9342cfd4129430916dfd99484c99419170df3bbd778fc6cebeee6a463605e1c4"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.logStartupRecoveryDecision",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "ed06f704b09dc04737bfc5508c970a248b59832cd947de20fc7bc9829012a7e3"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.startupTimerObligationReader",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "1a65a277f19cd40ec3fb1bd5c34ac3cc5e304c762db4c513d5da03908b93449c"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::InspectStartupRecoveryAdmission",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "f8cd60aa27f6aa5ff004e08f97fb0099b2b6e1e32357d2d4c8fc243dde4479d8"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::canonicalDeliveryRecoveryInventory",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "7dfe7bf075f103f227ca937be840183a36933dece078f9989aef88b423151a0d"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::canonicalTimerObligationSnapshot",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "cfb40da80f930d8b0c239beb4badb2a41aad97d8426f7c3214f4d29d9d3ce388"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::inspectDeliveryRecoveryInventory",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "d8ffe188611c8c7d395a409a4962f7fbd746563f58718ae09ce8fce7a4050261"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::inspectStartupRecoverySnapshot",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "d90849fbe62c4a1075f8902f5986356d2efe3f0084c44e6f204ad1b243c71f9e"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::newStartupRecoveryDecisionReport",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "8f9ea365ae69c8ff48c1bb406299968beb7e9636f86cbe17599cfee55f6e9ed6"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::newStartupRecoveryFailure",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "13c6b68c27144c8ca8adfc1da94bd5bb3b273179dd49f0afdb633307c88504db"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::partitionDeliveryRecoveryInventory",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "369d71e0adfe2114e123731ed729bb2cc7995b678936bebd1d9996c38cf2caf3"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.bootPayload",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "089073f4881f0e58cec40e4cf5617e5771a2483c1e9cb0e670a87105b18ced18"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.denialError",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "f391ccadaa4bc68a5b4afe5753cc675f3de5fa571bc0f5329d59a0837e4a0d1d"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.detail",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "320fd871161d1a49fe02e9e0dfd318bdab91080b189b487412e74bff0c73a7c1"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.level",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "152580eedec63ed522f309890f2ef92534eb67bd3739e7bd2ca4b7b2e582486d"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoveryDecisionReport.message",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "4b12e2f9b959e96309a7f3d45b46ca8bfda291cfdbf76869e71c4cb622ae7dc6"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.Detail",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "37a31c764f3e1cb8d706e2e1451f1a7c3db3a903397391d461d8e6e1562625d8"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.HasRecoverableWork",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "e1bf2d99e2f501ea91b1e8ed788f71e26f52eb06ecb4f0ff103bcaaaf18bddeb"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.HasStartupBlockingRecoverableWork",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "99a7cd0ba8b8d57dc10643fbf83b78973bc13e8bb1078b7344b39f93e318aaae"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.StartupBlockingWorkClasses",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "dd1dfdb4d2bfd1110f94fc7e889ee41867ec7e4487e97faf446a171ceb3a9cfb"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.WorkClasses",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "854787f4393bb306841ed8f77c21f628713778aad2c9d1e456d740456516b365"
+  },
+  {
+    "owner": "internal/runtime/startup_recovery_diagnostics.go::startupRecoverySnapshot.summary",
+    "audit_rows": "A23,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "a2910c06cbc47de0cbf64fc1a7a48a9dbf8dae1ac0b1e53cdec5cb1374677c2e"
+  },
+  {
+    "owner": "internal/runtime/startupownership/acquisition_admission.go::AdmitAuthorityInspection",
+    "audit_rows": "A20",
+    "proof_families": "P19,P22",
+    "body_sha256": "83676e33ee5a7b8e41fcd6fd5484b90098c926bcad74de2bc94bd89c29af53a7"
+  },
+  {
+    "owner": "internal/runtime/startupownership/acquisition_admission.go::SuccessorAcquisitionKind",
+    "audit_rows": "A20",
+    "proof_families": "P19,P22",
+    "body_sha256": "1c55412fe58d2f6d433d314711efbd79400bfcd69d2efbe9f181ccb1ae031d85"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::NativeToolAdmissionDecisions",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "ae57447be73a840ecf285f9a38919b9eaa5f423175f3ce937185a1fc6e9b43b6"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::ValidateNativeToolAgentAdmission",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "b8c4f0a56a6c63926577101698e751416ee699c1a2ee73dd62c62b993aad682e"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::actorLabel",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "4c605cfed3f5ef73349b4ed61bea8a6559ffe9ebb5431561857c550a59904ff6"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::admitWebSearchFallback",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "af339b42db23796c9bcb62d84d3909ef5c240f40455bbed365df9048761efc62"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::admitWorkspaceCapability",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "74483fe958b25b63397e4b6bc2c3350f133055955ec0f3441adb94efe849214d"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::nativeToolAdmissionDecision",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "0ad04c116ee3a1d942af4ef4586a27cbb190b8cc76f28a171902d0aaf58f8abf"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::nativeToolAdmissionDecisions",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "5929ee3d8f1d0c9fb89502372201a1186f9dcae4b38ffb6ce282d7ae47541e9f"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::nativeToolAgentConfig",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "46388a972061029ad8decfca512c4390ab353725160ff52b9bda172e84393251"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::nativeToolCapabilitySupported",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "6cbad02b0c565feec0fa52d36efe057721a6414fa16f503707a4909a194f2eb8"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::nativeToolConfigFromContract",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "544c87525993b199aa2abe40ac61091be8acc2fda580a1e76537c15e34171a62"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::nativeToolContractFlag",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "61e273ac28a92c2747ac2bb36bf27896c4725d9ed7ee25ed403d2935996e7a73"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::requiresWebSearchCredential",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "1f70c85059adca59d621310d1efcada225d397f699c798ae37bebe303f71f778"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::validateNativeToolAgentAdmission",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "9a99db6e8052efc02a8508ae15d808f4c2fd05a7362de41155b551ccbdf92263"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::validateNativeToolAgentCapabilityAdmission",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "af9058f5bb9bbbcb2d6c49621be841ce99761173f0e8d323250aea7c392686dd"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::validateWebSearchCredential",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "7e8b9ae832fd1eb01df5b37befcd735cfa0bd67c39ed3d31bece414389a451b9"
+  },
+  {
+    "owner": "internal/runtime/tools/native_tools_admission.go::workspaceCapabilityDenial",
+    "audit_rows": "A13",
+    "proof_families": "P09,P11",
+    "body_sha256": "47d9ef90d1cf5cc3aa08de428be00e84ff352565743b71ba0744dfe96c7be7ee"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation.go::DefaultWorkflowContractValidationOptions",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "730337834847351d50816de149698cd6f20db905ad2a2ab1c10698b0f499ae92"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation.go::StructuralWorkflowContractValidationOptions",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "e26b1c471e5a45266fe1749e0e47d6ee261bda8fb75764e1cc9be641364696f3"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation.go::ValidateWorkflowContractSurface",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "f2358a34fb451a5364b2d6ed85ee46b9134d0f46ca322d5e67dc8132ad602d78"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation.go::filterWorkflowValidationFindings",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "8cf9699124b4c60877776700af07fa836ea008bd234dc389c66e09f1332e607d"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation.go::formatValidationErrors",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "db5fa855c1d4cb145b281086ed047c01acffa6e072067de18dbceaf84854fd06"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation.go::formatWorkflowValidationFindings",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "77f3442d2a2e2a5d771e3e54a07bc30d9310adcc5097958b758806b8a953f838"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation.go::unsignedRawAdmissionFindings",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "adf9f3fd53593c76d15b0627a1218447210489054cc0c5192db99359fa45c2b5"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation.go::workflowContractValidationPolicyOptions",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "4de1b733bf88e92fb545403d94d7498d67e06221f4cfb3916bfcb2b1b80c1636"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.bindAdmissionSourceSubject",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "b3e1edb3d9bd7c7e039a9bdf8a69fd56f15a64fb95a9d6bd68ff86ef12f13c0b"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.blockAdmissionTail",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "ab4c0fb0ec7fbc7c8cc7f577de41031586323fc7a58686b6b090d5a8fbf684bf"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.failAdmissionClause",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "7ce368e3584aecb9d3410cd055bc0522ef79c83d22fe5fa66d07b03e8c5ce9b6"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.finishAdmissionClause",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "88fccb7a8eb2c560b04f7ef7cdf9bbd715f5975a91f39ea1da6660a53392e626"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.settleWorkflowAdmission",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "ef8d4ba63d417c85b60867e7b61fb1adc31ce81e33c10c916dc2fa8b90e220b8"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::*WorkflowContractValidationResult.startAdmissionClause",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "fc34c9d5fb3c7b83f2ae27d15f266a5054a9dde82e2f08b70c90af9650922532"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::BlockedWorkflowContractAdmission",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "cc59abe99116bae5d4002413bedf1a2a97b09630ddb473f71dd2bbffdd1d1a80"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation_admission.go::workflowAdmissionObservations",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "e7961ab3e4798c88a5d9ff533ba3304de8722319432ed1a6c379cbca26c32d23"
+  },
+  {
+    "owner": "internal/runtime/workspace/capability_admission.go::DockerCapabilityTarget",
+    "audit_rows": "A15,A16,A17",
+    "proof_families": "P13,P14,P15",
+    "body_sha256": "c2ec4d692656f2ddc6426dfdcfe25e555344049b2d38a3cbe6292b3da0bd8c42"
+  },
+  {
+    "owner": "internal/runtime/workspace/capability_admission.go::HostCapabilityTarget",
+    "audit_rows": "A15,A16,A17",
+    "proof_families": "P13,P14,P15",
+    "body_sha256": "4b3ceae62c88fde03ca499f70e7e94b5126320c54719e3e1192abc71bf28e686"
+  },
+  {
+    "owner": "internal/runtime/workspace/capability_admission.go::NewDockerCapabilityInspection",
+    "audit_rows": "A15,A16,A17",
+    "proof_families": "P13,P14,P15",
+    "body_sha256": "cc035c547dcf2d65ba348b77a5dc016d966b8bc36707c407d440a36ac592617a"
+  },
+  {
+    "owner": "internal/runtime/workspace/capability_admission.go::NewHostCapabilityInspection",
+    "audit_rows": "A15,A16,A17",
+    "proof_families": "P13,P14,P15",
+    "body_sha256": "3688bd862a07731226e975e7b2587f76ff792a1d86fca1435d8484ac9ad1f2cf"
+  },
+  {
+    "owner": "internal/runtime/workspace/capability_admission.go::capabilityInspection.ResolveWorkspace",
+    "audit_rows": "A15,A16,A17",
+    "proof_families": "P13,P14,P15",
+    "body_sha256": "2e3907e97c4171b240f53c0d774317a35480b67dbc9dd5dc7deee01454351613"
+  },
+  {
+    "owner": "internal/runtime/workspace/capability_admission.go::capabilityInspection.ResolveWorkspaceForCapabilityAdmission",
+    "audit_rows": "A15,A16,A17",
+    "proof_families": "P13,P14,P15",
+    "body_sha256": "98d9d543cb19b2b7cfb542a41aa8a21a798800e1a9ae6b14f0226a19f7a77e83"
+  },
+  {
+    "owner": "internal/runtime/workspace/source_admission.go::ValidateDockerSourceAdmission",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "48ac88101cbee71aef8c53b1a2101efa1718f36b05c1663e296a0afefded78e0"
+  },
+  {
+    "owner": "internal/runtime/workspace/source_admission.go::ValidateHostSourceAdmission",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "d7af6ed777bdf2d7ef739947946fbfbd5b1cd95dcdbf90ab58424985f8124f54"
+  },
+  {
+    "owner": "internal/runtime/workspace/source_admission.go::validateDockerMountAdmission",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "cf53573990270255374fcbb1f1c7305584ef3d8df0e1fcd6222ad0584b144e20"
+  },
+  {
+    "owner": "internal/runtime/workspace/source_admission.go::validateHostMountAdmission",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "ab14213fd99c8e7f9e4153f4b0faf533fcc7939e1a209d76301f959b0e526795"
+  },
+  {
+    "owner": "internal/runtime/workspace/source_admission.go::validateWorkspaceSourceClasses",
+    "audit_rows": "A15",
+    "proof_families": "P13,P14",
+    "body_sha256": "3e166a7acbdbf61aba966ef790ec25a9d133caf9de4ff94ef5a205f51365165c"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PreflightChannelActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "147ce36e0b596466336aadae6fe9c8d541be98a583784cbcf5d60a532f7541bf"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PromoteChannelRegistration",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "2d2a818cd390ef1d14923db60b41778877dbf8aa2f5acbc14ce0732f3ec53f76"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PublishChannelActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "b6a6d62ae162cbae3d270efdaa60b62720a7e8ececf92979bebaf3b8e6bce9a0"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.RefreshChannelActivationCandidates",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "d58f29c7f77bc28f1dee6d13ac81fb9c0afbe544970bfc7f5e306f9fd14c951d"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.RefreshChannelActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "b94d05478592e8a0d3371c3e152cdbeaae700738c21367376df0d41ab25a8099"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.publishChannelActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "4af459fbe189aa59a2d126df546436848d7d1836754e4d30b92fcff9ec2bb6f0"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.reconcileChannelRegistrations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "8a69e033cc20d786ea92a115258d5dbf2c906e3163e8a867fc48286792e71eae"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.DispatchChannelConfirmation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "7addc3ce09304154351f197fcea04cb929035e8109e54e9ea7503a5d4af1b737"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.ReconcileChannelEffectsBeforeRebind",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "d7b981dbea71bac73f3e530faa20f16770035139ee9fea7b0ae9c44f71e0c02d"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.ProjectConnectedChannelReadiness",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "30a24eb89b2c223eca501ad7084b3baffaa144ec0b631e42a12e6532ce25674b"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observedAt",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "cc019793946b65c7a4338ac86d1e7223ec9e3dcebaa594576e4b733cb2b2509c"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::activateServeAfterConnectedChannelTeardownRecovery",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "77902ab764ea014301c127f73febba794f670267008a415cc783e70fa6a0f4f2"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::channelEffectTerminal",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "a343b09e4699bf9f9f5718e424b117520078c4d123db31abd308d1325ae3f177"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::channelOnboardingDeclaredPlans",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "69e5877376647430085c33253691299168a13dcdf37a3d63d54b62b9ec574ea6"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::classifyChannelEffectsBeforeRebind",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "f418eeb6bdafcf36225b6270861374b52bed779219582b40e9c4315548403c66"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::compileServeChannelActivationSnapshot",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "4223f8b17c8384e553d97fbe0def0e7982248bfc0f00bc115f6bb2d6625b40c9"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::declaredActivationCoordinate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "6492985e88140eca202e4b897231fff390b875d9065d5a5e2dfa05a9d1939566"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::declaredActivationCredentialAdmissions",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "90a499d18a15edbe0e949d62376b5d6c17bbe221dbb2431594a3164a9cfdc56d"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::exactChannelActivationHandoff",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "3ab6d751957e93463d46e678208183b236abf5eb99c403ee275a59bac470e6e9"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::newServeChannelConfirmationDispatcher",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "7bd9953371b72ef1e3322f820d0e495befa117301182985b0884319feef5c170"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::reconcileRetiredConnectedChannelContexts",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "e6247b44be304dd50828724ebe4f3374a545c852faff4681f9b38c1b1cb52f06"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::rejectWebhookPrebindingWithoutPublicIngress",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "7359011c1db7453430c465b9e27e567d12edc847246227ed5acadbe701fb1e15"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::serveChannelOnboardingCatalog",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "3443cb93dc205f55772ec79743ea2b9bc234b0b9b9cedcaad35df759d6a4969e"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::validateChannelEffectProvenance",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "3f88247333a34e264493f5f6b49d4ce532ea7164067ca21c634d50f9b1ad5bd9"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceController.ResetStandingService",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "7a22530a726d4debf96fc98feb92006258d7cc0c76e872fd938031bf8c44d36e"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceController.ResumeStandingService",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "2d7c5ba5188bfd522d695f5f80755e32358d3c5dde2e4a0771725a085018d3b5"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceController.SuspendStandingService",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "aaa056a8cd2805a7994486efc3d1b91064f5c4ae4b6262f8a93975fe75656de5"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceController.admitProcessTransition",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "5db1254b9c4f61bcc31034354ff98be044cf4758a8f5ddc624a93e8cb8bd6d4e"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceController.closeAndDrain",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "6bf62dd2d06247e4f863249ee77807620b1417f383fc0f0f4fa7112e4223e68d"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceController.failClosedAfterReopen",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "9accc097f0068e2012eca9e9ba6cf0203c6bfecc0e5dc6af3bb34ebf7fb8a93c"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceController.mutateStandingService",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "9bb2216fb92e37dfbd918ab4e2c3d362e6b565ded53ecd1150192f8b1ae260f5"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceController.publishActiveService",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "ab8de093d4f02a8d1c707871f066aade9a0cc16db92b82fce6b272e3eb799c39"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceController.restoreAdmission",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "49bc0bfae9c6cfeeb5f6312f5903eb49b06b8a990ecd7102cca42152ad6d7d41"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceTransition.Restore",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "f5d208083332e9458e4e6f87a46fd0f021e1dce6624e91008793cca139869e91"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceTransition.Retire",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "5611ad9e0e66e7fbb4a267da453e4d74e14a04feddf4612bfc33cfba8252a613"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStandingServiceTransition.Wait",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "0905f9431d1b69db48c9c4b2c2a96ede2d003c4c81e62e1433eed1d12cab4e85"
+  },
+  {
+    "owner": "internal/serveapp/main.go::*serveStartupStandingRecoveryOwner.BeginStandingRunRecovery",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "0cfe931aa0350fe6f2282f4a728e649b92df53671d7fdee066a9b93d16675702"
+  },
+  {
+    "owner": "internal/serveapp/main.go::Run",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "c231ad3faf35905e31341120939e934b7e287de894617dfd185f81e111b202a8"
+  },
+  {
+    "owner": "internal/serveapp/main.go::addrString",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "4a931937f9481804f6465554909ba349d755d9d073dcf50e0ba9b6b34977762f"
+  },
+  {
+    "owner": "internal/serveapp/main.go::buildForkChatSandboxLLMRuntimes",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "f67a127303fbdd2c2b2ab4c696fb491272bad7607d252e329d9cc74257740cfe"
+  },
+  {
+    "owner": "internal/serveapp/main.go::buildRuntimeComposition",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "f085db29f5bb1e168c064cb2bd088e5516a1b982017d2ab586754780ee2dcac8"
+  },
+  {
+    "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "d3be0d1f99def888bd599a764b8ca37ecd20f5279dd2f82ee33fb160af81d978"
+  },
+  {
+    "owner": "internal/serveapp/main.go::buildStores",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "a5c23ad66365e6ac34f83981e5a56a6643133c72bed9e42ab596386b6dfa8551"
+  },
+  {
+    "owner": "internal/serveapp/main.go::closeAdditionalServeRuntimeContexts",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "bbde7044cfbc8f19dd83f47fc873612f526ce2f8fc5a828fb852871fb52e4937"
+  },
+  {
+    "owner": "internal/serveapp/main.go::compileServeSourceSetPlan",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "6b44099e3c217d0b16d43f65b1a3f88c6ac013d3efd0aceab0b39e0d29384f66"
+  },
+  {
+    "owner": "internal/serveapp/main.go::conciseOwnershipAge",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "35145c8c4b73d54af5a5b6d7cff636ff66bf0a7357d9ee463e83d7f8c10845de"
+  },
+  {
+    "owner": "internal/serveapp/main.go::configureWorkspaceDataProjection",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "802b85ebeed0e5f853015abb72b60a1e5fb6c63b31048242c4dcb1ed06f04f45"
+  },
+  {
+    "owner": "internal/serveapp/main.go::createServeToolGatewayBinding",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "07f43763b44e13958beb2c331ac4b31935d75c0db06ed351f9f184c69752b6bf"
+  },
+  {
+    "owner": "internal/serveapp/main.go::ensureServeSchemaTables",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "f6b6efc251f3d139f897136640089af0eec4f7e6a133a8ce752d3c590cabe795"
+  },
+  {
+    "owner": "internal/serveapp/main.go::initializeLoadedServeRuntimeStateStores",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "0065074bda3f10fa0c860e3496b081edff424702c2dc2cdc62402508093afaf0"
+  },
+  {
+    "owner": "internal/serveapp/main.go::initializeServePlatformStateStores",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "c079505866fa465869dea229d913f2362ab358dbbaea5daf1988ce61a98a8809"
+  },
+  {
+    "owner": "internal/serveapp/main.go::initializeStateStores",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "6fff865f9541845ec58c63bc58917ac1dede968aca05f0337479a03bce992fd9"
+  },
+  {
+    "owner": "internal/serveapp/main.go::installServeSourceSet",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "aa30940d69b4607a5fff6d66ea459a35143580f32642155a5e5a251d77e99e43"
+  },
+  {
+    "owner": "internal/serveapp/main.go::isLocalListenerHost",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "2e40c3a3b6c99cb20de33a1e10f53a1ba02a05ec16020d08885aae078798d9c7"
+  },
+  {
+    "owner": "internal/serveapp/main.go::loadBudgetRecoveryStageSource",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "87d31f865ff5d43bfb045277273963541e9cab4e7008b97a7d8fd21bda199d8c"
+  },
+  {
+    "owner": "internal/serveapp/main.go::loadServePlatformSpecDocument",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "3e6b65afe48548754a4e4e5344b37d559a9e0d74a567f605ee2f7f4def73fad5"
+  },
+  {
+    "owner": "internal/serveapp/main.go::loadServeRuntimeBundle",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "fc5c93cf238f7d716c4909ed563c241c0a355b333c24e99bb333ad9e2d5baabe"
+  },
+  {
+    "owner": "internal/serveapp/main.go::loadServeRuntimeBundleFromArtifact",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "dd148977f1d00c92907693f6954152232e881c2f94ba64c515b79bf59dfb7fcc"
+  },
+  {
+    "owner": "internal/serveapp/main.go::loadServeRuntimeBundles",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "d9e83dcb31492af325439b1ae23af451ec8f6680363437508d81fd4645e0dd41"
+  },
+  {
+    "owner": "internal/serveapp/main.go::materializeRuntimeBundle",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "5755530ba13174483d927427917f26ebe9b0c0f9f3d322362ab8d766837dd2c4"
+  },
+  {
+    "owner": "internal/serveapp/main.go::newAPIServer",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "6d4b46aa207344e38a247d053dbf80d2619bff1fca5ba2c6db141d364d5ad542"
+  },
+  {
+    "owner": "internal/serveapp/main.go::newServeStartupStandingRecoveryOwner",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "804a1ab1cfd7dbc911f3a6977816cb926f412dd37fca45cdd9ecddf5d70b9de4"
+  },
+  {
+    "owner": "internal/serveapp/main.go::plannedServeRuntimeContexts",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "a70620225a22b1387e793e705dff4eb134aa2b286ba43d475c590ac953b72281"
+  },
+  {
+    "owner": "internal/serveapp/main.go::postgresDSNFromConfig",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "1635f8ce85a6475981da760a33b2d5b305f99bef6e05b139461b20198ae533ec"
+  },
+  {
+    "owner": "internal/serveapp/main.go::prepareLoadedServeSourceArtifact",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "ee54298ce77e1cf69125230ca037205eba61f4b3b27338c4d12b2ec5b7827457"
+  },
+  {
+    "owner": "internal/serveapp/main.go::prepareResetServeRuntimeContexts",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "e8c2a351ec5ee4bdca271333c017c42072f58acf5222abd7c9154f32f2255557"
+  },
+  {
+    "owner": "internal/serveapp/main.go::prepareServeRuntimeContextSet",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "1114fef92ba8fb4622eb0b2ba12b12f36fadd3edb0b2db09980ec326c75c2a1e"
+  },
+  {
+    "owner": "internal/serveapp/main.go::prepareServeRuntimeContexts",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "262e1f7bfc709cf6721545ff5136595e1852ab80e8f95cca6ddbf635c01da8fb"
+  },
+  {
+    "owner": "internal/serveapp/main.go::probeServeHealthEndpoint",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "9a142a16f2948bdc93273479330b7732793912355c9340c963d6957654ff9497"
+  },
+  {
+    "owner": "internal/serveapp/main.go::processOwnedDestructiveResetStore.ApplyDestructiveResetCleanup",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "bc8304600ad4fa3a687fbec4c5e01a48e5624c2a983a1f10e549b09800a31538"
+  },
+  {
+    "owner": "internal/serveapp/main.go::processOwnedHTTPHandler",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "fd2b3703b587ca2bf9d4b6483709e58ce0a92343f7b65fd0b3fa70dfef185164"
+  },
+  {
+    "owner": "internal/serveapp/main.go::reconcileServeRuntimeStandingTargets",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "224327149871c637e267d911cd41126041253a811259744fc7f9cfa38235ede5"
+  },
+  {
+    "owner": "internal/serveapp/main.go::reconcileServeStandingServices",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "9efb72e16089f1b029fec9ae809172d7f990bbd04705c0a6561fb1fd2a848a58"
+  },
+  {
+    "owner": "internal/serveapp/main.go::remainingServeShutdownGrace",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "ba9e47bc56e787235e752d9b4985ffcb89701c4e6f262ab8be73e08687e5d184"
+  },
+  {
+    "owner": "internal/serveapp/main.go::reportServeStandingReadiness",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "b11a273813071818b873b4b7c5fcafbd9f3d75d59c8e2ac9bee2ff92090148e1"
+  },
+  {
+    "owner": "internal/serveapp/main.go::runServeSourceArtifactStartupRecovery",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "2f901d2092ca458f629e59fd6947c18e3e7fa01275687a1e1c5ada19731dea17"
+  },
+  {
+    "owner": "internal/serveapp/main.go::runtimeAdmissionReady",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "cc174f2ff9a932796069cc581c4241b27a6c1e1372c38d478c60a41eaff492a4"
+  },
+  {
+    "owner": "internal/serveapp/main.go::schemaBootstrapRequest",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "4b97f295cd7a7ddda22b1a0e96342e385222121712348784e8f4fefb22a235f8"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveBootBundleLoadDetail",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "1a6d18f9fab1cd0529834a289b7a1f035d4e709789b3911591656e8bd36dccc9"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveBootRegistryDetail",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "f9292437b8d12a00e47f17665cbc44c8602d3511e3b13eabe86a8c157626d2e6"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveCancellationExitCode",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "edcad1704004f4ec12b2ab9c99c67f6aa52f9a1b9827f579fe4fb65af60cb31a"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveConfigLoadDetail",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "848872457b5ec80393133fd5a5cb70df07e61484e953416ad8c41773ffc8a8b3"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveHTTPServer",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "fc9fc8a13f8ffee832c56a8b3d3e544c7cc15cf1021c507e788fd909c3f52cd4"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveHealthProbeBaseURL",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "73273f0e903c36f39cc3c7caeb2151b9881a57bbaa7530a7e9194353ad9ec320"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveLifecyclePackFacts",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "452bb799d729ce053aa3f29f44001d18cda5addaeeae1b9cf9f72bfbb7e22a93"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveLifecycleProjectName",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "7b765710000ddd8800001b9cb25df3ceb0c6b1f040994d9879620d476ee6cd80"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveLifecycleSourceCounts",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "b2143fa504334feeffef4eba5adfefa8e2e9724164eee658e80bf3f42430cb9f"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveLifecycleWorkspaceLabels",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "4ba6e3426375fc4f0721b8709a17958edea63104b64b3e0db42d3cf94673224f"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveListenerHTTPURL",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "f93032b9a926d473ef7c73eeff723a81ebf765ce3399c116f49cebab0b1753ec"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveListenerHTTPURLWithHost",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "73d5804f5924fd8ae30489dee88700eab48d7bd7983c8df73d61680fa1c5458b"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveMCPContainerGatewayURL",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "433e4ff71e703224ed51ac358a6301ca3251857679fff373d054430ed57a00ba"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveOperatorChannelInterfaces",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "1d2435d9cfc2b05cd546ca7e59099b28ed74e137e86bda7c48d9b7e0af332a9e"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveOwnershipAcquisitionError",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "8f7e0b42896a78abcb416489432a34346b435ecfedf313076f96a9e2f8150713"
+  },
+  {
+    "owner": "internal/serveapp/main.go::servePinnedBundleHashes",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "d6b9f863a785397daa5b1e0645b7b2af7c61e3754f06040153d30b1870451cf6"
+  },
+  {
+    "owner": "internal/serveapp/main.go::servePreCatalogPlatformSpecPath",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "271e1082041583536bc5d6ac3a6dc160774e413f45bbf994c8480f77fe2764f7"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveReadyStandingIngress",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "298efa53f7b3edaa7cf748bfcf5bf9e183256662785952192b2e200882217da9"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveRuntimeBundle.serveIdentityDetail",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "1931743be78343f4bee41c361d229f1a2ad4b572392a815b8eb1025ee9f8b49f"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveRuntimeBundleAuthorLabel",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "3c1aaad8cd1a980b2469179bc0e28b28f58e67167fdb1118ac82dbbb4d830534"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveRuntimeBundleIdentitiesDetail",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "04b1d878d94b6f6803d09c90a0d00087dd9ea6ce6b14eaa7689c6b574a08b999"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveRuntimeContextStandingTargets",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "01a0630f1f29f4db05d46aa540172b265343edfa2e58abd98fee364b9489b0cf"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveRuntimeStateStoreSummary",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "a5ed2bb92754a478e90f58d151f61c1a22527d565ee403b064a2bcb50ba4e3ed"
+  },
+  {
+    "owner": "internal/serveapp/main.go::serveStateStoreSummaryAt",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "3bb47af3d05c5f35d2f127891ce1626bc36d71b324965d72129176752ea00925"
+  },
+  {
+    "owner": "internal/serveapp/main.go::shutdownHTTPServer",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "3a8f10bb7f0f8022b6e329b393e9ba6259e893f9c109dcbb5082ac3e6051b350"
+  },
+  {
+    "owner": "internal/serveapp/main.go::splitListenerHostPort",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "fa7f0f8953c8f2b977eb7b75e961d7614cf1473cad0d88e390ca2b202baa0cf9"
+  },
+  {
+    "owner": "internal/serveapp/main.go::startServeOwnershipWatch",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "e37c1c688e6f649a2ae0c74e2b9ffa7c5a7b6341dd232d0612b417c0e42e1e2d"
+  },
+  {
+    "owner": "internal/serveapp/main.go::systemWorkspaceContainers",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "8843f379f9604c06a1a722b486bbaeb170350d297ed4b14af9185f0cbf34a42e"
+  },
+  {
+    "owner": "internal/serveapp/main.go::validateServeGatewayURLEnvForNonDev",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "9a6ed63e94080dd90121df612feca389500399de9c3be95f3ff1d0c21198e836"
+  },
+  {
+    "owner": "internal/serveapp/main.go::validateServeMultiContextToolGatewayAdmission",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "f401ece1ad136c875132205193a5117064df528ae352a032d0bbf2a83ac7f8ff"
+  },
+  {
+    "owner": "internal/serveapp/main.go::waitForServeHealthEndpoints",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "a774f51c979b75b173cdf02738526ab1d918d8759200dd214b392cce24d409f5"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.BeginTx",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "a60a9355cc98a027a01df350e39e4c080fbda55d3c0a2e99d96879c81ab62bf2"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.CapacityReservationsForTest",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "227c7fad8a2c0a2844f34729e5f9d44f8031af507a8ca778c63a5d41901d64a7"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.Close",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "7dd79b6a526fadb2c328064fb709206ba8c46b4a3e571fd4dd3bd93be695c9c7"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.Conn",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "42480d84cb741d01a902f277950e76757500c2627483dc45e0aa68a8e41a42be"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.ConnectionCapacity",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "ad94810d77f326fbb6eba8a4a6e1fd511f82c434c62b22ed5fe41ee1a558875b"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.ConstructionHandle",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "7383b83379daff84701ddd06e587edf61cdab26fcdf8387408f43a72830d2548"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.Exec",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "f9d8410f54abeff100e8cadf0a573681877c3a36ec040413ce268c09c6d1f864"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.ExecContext",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "d115fbc28b8e59bd42f9f5f61c436590126a3ffddcec092295a40901a27be578"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.InstallTransactionProbeForTest",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "a1ff69a4a87f568eca3bc1edc502f2e1e45a0a61fdb8c570e1df3a810f1721ee"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.NewSessionAuthority",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "05608bf636363eecf6954b1c9e48e54630b4885153fc77484a6b0f00c7fb8480"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.Ping",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "79a1ee70c93555e20eb74b8e1f109d2d86d26397cc1efb64817d6398c7d7c17a"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.Query",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "157adf29a947fa54dd1670aba87a82ca5f1a96078d2c326a7f0c8090454cef27"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.QueryContext",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "4427b02d01481007d78a9cdcd0d6a919682ca10d64483d22a68efeb0267348d7"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.QueryRow",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "0c12646284b12de796034bf61d8e64dbe4fc7202c437dea4e2bf948175f36424"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.QueryRowContext",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "da70166b66b6be38ee338f2d8cd79dcd1af050d151ea33dac23fd04a2f6d349a"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.RetainConnectionCapacity",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "f993a1f1f50cc1eb6c0addea8026fb13c9bfb006ee12c0ea1b2810520d895ead"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.Valid",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "b063b5b42be5556fd6f65f2716b1c141f3ab87c73d5003945eacae2b093117c7"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::New",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "45ff1745e25b6fa7481a2c61a24dd3c06b2cbfd45e9e1eef8b95e9f5514a64cd"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::NewWithInspectionConfig",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "b4bf508dda1d38eaf501eee3e8492f2e875e3f44383480f6b30cd4a7a0043e5d"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/backend.go::invalidRow",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "a2ee518d568d5161c6bdccbd3ad0b40f8b3dee1e8f3390435e9c70f48bfb7f94"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/inspection.go::*Backend.InspectSnapshot",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "71e4f7f7c66099499175f8289cef99f713b27e3e7059ebeab58a3144934dd096"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/inspection.go::*Backend.inspectTransaction",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "d9e14a0d129d217aa0ad15b84ee329ff803835b2186d11c9637cfa4255e18a8a"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/inspection.go::*Backend.inspectionSQLContext",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "60bb188395c958f5ded7224f7995d191b82e11873ed9bf4af4400e51786d535d"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/inspection.go::*Backend.inspectionTransaction",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "b02825173c0986db3d3ef7445f704082e5e22283b13eaeedd68d4d796a9da5cc"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/inspection.go::*Backend.refuseInspectionMutation",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "80ba2b5313e07fec792730bfed94850e600962ea32420fc85c1b9bf3ce17218c"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/inspection_io.go::*Backend.withInspectionIO",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "6c868c0af6436d45db952fb3e1cd63cc721e76eab66569bb93d7f01e2cf8a44a"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/inspection_io.go::OpenForInspection",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "934acd92b97a1a2ee4ff0e984aa9520f6e4fca1358099fa505c7b9d248003c26"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*Backend.ObserveAdvisoryLock",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "6dd5a1356ec87c1773024cbd2e221288b4955c2733adcf6e53c2307e16e8d57f"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*Backend.observeAdvisoryLock",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "c33175c88f4920b744902a73f527e800ea8b77941ed5eab8bd81cf59e04b6bc2"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.Dial",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "7564996d1a831e9b4ed366aed555624307ab510a5469a9f5ae5357746280688a"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.DialContext",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "99aa2a7615b9044749da58c4df450b01e3cedc1a96628b3bb7bb0343110691ce"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.DialTimeout",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "9f3480f4f6e7f5617a5cd61ab2f3359f172cacf7c97e5761f979d8b6363e739c"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.bind",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "819bd0c5f324efcbd569d1413e35a32af113e6771d500abbae68f453d74edeb1"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.close",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "8117d5e88f6e65ec3dccfc878232936013dc3bfadfd1e92c98dc9b874aad249a"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.Close",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "eb0832e206ea48f230db869bfde12ead94bb27b3e206c136b332616a7e5869fd"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.Read",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "019729aa85d6f9d8745f06b58c1226eb04bddeeaf5f2e08574e4a6569ef91777"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.SetDeadline",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "cb8a53ee9ebdb91cde868cb3977c08bdb8fe9e6bedda22387f07b37f61f227b3"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.Write",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "f47e7fc87b13c33b5d5bc35ed220fa7ba1d772e2413ecaa1996119db14b967f8"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.bound",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "4d4eff6615106dd498852683866e6b375512a9fdb0620b78a49948eb3dec1db8"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::observationContextError",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "cc43f947a6538fe8fb3d357a347deaaab28cb9f326e2db08db33511510366360"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunReadTransaction",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "0e85755a12441bf779ac96db3913a941f8fea1663cf4e8887b3fb88c73ed5392"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunTransaction",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "fe17fe0e43e57642d80424662c1356e55ec00a7c2d5c452a4cfca045665f0727"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunTransactionOutcome",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "eee8da137edad68c012dd1b12d632333ec9048673b1ab74d84edfc79b87ce906"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunTransactionWithOptions",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "d33e312108320e17d1b130013034703d0e9db76341db83a43fcb9084473058c0"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunTransactionWithOptionsOutcome",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "8907f100c3781d1f2ee05d8b2a537a33ffb53176be837dcf7f19599781d44066"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "615bfdd34f3806b5faf55dafdc203d0ba4ab5d4b851a1950e3db18324505a284"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.ListSelectedForkRecoveryEntries",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "9422250c7a479a0b0838686534ea1449898ab405098228ccd50ebabfe7d198c0"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.RecoverSelectedFork",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "281d155296c993e39d1d644d9a286cb2bac5b0ed8e79dcd2e254ce638fa0aa2b"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkSQLiteOwner.ListSelectedForkRecoveryEntries",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "1db1b29ae17568a61dce099e97329c02061e9e79819733cd73a65b154aedc73d"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkSQLiteOwner.RecoverSelectedFork",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "f192a0e221ab2795c5c92e4f4757bc81cdcfbfc296d7881fcedfa6182db01297"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::admitSelectedRecoveryTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "f43f6854de2bf026d810e1c79f16f035760cbf800b903d79e38d033c1424f5ff"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::listSelectedForkRecoveryEntries",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "3fd95d54c67216c35209a1558bb6439e86f8a0b94d0f545a03e92f1781e12dab"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::loadSelectedRecoveryRecordTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "e025cc5b1191678c3f170c14e24081bffee67741d970c9e3a44164e546d1e98d"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::planSelectedRecoveryTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "3dfdec59cde9b0ec0ff6903c3dc12275c4daf421e4236005b95507d7077556b5"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverSelectedForkTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "284515ef157f160924eca16188d2093d8054d2d87c4fa250cb1cd2061951a373"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::sameSelectedForkPointIdentity",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "cbab63fc6cf5922fd40b383b7ff4adf9915f1112bc6b7000faba2bc8bb642585"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedFiniteFeedRecoveryOperationTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "6f85959c468dc5aea2dde1f2b8167354cb7d8eb48bc504d2fd88fbac274dbc46"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedFiniteFeedRecoveryPinsTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "082b88f90a6de0bf3c281827822aa05bb4b4109d0743ec1bea62d3a536e72fda"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedFiniteFeedRecoveryTopologiesTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "b3ac4a7d4957ad321d466b8da97b24a70fd4d731a4672a8ac173e291dd018861"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkActivatedOperationTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "fe1633ba1c250edcb694a60b47e266c4988dc429e5e231af988bf78b07849fba"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkActiveEffectsTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "6b88028f5b198e20569eacc3160f3afe976297128abf76a72872d329305c0cdb"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkOperationForRecoveryTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "6081fed1a66d2a3ff8c12d87895aa9d00d5d75e53fbb9dc40096505634f5c760"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::settleInterruptedSelectedFiniteFeedOperationTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "5fae9a8a1aeea7111d7fa48e3283c32566e6974805d9511e3677bfbba66ce0f8"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::settledSelectedRecoveryTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "e48e20e26788193cd9aa90b72b31082f3ef845f87966c39ea00513268b1b0c53"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery_inspection.go::*RunForkPostgresOwner.InspectSelectedForkRecovery",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "9a23d4de93f65e3c7ce2e3b3d72b15f3b26e3d379b8bdcd0ebe9d95bf369e994"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery_inspection.go::*RunForkSQLiteOwner.InspectSelectedForkRecovery",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "43060c1ec863860d4c2096d7f844cf9a9c90b1ef836059fe6616be1340927092"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery_inspection.go::inspectSelectedRecoveryTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "f62b0f5cbe1cdd5c3feeeb972abbefb8cbcc8eb6981458786ee31d5cc855c36d"
+  },
+  {
+    "owner": "internal/store/internal/startupownership/possession_observation.go::*StartupPostgresOwner.ProbePossession",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "9e79df8776408edb1d1f22de9800be6e66e6ff8650f05fff86d6fb8727b76d02"
+  },
+  {
+    "owner": "internal/store/internal/startupownership/possession_observation.go::*StartupSQLiteOwner.ProbePossession",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24",
+    "body_sha256": "5fa3d579fe0a841a35b0c1480d3ca18647067b72c2fd81a5960b8901d6a26365"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionInspection.Close",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "c004716bf6d5f13df5a0f71007523c75d72ed0ca392e4cfc9975b051d95772c7"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionInspection.Inspect",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "9b5db941c3062f36a5d3d0c96b82029315a5caba6d4d8d61afb963c1402081ad"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionInspection.ProbePossession",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "03bbf89dcf8181189b86cff98fd44616769f14f439dcf9fa60c6bc6cec075cd0"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ActiveNonStandingRunBundleAvailabilities",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "7f2aa2cb27676ead8021c2ff4d6d42fa0c6cbcc426c77a5773bdfc046b6bf21b"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.GetSourceArtifact",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "7733ffec6ae4eda64f924f331eb1ca301ee8d88f2afc022f51ce73b98a8b6d9c"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.GlobalWorkPresence",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "e7113327d68b41660ea524be9c93618f53edd564c9e8e19610e5c907199b36b1"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectAuthority",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "6aff13413234c74fce92f18c32ff99e149ba5418791ae0d5c16552aebe5d08bd"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectDeliveryRecovery",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "e9c82dfb532e3bec460090e3ee2c76d15fce0e81501c76fd217091ebfcf47f3e"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectDynamicFlowRuntimeReadinessForSource",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "b8122f466b411b1019cd0ff70d8979475c299eab96f932b223723f863379ba59"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectSelectedForkRecovery",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "0b8cf9793c3206330dde6a9aca47ba5bb3354a2b079aed8399795899e87f1a42"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListActiveAgentDescriptors",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "cfca0e0ad368c814c46af604cccf675a8fb81621b2925f5fff1708647df32c1b"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListChannelOnboardingOperations",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "2c7b6126b78f7590f581df15e0c74bff4a1154adb7a879ab9da01cbe89455f9c"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListChannelTeardowns",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "daf1048d0a7627a598384212dbc54633463d3ff76dff8599c04d6bb9e1ec2fe3"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListCurrentConnectedChannelActivations",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "164932929b3ce42d628955a9bfc8792eed5cb0022eea24221322b6149abfe23f"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListFlowInstanceRoutes",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "aa78080ee154819c785777b9b17bad85f71d5ff49811096d5fc44e4f5c786b25"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListSelectedContractRouteRecoveryRecords",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "7662c6579ca83ccf49c6b06d0785f98ec217b566dc21f0f0374449c65cc41906"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListSelectedForkRecoveryEntries",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "92e9ce3b38e1be4b69229284dafda4f4230ddddec4025d24ebaf941d5bb5dcca"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.LoadAgents",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "57ece53698dd64d83f3503a03232c1df59ed8880b0d4f500805ff6ae9b89b59a"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.LoadRunBundleAvailability",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "278a0b430e52aa272d10f17ad1cbd32ab41abe71b4b731acdddb63fa3c3e591f"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ObserveOrdinaryRunSource",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "2796885dedf0570c11213fbdba4efe6c63c019f1bda270d631f68545a24da42f"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.PendingResetOperations",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "e1362d07bab084a512443c285addfef991911c6b1f2ca95113aebb9438f2df6f"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ReadResetInventory",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "a7e03a074d1ab0211e5fbbad5b4e4fe9b89e7e23087495a4c23d6d12f49446d5"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ReadTimerObligations",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "53107af5e868f8cac993af234c49cafeeb945c9b35663d283d23728e1562593b"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.RequiresSchemaPreparation",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "998713c3e21de1055ba537865c5df5582387819d2ae6fc878d84666410c0e0ce"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.StandingRunRestartDisposition",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "1344d8b632634cfdb487cd4261780ede76318b24d45670398cdd3ac035abfcf3"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.readContext",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "50e25588eabe95256dfde58a048ad8cdb5aa1dba09c9629ac82ccccb02bab27a"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::OpenAdmissionInspection",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "26f29c03fa8d4b382f5c2525e4c4b4b6027ec43a53e68d1beefb3cdd627cfb4d"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::openInspectionStore",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "de436ce0bcef10acffa79e5bf6d6753cf7cf8cc07fef63d4d95a6a5b029ca27b"
+  }
+]

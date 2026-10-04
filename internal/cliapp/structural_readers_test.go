@@ -18,7 +18,7 @@ func TestStructuralReadersShareAdmittedSource(t *testing.T) {
 	t.Setenv("SWARM_CREDENTIALS_FILE", t.TempDir())
 	t.Setenv("SWARM_MANAGED_CREDENTIALS_FILE", t.TempDir())
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	for _, command := range [][]string{{"verify"}, {"describe"}, {"describe", "--graph"}, {"describe", "routes"}} {
+	for _, command := range [][]string{{"verify", "--portable"}, {"describe"}, {"describe", "--graph"}, {"describe", "routes"}} {
 		t.Run(strings.Join(command, " "), func(t *testing.T) {
 			args := append(append([]string(nil), command...), root, "--json")
 			var out, errOut bytes.Buffer
@@ -70,7 +70,7 @@ func TestStructuralReadersRetainPostBootInvalidity(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	root := canonicalrouting.CopyVerifyLintEvidence(t, true)
 	configPath := writeTestVerifyRuntimeConfig(t)
-	for _, command := range [][]string{{"verify"}, {"describe"}, {"describe", "--graph"}} {
+	for _, command := range [][]string{{"verify", "--portable"}, {"describe"}, {"describe", "--graph"}} {
 		t.Run(strings.Join(command, " "), func(t *testing.T) {
 			args := append(append([]string(nil), command...), root, "--config", configPath, "--json")
 			var out, errOut bytes.Buffer

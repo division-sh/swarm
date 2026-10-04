@@ -589,17 +589,7 @@ func (m *DockerManager) ValidateSource(ctx context.Context, source semanticview.
 	if err := m.validateSharedMounts(ctx); err != nil {
 		return err
 	}
-	classes, err := workspaceClassesForSource(source)
-	if err != nil {
-		return err
-	}
-	if err := validateAgentWorkspaceClasses(source, classes); err != nil {
-		return err
-	}
-	if strings.TrimSpace(m.cfg.WorkspaceImage) == "" {
-		return fmt.Errorf("workspace validation failed: workspace image is required")
-	}
-	return nil
+	return ValidateDockerSourceAdmission(m.cfg, source)
 }
 
 func (m *DockerManager) EnsurePrereqs(ctx context.Context) error {
@@ -708,28 +698,7 @@ func (m *DockerManager) ResolveWorkspaceForCapabilityAdmission(_ context.Context
 	if _, err := m.standardMountArgs(); err != nil {
 		return nil, err
 	}
-	class, err := m.workspaceClass(actor)
-	if err != nil {
-		return nil, err
-	}
-	container := strings.TrimSpace(m.cfg.SystemContainer)
-	workdir := strings.TrimSpace(m.cfg.SystemWorkdir)
-	switch workspaceRouteClass(class) {
-	case "scaffold":
-		container = strings.TrimSpace(m.cfg.ScaffoldContainer)
-		workdir = strings.TrimSpace(m.cfg.ScaffoldWorkdir)
-	case "system":
-	default:
-		if _, err := workspaceScopeForCapabilityAdmission(m.semanticSource(), actor); err != nil {
-			return nil, err
-		}
-	}
-	return &Target{
-		Container: container,
-		Workdir:   workdir,
-		Backend:   BackendDocker,
-		Mounts:    dockerExecutionMounts(m.cfg, false),
-	}, nil
+	return DockerCapabilityTarget(m.cfg, m.semanticSource(), actor)
 }
 
 func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.AgentConfig, materializeData bool) (*Target, error) {
@@ -1060,7 +1029,11 @@ func (m *DockerManager) standardMountArgs() ([]string, error) {
 }
 
 func (m *DockerManager) ensureDockerAvailable(ctx context.Context) error {
-	if _, err := m.RunDocker(ctx, "version", "--format", "{{.Server.Version}}"); err != nil {
+	return m.checkDockerAvailable(ctx, m.RunDocker)
+}
+
+func (m *DockerManager) checkDockerAvailable(ctx context.Context, run func(context.Context, ...string) (string, error)) error {
+	if _, err := run(ctx, "version", "--format", "{{.Server.Version}}"); err != nil {
 		return &PrerequisiteError{
 			Problem:     fmt.Sprintf("Docker is not reachable via %q", m.DockerBin()),
 			Remediation: fmt.Sprintf("Start the Docker daemon, then verify with `%s`", DockerInfoCommand(m.DockerBin())),
@@ -1075,7 +1048,11 @@ func (m *DockerManager) ensureWorkspaceNetwork(ctx context.Context) error {
 	if network == "" {
 		return nil
 	}
-	if _, err := m.RunDocker(ctx, "network", "inspect", network); err == nil {
+	present, err := m.InspectWorkspaceNetwork(ctx)
+	if err != nil {
+		return fmt.Errorf("workspace prerequisite failed: inspect network %s: %w", network, err)
+	}
+	if present {
 		return nil
 	}
 	if _, err := m.RunDocker(ctx, "network", "create", network); err != nil {
@@ -1103,8 +1080,8 @@ func (m *DockerManager) ensureWorkspaceImage(ctx context.Context) error {
 }
 
 func (m *DockerManager) validateSharedMounts(ctx context.Context) error {
-	if strings.TrimSpace(m.cfg.WorkspaceVolumesFrom) != "" || strings.TrimSpace(m.cfg.SharedDataSource) != "" {
-		return fmt.Errorf("workspace.data_source and workspace.volumes_from are unsupported")
+	if err := validateDockerMountAdmission(m.cfg); err != nil {
+		return err
 	}
 	_, err := validateSourceProjection(m.cfg.SourceProjection, m.cfg.BundleHash)
 	return err

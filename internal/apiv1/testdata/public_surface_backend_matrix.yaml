@@ -56,6 +56,12 @@ store_parity:
       semantic_owner: internal/runtime/startupownership maintenance through internal/store/selected
       proof_ids: [authority-repair-parity, authority-maintenance-sqlite]
       close_proof_ids: [authority-maintenance-close]
+    - id: admission_inspection
+      constructor: OpenAdmissionInspection
+      consumers: [internal/cliapp/verify_deployment_store.go]
+      semantic_owner: internal/store/selected.AdmissionInspection and existing canonical domain readers
+      proof_ids: [admission-inspection-parity, admission-possession-public-parity]
+      close_proof_ids: [admission-inspection-parity, admission-inspection-transport-close]
   different_construction:
     runtime_deps: [Config, Options, StartupGrant]
   composite_owners:
@@ -132,6 +138,25 @@ store_parity:
       purpose_ids: [authority_inspection]
       capabilities: [{claim_id: startup_authority, risk_dimensions: [selected_construction]}]
     - {id: authority-inspection-close, kind: go_test, name: TestAuthorityInspectionPropagatesOperationAndCloseErrors, path: internal/cliapp/store_authority_test.go, profile: core, purpose_ids: [authority_inspection]}
+    - id: admission-inspection-parity
+      kind: go_test
+      name: TestAdmissionInspectionRealReadScopeBothStores
+      path: internal/store/selected/admission_test.go
+      profile: core
+      backends: [default_sqlite, explicit_postgres]
+      required_children: [sqlite, postgres]
+      purpose_ids: [admission_inspection]
+      capabilities: [{claim_id: startup_authority, risk_dimensions: [selected_construction, fail_closed]}]
+    - id: admission-possession-public-parity
+      kind: go_test
+      name: TestVerifyPossessionPublicFormatsAndPortableBothStores
+      path: internal/cliapp/verify_possession_test.go
+      profile: core
+      backends: [default_sqlite, explicit_postgres]
+      required_children: [sqlite, postgres]
+      purpose_ids: [admission_inspection]
+      capabilities: [{claim_id: startup_authority, risk_dimensions: [selected_construction, fail_closed]}]
+    - {id: admission-inspection-transport-close, kind: go_test, name: TestAdmissionInspectionBoundsSilentPostgresHandshake, path: internal/store/selected/admission_transport_test.go, profile: core, purpose_ids: [admission_inspection]}
     - id: authority-repair-parity
       kind: go_test
       name: TestAuthorityRepairParity
@@ -458,12 +483,12 @@ store_parity:
       public_methods: [conversation.fork, conversation.fork_chat, conversation.fork_delete, conversation.fork_list, conversation.fork_view, conversation.get_turn, conversation.list, conversation.list_turns]
     - id: startup_authority
       semantic_owners: [internal/runtime/startupownership, internal/store/selected authority purposes]
-      selected_purposes: [authority_inspection, authority_maintenance]
+      selected_purposes: [authority_inspection, authority_maintenance, admission_inspection]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#agent_topology_authority]
       risk_dimensions: [selected_construction, restart, forced_death, fail_closed, dev_forced_restart_abandonment]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [selected_construction, fail_closed], proof_ids: [authority-repair-parity, authority-inspection-sqlite, authority-inspection-postgres]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [selected_construction, fail_closed], proof_ids: [authority-repair-parity, authority-inspection-sqlite, authority-inspection-postgres, admission-inspection-parity, admission-possession-public-parity]}
         - {role: risk_proof, risk_dimensions: [restart, forced_death], proof_ids: [golden-forced-restart]}
         - {role: risk_split, risk_dimensions: [dev_forced_restart_abandonment], proof_ids: [dev-restart-abandonment-2364]}
       required_ports: [startupOwnership]

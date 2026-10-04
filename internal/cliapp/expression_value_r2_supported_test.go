@@ -36,7 +36,7 @@ func TestVerifyCommandR2LiteralEmitUsesDestinationSchema(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 			if (code == 0) != tc.wantOK {
 				t.Fatalf("verify code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -91,7 +91,7 @@ func TestVerifyCommandR2RecursiveRecordUsesNamedDestination(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 			if (code == 0) != tc.wantOK {
 				t.Fatalf("verify code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -148,7 +148,7 @@ func TestVerifyCommandR2ConstructorAndCommentCrossProduct(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 			if (code == 0) != tc.valid {
 				t.Fatalf("verify code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}

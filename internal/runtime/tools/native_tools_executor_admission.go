@@ -7,6 +7,7 @@ import (
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 )
 
 func (e *Executor) ValidateNativeToolCapabilityAdmission(ctx context.Context, actor models.AgentConfig) error {
@@ -40,11 +41,15 @@ func (e *Executor) nativeToolAdmissionOptions(actor models.AgentConfig) (models.
 	if err != nil {
 		return actor, NativeToolAdmissionOptions{}, err
 	}
+	contract, err := llm.RequireProviderContract(resolved.Selection.Profile.RuntimeMode, resolved.Runtime)
+	if err != nil {
+		return actor, NativeToolAdmissionOptions{}, err
+	}
 	return resolved.Actor, NativeToolAdmissionOptions{
-		Runtime:     resolved.Runtime,
-		Credentials: credentials,
-		Source:      source,
-		Workspaces:  workspaces,
+		ProviderContract: contract,
+		Credentials:      credentials,
+		Source:           source,
+		Workspaces:       workspaces,
 	}, nil
 }
 
@@ -62,7 +67,15 @@ func (e *Executor) nativeToolAdmissionForTool(ctx context.Context, actor models.
 	if err != nil {
 		return false, err.Error()
 	}
-	for _, decision := range NativeToolAdmissionDecisions(ctx, resolvedActor, opts) {
+	return nativeToolAdmissionForTool(ctx, resolvedActor, toolName, opts, workspaceResolutionExecution)
+}
+
+func nativeToolAdmissionForTool(ctx context.Context, actor models.AgentConfig, toolName string, opts NativeToolAdmissionOptions, purpose workspaceResolutionPurpose) (bool, string) {
+	toolName = normalizeNativeToolName(strings.TrimSpace(toolName))
+	if !isNativeFallbackToolName(toolName) {
+		return true, ""
+	}
+	for _, decision := range nativeToolAdmissionDecisions(ctx, actor, opts, purpose) {
 		for _, name := range decision.ToolNames {
 			if normalizeNativeToolName(name) != toolName {
 				continue

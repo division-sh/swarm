@@ -13,6 +13,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
@@ -358,6 +359,7 @@ func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitt
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
+		Credentials:                    testProviderCredentialStore(t, "provider_token", "test-provider-token"),
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -454,6 +456,7 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 		},
 	}
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
+		Credentials:                    testProviderCredentialStore(t, "telegram_bot_token", "test-telegram-token"),
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -517,6 +520,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
+		ManagedCredentials:             runtimemanagedcredentials.NewMemoryStore(),
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -722,6 +726,8 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 				},
 			}
 			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
+				Credentials:                    testProviderCredentialStore(t, "provider_token", "test-provider-token"),
+				ManagedCredentials:             runtimemanagedcredentials.NewMemoryStore(),
 				ExecutionPosture:               executionposture.Live,
 				CheckMCPReachable:              false,
 				StrictEmitSchemas:              false,

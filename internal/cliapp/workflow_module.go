@@ -48,6 +48,10 @@ func loadConfiguredCLIWorkflowModule(repoRoot string, opts CLISourcePlatformSpec
 	if err != nil {
 		return nil, nil, CLISourcePlatformSpecPaths{}, err
 	}
+	return loadCLIWorkflowModuleWithRuntimeConfig(repoRoot, opts, cfgResult)
+}
+
+func loadCLIWorkflowModuleWithRuntimeConfig(repoRoot string, opts CLISourcePlatformSpecPathOptions, cfgResult RuntimeConfigLoadResult) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, CLISourcePlatformSpecPaths, error) {
 	paths, err := resolveCLISourcePlatformSpecPathsFromConfig(repoRoot, opts, cfgResult.cli)
 	if err != nil {
 		return nil, nil, CLISourcePlatformSpecPaths{}, err

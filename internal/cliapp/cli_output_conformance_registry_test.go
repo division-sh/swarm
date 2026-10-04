@@ -40,7 +40,7 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm import":            {Constructor: "newImportPackCommand", Runner: "newImportPackCommand"},
 	"swarm packs list":        {Constructor: "newPacksListCommand", Runner: "newPacksListCommand"},
 	"swarm packs show":        {Constructor: "newPacksShowCommand", Runner: "newPacksShowCommand"},
-	"swarm verify":            {Constructor: "newVerifyCommand", Runner: "runVerifyCommandWithOutput"},
+	"swarm verify":            {Constructor: "newVerifyCommand", Runner: "renderVerifyCommandResult"},
 	"swarm run list":          {Constructor: "newRunsCommand", Runner: "runDiagnosticRunListCommand"},
 	"swarm run fan-out list":  {Constructor: "newRunFanOutCommand", Runner: "newRunFanOutCommand"},
 	"swarm run status":        {Constructor: "newStatusCommand", Runner: "runDiagnosticRunCommand"},
@@ -434,6 +434,9 @@ func cliOutputAbsentCommandRows(t *testing.T) []string {
 func TestCLIOutputConformanceSharedRowsConsumeSharedOwner(t *testing.T) {
 	rows := cliOutputConformanceRegistryRows(t)
 	calls := cliOutputFunctionCalls(t)
+	if !calls["runVerifyCommandWithOutput"]["renderVerifyCommandResult"] || !calls["renderVerifyAdmissionRefusal"]["renderVerifyCommandResult"] {
+		t.Error("verify success and refusal must consume the shared command-result renderer")
+	}
 	for command, row := range rows {
 		proof, hasProof := cliOutputSharedOwnerProofs[command]
 		if row.Classification == "shared_output" {
@@ -710,7 +713,7 @@ func cliOutputFunctionCalls(t *testing.T) map[string]map[string]bool {
 					return true
 				}
 				switch ident.Name {
-				case "bindCLIOutputFlags", "renderCLIOutput", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState", "writeCLILabeledDetail":
+				case "bindCLIOutputFlags", "renderCLIOutput", "renderVerifyCommandResult", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState", "writeCLILabeledDetail":
 					calls[fn.Name.Name][ident.Name] = true
 				}
 				return true

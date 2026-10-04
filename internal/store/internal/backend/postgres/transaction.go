@@ -34,11 +34,25 @@ func (b *Backend) RunTransactionWithOptionsOutcome(ctx context.Context, opts *sq
 
 // RunReadTransaction owns one caller-scoped, transactionally consistent read.
 func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+	if tx, err := b.inspectionTransaction(ctx); err != nil {
+		return err
+	} else if tx != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if operation == nil {
+			return nil
+		}
+		return errors.Join(operation(b.inspectionSQLContext(ctx), tx), ctx.Err())
+	}
 	_, err := b.runTransactionOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, false, operation)
 	return err
 }
 
 func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions, drain bool, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+	if err := b.refuseInspectionMutation(ctx); err != nil {
+		return false, err
+	}
 	if !b.Valid() {
 		return false, fmt.Errorf("postgres backend is required")
 	}

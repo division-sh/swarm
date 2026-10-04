@@ -57,7 +57,6 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
-	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -701,7 +700,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(1, "serve_admission", fmt.Errorf("--no-feed requires --dev"))
 		return 2
 	}
-	publicIngressMode, publicIngressEnabled, err := resolveServePublicIngressMode(opts)
+	publicIngressMode, publicIngressEnabled, err := cliapp.ResolveServePublicIngressMode(opts)
 	if err != nil {
 		presenter.fail(1, "serve_admission", err)
 		return 2
@@ -728,7 +727,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(2, "config_load", err)
 		return 1
 	}
-	if err := validateServeAPIAuthBinding(opts.APIListenAddr, apiAuth); err != nil {
+	if err := cliapp.ValidateServeAPIAuthBinding(opts.APIListenAddr, apiAuth); err != nil {
 		presenter.fail(2, "config_load", err)
 		return 1
 	}
@@ -1357,7 +1356,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return exitCode
 		}
 	}
-	if err := enforceServePinnedBundleAdmissionForHashes(ctx, stores.RunBundleAvailability(), serveRuntimeBundleIdentitiesDetail(loadedBundles), pinnedBundleHashes); err != nil {
+	if err := runbundle.AdmitPinnedSources(ctx, stores.RunBundleAvailability(), serveRuntimeBundleIdentitiesDetail(loadedBundles), pinnedBundleHashes); err != nil {
 		presenter.fail(5, "pinned_bundle_admission", err)
 		return 3
 	}
@@ -2483,7 +2482,7 @@ func runServeSourceArtifactStartupRecovery(
 	artifacts runtimestartuprecovery.ArtifactReader,
 	presenter *serveLifecyclePresenter,
 ) int {
-	_, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
+	_, err := runtimestartuprecovery.Inspect(ctx, runtimestartuprecovery.Request{
 		AvailabilityReader: recoveryStore.Availability(),
 		ArtifactReader:     artifacts,
 	})
@@ -2757,74 +2756,6 @@ func postgresDSNFromConfig(ctx context.Context, cfg config.DatabaseConfig) (stri
 	return store.DSNFromConfig(cfg, password), nil
 }
 
-func enforceServePinnedBundleAdmissionForHashes(ctx context.Context, availability runbundle.AvailabilityStore, bootIdentity string, pinnedBundleHashes []string) error {
-	bootIdentity = strings.TrimSpace(bootIdentity)
-	pinnedBundleHashes = uniqueTrimmedServeBundleHashes(pinnedBundleHashes)
-	if len(pinnedBundleHashes) == 0 {
-		return nil
-	}
-	if bootIdentity == "" {
-		return fmt.Errorf("boot bundle identity is required")
-	}
-	if availability == nil {
-		return nil
-	}
-	mismatches, err := activeNonStandingRunPinnedBundleHashesConflicts(ctx, availability, pinnedBundleHashes)
-	if err != nil {
-		return err
-	}
-	if len(mismatches) == 0 {
-		return nil
-	}
-	details := make([]string, 0, len(mismatches))
-	for _, mismatch := range mismatches {
-		details = append(details, mismatch.DetailString())
-	}
-	return fmt.Errorf("active non-standing run pinned bundle_hash conflict: DB-loaded serve bundle_hash set %s cannot resume %d active non-standing run(s) with different bundle_hash: %s", strings.Join(pinnedBundleHashes, ","), len(mismatches), strings.Join(details, "; "))
-}
-
-func activeNonStandingRunPinnedBundleHashesConflicts(ctx context.Context, availability runbundle.AvailabilityStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
-	allowed := map[string]struct{}{}
-	for _, hash := range uniqueTrimmedServeBundleHashes(pinnedBundleHashes) {
-		allowed[hash] = struct{}{}
-	}
-	if len(allowed) == 0 {
-		return nil, nil
-	}
-	availabilities, err := availability.ActiveNonStandingRunBundleAvailabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	conflicts := make([]runbundle.Availability, 0, len(availabilities))
-	for _, availability := range availabilities {
-		if !availability.Available() {
-			continue
-		}
-		if _, ok := allowed[strings.TrimSpace(availability.BundleHash)]; !ok {
-			conflicts = append(conflicts, availability)
-		}
-	}
-	return conflicts, nil
-}
-
-func uniqueTrimmedServeBundleHashes(values []string) []string {
-	seen := map[string]struct{}{}
-	out := []string{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
-}
-
 func initializeStateStores(ctx context.Context, schema store.SchemaBootstrapper, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
 	if bundle == nil {
 		return "store wiring ready", nil
@@ -2875,19 +2806,7 @@ func initializeLoadedServeRuntimeStateStores(ctx context.Context, schema store.S
 }
 
 func schemaBootstrapRequest(spec runtimecontracts.PlatformSpecDocument, platformPlans, statePlans []store.SchemaTableDDL) (store.SchemaBootstrapRequest, error) {
-	metadata, err := versionmetadata.Resolve(cliapp.InjectedBuildMetadata())
-	if err != nil {
-		return store.SchemaBootstrapRequest{}, fmt.Errorf("resolve schema bootstrap build identity: %w", err)
-	}
-	return store.SchemaBootstrapRequest{
-		PlatformPlans: platformPlans,
-		StatePlans:    statePlans,
-		Origin: store.RuntimeStoreOrigin{
-			SwarmVersion:    metadata.BinaryVersion,
-			PlatformVersion: strings.TrimSpace(spec.Platform.Version),
-			CreatedAt:       time.Now().UTC(),
-		},
-	}, nil
+	return cliapp.SchemaBootstrapRequest(spec, platformPlans, statePlans)
 }
 
 func ensureServeSchemaTables(ctx context.Context, schema store.SchemaBootstrapper, request store.SchemaBootstrapRequest) error {
@@ -3015,23 +2934,6 @@ func runtimeAdmissionReady(ready serveReadiness) bool {
 		return runtimeReady.RuntimeLoad()
 	}
 	return ready.Load()
-}
-
-func validateServeAPIAuthBinding(apiListenAddr string, auth apiv1.AuthTokenResolution) error {
-	if !auth.UsesDefaultLoopbackToken() {
-		return nil
-	}
-	if err := cliapp.ValidateServeListenAddr("--api-listen-addr", apiListenAddr); err != nil {
-		return err
-	}
-	host, _, err := net.SplitHostPort(strings.TrimSpace(apiListenAddr))
-	if err != nil {
-		return fmt.Errorf("--api-listen-addr must be a host:port listen address: %w", err)
-	}
-	if apiv1.DefaultLoopbackAPITokenAllowedHost(host) {
-		return nil
-	}
-	return fmt.Errorf("non-loopback API bind %s requires --api-token-file or config serve.api_token_file", strings.TrimSpace(apiListenAddr))
 }
 
 func serveHTTPServer(name string, server *http.Server, listener net.Listener, onFailure func(string, error)) {

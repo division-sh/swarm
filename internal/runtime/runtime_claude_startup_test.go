@@ -217,6 +217,7 @@ func TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRec
 	}
 
 	opts.ToolGatewayBinding = testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token")
+	opts.ProviderCredentials = testProviderCredentialStore(t, "", "")
 	err = validateClaudeStartupConfigForActiveAgents(testAuthorActivityContext(context.Background()), cfg, opts, claudeStartupAgentFreeSource(), manager)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
@@ -798,7 +799,7 @@ func TestValidateManagedProviderPreflightFailsClosedWhenLiveClaudeRuntimeLacksSt
 func TestClaudeStartupCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 	source := ambiguousScopedClaudeStartupSource(t)
 	cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}}
-	err := validateSelectedBackendModelAliasesForDeclaredAgents(executionposture.Live, cfg, source)
+	err := ValidateDeclaredAgentModelAdmission(executionposture.Live, cfg, source)
 	if err == nil || !strings.Contains(err.Error(), "flow packages/project-a agent shared-worker") || !strings.Contains(err.Error(), "missing-live-alias") {
 		t.Fatalf("model alias validation error = %v, want hidden scoped declaration", err)
 	}

@@ -2,24 +2,30 @@ package bootverify
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
+	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type Finding struct {
-	CheckID     string
-	Severity    string
-	Message     string
-	Location    string
-	Remediation string
-	Evidence    []string
+	CheckID      string
+	Severity     string
+	Message      string
+	Location     string
+	Remediation  string
+	Evidence     []string
+	FailureClass failures.Class
 }
 
 const (
@@ -151,7 +157,23 @@ func NewHardInvalidityFinding(checkID, location, message, remediation string, ev
 }
 
 type Report struct {
-	Findings []Finding
+	Findings             []Finding
+	Purpose              ValidationPurpose
+	Observations         []AdmissionObservation
+	ExecutionObligations []AdmissionExecutionObligation
+	Interrupted          bool
+	SourceArtifactHash   string
+	mcpTools             map[string]runtimemcp.DiscoveredTool
+	mcpObservation       *AdmissionObservation
+}
+
+// DiscoveredToolAdmission returns only the catalog from this completed
+// observation. Failed or skipped discovery cannot masquerade as an empty one.
+func (r Report) DiscoveredToolAdmission() (map[string]runtimemcp.DiscoveredTool, error) {
+	if r.mcpObservation == nil || (r.mcpObservation.Status != AdmissionPassed && r.mcpObservation.Status != AdmissionNotApplicable) {
+		return nil, fmt.Errorf("required MCP catalog observation did not complete")
+	}
+	return maps.Clone(r.mcpTools), nil
 }
 
 type Options struct {
@@ -161,6 +183,7 @@ type Options struct {
 	ManagedCredentials      runtimemanagedcredentials.Store
 	EffectReachability      SourceBootEffectReachability
 	CheckMCPReachable       bool
+	MCPDiscoveryTimeout     time.Duration
 	ValidateModelResolution bool
 	LLMProfile              llmselection.Profile
 	ModelAliases            llmselection.ModelAliases
@@ -180,9 +203,11 @@ func (p ValidationPurpose) Valid() bool {
 }
 
 func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
-	report := Report{}
+	report := Report{Purpose: opts.Purpose}
 	if !opts.Purpose.Valid() {
 		report.Add(NewHardInvalidityFinding("workflow_contract_validation", "global", "invalid validation purpose", "Select structural validation or execution admission."))
+		report.BlockRegisteredChecks("selected_source", "workflow_contract_validation", "invalid validation purpose prevents check execution")
+		report.Interrupted = errors.Is(ctx.Err(), context.Canceled)
 		return report
 	}
 	if source == nil {
@@ -192,18 +217,24 @@ func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
 			Message:  "semantic source is not configured",
 			Location: "global",
 		})
+		report.BlockRegisteredChecks("selected_source", "workflow_contract_validation", "semantic source admission has not succeeded")
+		report.Interrupted = errors.Is(ctx.Err(), context.Canceled)
 		return report
 	}
 	checkCtx := newCheckerContext(ctx, source, opts)
+	if bundle, ok := semanticview.Bundle(source); ok && bundle.SourceArtifact != nil {
+		report.SourceArtifactHash = bundle.SourceArtifact.BundleHash()
+	}
 	for _, check := range bootCheckRegistry {
-		for _, finding := range check.Run(checkCtx) {
-			report.Add(finding)
-		}
+		report.runAdmissionCheck(checkCtx, check)
 	}
 	for _, check := range supplementalChecks {
-		for _, finding := range check.Run(checkCtx) {
-			report.Add(finding)
-		}
+		report.runAdmissionCheck(checkCtx, check)
+	}
+	report.mcpTools = maps.Clone(checkCtx.mcpDiscoveredTools)
+	if checkCtx.mcpObservation != nil {
+		observation := *checkCtx.mcpObservation
+		report.mcpObservation = &observation
 	}
 
 	report.Sort()

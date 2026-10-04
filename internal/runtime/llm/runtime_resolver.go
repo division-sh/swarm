@@ -73,6 +73,40 @@ type AgentRuntimeResolver interface {
 	ResolveAgentRuntime(models.AgentConfig) (AgentRuntimeResolution, error)
 }
 
+type AgentProviderContractResolver interface {
+	ConfiguredDefault() llmselection.Profile
+	ResolveAgentProviderContract(models.AgentConfig) (ProviderContract, error)
+}
+
+// AgentProviderContracts is the read-only profile projection of the same
+// selection owner used by AgentRuntimeSet. It never constructs runtime slots.
+type AgentProviderContracts struct {
+	configuredDefault llmselection.Profile
+}
+
+func NewAgentProviderContracts(configuredDefault llmselection.Profile) (AgentProviderContracts, error) {
+	profile, err := llmselection.ResolveLiveBackend(configuredDefault.ID)
+	if err != nil {
+		return AgentProviderContracts{}, err
+	}
+	return AgentProviderContracts{configuredDefault: profile}, nil
+}
+
+func (r AgentProviderContracts) ConfiguredDefault() llmselection.Profile {
+	return r.configuredDefault
+}
+
+func (r AgentProviderContracts) ResolveAgentProviderContract(actor models.AgentConfig) (ProviderContract, error) {
+	if r.configuredDefault.ID == "" {
+		return ProviderContract{}, fmt.Errorf("agent llm provider contracts are not configured")
+	}
+	selection, err := ValidateAgentExecutionDescriptor(r.configuredDefault, actor)
+	if err != nil {
+		return ProviderContract{}, fmt.Errorf("agent %s execution selection: %w", agentRuntimeLabel(actor), err)
+	}
+	return ProviderContractForProfile(selection.Profile)
+}
+
 type AgentRuntimeResolution struct {
 	Actor     models.AgentConfig
 	Selection llmselection.AgentExecutionSelection
@@ -127,6 +161,24 @@ func (r *AgentRuntimeSet) ConfiguredDefault() llmselection.Profile {
 		return llmselection.Profile{}
 	}
 	return r.configuredDefault
+}
+
+func (r *AgentRuntimeSet) ResolveAgentProviderContract(actor models.AgentConfig) (ProviderContract, error) {
+	if r == nil {
+		return ProviderContract{}, fmt.Errorf("agent llm runtime resolver is required")
+	}
+	selection, err := ValidateAgentExecutionDescriptor(r.configuredDefault, actor)
+	if err != nil {
+		return ProviderContract{}, fmt.Errorf("agent %s execution selection: %w", agentRuntimeLabel(actor), err)
+	}
+	slot := r.defaultSlot
+	if selection.Profile.ID == llmselection.BackendMock {
+		slot = r.mockSlot
+	}
+	if slot != nil && slot.injected != nil {
+		return RequireProviderContractForProfile(selection.Profile, slot.injected)
+	}
+	return ProviderContractForProfile(selection.Profile)
 }
 
 func (r *AgentRuntimeSet) runtimeForSelection(selection llmselection.AgentExecutionSelection) (Runtime, error) {
