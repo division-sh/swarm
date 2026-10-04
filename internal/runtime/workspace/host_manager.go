@@ -276,7 +276,7 @@ func (m *HostManager) ResolveWorkspaceForCapabilityAdmission(_ context.Context, 
 			return nil, err
 		}
 	}
-	if err := m.validateSharedMounts(); err != nil {
+	if err := m.ensurePrereqs(); err != nil {
 		return nil, err
 	}
 	root, err := m.hostRoot()

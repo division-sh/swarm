@@ -2550,7 +2550,7 @@ func assertSelectedForkClaudeManagedSurface(t testing.TB, surface managedcapabil
 			t.Fatalf("selected Claude %s %s bindings = %v", authorityKind, kind, got)
 		}
 	}
-	for _, kind := range []managedcapabilities.BindingKind{managedcapabilities.BindingAPIDefinition, managedcapabilities.BindingLocalRuntime} {
+	for _, kind := range []managedcapabilities.BindingKind{managedcapabilities.BindingAPIDefinition, managedcapabilities.BindingKind("local_runtime")} {
 		if got := surface.BindingNames(kind); len(got) != 0 {
 			t.Fatalf("selected Claude %s acquired fallback %s bindings = %v", authorityKind, kind, got)
 		}
@@ -2920,7 +2920,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 			Name: "selected_http", DefinitionHash: "selected-http-definition-v1",
 			Capability: toolcapabilities.Capability{Name: "selected_http", Visible: true, Callable: true},
 			Bindings: []managedcapabilities.DeliveryBinding{{
-				Kind: managedcapabilities.BindingLocalRuntime, ExactName: "selected_http", RequiredEvidenceKind: "local_runtime_registered",
+				Kind: managedcapabilities.BindingAPIDefinition, ExactName: "selected_http", RequiredEvidenceKind: "api_definition_delivered",
 			}},
 		}},
 	})
@@ -2928,8 +2928,8 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 		t.Fatalf("build selected HTTP capability surface: %v", err)
 	}
 	surface, err = surface.Observe(managedcapabilities.DeliveryEvidence{
-		BindingKind: managedcapabilities.BindingLocalRuntime, ExactName: "selected_http",
-		Kind: "local_runtime_registered", Status: managedcapabilities.EvidenceConfirmed,
+		BindingKind: managedcapabilities.BindingAPIDefinition, ExactName: "selected_http",
+		Kind: "api_definition_delivered", Status: managedcapabilities.EvidenceConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("observe selected HTTP capability surface: %v", err)
@@ -3011,7 +3011,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 			Name: "selected_http", DefinitionHash: "selected-http-definition-v1",
 			Capability: toolcapabilities.Capability{Name: "selected_http", Visible: true, Callable: true},
 			Bindings: []managedcapabilities.DeliveryBinding{{
-				Kind: managedcapabilities.BindingLocalRuntime, ExactName: "selected_http", RequiredEvidenceKind: "local_runtime_registered",
+				Kind: managedcapabilities.BindingAPIDefinition, ExactName: "selected_http", RequiredEvidenceKind: "api_definition_delivered",
 			}},
 		}},
 	})
@@ -3499,7 +3499,7 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil)
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
 	}
@@ -3554,7 +3554,7 @@ func TestStartSelectedContractAgentRuntimeGatewayDoesNotConsumeAmbientToken(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

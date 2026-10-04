@@ -102,7 +102,7 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 				default:
 					cfg := &config.Config{}
 					cfg.LLM.Session.RotateAfterTurns = 1
-					err = runtimellm.NewMockRuntime(cfg, store, "worker-1", nil, nil, nil).PrepareManagedSession(ctx, session)
+					err = runtimellm.NewMockRuntime(cfg, store, "worker-1", nil, nil, nil, runtimellm.MockRuntimeOptions{}).PrepareManagedSession(ctx, session)
 				}
 				if fail && !errors.Is(err, failure) || !fail && err != nil {
 					t.Fatalf("handoff error not preserved: %v", err)

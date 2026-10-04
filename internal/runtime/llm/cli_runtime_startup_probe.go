@@ -65,6 +65,12 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	}
 	s.claudeState = target.ClaudeState
 	defer func() { retErr = errors.Join(retErr, r.releaseInvocationState(ctx, s)) }()
+	ctx, err = r.probeWorkspaceMCP(ctx, s, target)
+	if err != nil {
+		failStartupProbePrelaunch(ctx, handle, err)
+		return nil, err
+	}
+	surface, _ = managedcapabilities.FromContext(ctx)
 
 	buildArgs := func(includeSystemPrompt bool) ([]string, string, error) {
 		args := []string{
