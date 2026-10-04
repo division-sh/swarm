@@ -11,12 +11,9 @@ import (
 // Error presentation consumes the admitted provenance ledger, not source bytes
 // or another expression parser. Programmatic contracts may have no source fact.
 func (c *checkerContext) authoredExpressionError(record contracts.ScopedNodeRecord, event string, reader expressionReference, err error) error {
-	slot := strings.TrimSuffix(strings.TrimSuffix(reader.SourceSlot, ".cel"), ".ref")
+	slot := reader.SourceSlot
 	if strings.HasPrefix(slot, "guard.checks[") && !strings.HasSuffix(slot, ".check") {
 		slot += ".check"
-	}
-	if reader.HasRuleIndex && reader.RuleCollection == "rules" && strings.HasSuffix(slot, ".condition") {
-		slot = strings.TrimSuffix(slot, ".condition") + ".when"
 	}
 	if bundle, ok := semanticview.Bundle(c.source); ok && bundle != nil && slot != "" {
 		node, _ := record.Identity()

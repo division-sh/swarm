@@ -195,8 +195,12 @@ func appendConditionExecutableReader(out *[]expressionReference, kind, expressio
 }
 
 func appendExpressionValueExecutableReaders(out *[]expressionReference, kind string, value runtimecontracts.ExpressionValue, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
+	before := len(*out)
 	appendExecutableReader(out, kind+".ref", value.Ref, phase)
 	appendExecutableReader(out, kind+".cel", value.CEL, phase)
+	for index := before; index < len(*out); index++ {
+		(*out)[index].SourceSlot = kind
+	}
 }
 
 func appendActivityExecutableReaders(out *[]expressionReference, ctx executableReaderContext, kind string, activity runtimecontracts.ActivitySpec) {
@@ -319,6 +323,9 @@ func appendRulesExecutableReaders(out *[]expressionReference, ctx executableRead
 			ruleCtx.ruleIndex = i
 			handlerRuleEntryExecutableReaderCensus[field](out, ruleCtx, prefix, rule)
 			for index := fieldBefore; index < len(*out); index++ {
+				if kind == "rules" && field == "Condition" {
+					(*out)[index].SourceSlot = prefix + ".when"
+				}
 				(*out)[index].Kind = label + strings.TrimPrefix((*out)[index].Kind, prefix)
 				(*out)[index].RuleCollection = kind
 				(*out)[index].RuleField = field
