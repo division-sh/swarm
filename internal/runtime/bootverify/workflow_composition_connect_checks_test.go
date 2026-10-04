@@ -433,6 +433,10 @@ func TestRun_AcceptsParentCompositionConnectToRootInput(t *testing.T) {
 	root := writeCompositionConnectBootverifyFixture(t, canonicalrouting.CompositionConnectRootReceiver)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
+	if _, declared := semanticview.Wrap(bundle).FlowInputEventPin(".", "deploy.completed"); declared {
+		t.Fatal("parent-local consumer must not require an artificial public input pin")
+	}
+
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	for _, finding := range append(report.Errors(), report.Warnings()...) {

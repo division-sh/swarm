@@ -87,6 +87,27 @@ func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 	}
 }
 
+func TestNestedLifecycleGeneratedSourcesLoadAndVerify(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		copy func(testing.TB) string
+	}{
+		{"static", CopyLifecycleNestedCascade},
+		{"template", CopyLifecycleNestedTemplates},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := RepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, tc.copy(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if findings := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
+				t.Fatalf("nested lifecycle hard invalidities: %#v", findings)
+			}
+		})
+	}
+}
+
 func TestPublicationSitesLoadAndVerify(t *testing.T) {
 	for _, mode := range []string{"root", "static", "template"} {
 		t.Run(mode, func(t *testing.T) {

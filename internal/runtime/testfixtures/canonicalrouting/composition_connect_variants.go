@@ -69,7 +69,12 @@ func writeCompositionConnectFixture(t testing.TB, opts compositionConnectFixture
 		rootSchema += "    resolution: select\n"
 	}
 	if opts.rootReceiver {
-		rootSchema += "pins:\n  inputs:\n    - deploy.completed\n"
+		writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
+  execution_type: system_node
+  subscribes_to: [deploy.completed]
+  event_handlers:
+    deploy.completed: {}
+`)
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer

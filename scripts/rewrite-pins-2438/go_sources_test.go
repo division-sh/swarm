@@ -89,6 +89,22 @@ func TestRewritePinMutationConsumersTrackCurrentSequences(t *testing.T) {
 	}
 }
 
+func TestRewritePinMutationPreservesCompleteInlineDirection(t *testing.T) {
+	name := "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go"
+	before := "pins:\n  inputs: [loop.escaped]\n  outputs: [work.completed]\n"
+	if got := rewritePinMutationLiteral(name, before); got != before {
+		t.Fatalf("complete direction changed: %q", got)
+	}
+	source := []byte("package fixture\nconst source = " + strconv.Quote(before) + "\n")
+	after, err := rewriteGoSource(name, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := generatedSourceLiteral(t, after); got != before {
+		t.Fatalf("complete source changed: %q", got)
+	}
+}
+
 func generatedSourceLiteral(t testing.TB, source []byte) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "producer.go", source, 0)
