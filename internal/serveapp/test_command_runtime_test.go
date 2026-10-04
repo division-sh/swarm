@@ -565,7 +565,6 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	}
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
-		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), "public-mock-approval.sqlite")
 		oldBuildStores := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
@@ -578,9 +577,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 	case servedparity.BackendExplicitPostgres:
-		_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-			return serveRuntimeWorkspaceStub{}
-		})
+		_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, nil)
 		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		opts.StoreMode = storebackend.BackendPostgres.String()
 		opts.StoreModeSet = true
