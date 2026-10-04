@@ -333,7 +333,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
 				if !unavailable {
-					requireSelectedForkPublicControlBoundary(t, rt, claim.RunID(), claimed.signal.EventID, declaredAgent)
+					requireSelectedForkPublicControlBoundary(t, rt, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
 				}
 			})
 		}
@@ -358,7 +358,7 @@ func writeSelectedForkAgentProofFixture(t *testing.T, root, role, subscriptions,
 	}
 }
 
-func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, runID, eventID string, declaredAgent bool) {
+func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, runID, eventID string, declaredAgent bool, completionCount int) {
 	t.Helper()
 	// Delivery completion precedes the completion worker's await-mutation
 	// projection. Observe that durable handoff before measuring API mutations;
@@ -401,7 +401,7 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 			t.Fatalf("selected declaration did not materialize the control target: count=%d err=%v", count, err)
 		}
 		cases = append(cases, controlCase{"agent.replay", map[string]any{"run_id": runID, "agent_id": "same-name", "event_id": eventID}})
-		requireSelectedForkDeclaredAgentReads(t, rt, runID)
+		requireSelectedForkDeclaredAgentReads(t, rt, runID, completionCount)
 	}
 	for _, test := range cases {
 		t.Run(test.method, func(t *testing.T) {
@@ -443,7 +443,7 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 	}
 }
 
-func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRuntime, runID string) {
+func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRuntime, runID string, completionCount int) {
 	t.Helper()
 	before := snapshotForkReceiverApplication(t, rt)
 	params := map[string]any{"run_id": runID, "agent_id": "same-name", "flow_instance": "consumer"}
@@ -472,10 +472,10 @@ func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRu
 	}
 	var usage operatorread.OperatorAgentUsage
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.usage", params, &usage)
-	if usage.AgentID != "same-name" || usage.Usage.Estimated.LedgerEntries != 1 || usage.Usage.Exact.LedgerEntries != 0 {
+	if usage.AgentID != "same-name" || usage.Usage.Estimated.LedgerEntries != completionCount || usage.Usage.Exact.LedgerEntries != 0 {
 		t.Fatalf("selected agent usage lost its exact mock turn: %+v", usage)
 	}
-	requireSelectedForkDurablePublicReads(t, rt, runID)
+	requireSelectedForkDurablePublicReads(t, rt, runID, completionCount)
 	if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
 		t.Fatal("selected agent reads changed durable state")
 	}
