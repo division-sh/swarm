@@ -767,10 +767,8 @@ func (s *Service) Recover(ctx context.Context) error {
 	}
 	for _, op := range operations {
 		if op.Phase.Terminal() {
-			if op.Phase == PhaseFailed {
-				if err := s.credentials.ReleaseOperation(context.WithoutCancel(ctx), op); err != nil {
-					return fmt.Errorf("recover failed channel onboarding %s credential cleanup: %w", op.OperationID, err)
-				}
+			if err := s.recoverTerminalCredentials(ctx, op); err != nil {
+				return err
 			}
 			continue
 		}
@@ -806,6 +804,15 @@ func (s *Service) Recover(ctx context.Context) error {
 				continue
 			}
 			return fmt.Errorf("recover channel onboarding %s: %w", op.OperationID, err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) recoverTerminalCredentials(ctx context.Context, op Operation) error {
+	if op.Phase == PhaseFailed {
+		if err := s.credentials.ReleaseOperation(context.WithoutCancel(ctx), op); err != nil {
+			return fmt.Errorf("recover failed channel onboarding %s credential cleanup: %w", op.OperationID, err)
 		}
 	}
 	return nil
@@ -1336,14 +1343,8 @@ func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate 
 	if missingErr != nil {
 		return nil, missingErr
 	}
-	for _, admission := range admissions {
-		if admission.StoreKey == "" {
-			continue
-		}
-		current, err := s.credentials.Current(ctx, admission)
-		if err != nil || !current {
-			return nil, errors.Join(fmt.Errorf("%w: credential %q changed before admission", ErrConflict, admission.StoreKey), err)
-		}
+	if err := s.ensureCredentialAdmissionsCurrent(ctx, admissions); err != nil {
+		return nil, err
 	}
 	if generateSigning != -1 {
 		value, err := s.secret()
@@ -1363,6 +1364,19 @@ func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate 
 		admissions[i] = CredentialAdmission{Role: op.CredentialReservations[i].Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, ValueSeal: written.ValueSeal}
 	}
 	return admissions, nil
+}
+
+func (s *Service) ensureCredentialAdmissionsCurrent(ctx context.Context, admissions []CredentialAdmission) error {
+	for _, admission := range admissions {
+		if admission.StoreKey == "" {
+			continue
+		}
+		current, err := s.credentials.Current(ctx, admission)
+		if err != nil || !current {
+			return errors.Join(fmt.Errorf("%w: credential %q changed before admission", ErrConflict, admission.StoreKey), err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) currentCredentialAdmissions(ctx context.Context, slot string) (map[string]CredentialAdmission, error) {
