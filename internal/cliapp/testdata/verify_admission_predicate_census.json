@@ -471,7 +471,7 @@
     "owner": "internal/cliapp/verify_runtime.go::runVerifyCommandWithOutput",
     "audit_rows": "A01,A28,A29,A30",
     "proof_families": "P01,P02,P23,P24",
-    "body_sha256": "f0d1894c1e543914660817f182b3281e88f554ae31f0a47e8ccac8aac24e4547"
+    "body_sha256": "3583e976a3198532920ebc38a2112d5bef2d4521ce79f96505c7f935c6c5b611"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::trimmedStringSlice",
