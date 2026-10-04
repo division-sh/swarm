@@ -14,14 +14,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -153,6 +157,25 @@ func killSelectedForkAtCheckpoint(t *testing.T, backend, dsn, cut string) select
 	defer writer.Close()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSelectedForkCrashProcessHelper$")
 	cmd.Env = append(os.Environ(), "SWARM_SELECTED_CRASH_BACKEND="+backend, "SWARM_SELECTED_CRASH_DSN="+dsn, "SWARM_SELECTED_CRASH_CUT="+cut)
+	if cut == "native_before_activation" {
+		// The killed child cannot release its sealed source projections. Keep
+		// every private scratch root under the parent's exact cleanup ownership.
+		root := t.TempDir()
+		cmd.Env = append(cmd.Env, "TMPDIR="+root)
+		t.Cleanup(func() {
+			if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if entry.IsDir() {
+					return os.Chmod(path, 0o700)
+				}
+				return nil
+			}); err != nil {
+				t.Errorf("unseal owned crash fixture for cleanup: %v", err)
+			}
+		})
+	}
 	cmd.ExtraFiles = []*os.File{writer}
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
@@ -253,12 +276,34 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
 	root := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple"), PlatformSpecPath: contracts.DefaultPlatformSpecFile(root)}
-	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	cut := os.Getenv("SWARM_SELECTED_CRASH_CUT")
+	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}
+	if cut == "native_before_activation" {
+		loader.SourceRoot = nativeSelectedForkCrashFixture(t, root)
+		manager := workspace.NewHostManager()
+		cfg := workspace.DefaultHostConfig()
+		cfg.WorkspaceRoot = t.TempDir()
+		manager.SetConfig(cfg)
+		options.Workspace = manager
+		options.Config = &config.Config{LLM: config.LLMConfig{
+			Backend: selection.BackendClaudeCLI,
+			Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
+		}}
+	}
+	var sourceLoader SelectedContractSourceLoader = loader
+	if cut == "native_before_activation" {
+		sourceLoader = nativeSelectedCrashLoader{admittedFixtureSelectedContractSourceLoader: loader}
+	}
+	loaded, err := sourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
-	seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+	if cut == "native_before_activation" {
+		seedSelectedAgentExecutionSource(t, ctx, backend, db, capabilityStore, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC(), executionmode.Mock)
+	} else {
+		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+	}
 	checkpoint := func(forkRun string) {
 		pipe := os.NewFile(3, "selected-checkpoint")
 		if err := json.NewEncoder(pipe).Encode(selectedForkCrashCheckpoint{SourceRun: sourceRun, ForkRun: forkRun}); err != nil {
@@ -269,7 +314,6 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		_, err := os.Stdin.Read(b[:])
 		t.Fatalf("checkpoint returned without process death: %v", err)
 	}
-	cut := os.Getenv("SWARM_SELECTED_CRASH_CUT")
 	if cut == "before_materialization" || cut == "materialized" {
 		owner.ports.fork = selectedCrashMaterialization{SelectedContractForkLifecycle: owner.ports.fork, before: cut == "before_materialization", checkpoint: checkpoint}
 	} else if cut == "execution_issued" || cut == "execution_claimed" {
@@ -279,16 +323,16 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 			occurrence, _ := worklifetime.OccurrenceFromContext(ctx)
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
-	} else if cut == "before_activation" {
+	} else if cut == "before_activation" || cut == "native_before_activation" {
 		var discards int
 		owner.ports.fork = selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
 			occurrence, _ := worklifetime.OccurrenceFromContext(ctx)
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
 	}
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-		AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
+		AgentRuntime:      options})
 	if err != nil {
 		t.Fatal(err)
 	}

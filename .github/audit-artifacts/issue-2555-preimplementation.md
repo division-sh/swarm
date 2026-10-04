@@ -962,3 +962,41 @@ directive admission uses that fixture's exact existing execution posture.
 No production or schema/owner change is authorized by these proof corrections.
 E's actual #2525 merge and crossed L01/L04, hosted default Q01, complete 48-row
 mapping, fresh final-head full/full and CI/audit remain required.
+
+### Selected native interruption and fifth qualification delta
+
+`TestSelectedForkNativeEmitProcessDeathBothStores` now exercises the existing
+selected execution owner with an authored native mock, actual host workspace
+and authenticated HTTP emit. The child reaches the existing pre-activation
+checkpoint only after one exact terminal emit and settled model turn, then the
+parent sends SIGKILL. SQLite and PostgreSQL each retain a quiesced, paused,
+unactivated execution. Two fresh recovery compositions must preserve the exact
+event and business snapshots, one execution generation, one delivered agent
+input, one captured call/session and one settled completion, without replay.
+Selected terminal completion does not acquire the normal-delivery response
+projection; its expected projection count is zero, unlike the earlier selected
+nonterminal read's tool-request/post-tool pair. This is internal retained
+selected-agent crash proof, not a public serve or paid-provider journey.
+
+The clean `ec93d1898` independent full run is RED and retained. Its first
+concrete failure is the served public-mock approval fixture's workspace stub:
+activation correctly refuses its missing native execution target, then reaches
+E's still-unmerged compensation defect. The fixture now preserves actual host
+workspace construction on both stores; its deadline, approval, cardinality,
+credential and settlement assertions remain unchanged. The selected Claude
+OAuth framing fixture also now executes a native child against its real HTTP
+gateway before its fake model calls. Docker selection/address mapping remain
+explicitly simulated in that framing fixture and earn no Docker lifetime
+credit. Both corrected families pass focused both-store execution.
+
+The real-Docker public fork-chat root is separately provisioned through the
+existing finite deferral owner, like the ordinary Docker emit root. Default
+suite skips do not count as successful execution; its actual both-store Docker
+receipts remain separately required. The conformance partition census excludes
+`TestMain`, which owns native-worker entry but is not a test root; the reviewed
+164 executable-root count and all real roots remain unchanged.
+
+No runtime owner, authority, schema, compatibility path or assertion waiver is
+introduced by this delta. The full 48-row gate is unchanged. Selected-agent
+gateway-loss/pre-model refusal, E's integrated durable activation proof, hosted
+default-Linux Q01, final qualification and final PR proof audit remain open.
