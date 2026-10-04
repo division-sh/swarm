@@ -206,7 +206,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatalf("RuntimeActivityTarget: %v", err)
 			}
 			privateToolID := privateIdentity.ToolID()
-			activationOwner := testChannelActivationOwner(t, binding)
+			activationOwner := testAdmittedChannelActivationOwner(t, credentialStore, binding)
 			coordinator = newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
@@ -215,6 +215,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
+				ProviderCredentials: credentialStore,
 				ChannelActivations:  activationOwner,
 				FlowRoutes:          bus,
 			})
@@ -252,7 +253,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			callCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "call-1")
 			result, err := executor.Execute(callCtx, "channel.ops.deliver", input)
 			if err != nil {
-				t.Fatalf("configured channel execute: %v", err)
+				t.Fatalf("configured channel execute: %v (cause=%v)", err, errors.Unwrap(err))
 			}
 			wantResult := map[string]any{"delivery_reference": map[string]any{"id": int64(99)}}
 			if !reflect.DeepEqual(result, wantResult) {
@@ -324,7 +325,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if replacementToolID == privateToolID || replacementIdentity.Generation().Equal(privateIdentity.Generation()) {
 				t.Fatal("replacement plan reused the prior private target generation")
 			}
-			replacementOwner := testChannelActivationOwner(t, replacementBinding)
+			replacementOwner := testAdmittedChannelActivationOwner(t, credentialStore, replacementBinding)
 			mismatchedCoordinator := newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
@@ -333,6 +334,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
+				ProviderCredentials: credentialStore,
 				FlowRoutes:          bus,
 				ChannelActivations:  replacementOwner,
 			})
@@ -356,6 +358,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
+				ProviderCredentials: credentialStore,
 				FlowRoutes:          bus,
 				ChannelActivations:  replacementOwner,
 			})
@@ -372,7 +375,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatalf("stale plan generation reached provider: calls=%d", calls.Load())
 			}
 
-			fencedOwner := testChannelActivationOwner(t, binding)
+			fencedOwner := testAdmittedChannelActivationOwner(t, credentialStore, binding)
 			fencedCoordinator := newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
@@ -381,6 +384,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
+				ProviderCredentials: credentialStore,
 				FlowRoutes:          bus,
 				ChannelActivations:  fencedOwner,
 			})
@@ -405,7 +409,9 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatal("durable channel activity did not reach the post-commit receiver fence")
 			}
 			replaced := make(chan error, 1)
-			go func() { replaced <- fencedOwner.Replace(testChannelActivationPublication(t, replacementBinding)) }()
+			go func() {
+				replaced <- fencedOwner.Replace(testAdmittedChannelActivationPublication(t, credentialStore, replacementBinding))
+			}()
 			deadline := time.Now().Add(time.Second)
 			for {
 				probe, open := fencedOwner.AcquireRuntimeOperation(binding.RuntimeToolID("deliver"))
@@ -440,7 +446,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatalf("predecessor activity calls after replacement fence = %d, want three total distinct operations", calls.Load())
 			}
 			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 6, 3)
-			if err := fencedOwner.Replace(testChannelActivationPublication(t, binding)); err != nil {
+			if err := fencedOwner.Replace(testAdmittedChannelActivationPublication(t, credentialStore, binding)); err != nil {
 				t.Fatal(err)
 			}
 			proveRegisteredManagedChannelTransport(t, ctx, eventStore, fencedExecutor, fencedOwner, binding, actor, calls.Load)
@@ -635,7 +641,12 @@ func configuredChannelExecutor(source semanticview.Source, activations *runtimec
 
 func testChannelActivationOwner(t *testing.T, bindings ...packs.OutboundBindingPlan) *runtimechannelactivation.Owner {
 	t.Helper()
-	owner, err := runtimechannelactivation.NewOwner(testChannelActivationPublication(t, bindings...))
+	return testAdmittedChannelActivationOwner(t, channelRuntimeCredentialStore(t, "provider-secret"), bindings...)
+}
+
+func testAdmittedChannelActivationOwner(t *testing.T, credentials runtimecredentials.Store, bindings ...packs.OutboundBindingPlan) *runtimechannelactivation.Owner {
+	t.Helper()
+	owner, err := runtimechannelactivation.NewOwner(testAdmittedChannelActivationPublication(t, credentials, bindings...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -644,6 +655,15 @@ func testChannelActivationOwner(t *testing.T, bindings ...packs.OutboundBindingP
 
 func testChannelActivationPublication(t *testing.T, bindings ...packs.OutboundBindingPlan) channelonboarding.ChannelActivationPublication {
 	t.Helper()
+	return testAdmittedChannelActivationPublication(t, channelRuntimeCredentialStore(t, "provider-secret"), bindings...)
+}
+
+func testAdmittedChannelActivationPublication(t *testing.T, credentials runtimecredentials.Store, bindings ...packs.OutboundBindingPlan) channelonboarding.ChannelActivationPublication {
+	t.Helper()
+	credentialOwner, err := runtimecredentials.NewSnapshotOwner(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fact := sourceartifactfixture.FactFor(configuredChannelAgentBundle(t).SourceArtifact)
 	bundleHash := fact.BundleHash()
 	activations := make([]channelonboarding.CompiledActivation, 0, len(bindings))
@@ -663,9 +683,13 @@ func testChannelActivationPublication(t *testing.T, bindings ...packs.OutboundBi
 		}
 		admissions := make([]channelonboarding.CredentialAdmission, 0, len(binding.CredentialStoreKeys()))
 		for role, key := range binding.CredentialStoreKeys() {
+			evidence, err := credentialOwner.SealCurrentValue(context.Background(), key)
+			if err != nil {
+				t.Fatal(err)
+			}
 			admissions = append(admissions, channelonboarding.CredentialAdmission{
 				Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved,
-				ValueSeal: runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat("a", 64)),
+				ValueSeal: evidence.Seal,
 			})
 		}
 		activations = append(activations, channelonboarding.CompiledActivation{
@@ -803,7 +827,8 @@ func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL strin
 		structuralSubject.Evidence[0].Fields["connector_hash"] != connectorEntry.ManifestHash() {
 		t.Fatalf("channel capability subject = %#v", structuralSubject)
 	}
-	binding, err := packs.NewOutboundBindingPlan("ops", plans[0], "42", nil)
+	binding, err := packs.NewOutboundBindingPlanWithCredentials("ops", plans[0], "42", nil,
+		map[string]string{"telegram_bot_token": "telegram_bot_token"})
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlan: %v", err)
 	}
