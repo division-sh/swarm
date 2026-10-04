@@ -201,10 +201,22 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				if !ready.OK || !ready.AdmissionComplete || ready.LiveReadiness != "not_evaluated" || ready.ValidationScope != "deployment" {
 					t.Fatalf("free-store evidence was incomplete or became readiness: %+v", ready)
 				}
+				connectedStateObserved := false
+				for _, observation := range ready.Observations {
+					if observation.CheckID == "retained_channel_admission" && observation.Status == bootverify.AdmissionPassed {
+						connectedStateObserved = true
+					}
+				}
+				if !connectedStateObserved {
+					t.Fatal("complete admission omitted retained connected-channel reads")
+				}
 			}
 			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&after); err != nil || before != after {
 				t.Fatalf("successful public observation acquired authority: %d -> %d %v", before, after, err)
 			}
+			t.Run("retained_channel", func(t *testing.T) {
+				assertVerifyRetainedChannelPublicAdmission(t, ctx, root, configPath, owner, db)
+			})
 			contender, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 				OwnerID: "contender-after-public-verification", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
 			})

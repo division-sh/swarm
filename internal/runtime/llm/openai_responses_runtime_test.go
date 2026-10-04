@@ -189,6 +189,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 	defer server.Close()
 
 	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
+	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_API_KEY", "")
 	ctx := withTestStatelessMemory(t, unmanagedLLMTestContext(), "agent-1", "")
 	ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular"})
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)

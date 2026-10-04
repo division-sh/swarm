@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -204,6 +205,35 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		_, err := manager.InspectSelectedContractRouteRecoveries(ctx, snapshot)
 		return err
 	})
+	verifyDeploymentObservation(ctx, result, "retained_channel_admission", "internal/channelonboarding.InspectRetainedActivations", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+		inventory, err := channelonboarding.InspectRetainedActivations(ctx, snapshot)
+		if err != nil {
+			if errors.Is(err, channelonboarding.ErrConflict) {
+				return fmt.Errorf("%s: %w", err.Error(), failures.Wrap(failures.ClassLifecycleConflict, "retained_channel_ownership_conflict", "verify", "channel-inspection", nil, err))
+			}
+			return err
+		}
+		teardowns, err := channelonboarding.InspectPendingTeardowns(ctx, snapshot)
+		if err != nil {
+			if errors.Is(err, channelonboarding.ErrConflict) {
+				return fmt.Errorf("%s: %w", err.Error(), failures.Wrap(failures.ClassLifecycleConflict, "retained_channel_teardown_conflict", "verify", "channel-inspection", nil, err))
+			}
+			return err
+		}
+		if len(inventory.Operations) != 0 || len(inventory.Activations) != 0 || len(teardowns) != 0 {
+			result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+				ID: "connected_channel_reconciliation", Owner: "internal/channelonboarding.Service.ReconcileLocal/Recover", Subject: subject,
+				Reason: "boot must independently reconcile exact successor contexts, credentials, identities and provider effects; durable row inspection is not activation or readiness",
+			})
+		}
+		for _, operation := range teardowns {
+			result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+				ID: "connected_channel_teardown", Owner: "internal/channelonboarding.DestructiveService.Recover", Subject: "channel-teardown:" + operation.TeardownID,
+				Reason: "boot must settle the inspected " + string(operation.Phase) + " teardown; verification never retires authority or removes credentials",
+			})
+		}
+		return nil
+	})
 	retained.forksOK = verifyDeploymentObservation(ctx, result, "selected_fork_recovery_admission", "internal/runtime/runforkexecution.InspectSelectedForkRecoveries", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
 		forks, err := runforkexecution.InspectSelectedForkRecoveries(ctx, snapshot, runforkexecution.SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: repo, PlatformSpecPath: paths.PlatformSpecPath,
@@ -257,6 +287,7 @@ func accountVerifyStoreTail(result *runtime.WorkflowContractValidationResult, su
 		{"startup_authority_lineage", "internal/runtime/startupownership.AdmitAuthorityInspection"},
 		{"pending_reset_admission", "internal/runtime/destructivereset.InspectPendingOperations"},
 		{"retained_route_admission", "internal/runtime/manager.InspectSelectedContractRouteRecoveries"},
+		{"retained_channel_admission", "internal/channelonboarding.InspectRetainedActivations"},
 		{"selected_fork_recovery_admission", "internal/runtime/runforkexecution"},
 		{"retained_actor_admission", "internal/runtime/manager"},
 		{"selected_fork_source_dependencies", "internal/runtime.ValidateWorkflowContractSurface"},

@@ -1,5 +1,119 @@
 [
   {
+    "owner": "internal/channelonboarding/retained_inspection.go::InspectPendingTeardowns",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "567b9c4d3e1bb2d3a51c6e507bc2cc5f78c56ca2823c1708006426dc3e7c56da"
+  },
+  {
+    "owner": "internal/channelonboarding/retained_inspection.go::InspectRetainedActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "25e5b507fb7514273d0cdcb85ec8f23538ea2affef935d5dec8f0cb573ac2ef5"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Recover",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "02d056f50364e805c7a13e596ff6480c0e9b6dc75daa10eb0c932ac4dd3fcad9"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RetireContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "ecc2c236e6e3cafa78e932374c89455b43c951f22eb3be02507922aede1bd7ed"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RetireInterface",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "24bf9d1b6e7b9b15a112bb8d2cb7559d301ecf8dc995442c8ef1a6540e789af5"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RevokeProof",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "c084c71089ed03171da0d32fa30bf3976e20b5733a733160005681811f8b2b48"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Unbind",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "035bf661ebc5fc9b87e2a90c43dd035ef7ebc6a44d59b0218f0f9e3aecbfe3df"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.complete",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "616282d0e2b5f38e69b8caec452bce02de13805197a8c6da593b85281fc0c08d"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.exactTeardownReplay",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "10839fee7202d465f2eb4c3e2467b671f3bf42ae2ca8bf475acc4e3c9d75e18a"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.releaseScopedCredentials",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "ec1e3baa74341497bd378a9afe333c9abb3d3349948da5cca048d44cb4136d6d"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retainedCredentialEvidence",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "6729fd53a30ef06561e3ba0f14c0cef15169e322eb5297a8d555ed62d97d1d25"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retireAuthority",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "eccdfd36aca61d25a431311fe90dbeb67b77103e61020dd216eee8fd14e6f620"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::NewDestructiveService",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "9f14c1c072caa84172fe02c6cb8db923ff496c43ba9e8ec37aeb269b8035f8c6"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::ReserveTeardownRequest.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "d9f566bffa19edc1bf2b4ad1010bcd9e23ec1f5ff8985e7384f85bc25fde2929"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::TeardownKind.Valid",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "70b13e271dce38d063d4964f95c89263c38d7e8910fbc9b13c4e7e730c628728"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::TeardownPhase.Terminal",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "c2a08450675ba535548a217aeedbcd80316b4e07cd59c2c0646c10ca2150df0e"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::TeardownScope.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "22397c063f82f64fd5085fa90c8f4e93899a9dfbbe1d68156c59c4481edccacb"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::TeardownScope.normalized",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "c796e57bc1db099bd1fbd1a468473705406fd6cc5f1383b6072394b83285aaef"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::teardownScopeMatchesOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "f721fdd2b90727837635573c79032bbe04d0e9a6237b548f0503b9619f30496f"
+  },
+  {
     "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.add",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
@@ -265,32 +379,32 @@
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::accountVerifyStoreTail",
-    "audit_rows": "A19,A20,A21,A22,A23,A24",
-    "proof_families": "P17,P18,P19,P20,P21",
-    "body_sha256": "002acfffa53f99deddd064e9289573948d7c323bd5e4cafb8d9384e7959fa2a0"
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "body_sha256": "70542e0f45c2f90f956228dc6189ff3f4f428754cfb338eb76e20e416a0fe1bb"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::blockVerifyStoreTail",
-    "audit_rows": "A19,A20,A21,A22,A23,A24",
-    "proof_families": "P17,P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
     "body_sha256": "ac54664affc5d34a5ffb76d69a0641f5b8c9c2d1a217ee6ce5f2243b822aab45"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRecoverySnapshot",
-    "audit_rows": "A19,A20,A21,A22,A23,A24",
-    "proof_families": "P17,P18,P19,P20,P21",
-    "body_sha256": "2f12eb1c445dfaf2cc98c15032791eef5cb997107a7a0b85856df841866e0ea4"
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
+    "body_sha256": "4bf1e0630a3ca05f5e75ec1902b2cd41fd3d3d0258ca3cf2d9b6865090ca4a30"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifySelectedStore",
-    "audit_rows": "A19,A20,A21,A22,A23,A24",
-    "proof_families": "P17,P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
     "body_sha256": "92a991e5c319af6b3f059128671eb4afe34e65f49c78606af448e39e916deb15"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::prepareVerifySelectedStoreInspection",
-    "audit_rows": "A19,A20,A21,A22,A23,A24",
-    "proof_families": "P17,P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21",
     "body_sha256": "62fcd3c10ab77f2ae7d290f80584d60afbe8ab9fcd3f3e3d68537b5f7d08a8ff"
   },
   {
@@ -2328,6 +2442,150 @@
     "body_sha256": "3e166a7acbdbf61aba966ef790ec25a9d133caf9de4ff94ef5a205f51365165c"
   },
   {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PreflightChannelActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "147ce36e0b596466336aadae6fe9c8d541be98a583784cbcf5d60a532f7541bf"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PromoteChannelRegistration",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "2d2a818cd390ef1d14923db60b41778877dbf8aa2f5acbc14ce0732f3ec53f76"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PublishChannelActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "b6a6d62ae162cbae3d270efdaa60b62720a7e8ececf92979bebaf3b8e6bce9a0"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.RefreshChannelActivationCandidates",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "d58f29c7f77bc28f1dee6d13ac81fb9c0afbe544970bfc7f5e306f9fd14c951d"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.RefreshChannelActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "b94d05478592e8a0d3371c3e152cdbeaae700738c21367376df0d41ab25a8099"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.publishChannelActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "4af459fbe189aa59a2d126df546436848d7d1836754e4d30b92fcff9ec2bb6f0"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.reconcileChannelRegistrations",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "8a69e033cc20d786ea92a115258d5dbf2c906e3163e8a867fc48286792e71eae"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.DispatchChannelConfirmation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "7addc3ce09304154351f197fcea04cb929035e8109e54e9ea7503a5d4af1b737"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.ReconcileChannelEffectsBeforeRebind",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "d7b981dbea71bac73f3e530faa20f16770035139ee9fea7b0ae9c44f71e0c02d"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.ProjectConnectedChannelReadiness",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "30a24eb89b2c223eca501ad7084b3baffaa144ec0b631e42a12e6532ce25674b"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observedAt",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "cc019793946b65c7a4338ac86d1e7223ec9e3dcebaa594576e4b733cb2b2509c"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::activateServeAfterConnectedChannelTeardownRecovery",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "77902ab764ea014301c127f73febba794f670267008a415cc783e70fa6a0f4f2"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::channelEffectTerminal",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "a343b09e4699bf9f9f5718e424b117520078c4d123db31abd308d1325ae3f177"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::channelOnboardingDeclaredPlans",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "69e5877376647430085c33253691299168a13dcdf37a3d63d54b62b9ec574ea6"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::classifyChannelEffectsBeforeRebind",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "f418eeb6bdafcf36225b6270861374b52bed779219582b40e9c4315548403c66"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::compileServeChannelActivationSnapshot",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "4223f8b17c8384e553d97fbe0def0e7982248bfc0f00bc115f6bb2d6625b40c9"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::declaredActivationCoordinate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "6492985e88140eca202e4b897231fff390b875d9065d5a5e2dfa05a9d1939566"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::declaredActivationCredentialAdmissions",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "90a499d18a15edbe0e949d62376b5d6c17bbe221dbb2431594a3164a9cfdc56d"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::exactChannelActivationHandoff",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "3ab6d751957e93463d46e678208183b236abf5eb99c403ee275a59bac470e6e9"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::newServeChannelConfirmationDispatcher",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "7bd9953371b72ef1e3322f820d0e495befa117301182985b0884319feef5c170"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::reconcileRetiredConnectedChannelContexts",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "e6247b44be304dd50828724ebe4f3374a545c852faff4681f9b38c1b1cb52f06"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::rejectWebhookPrebindingWithoutPublicIngress",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "7359011c1db7453430c465b9e27e567d12edc847246227ed5acadbe701fb1e15"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::serveChannelOnboardingCatalog",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "3443cb93dc205f55772ec79743ea2b9bc234b0b9b9cedcaad35df759d6a4969e"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::validateChannelEffectProvenance",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "3f88247333a34e264493f5f6b49d4ce532ea7164067ca21c634d50f9b1ad5bd9"
+  },
+  {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.ResetStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
@@ -3253,152 +3511,170 @@
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionInspection.Close",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "c004716bf6d5f13df5a0f71007523c75d72ed0ca392e4cfc9975b051d95772c7"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionInspection.Inspect",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "9b5db941c3062f36a5d3d0c96b82029315a5caba6d4d8d61afb963c1402081ad"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionInspection.ProbePossession",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "03bbf89dcf8181189b86cff98fd44616769f14f439dcf9fa60c6bc6cec075cd0"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ActiveNonStandingRunBundleAvailabilities",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "7f2aa2cb27676ead8021c2ff4d6d42fa0c6cbcc426c77a5773bdfc046b6bf21b"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.GetSourceArtifact",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "7733ffec6ae4eda64f924f331eb1ca301ee8d88f2afc022f51ce73b98a8b6d9c"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.GlobalWorkPresence",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "e7113327d68b41660ea524be9c93618f53edd564c9e8e19610e5c907199b36b1"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectAuthority",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "6aff13413234c74fce92f18c32ff99e149ba5418791ae0d5c16552aebe5d08bd"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectDeliveryRecovery",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "e9c82dfb532e3bec460090e3ee2c76d15fce0e81501c76fd217091ebfcf47f3e"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectDynamicFlowRuntimeReadinessForSource",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "b8122f466b411b1019cd0ff70d8979475c299eab96f932b223723f863379ba59"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectSelectedForkRecovery",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "0b8cf9793c3206330dde6a9aca47ba5bb3354a2b079aed8399795899e87f1a42"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListActiveAgentDescriptors",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "cfca0e0ad368c814c46af604cccf675a8fb81621b2925f5fff1708647df32c1b"
   },
   {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListChannelOnboardingOperations",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "2c7b6126b78f7590f581df15e0c74bff4a1154adb7a879ab9da01cbe89455f9c"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListChannelTeardowns",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "daf1048d0a7627a598384212dbc54633463d3ff76dff8599c04d6bb9e1ec2fe3"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListCurrentConnectedChannelActivations",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "164932929b3ce42d628955a9bfc8792eed5cb0022eea24221322b6149abfe23f"
+  },
+  {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListFlowInstanceRoutes",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "aa78080ee154819c785777b9b17bad85f71d5ff49811096d5fc44e4f5c786b25"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListSelectedContractRouteRecoveryRecords",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "7662c6579ca83ccf49c6b06d0785f98ec217b566dc21f0f0374449c65cc41906"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListSelectedForkRecoveryEntries",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "92e9ce3b38e1be4b69229284dafda4f4230ddddec4025d24ebaf941d5bb5dcca"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.LoadAgents",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "57ece53698dd64d83f3503a03232c1df59ed8880b0d4f500805ff6ae9b89b59a"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.LoadRunBundleAvailability",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "278a0b430e52aa272d10f17ad1cbd32ab41abe71b4b731acdddb63fa3c3e591f"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ObserveOrdinaryRunSource",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "2796885dedf0570c11213fbdba4efe6c63c019f1bda270d631f68545a24da42f"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.PendingResetOperations",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "e1362d07bab084a512443c285addfef991911c6b1f2ca95113aebb9438f2df6f"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ReadResetInventory",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "a7e03a074d1ab0211e5fbbad5b4e4fe9b89e7e23087495a4c23d6d12f49446d5"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ReadTimerObligations",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "53107af5e868f8cac993af234c49cafeeb945c9b35663d283d23728e1562593b"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.RequiresSchemaPreparation",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "998713c3e21de1055ba537865c5df5582387819d2ae6fc878d84666410c0e0ce"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.StandingRunRestartDisposition",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "1344d8b632634cfdb487cd4261780ede76318b24d45670398cdd3ac035abfcf3"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.readContext",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "50e25588eabe95256dfde58a048ad8cdb5aa1dba09c9629ac82ccccb02bab27a"
   },
   {
     "owner": "internal/store/selected/admission.go::OpenAdmissionInspection",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "26f29c03fa8d4b382f5c2525e4c4b4b6027ec43a53e68d1beefb3cdd627cfb4d"
   },
   {
     "owner": "internal/store/selected/admission.go::openInspectionStore",
-    "audit_rows": "A19,A20,A22,A23,A24",
-    "proof_families": "P18,P19,P20,P21",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "de436ce0bcef10acffa79e5bf6d6753cf7cf8cc07fef63d4d95a6a5b029ca27b"
   }
 ]

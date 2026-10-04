@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -48,6 +49,8 @@ type admissionInspectionPort interface {
 	ListFlowInstanceRoutes(context.Context) ([]flowidentity.RunScopedFlowInstance, error)
 	PipelineObligations() pipelineobligation.Store
 	ObserveOrdinaryRunSource(context.Context, correlation.SourceArtifactFact, string) (bool, error)
+	channelonboarding.RetainedActivationReader
+	channelonboarding.PendingTeardownReader
 }
 
 // AdmissionInspection is a read purpose, not an unactivated runtime owner.
@@ -169,6 +172,33 @@ func (s *AdmissionSnapshot) InspectAuthority(ctx context.Context) (startupowners
 	}
 	defer done()
 	return s.store.InspectAuthority(ctx)
+}
+
+func (s *AdmissionSnapshot) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return s.store.ListChannelOnboardingOperations(ctx)
+}
+
+func (s *AdmissionSnapshot) ListCurrentConnectedChannelActivations(ctx context.Context) ([]channelonboarding.ConnectedChannelActivation, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return s.store.ListCurrentConnectedChannelActivations(ctx)
+}
+
+func (s *AdmissionSnapshot) ListChannelTeardowns(ctx context.Context) ([]channelonboarding.TeardownOperation, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return s.store.ListChannelTeardowns(ctx)
 }
 
 func (s *AdmissionSnapshot) ActiveNonStandingRunBundleAvailabilities(ctx context.Context) ([]runbundle.Availability, error) {

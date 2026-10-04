@@ -9067,6 +9067,15 @@ engine:
         a generation grant, excludes selected-fork bindings, and is not execution ownership.
         Dynamic readiness filtering shares the same standing-disposition owner. Boot separately
         proves current process and generation ownership and retains recovery/hydration effects.
+      connected_channel_inspection: >
+        The same selected-store read snapshot consumes canonical onboarding, current activation
+        and teardown readers. Verification and boot share the exact durable activation-to-operation
+        ownership check and pending teardown kind admission. Missing readers, malformed evidence
+        and failed reads never become an empty connection inventory. Retained rows do not grant
+        successor runtime identity, executable channel publication, credential admission or live
+        readiness. Boot independently reconciles successor context and credential/identity facts,
+        retires obsolete contexts and settles provider effects, teardown and confirmation delivery;
+        verification names these outstanding responsibilities without performing any of them.
       retained_fork_actor_admission: >
         Selected-fork inspection shares the actual retained binding, preparation, execution,
         source-artifact fingerprint, finite-feed and recovery-disposition owners. Its prospective

@@ -1687,6 +1687,8 @@ func sourceSelectedPurposeConsumers(root string) (map[string]struct{}, error) {
 				purposes["runtime"] = struct{}{}
 			case "OpenAuthorityInspection", "AuthorityInspection":
 				purposes["authority_inspection"] = struct{}{}
+			case "OpenAdmissionInspection", "AdmissionInspection", "AdmissionSnapshot":
+				purposes["admission_inspection"] = struct{}{}
 			case "OpenAuthorityMaintenance", "AuthorityMaintenance":
 				purposes["authority_maintenance"] = struct{}{}
 			}

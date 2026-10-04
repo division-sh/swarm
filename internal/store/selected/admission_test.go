@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimecore "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -126,6 +127,12 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				if _, err := snapshot.ListSelectedContractRouteRecoveryRecords(ctx); err != nil {
 					return err
 				}
+				if inventory, err := channelonboarding.InspectRetainedActivations(ctx, snapshot); err != nil || len(inventory.Operations) != 0 || len(inventory.Activations) != 0 {
+					t.Fatalf("empty connected channel read scope: %+v %v", inventory, err)
+				}
+				if pending, err := channelonboarding.InspectPendingTeardowns(ctx, snapshot); err != nil || len(pending) != 0 {
+					t.Fatalf("empty channel teardown read scope: %+v %v", pending, err)
+				}
 				source, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 				if err != nil {
 					return err
@@ -158,6 +165,12 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			}
 			if _, err := retained.PendingResetOperations(context.Background()); !errors.Is(err, context.Canceled) {
 				t.Fatalf("expired snapshot escaped to reset ledger reader: %v", err)
+			}
+			if _, err := channelonboarding.InspectRetainedActivations(ctx, retained); !errors.Is(err, context.Canceled) {
+				t.Fatalf("expired snapshot escaped to channel reader: %v", err)
+			}
+			if _, err := channelonboarding.InspectPendingTeardowns(ctx, retained); !errors.Is(err, context.Canceled) {
+				t.Fatalf("expired snapshot escaped to teardown reader: %v", err)
 			}
 			var processRows int
 			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&processRows); err != nil {
