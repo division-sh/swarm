@@ -45,8 +45,46 @@ features. New frameworks, compatibility paths and vendoring are not authorized.
 Tracker decision: body updated before coding; no new issue required.
 Existing `transport_policy_and_surface_parity` node is refined. #1779 paid
 tail, F #2319 and E #2496 remain separate; no inferred merge dependency.
-Coding gate: **independent reviewer-g outcome requested, not yet recorded**.
-Implementation is frozen. The 48 rows are planned proof, not runtime closure.
+Coding gate: **approved** by reviewer-g in
+https://github.com/division-sh/swarm/issues/2555#issuecomment-5976477595.
+The 48 rows are planned proof, not runtime closure. Implementation exposed two
+bounded stop conditions: the existing persisted `start_failed` compensation
+operation is outside both stores' operation union, and Docker fork-chat
+capability admission can replace the source actor's execution container. Those
+bounded dispositions are recorded at
+https://github.com/division-sh/swarm/issues/2555#issuecomment-5978140439.
+Fork-chat isolation is approved inside #2555, through the existing workspace
+owner and exact selected-store fork authority, shared by mock and Claude.
+E's #2525 alone owns the compensation fix; no duplicate/cherry-pick here.
+L01/L04 and final closure wait for its actual merge and G's both-store
+target-local refusal/retry proof after integration. Independent work continues.
+Both remain audited obligations, not a schema/framework or identity fallback.
+Independent M09 proof then exposed a third bounded stop condition: loss of the
+attached local Docker client lets `RunWorker` return while its exact native
+container worker and held HTTP request are still live. Real-Docker probes fail
+3/3 while request-deadline controls pass 3/3. The same existing owner serves
+mock model, gateway probe and tool-call consumers; no second interpreter was
+found. Reviewer-g approved the bounded existing-worker-owner repair in
+https://github.com/division-sh/swarm/issues/2555#issuecomment-5978927926.
+The uncommitted repair has real-Docker request/process join, sibling/source
+isolation and ambiguous-call controls; those are partial WIP proof, not closure.
+The already-audited Conversation consumer also must stop an uncertain transported
+tool outcome rather than feed it to a new model round. Its real HTTP lost-response
+counterexample failed three times; the bounded correction preserves ordinary
+observed tool-error feedback. No source-container deletion, deadline-based
+completion inference, provider replay, ledger or new lifecycle framework is
+authorized. Independent proof continues; #2525 is not the only remaining
+obligation.
+The current M09 controls pass all seven real-Docker leaves with race detection
+three times, including post-call deadline uncertainty. Typed possible-commit
+evidence survives cancellation and malformed replies; the Conversation stops
+without a successor call. The ordinary client-loss tests retain strict
+request/process absence before return. An intentionally failed cleanup observer
+instead proves uncertainty and both errors, with eventual disposal owned by
+the proof, not credited as a successful runtime join. Both-store lost-reply
+replay refusal survives selected-store reopen. Retained forced restart and
+exact two-context native gateway preparation also pass named partial controls.
+These are uncommitted WIP results, not final-head or 48-row closure proof.
 
 ## Historical field report
 
@@ -135,6 +173,6 @@ With that, all 18 sessions of the real week-2 run worked: tools available, 0 dea
 
 ## tracker
 ```yaml
-blockers: []
+blockers: [2525]
 score: 80
 ```

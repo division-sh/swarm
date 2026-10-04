@@ -187,7 +187,7 @@ func originTestRuntime(t *testing.T, provider string, harness *effecttest.Harnes
 		return runtime, func() int { files, _ := filepath.Glob(filepath.Join(root, "*.args")); return len(files) }
 	}
 	if provider == "mock" {
-		return NewMockRuntime(&config.Config{}, registry, "origin-test", nil, publisher, controller), func() int {
+		return NewMockRuntime(&config.Config{}, registry, "origin-test", nil, publisher, controller, mockHostRuntimeOptions(t)), func() int {
 			count := 0
 			for _, state := range harness.States {
 				if state == effects.StateSettled || state == effects.StateResponseObserved {

@@ -1,17 +1,29 @@
 package cliapp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 )
 
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if code, handled := worker.RunArgument(ctx, os.Args[1], os.Stdin, os.Stdout); handled {
+			os.Exit(code)
+		}
+	}
 	if err := preserveCLIAPPGoCaches(); err != nil {
 		fmt.Fprintf(os.Stderr, "preserve cliapp Go caches: %v\n", err)
 		os.Exit(1)

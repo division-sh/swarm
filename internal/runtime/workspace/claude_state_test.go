@@ -14,6 +14,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -188,10 +190,20 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 	}
 	for _, kind := range []string{"invocation", "fork"} {
 		t.Run(kind, func(t *testing.T) {
+			ctx := ctx
 			var ephemeral ClaudeStateRequest
 			var err error
 			if kind == "fork" {
 				ephemeral, err = ClaudeForkState(actor.Identity, uuid.NewString())
+				turnID := uuid.NewString()
+				authority := effects.Authority{Kind: effects.AuthorityConversationForkChat, ID: turnID,
+					ExecutionOwner: "offline-fork-state-proof", LeaseExpiresAt: time.Now().Add(3 * time.Minute), FenceGeneration: 1, ExecutionMode: actor.ExecutionMode,
+					ForkChat: effects.ConversationForkChatAuthority{ForkTurnID: turnID, ForkID: uuid.NewString(), SourceRunID: actor.Identity.RunID,
+						BundleHash: second.BundleHash(), ActorTokenID: "operator", RequestOccurrenceID: uuid.NewString(), RequestHash: "offline-proof"}}
+				// This offline workspace leaf supplies exact owner observation;
+				// selected-store admission is proved separately on both databases.
+				owner := &forkWorkspaceAuthorityStore{Harness: effecttest.New(), authority: authority}
+				ctx = effects.WithController(effects.WithAuthority(ctx, authority), effects.NewController(owner))
 			} else {
 				ephemeral, err = ClaudeSessionState(agentmemory.Plan{Enabled: false}, actor.Identity, uuid.NewString())
 			}
@@ -219,6 +231,9 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 			}
 			if err := e.ClaudeState.Release(ctx); err != nil {
 				t.Fatal(err)
+			}
+			if err := b.ClaudeState.CheckHead(ctx, head); err != nil {
+				t.Fatalf("temporary invocation changed live source conversation: %v", err)
 			}
 			if _, err := m2.ResolveClaudeWorkspace(ctx, actor, ephemeral, ephemeralHead); err == nil {
 				t.Fatal("terminated tmpfs survived")

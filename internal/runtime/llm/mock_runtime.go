@@ -21,6 +21,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 )
 
 type MockRuntime struct {
@@ -31,10 +34,19 @@ type MockRuntime struct {
 	lockOwner            string
 	events               EventPublisher
 	completionController *runtimeeffects.Controller
+	workspaces           workspace.Resolver
+	mcpTurns             MCPTurnContextStore
+	toolGateway          toolgateway.Binding
 }
 
-func NewMockRuntime(cfg *config.Config, sessionRegistry sessions.Registry, lockOwner string, conversations ConversationPersistence, publisher EventPublisher, controller *runtimeeffects.Controller) *MockRuntime {
-	return &MockRuntime{cfg: cfg, sessions: sessionRegistry, liveSessions: newTransientLiveSessionAcquirer(sessionRegistry), conversations: conversations, lockOwner: lockOwner, events: publisher, completionController: controller}
+type MockRuntimeOptions struct {
+	Workspaces  workspace.Resolver
+	MCPTurns    MCPTurnContextStore
+	ToolGateway toolgateway.Binding
+}
+
+func NewMockRuntime(cfg *config.Config, sessionRegistry sessions.Registry, lockOwner string, conversations ConversationPersistence, publisher EventPublisher, controller *runtimeeffects.Controller, opts MockRuntimeOptions) *MockRuntime {
+	return &MockRuntime{cfg: cfg, sessions: sessionRegistry, liveSessions: newTransientLiveSessionAcquirer(sessionRegistry), conversations: conversations, lockOwner: lockOwner, events: publisher, completionController: controller, workspaces: opts.Workspaces, mcpTurns: opts.MCPTurns, toolGateway: opts.ToolGateway}
 }
 
 func (r *MockRuntime) ProviderContract() ProviderContract { return MockProviderContract() }
@@ -43,7 +55,7 @@ func MockProviderContract() ProviderContract {
 	return ProviderContract{
 		RuntimeMode: llmselection.BackendMock,
 		Provider:    llmselection.ProviderMock,
-		Transport:   ProviderTransportInProcess,
+		Transport:   ProviderTransportCLI,
 		ToolSchema: ProviderToolSchemaContract{
 			ValidatesInputSchemas: true,
 			TranslatesTools:       true,
@@ -57,7 +69,7 @@ func MockProviderContract() ProviderContract {
 			NormalizesMessages: true, NormalizesToolCalls: true, PreservesRawResponse: true,
 			StreamingParser: "mock_python_json",
 		},
-		NativeTools: ProviderNativeToolContract{FallbackToolsAllowed: false},
+		NativeTools: ProviderNativeToolContract{FallbackToolsAllowed: false, StartupVisibleSurfaceProbe: true},
 		Persistence: ProviderPersistenceContract{
 			PersistsTurns: true, PersistsConversationSnapshots: true, PersistsStatelessAudit: true,
 		},
@@ -196,20 +208,43 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	if err != nil {
 		return nil, fmt.Errorf("marshal mock completion input: %w", err)
 	}
-	ctx, _, err = withObservedMockRuntimeCapabilitySurface(ctx, session.Tools, actor.Mock.Digest)
-	if err != nil {
-		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_in_process_request_mismatch", "mock-python-adapter", "build_request", nil, err)
-	}
 	ctx, targetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, session, lease, entityID)
 	if err != nil {
 		return nil, err
 	}
+	if r.workspaces == nil {
+		return nil, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "mock_workspace_required", "mock-python-adapter", "prepare_target", nil)
+	}
+	target, err := r.resolveWorkspace(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { retErr = errors.Join(retErr, releaseMockTarget(ctx, target)) }()
+	ctx, err = probeWorkspaceMCP(ctx, r.cfg, r.mcpTurns, session, r.toolGateway, target)
+	if err != nil {
+		return nil, err
+	}
 	start := time.Now()
-	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON, providerModel, len(request.ToolResults) != 0, managed)
+	response, raw, usage, dispatch, executeErr := executeMockCompletionWithExecutor(ctx, actor, session.Tools, requestJSON, providerModel, len(request.ToolResults) != 0, managed, func(ctx context.Context, request pythonmodule.Request) (pythonmodule.Result, error) {
+		result, err := workspace.RunWorker(ctx, target, r.cfg.Workspace.DockerBin, worker.Request{Mode: "model", Module: &request})
+		if err != nil {
+			return pythonmodule.Result{}, err
+		}
+		if result.Module == nil {
+			return pythonmodule.Result{}, &workspace.WorkerExecutionError{Started: true, Observed: true, ModelStarted: result.ModelStarted, Err: runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mock_worker_result_missing", "mock-python-adapter", "execute_completion", nil)}
+		}
+		return *result.Module, nil
+	})
 	latency := time.Since(start)
 	if response != nil {
 		if surface, ok := managedcapabilities.FromContext(ctx); ok {
-			response.CapabilitySurface = &surface
+			observed, observationErr := observeAllBindings(surface, managedcapabilities.BindingMCPProvider, evidenceMCPVisible, managedcapabilities.EvidenceConfirmed, "")
+			if observationErr != nil {
+				executeErr = errors.Join(executeErr, observationErr)
+			} else {
+				response.CapabilitySurface = &observed
+				ctx = managedcapabilities.WithContext(ctx, observed)
+			}
 		}
 	}
 	turn := enrichTurnRecord(ctx, session, AgentTurnRecord{
@@ -222,7 +257,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		if dispatch == nil {
 			return nil, executeErr
 		}
-		if _, settleErr := settleCompletionTurn(ctx, dispatch, targetID, turn, nil, profile, usage, runtimeeffects.StateTerminalFailure, turn.Failure, map[string]any{
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, targetID, turn, nil, profile, usage, dispatch.state, turn.Failure, map[string]any{
 			"execution_mode": runtimeeffects.ExecutionModeMock, "module_digest": actor.Mock.Digest,
 		}); settleErr != nil {
 			return nil, errors.Join(executeErr, settleErr)
@@ -320,10 +355,6 @@ type mockUsage struct {
 
 type mockCompletionExecutor func(context.Context, pythonmodule.Request) (pythonmodule.Result, error)
 
-func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel, postToolRound bool, managed *managedProviderCall) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
-	return executeMockCompletionWithExecutor(ctx, actor, tools, request, providerModel, postToolRound, managed, pythonmodule.Execute)
-}
-
 func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel, postToolRound bool, managed *managedProviderCall, execute mockCompletionExecutor) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
 	model := strings.TrimSpace(providerModel.ConcreteModel)
 	attempt, err := beginProviderCompletion(ctx, "mock_python", request, managed)
@@ -355,6 +386,16 @@ func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.
 		Fuel: mockperformance.ExecutionFuel, MemoryPages: mockperformance.ExecutionMemoryPages, OutputBytes: mockperformance.ExecutionOutputBytes,
 	})
 	if err != nil {
+		var execution *workspace.WorkerExecutionError
+		if errors.As(err, &execution) && !execution.RemoteCleanupUnproven && (!execution.Started || execution.Observed) {
+			if !execution.Started || !execution.ModelStarted {
+				dispatch.invocation = completionProviderInvocationNotStarted
+				err = dispatch.noDispatchError(err)
+			}
+		} else {
+			dispatch.state = runtimeeffects.StateOutcomeUncertain
+			err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "mock_worker_outcome_uncertain", "mock-python-adapter", "execute_completion", nil, err)
+		}
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	raw := append([]byte(nil), result.Output...)

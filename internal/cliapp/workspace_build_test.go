@@ -6,8 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 )
 
 func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
@@ -287,7 +292,7 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 		}
 	}
 	row := spec.CLISpecification.CommandCatalog.WorkspaceBuild
-	if row.Command != "swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>]" || row.ImplementationStatus != "implemented_first_slice" || row.Owner != "workspace_model.local_workspace_image_build_authority" {
+	if row.Command != "swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>] [--worker-binary <linux-swarm>]" || row.ImplementationStatus != "implemented_first_slice" || row.Owner != "workspace_model.local_workspace_image_build_authority" {
 		t.Fatalf("workspace_build command catalog row = %#v", row)
 	}
 	for _, want := range []string{"embedded/materialized", "temporary image tag", "workspace.docker_bin", "workspace.image", "claude --version"} {
@@ -297,6 +302,57 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 	}
 	if !stringSliceContains(row.Boundaries, "no runtime startup auto-build") || !stringSliceContains(row.Boundaries, "no source-checkout Dockerfile lookup or go.mod walk") {
 		t.Fatalf("workspace_build boundaries incomplete: %#v", row.Boundaries)
+	}
+}
+
+func TestWorkspaceBuildWorkerPinsCopiedBytesAndEmbeddedPlan(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("native Linux artifact copy; cross-platform contract is covered by worker identity tests")
+	}
+	dockerfile, err := platform.MaterializeWorkspaceDockerfile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDir, cleanup, err := materializeWorkspaceBuildContext(dockerfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := provisionWorkspaceBuildWorker(contextDir, binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := worker.ExecutableIdentity()
+	if err != nil || identity != want {
+		t.Fatalf("copied identity = %+v want %+v: %v", identity, want, err)
+	}
+	digest, err := worker.ArtifactDigest(filepath.Join(contextDir, "swarm-worker"))
+	if err != nil || digest != identity.BinaryDigest {
+		t.Fatalf("copied artifact digest = %q: %v", digest, err)
+	}
+	plan, err := os.ReadFile(filepath.Join(contextDir, platform.DefaultWorkspaceDockerfilePath))
+	if err != nil || !strings.Contains(string(plan), "COPY --chmod=0555 swarm-worker "+workspace.WorkerContainerPath) {
+		t.Fatalf("worker was not provisioned by embedded plan: %s err=%v", plan, err)
+	}
+}
+
+func TestWorkspaceBuildWorkerRejectsNonLinuxArtifactBeforeDocker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-linux")
+	if err := os.WriteFile(path, []byte("not a Linux executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stub := configureWorkspaceBuildDockerStub(t)
+	var stdout, stderr bytes.Buffer
+	exit := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli", "--worker-binary", path, "--docker-bin", stub.dockerPath}, &stdout, &stderr, defaultRootCommandOptions())
+	if exit != CLIExitRuntime || !strings.Contains(stderr.String(), "must be a runnable Linux swarm executable") {
+		t.Fatalf("artifact refusal exit=%d stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(stub.callsPath); !os.IsNotExist(err) {
+		t.Fatalf("invalid artifact reached Docker: calls-file error %v", err)
 	}
 }
 

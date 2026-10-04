@@ -30,15 +30,18 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -54,6 +57,8 @@ type gatewayStorySelectedStore struct {
 	backend  gatewayStoryStore
 	db       *sql.DB
 	postgres bool
+	close    func() error
+	reopen   func() gatewayStorySelectedStore
 }
 
 func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
@@ -64,15 +69,21 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 		{
 			name: "sqlite",
 			start: func(t *testing.T) gatewayStorySelectedStore {
-				backend := storetest.StartSQLiteRuntimeStore(t)
-				return gatewayStorySelectedStore{backend: backend, db: storetest.Database(backend)}
+				backend, reopen := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
+				return gatewayStorySelectedStore{backend: backend, db: storetest.Database(backend), close: backend.Close, reopen: func() gatewayStorySelectedStore {
+					next := reopen()
+					return gatewayStorySelectedStore{backend: next, db: storetest.Database(next), close: next.Close}
+				}}
 			},
 		},
 		{
 			name: "postgres",
 			start: func(t *testing.T) gatewayStorySelectedStore {
-				_, db, _ := testutil.StartPostgres(t)
-				return gatewayStorySelectedStore{backend: storetest.AdmitPostgresRuntimeStore(t, db), db: db, postgres: true}
+				backend, reopen := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				return gatewayStorySelectedStore{backend: backend, db: storetest.Database(backend), postgres: true, close: backend.Close, reopen: func() gatewayStorySelectedStore {
+					next := reopen()
+					return gatewayStorySelectedStore{backend: next, db: storetest.Database(next), postgres: true, close: next.Close}
+				}}
 			},
 		},
 	} {
@@ -129,16 +140,19 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			}
 
 			registry := runtimemcp.NewTurnContextRegistry(models.ActorFromContext)
-			gateway := runtimemcp.NewGateway(executor, gatewayStoryAuthToken, runtimemcp.GatewayHooks{
-				WithActor:                 models.WithActor,
-				WithInboundEvent:          runtimebus.WithInboundEvent,
-				ActorFromContext:          models.ActorFromContext,
-				ResolveTurnContext:        registry.ResolveTurnContext,
-				ObserveCapabilityEvidence: registry.ObserveCapabilityEvidence,
-				ObserveCapabilityMismatch: registry.ObserveCapabilityMismatch,
-				ObserveMCPProviderCall:    registry.ObserveMCPProviderCall,
-				MarkEmitKeyUsed:           registry.MarkEmitKeyUsed,
-			})
+			newGateway := func(registry *runtimemcp.TurnContextRegistry) *runtimemcp.Gateway {
+				return runtimemcp.NewGateway(executor, gatewayStoryAuthToken, runtimemcp.GatewayHooks{
+					WithActor:                 models.WithActor,
+					WithInboundEvent:          runtimebus.WithInboundEvent,
+					ActorFromContext:          models.ActorFromContext,
+					ResolveTurnContext:        registry.ResolveTurnContext,
+					ObserveCapabilityEvidence: registry.ObserveCapabilityEvidence,
+					ObserveCapabilityMismatch: registry.ObserveCapabilityMismatch,
+					ObserveMCPProviderCall:    registry.ObserveMCPProviderCall,
+					MarkEmitKeyUsed:           registry.MarkEmitKeyUsed,
+				})
+			}
+			gateway := newGateway(registry)
 			surface, authority, admission := gatewayStoryCapabilitySurface(t, gateway, actor, runID, lifecycleToken)
 
 			successCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, scope, sourceFact, authority, admission, lifecycleToken, "gateway-http-success")
@@ -162,6 +176,88 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			if got := dispatches.Load(); got != 1 {
 				t.Fatalf("scope-less call dispatched HTTP request; dispatches = %d, want 1", got)
 			}
+			t.Run("native_worker_committed_lost_reply", func(t *testing.T) {
+				lostCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, scope, sourceFact, authority, admission, lifecycleToken, "gateway-http-lost-reply")
+				lostToken := registry.RegisterTurnContextWithCapabilitySurface(lostCtx, time.Hour, surface)
+				defer registry.UnregisterTurnContext(lostToken)
+				var drop atomic.Bool
+				drop.Store(true)
+				gatewayHandler := gateway.Handler()
+				transport := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					recorded := httptest.NewRecorder()
+					gatewayHandler.ServeHTTP(recorded, r)
+					if drop.Swap(false) {
+						var rpc struct {
+							Result map[string]any `json:"result"`
+						}
+						if recorded.Code != http.StatusOK || json.Unmarshal(recorded.Body.Bytes(), &rpc) != nil || rpc.Result == nil || gatewayStoryResponseIsError(rpc.Result) {
+							t.Errorf("lost-reply checkpoint did not commit: %d %s", recorded.Code, recorded.Body.String())
+						}
+						connection, _, err := w.(http.Hijacker).Hijack()
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						_ = connection.Close()
+						return
+					}
+					for name, values := range recorded.Header() {
+						w.Header()[name] = values
+					}
+					w.WriteHeader(recorded.Code)
+					_, _ = w.Write(recorded.Body.Bytes())
+				}))
+				defer transport.Close()
+				target := &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()}
+				request := worker.Request{
+					Mode: "call", Tool: "send_story", Occurrence: "lost-reply-exact-call", Arguments: json.RawMessage(`{}`),
+					Gateway: toolgateway.HTTPObservation{URL: transport.URL + "/mcp", Headers: map[string]string{
+						"Authorization": "Bearer " + gatewayStoryAuthToken, "X-SWARM-Context-Token": lostToken,
+					}},
+				}
+				_, err := workspace.RunWorker(lostCtx, target, "", request)
+				failure, ok := failures.EnvelopeFromError(err)
+				if !ok || failure.Class != failures.ClassOutcomeUncertain || failure.Detail.Code != "workspace_tool_outcome_uncertain" {
+					t.Fatalf("committed response loss did not retain uncertainty: %v", err)
+				}
+				assertGatewayStoryEffectAndOccurrence(t, selected, scope, 2)
+				result, err := workspace.RunWorker(lostCtx, target, "", request)
+				var replay map[string]any
+				if err != nil || json.Unmarshal(result.ToolResult, &replay) != nil || !gatewayStoryResponseIsError(replay) {
+					t.Fatalf("exact committed-call replay was not refused: %s %v", result.ToolResult, err)
+				}
+				assertGatewayStoryDurableReplayRefusal(t, replay)
+				assertGatewayStoryEffectAndOccurrence(t, selected, scope, 2)
+				if dispatches.Load() != 2 {
+					t.Fatalf("lost reply erased/replayed committed effect: dispatches=%d", dispatches.Load())
+				}
+				// Retire every in-memory occurrence cache and native store handle.
+				// The same authority must still refuse redispatch from durable evidence.
+				transport.Close()
+				registry.Reset()
+				if err := selected.close(); err != nil {
+					t.Fatal(err)
+				}
+				reopened := selected.reopen()
+				reopenedCtx := runtimeeffects.WithController(lostCtx, runtimeeffects.NewController(reopened.backend).WithExecutionPosture(executionposture.Live))
+				freshRegistry := runtimemcp.NewTurnContextRegistry(models.ActorFromContext)
+				freshGateway := newGateway(freshRegistry)
+				freshToken := freshRegistry.RegisterTurnContextWithCapabilitySurface(reopenedCtx, time.Hour, surface)
+				defer freshRegistry.UnregisterTurnContext(freshToken)
+				freshTransport := httptest.NewServer(freshGateway.Handler())
+				defer freshTransport.Close()
+				request.Gateway.URL = freshTransport.URL + "/mcp"
+				request.Gateway.Headers["X-SWARM-Context-Token"] = freshToken
+				result, err = workspace.RunWorker(reopenedCtx, target, "", request)
+				if err != nil || json.Unmarshal(result.ToolResult, &replay) != nil || !gatewayStoryResponseIsError(replay) {
+					t.Fatalf("reopened committed-call replay was not refused: %s %v", result.ToolResult, err)
+				}
+				assertGatewayStoryDurableReplayRefusal(t, replay)
+				assertGatewayStoryEffectAndOccurrence(t, reopened, scope, 2)
+				if dispatches.Load() != 2 {
+					t.Fatalf("reopened gateway replayed committed effect: dispatches=%d", dispatches.Load())
+				}
+			})
 		})
 	}
 }
@@ -385,6 +481,14 @@ func callGatewayStoryTool(t *testing.T, gateway *runtimemcp.Gateway, token, tool
 func gatewayStoryResponseIsError(result map[string]any) bool {
 	isError, _ := result["isError"].(bool)
 	return isError
+}
+
+func assertGatewayStoryDurableReplayRefusal(t *testing.T, result map[string]any) {
+	t.Helper()
+	payload, err := runtimemcp.DecodeRuntimeErrorPayload(result["runtimeError"])
+	if err != nil || payload.Failure == nil || payload.Failure.Detail.Code != "external_effect_replay_refused" {
+		t.Fatalf("committed-call replay lacks the durable owner's refusal: %#v %v", result, err)
+	}
 }
 
 func assertGatewayStoryEffectAndOccurrence(t *testing.T, selected gatewayStorySelectedStore, scope runtimeauthoractivity.Scope, want int) {

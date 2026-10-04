@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -26,6 +27,16 @@ type Target struct {
 	Backend     string
 	Mounts      []ExecutionMount
 	ClaudeState ClaudeState
+	release     func(context.Context) error
+}
+
+// Release retires only disposable resources owned by this exact target.
+// Ordinary workspace targets retain their existing projection lifetime.
+func (t *Target) Release(ctx context.Context) error {
+	if t == nil || t.release == nil {
+		return nil
+	}
+	return t.release(ctx)
 }
 
 func (t *Target) Enabled() bool {
@@ -694,7 +705,12 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	return m.resolveWorkspace(ctx, actor, true)
 }
 
-func (m *DockerManager) ResolveWorkspaceForCapabilityAdmission(_ context.Context, actor models.AgentConfig) (*Target, error) {
+func (m *DockerManager) ResolveWorkspaceForCapabilityAdmission(ctx context.Context, actor models.AgentConfig) (*Target, error) {
+	if !actor.Identity.IsZero() {
+		// A concrete activation observes its selected container, but cannot
+		// materialize the run-bound data projection before executable admission.
+		return m.resolveWorkspace(ctx, actor, false)
+	}
 	if _, err := m.standardMountArgs(); err != nil {
 		return nil, err
 	}
@@ -1190,6 +1206,10 @@ func (m *DockerManager) EnsureContainerRunning(ctx context.Context, name string,
 }
 
 func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, name string, identity runtimecontaineridentity.Identity, createArgs []string) error {
+	return m.ensureContainerRunningWithIdentity(ctx, name, identity, createArgs, true)
+}
+
+func (m *DockerManager) ensureContainerRunningWithIdentity(ctx context.Context, name string, identity runtimecontaineridentity.Identity, createArgs []string, replaceStaleIdentity bool) error {
 	if m == nil {
 		return fmt.Errorf("workspace manager is required")
 	}
@@ -1220,7 +1240,7 @@ func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, 
 			return fmt.Errorf("container %s exists without the required runtime identity", name)
 		}
 		if !existing.Equal(identity) {
-			if !existing.ResetEligibleManaged() || existing.ContainerName != strings.TrimSpace(name) {
+			if !replaceStaleIdentity || !existing.ResetEligibleManaged() || existing.ContainerName != strings.TrimSpace(name) {
 				return fmt.Errorf("container %s has a conflicting non-replaceable runtime identity", name)
 			}
 			if _, err := m.RunDocker(ctx, "rm", "--force", name); err != nil {
@@ -1231,10 +1251,21 @@ func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, 
 		}
 	}
 	if exists {
+		if err := m.validateContainerWorkerInputs(ctx, name); err != nil {
+			return err
+		}
 		m.recordProjectionContainer(name, identity)
 	}
 	if !exists {
 		args := []string{"create", "--name", name}
+		if runtime.GOOS == "linux" {
+			args = append(args, "--add-host", "host.docker.internal:host-gateway")
+			artifact, err := currentWorkerArtifact()
+			if err != nil {
+				return fmt.Errorf("resolve workspace worker artifact: %w", err)
+			}
+			args = append(args, "--mount", "type=bind,source="+artifact.path+",destination="+WorkerContainerPath+",readonly")
+		}
 		if network := strings.TrimSpace(m.cfg.WorkspaceNetwork); network != "" {
 			args = append(args, "--network", network)
 		}

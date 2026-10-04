@@ -3,6 +3,8 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -257,12 +259,8 @@ func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_MissingWorkspaceCLIIsAct
 
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
-	script := `#!/bin/sh
-set -eu
-cat >/dev/null
-printf '%s\n' 'OCI runtime exec failed: exec failed: unable to start container process: exec: "claude": executable file not found in $PATH: unknown' >&2
-exit 127
-`
+	t.Setenv("SWARM_CLI_STARTUP_FAILURE_FIXTURE", "missing")
+	script := "#!/bin/sh\nexec " + shellQuote(os.Args[0]) + " -test.run=^TestCLIStartupFailureDockerHelper$ -- \"$@\"\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
 	}
@@ -272,6 +270,8 @@ exit 127
 	cfg.Workspace.Image = "swarm-workspace:test"
 	cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
 	cfg.LLM.ClaudeCLI.Command = "claude"
+	tools := []ToolDefinition{{Name: "emit_event"}}
+	binding, turns := nativeCLIProbeFixture(t, tools)
 
 	runtime := NewClaudeCLIRuntimeWithOptions(
 		cfg,
@@ -283,16 +283,12 @@ exit 127
 		nil,
 		ClaudeCLIRuntimeOptions{
 			ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
-			ToolGateway:         testToolGatewayBinding("http://127.0.0.1:18082", "http://host.docker.internal:18082", "gateway-token"),
-			MCPTurnContextStore: mcpTurnContextStoreStub{
-				register:   func(context.Context, time.Duration, []string) string { return "ctx-token-missing-cli" },
-				unregister: func(string) {},
-			},
+			ToolGateway:         binding,
+			MCPTurnContextStore: turns,
 		})
 
 	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
 	actor.Identity = testAgentIdentity(actor.ID, "")
-	tools := []ToolDefinition{{Name: "emit_event"}}
 	_, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, tools), actor, "system prompt", tools)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_startup_probe_failed" {
@@ -308,12 +304,8 @@ func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_AuthenticationFailureIsC
 
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
-	script := `#!/bin/sh
-set -eu
-cat >/dev/null
-printf '%s\n' 'OAuth token expired' >&2
-exit 1
-`
+	t.Setenv("SWARM_CLI_STARTUP_FAILURE_FIXTURE", "auth")
+	script := "#!/bin/sh\nexec " + shellQuote(os.Args[0]) + " -test.run=^TestCLIStartupFailureDockerHelper$ -- \"$@\"\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
 	}
@@ -322,6 +314,8 @@ exit 1
 	cfg.Workspace.DockerBin = scriptPath
 	cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
 	cfg.LLM.ClaudeCLI.Command = "claude"
+	tools := []ToolDefinition{{Name: "emit_event"}}
+	binding, turns := nativeCLIProbeFixture(t, tools)
 
 	runtime := NewClaudeCLIRuntimeWithOptions(
 		cfg,
@@ -333,18 +327,31 @@ exit 1
 		nil,
 		ClaudeCLIRuntimeOptions{
 			ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
-			ToolGateway:         testToolGatewayBinding("http://127.0.0.1:18082", "http://host.docker.internal:18082", "gateway-token"),
-			MCPTurnContextStore: mcpTurnContextStoreStub{
-				register:   func(context.Context, time.Duration, []string) string { return "ctx-token-auth" },
-				unregister: func(string) {},
-			},
+			ToolGateway:         binding,
+			MCPTurnContextStore: turns,
 		})
 
 	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
 	actor.Identity = testAgentIdentity(actor.ID, "")
-	tools := []ToolDefinition{{Name: "emit_event"}}
 	_, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, tools), actor, "system prompt", tools)
 	assertClaudeAuthenticationFailure(t, err)
+}
+
+func TestCLIStartupFailureDockerHelper(t *testing.T) {
+	mode := os.Getenv("SWARM_CLI_STARTUP_FAILURE_FIXTURE")
+	if mode == "" {
+		return
+	}
+	if code, handled := runCLIProbeDockerFixture(); handled {
+		os.Exit(code)
+	}
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	if mode == "missing" {
+		fmt.Fprintln(os.Stderr, `OCI runtime exec failed: exec failed: unable to start container process: exec: "claude": executable file not found in $PATH: unknown`)
+		os.Exit(127)
+	}
+	fmt.Fprintln(os.Stderr, "OAuth token expired")
+	os.Exit(1)
 }
 
 func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_IncompatiblePositiveSelectorFailsWithoutRetry(t *testing.T) {

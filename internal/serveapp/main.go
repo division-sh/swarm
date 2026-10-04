@@ -630,7 +630,7 @@ func configureWorkspaceDataProjection(workspaces workspace.Lifecycle, source sem
 	return nil
 }
 
-func buildForkChatSandboxLLMRuntimes(posture executionposture.Posture, cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (*runtimellm.AgentRuntimeSet, error) {
+func buildForkChatSandboxLLMRuntimes(posture executionposture.Posture, cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, turns runtimellm.MCPTurnContextStore, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (*runtimellm.AgentRuntimeSet, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
@@ -649,6 +649,7 @@ func buildForkChatSandboxLLMRuntimes(posture executionposture.Posture, cfg *conf
 		LockOwner:            "forkchat-sandbox",
 		Workspaces:           workspaces,
 		ToolGateway:          binding,
+		MCPTurns:             turns,
 		Credentials:          providerCredentials,
 		CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, projector).WithExecutionPosture(posture),
 	}, nil)
@@ -1132,21 +1133,28 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	source := loadedBundle.source
 	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
+	var listenerWorkspaceBackend cliapp.WorkspaceBackendSelection
 	if len(loadedBundles) == 0 {
 		presenter.boot(4, "bundle_load", "ok", "reset retained an empty source set; execution remains unloaded")
 	} else {
 		presenter.boot(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
 	}
-	if len(loadedBundles) > 0 {
-		_, err = cliapp.DecideWorkspaceBackend(req.Purpose, workspaceBackendPreference, cfg, source)
+	for _, bundle := range loadedBundles {
+		selection, selectionErr := cliapp.DecideWorkspaceBackend(req.Purpose, workspaceBackendPreference, cfg, bundle.source)
+		if selectionErr != nil {
+			presenter.failWithDiagnostic(5, "runtime_context", selectionErr, func(out io.Writer) bool {
+				cliapp.WriteWorkspaceBackendDecisionFailure(out, "serve", selectionErr)
+				return true
+			})
+			return 3
+		}
+		// The one listener must be reachable by every admitted workspace, not
+		// merely the primary bundle. Explicit listener provenance stays exact.
+		if listenerWorkspaceBackend.Backend == "" || selection.Backend == "docker" {
+			listenerWorkspaceBackend = selection
+		}
 	}
-	if err != nil {
-		presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
-			cliapp.WriteWorkspaceBackendDecisionFailure(out, "serve", err)
-			return true
-		})
-		return 3
-	}
+	opts.MCPListenAddr = cliapp.WorkspaceMCPListenAddr(opts.MCPListenAddr, opts.MCPListenAddrSource, listenerWorkspaceBackend)
 	managedCredentialStore, providerCredentialStore := req.ManagedCredentials, req.ProviderCredentials
 	providerCredentialOwner, err := runtimecredentials.NewSnapshotOwner(providerCredentialStore)
 	if err != nil {
@@ -3089,11 +3097,7 @@ func createServeToolGatewayBinding(mcpAddr net.Addr) (toolgateway.Binding, error
 	if mcpAddr == nil {
 		return toolgateway.Binding{}, errors.New("mcp listener address is unavailable")
 	}
-	mcpHostURL, err := serveListenerHTTPURL(mcpAddr, "127.0.0.1")
-	if err != nil {
-		return toolgateway.Binding{}, err
-	}
-	mcpContainerURL, err := serveMCPContainerGatewayURL(mcpAddr)
+	mcpHostURL, mcpContainerURL, err := toolgateway.ListenerEndpoints(mcpAddr)
 	if err != nil {
 		return toolgateway.Binding{}, err
 	}
@@ -3133,15 +3137,8 @@ func validateServeGatewayURLEnvForNonDev() error {
 }
 
 func serveMCPContainerGatewayURL(addr net.Addr) (string, error) {
-	host, _, err := splitListenerHostPort(addr)
-	if err != nil {
-		return "", err
-	}
-	containerHost := host
-	if isLocalListenerHost(host) {
-		containerHost = "host.docker.internal"
-	}
-	return serveListenerHTTPURLWithHost(addr, containerHost)
+	_, workspaceURL, err := toolgateway.ListenerEndpoints(addr)
+	return workspaceURL, err
 }
 
 func serveListenerHTTPURL(addr net.Addr, localHost string) (string, error) {

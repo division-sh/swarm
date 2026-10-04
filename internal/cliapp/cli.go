@@ -303,7 +303,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 			if opts.ShutdownGrace <= 0 {
 				return fmt.Errorf("--shutdown-grace must be a positive duration")
 			}
-			apiListenAddr, mcpListenAddr, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{
+			apiListenAddr, mcpListenAddr, mcpSource, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{
 				APIListenAddr:        opts.APIListenAddr,
 				MCPListenAddr:        opts.MCPListenAddr,
 				APIListenAddrFlagSet: cmd.Flags().Changed("api-listen-addr"),
@@ -316,6 +316,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 			}
 			opts.APIListenAddr = apiListenAddr
 			opts.MCPListenAddr = mcpListenAddr
+			opts.MCPListenAddrSource = mcpSource
 			if err := ValidateServeListenAddr("--api-listen-addr", opts.APIListenAddr); err != nil {
 				return err
 			}

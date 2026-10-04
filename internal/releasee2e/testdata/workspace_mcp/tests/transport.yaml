@@ -1,0 +1,7 @@
+name: real workspace MCP transport
+steps:
+  - publish: work.requested
+    payload: {marker: real-http-mcp}
+expect:
+  events: [work.completed]
+  no_dead_letters: true

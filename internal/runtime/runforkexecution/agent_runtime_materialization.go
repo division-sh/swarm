@@ -276,7 +276,7 @@ func (p *selectedContractAgentRuntimePlan) releaseWorkspaceProjection() error {
 type selectedContractAgentRuntimeFactory struct {
 	factory     runtimemanager.AgentFactory
 	options     runtimemanager.AgentManagerOptions
-	bindManager func(runtimetools.Manager)
+	bindManager func(*runtimemanager.AgentManager)
 	cleanup     func()
 	runtimes    *runtimellm.AgentRuntimeSet
 	tools       *runtimetools.Executor
@@ -762,7 +762,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	}
 
 	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	var managerRef runtimetools.Manager
+	var managerRef *runtimemanager.AgentManager
 	exec := newSelectedContractToolExecutor(options, source, bus, pipeline, func() runtimetools.Manager {
 		return managerRef
 	})
@@ -779,6 +779,11 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		}
 		cfg, err := managerRef.ResolveAgentConfig(identity.RunID, identity.AgentID(), identity.FlowInstance())
 		return cfg, err == nil
+	}, func(token runtimeeffects.LifecycleToken) error {
+		if managerRef == nil {
+			return errors.New("selected activation has no lifecycle owner")
+		}
+		return managerRef.ProveUnpublishedActivation(token)
 	})
 	if err != nil {
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("start selected-fork tool gateway: %w", err)
@@ -802,11 +807,21 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("build selected-fork agent runtime resolver: %w", err)
 	}
 	exec.SetModelRuntimes(runtimes)
+	managerOptions.WorkspaceGatewayAdmission = func(ctx context.Context, actor runtimeactors.AgentConfig) error {
+		token, ok := runtimeeffects.LifecycleTokenFromContext(ctx)
+		if !ok || managerRef == nil || token.Identity != actor.Identity {
+			return errors.New("selected activation requires its exact lifecycle token")
+		}
+		if err := managerRef.ProveUnpublishedActivation(token); err != nil {
+			return err
+		}
+		return req.Prepared.catalog.ObserveActivationGateway(ctx, options.Config, binding, mcpTurns, options.Workspace, actor, req.Prepared.preparationID, req.Prepared.coordinates, options.ProcessCapability)
+	}
 	factory := runtimeagents.NewLLMAgentFactory(runtimes, exec, runtimeagents.LLMAgentOptions{})
 	return selectedContractAgentRuntimeFactory{
 		factory: factory,
 		options: managerOptions,
-		bindManager: func(manager runtimetools.Manager) {
+		bindManager: func(manager *runtimemanager.AgentManager) {
 			managerRef = manager
 		},
 		cleanup:  cleanup,
@@ -839,7 +854,7 @@ func newSelectedContractToolExecutor(options SelectedContractAgentRuntimeOptions
 	})
 }
 
-func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTurns *runtimemcp.TurnContextRegistry, lease *worklifetime.Lease, resolveActorConfig func(agentidentity.Identity) (runtimeactors.AgentConfig, bool)) (_ toolgateway.Binding, _ func(), finalErr error) {
+func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTurns *runtimemcp.TurnContextRegistry, lease *worklifetime.Lease, resolveActorConfig func(agentidentity.Identity) (runtimeactors.AgentConfig, bool), validateActivation func(runtimeeffects.LifecycleToken) error) (_ toolgateway.Binding, _ func(), finalErr error) {
 	if lease == nil {
 		return toolgateway.Binding{}, nil, errors.New("selected-fork gateway requires admitted work")
 	}
@@ -881,7 +896,9 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTu
 		return toolgateway.Binding{}, nil, err
 	}
 
-	gateway := runtimemcp.NewGateway(exec, binding.AuthToken(), swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, mcpTurns))
+	hooks := swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, mcpTurns)
+	hooks.ValidateActivationProbe = validateActivation
+	gateway := runtimemcp.NewGateway(exec, binding.AuthToken(), hooks)
 	server := serveSelectedContractGateway(ln, gateway.Handler(), lease)
 	transferred = true
 	return binding, server.Close, nil

@@ -46,6 +46,7 @@ type AgentManager struct {
 	runtimeShutdownAdmissionClosed  func() bool
 	runtimeIngressSafetyPause       func(context.Context, string, *runtimefailures.Envelope) error
 	nativeToolAdmissionValidator    func(context.Context, models.AgentConfig) error
+	workspaceGatewayAdmission       func(context.Context, models.AgentConfig) error
 	runtimeMode                     string
 	llmBackend                      string
 	modelAliases                    llmselection.ModelAliases
@@ -249,6 +250,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		runtimeShutdownAdmissionClosed:    opts.RuntimeShutdownAdmissionClosed,
 		runtimeIngressSafetyPause:         opts.RuntimeIngressSafetyPause,
 		nativeToolAdmissionValidator:      opts.NativeToolAdmissionValidator,
+		workspaceGatewayAdmission:         opts.WorkspaceGatewayAdmission,
 		throttleSuppressPrefixes:          throttleSuppressPrefixes,
 		llmBackend:                        normalizeManagerLLMBackend(opts.LLMBackend),
 		modelAliases:                      llmselection.EffectiveModelAliases(opts.ModelAliases),

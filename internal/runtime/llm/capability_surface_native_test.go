@@ -47,7 +47,7 @@ func TestManagedCapabilityPlanSeparatesAllProviderNativeFamiliesFromConcreteFall
 	}
 	for _, kind := range []managedcapabilities.BindingKind{
 		managedcapabilities.BindingAPIDefinition,
-		managedcapabilities.BindingLocalRuntime,
+		managedcapabilities.BindingKind("local_runtime"),
 		managedcapabilities.BindingMCPProvider,
 		managedcapabilities.BindingMCPTool,
 	} {

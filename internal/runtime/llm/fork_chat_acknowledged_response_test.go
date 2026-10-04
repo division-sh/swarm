@@ -40,7 +40,7 @@ func TestForkChatRetainsCommittedAssistantThroughCleanupError(t *testing.T) {
 	runtime := NewMockRuntime(&config.Config{LLM: config.LLMConfig{Models: llmselection.ModelAliases{
 		llmselection.ModelAliasRegular: {llmselection.BackendMock: "mock-regular"},
 	}}}, sessions.NewInMemoryRegistry(time.Minute), "worker-1", nil, nil,
-		liveTestCompletionController(probe, probe, probe, probe))
+		liveTestCompletionController(probe, probe, probe, probe), mockHostRuntimeOptions(t))
 	conversation, err := NewForkChatConversation("fork-agent", "fork", "inspect", nil, agentmemory.Plan{}, 2, runtime)
 	if err != nil {
 		t.Fatal(err)

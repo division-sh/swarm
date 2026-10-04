@@ -46,7 +46,7 @@ func managedCompletionTestSurface(t testing.TB, authority runtimeeffects.Authori
 	case "claude_cli":
 		transport = "cli"
 	case "mock_python":
-		transport = "in_process"
+		transport = "cli"
 	}
 	runtimeMode := "task"
 	if authority.Target.Memory.Enabled {

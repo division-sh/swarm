@@ -467,7 +467,7 @@ func TestAllManagedAdaptersGateAdoptedSessionIdentityBeforeProviderLaunch(t *tes
 		{file: "openai_compatible_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "r.sendAdmittedRequest("},
 		{file: "openai_responses_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "r.sendAdmittedRequest("},
 		{file: "cli_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "r.runWithPreparedPrompt("},
-		{file: "mock_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "executeMockCompletion("},
+		{file: "mock_runtime.go", adoption: "requireManagedAcquiredBase(", launchCall: "executeMockCompletionWithExecutor("},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

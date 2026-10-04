@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -26,7 +27,6 @@ const (
 	evidenceProviderVisible     = "provider_visible"
 	evidenceMCPListed           = "mcp_listed"
 	evidenceMCPVisible          = "mcp_visible"
-	evidenceMockInputDelivered  = "mock_python_input_delivered"
 )
 
 type providerTurnAuthorityKey struct{}
@@ -364,9 +364,6 @@ func managedConcreteCapabilityBindings(contract ProviderContract, name string) [
 	if contract.Transport == ProviderTransportAPI {
 		return []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingAPIDefinition, ExactName: name, RequiredEvidenceKind: evidenceAPIRequestDelivered}}
 	}
-	if contract.Transport == ProviderTransportInProcess {
-		return []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingLocalRuntime, ExactName: name, RequiredEvidenceKind: evidenceMockInputDelivered}}
-	}
 	exactName := toolidentity.RuntimeToolsMCPPrefix + name
 	return []managedcapabilities.DeliveryBinding{
 		{Kind: managedcapabilities.BindingMCPTool, ExactName: exactName, RequiredEvidenceKind: evidenceMCPListed},
@@ -509,6 +506,29 @@ func ValidateCLIProviderCapabilitySurface(surface managedcapabilities.Surface, r
 	if !slices.Equal(expected, actual) {
 		return fmt.Errorf("provider-visible capability mismatch: expected [%s], got [%s]", strings.Join(expected, ", "), strings.Join(actual, ", "))
 	}
+	plannedMCP := surface.PlannedBindingNames(managedcapabilities.BindingMCPProvider)
+	if len(plannedMCP) == 0 {
+		return nil
+	}
+	if response == nil || !mcpRuntimeServerConnected(response.MCPServers) {
+		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "workspace_gateway_unreachable", "llm-runtime", "admit_mcp_surface", map[string]any{"status": "provider_mcp_unavailable"})
+	}
+	for _, tool := range surface.Tools {
+		if !tool.Capability.Visible || !tool.Capability.Callable {
+			continue
+		}
+		for _, binding := range tool.Bindings {
+			if binding.Kind != managedcapabilities.BindingMCPProvider {
+				continue
+			}
+			confirmed := slices.ContainsFunc(tool.Evidence, func(e managedcapabilities.DeliveryEvidence) bool {
+				return e.BindingKind == binding.Kind && e.ExactName == binding.ExactName && e.Kind == binding.RequiredEvidenceKind && e.Status == managedcapabilities.EvidenceConfirmed
+			})
+			if !confirmed {
+				return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "managed_capability_mcp_definition_mismatch", "llm-runtime", "admit_mcp_surface", map[string]any{"tool": tool.Name, "binding": binding.ExactName})
+			}
+		}
+	}
 	return nil
 }
 
@@ -561,59 +581,6 @@ func ObserveAPIRequestCapabilitySurface(surface managedcapabilities.Surface, del
 	return observeAllBindings(surface, managedcapabilities.BindingAPIDefinition, evidenceAPIRequestDelivered, managedcapabilities.EvidenceConfirmed, "exact provider request definition")
 }
 
-func ObserveMockRuntimeCapabilitySurface(surface managedcapabilities.Surface, deliveredTools []ToolDefinition, moduleDigest string) (managedcapabilities.Surface, error) {
-	moduleDigest = strings.TrimSpace(moduleDigest)
-	if moduleDigest == "" {
-		return surface, fmt.Errorf("mock runtime capability observation requires module digest")
-	}
-	planned := map[string]string{}
-	for _, tool := range surface.Tools {
-		if !tool.Capability.Visible || !tool.Capability.Callable {
-			continue
-		}
-		for _, binding := range tool.Bindings {
-			if binding.Kind == managedcapabilities.BindingLocalRuntime {
-				planned[binding.ExactName] = tool.DefinitionHash
-			}
-		}
-	}
-	actual := map[string]string{}
-	var mismatches []managedcapabilities.DeliveryMismatch
-	for _, def := range deliveredTools {
-		name := toolidentity.CanonicalName(def.Name)
-		if name == "" {
-			mismatches = append(mismatches, managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingLocalRuntime, ExactName: "<unnamed>", Kind: "unnamed_local_runtime_definition"})
-			continue
-		}
-		if _, duplicate := actual[name]; duplicate {
-			mismatches = append(mismatches, managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingLocalRuntime, ExactName: name, Kind: "duplicate_local_runtime_definition"})
-			continue
-		}
-		actual[name] = ToolDefinitionIdentity(def)
-	}
-	for name := range actual {
-		if _, ok := planned[name]; !ok {
-			mismatches = append(mismatches, managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingLocalRuntime, ExactName: name, Kind: "unplanned_local_runtime_definition"})
-		}
-	}
-	for name, definitionHash := range planned {
-		actualHash, ok := actual[name]
-		if !ok {
-			mismatches = append(mismatches, managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingLocalRuntime, ExactName: name, Kind: "missing_local_runtime_definition"})
-		} else if actualHash != definitionHash {
-			mismatches = append(mismatches, managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingLocalRuntime, ExactName: name, Kind: "local_runtime_definition_identity_mismatch"})
-		}
-	}
-	if len(mismatches) > 0 {
-		observed, err := surface.ObserveMismatch(mismatches...)
-		if err != nil {
-			return managedcapabilities.Surface{}, err
-		}
-		return observed, fmt.Errorf("mock runtime capability definition mismatch: planned %d, delivered %d", len(planned), len(actual))
-	}
-	return observeAllBindings(surface, managedcapabilities.BindingLocalRuntime, evidenceMockInputDelivered, managedcapabilities.EvidenceConfirmed, "mock_python module_digest="+moduleDigest)
-}
-
 func withObservedAPIRequestCapabilitySurface(ctx context.Context, deliveredTools []ToolDefinition) (context.Context, managedcapabilities.Surface, error) {
 	surface, ok := managedcapabilities.FromContext(ctx)
 	if !ok {
@@ -623,24 +590,6 @@ func withObservedAPIRequestCapabilitySurface(ctx context.Context, deliveredTools
 		return ctx, managedcapabilities.Surface{}, nil
 	}
 	observed, err := ObserveAPIRequestCapabilitySurface(surface, deliveredTools)
-	if err != nil {
-		if strings.TrimSpace(observed.ID) != "" {
-			ctx = managedcapabilities.WithContext(ctx, observed)
-		}
-		return ctx, observed, err
-	}
-	return managedcapabilities.WithContext(ctx, observed), observed, nil
-}
-
-func withObservedMockRuntimeCapabilitySurface(ctx context.Context, deliveredTools []ToolDefinition, moduleDigest string) (context.Context, managedcapabilities.Surface, error) {
-	surface, ok := managedcapabilities.FromContext(ctx)
-	if !ok {
-		if managedAgentExecutionContext(ctx) {
-			return ctx, managedcapabilities.Surface{}, fmt.Errorf("mock runtime request requires exact managed capability surface")
-		}
-		return ctx, managedcapabilities.Surface{}, nil
-	}
-	observed, err := ObserveMockRuntimeCapabilitySurface(surface, deliveredTools, moduleDigest)
 	if err != nil {
 		if strings.TrimSpace(observed.ID) != "" {
 			ctx = managedcapabilities.WithContext(ctx, observed)

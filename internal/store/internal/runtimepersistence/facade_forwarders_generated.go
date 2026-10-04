@@ -475,6 +475,10 @@ func (s *PostgresStore) IsExternalEffectAuthorityCurrent(ctx context.Context, au
 	return s.effectPostgresOwner.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
 
+func (s *PostgresStore) IsForkChatWorkspaceAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
+	return s.effectPostgresOwner.IsForkChatWorkspaceAuthorityCurrent(ctx, authority)
+}
+
 func (s *PostgresStore) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
 	return s.runForkPostgresOwner.IssueRunForkSelectedContractRuntimeExecution(ctx, req)
 }
@@ -1729,6 +1733,10 @@ func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForSource(ctx con
 
 func (s *SQLiteRuntimeStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
 	return s.effectSQLiteOwner.IsExternalEffectAuthorityCurrent(ctx, authority)
+}
+
+func (s *SQLiteRuntimeStore) IsForkChatWorkspaceAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
+	return s.effectSQLiteOwner.IsForkChatWorkspaceAuthorityCurrent(ctx, authority)
 }
 
 func (s *SQLiteRuntimeStore) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {

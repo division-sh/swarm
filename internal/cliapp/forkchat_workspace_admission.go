@@ -7,6 +7,7 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -34,7 +35,7 @@ func (e workspaceAdmittedForkChatExecutor) ExecuteForkChat(ctx context.Context, 
 		return runfork.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat resolve llm runtime: %w", err)
 	}
 	providerContract, hasProviderContract := runtimellm.ProviderContractForRuntime(resolved.Runtime)
-	if hasProviderContract && providerContract.Transport == runtimellm.ProviderTransportCLI {
+	if hasProviderContract && providerContract.Provider == llmselection.ProviderClaude && providerContract.Transport == runtimellm.ProviderTransportCLI {
 		switch {
 		case e.decision.Backend == workspace.BackendDocker:
 			return e.inner.ExecuteForkChat(ctx, prepared, message)

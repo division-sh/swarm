@@ -40,6 +40,7 @@ type GatewayHooks struct {
 	MarkEmitKeyUsed                func(string, string) bool
 	Log                            func(context.Context, string, string, string, string, map[string]any, *failures.Envelope)
 	AfterToolSuccess               func(context.Context, *http.Request, string)
+	ValidateActivationProbe        func(runtimeeffects.LifecycleToken) error
 }
 
 type Gateway struct {
@@ -133,6 +134,17 @@ func (g *Gateway) StartupProbeRequestAuthority(r *http.Request) (runtimeeffects.
 	return authority, true
 }
 
+func (g *Gateway) ActivationProbeToken(r *http.Request) (runtimeeffects.LifecycleToken, bool) {
+	if g == nil || r == nil || g.authorize(r) != nil {
+		return runtimeeffects.LifecycleToken{}, false
+	}
+	turn, err := g.runtimeTurnContextForRequest(r, "mcp.activation_probe_admission")
+	if err != nil || !turn.HasLifecycleToken || turn.CapabilitySurface == nil || turn.CapabilitySurface.Authority.Kind != managedcapabilities.AuthorityStartupProbe {
+		return runtimeeffects.LifecycleToken{}, false
+	}
+	return turn.LifecycleToken, true
+}
+
 func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, ToolGatewayResponse{OK: false, Error: "method not allowed"})
@@ -159,11 +171,6 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: "tool name is required"})
 		return
 	}
-	if g.executor == nil {
-		WriteJSON(w, http.StatusServiceUnavailable, ToolGatewayResponse{OK: false, Error: "tool executor unavailable"})
-		return
-	}
-
 	var req ToolGatewayRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: "invalid json body"})
@@ -178,6 +185,10 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
+	if isActivationProbeContext(ctx) {
+		WriteJSON(w, http.StatusForbidden, ToolGatewayResponse{OK: false, Error: "activation observation cannot execute tools"})
+		return
+	}
 	r = r.WithContext(ctx)
 	if !toolAllowedInContext(ctx, toolName) {
 		err := g.newGatewayError(ErrCodeToolNotAllowed, "tool.execute.authorize_tool", nil, map[string]any{"tool": toolName})
@@ -188,7 +199,7 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: g.formatError(err)})
 		return
 	}
-	out, err := g.executor.Execute(ctx, toolName, req.Input)
+	out, err := g.executeToolInContext(ctx, toolName, req.Input)
 	if err != nil {
 		execErr := g.newGatewayError(ErrCodeToolExecFailed, "tool.execute", err, map[string]any{"tool": toolName})
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, RuntimeError: RuntimeErrorPayloadFromError(execErr)})
@@ -261,9 +272,8 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		WriteRPCResult(w, req.ID, map[string]any{"tools": tools})
 		return
 	case "tools/call":
-		if g.executor == nil {
-			err := g.newGatewayError(ErrCodeToolExecFailed, "mcp.tools.call.execute", nil, map[string]any{"dependency": "tool_executor"})
-			g.writeToolCallErrorResult(w, req.ID, err)
+		if _, ok := g.ActivationProbeToken(r); ok {
+			WriteRPCError(w, req.ID, -32003, "activation observation cannot execute tools")
 			return
 		}
 		toolName := strings.TrimSpace(asString(req.Params["name"]))
@@ -364,7 +374,19 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		out, execErr := g.executor.Execute(ctx, toolName, req.Params["arguments"])
+		var out any
+		var execErr error
+		if call, settled := llm.ToolOutputCallFromContext(ctx); settled {
+			identity, identityErr := call.Authorize(toolName, req.Params["arguments"], occurrence)
+			output, dedicated := g.executor.(llm.ToolOutputEventExecutor)
+			if identityErr != nil || !dedicated {
+				execErr = g.newGatewayError(ErrCodeToolNotAllowed, "mcp.tools.call.output_authority", identityErr, nil)
+			} else {
+				out, execErr = output.ExecuteOutputEvent(ctx, toolName, req.Params["arguments"], identity)
+			}
+		} else {
+			out, execErr = g.executeToolInContext(ctx, toolName, req.Params["arguments"])
+		}
 		if execErr != nil {
 			err = g.newGatewayError(ErrCodeToolExecFailed, "mcp.tools.call.execute", execErr, map[string]any{"tool": toolName})
 			g.logMCP(r, "warn", "mcp.tools.call.exec_error", err, map[string]any{
@@ -588,13 +610,14 @@ func (g *Gateway) withToolCapabilities(ctx context.Context, actor models.AgentCo
 	if g == nil || ctx == nil {
 		return ctx
 	}
-	if g.executor == nil {
+	executor := g.executorForContext(ctx)
+	if executor == nil {
 		return ctx
 	}
-	if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
+	if contextAware, ok := executor.(runtimeGatewayContextAwareExecutor); ok {
 		return toolcapabilities.WithContext(ctx, contextAware.ToolCapabilitiesForActorInContext(ctx, actor, names, requestAllowed))
 	}
-	set := g.executor.ToolCapabilitiesForActor(actor, names, requestAllowed)
+	set := executor.ToolCapabilitiesForActor(actor, names, requestAllowed)
 	return toolcapabilities.WithContext(ctx, set)
 }
 
@@ -815,13 +838,14 @@ func (g *Gateway) mcpToolsForActorInContext(ctx context.Context, actor models.Ag
 
 func (g *Gateway) acquireToolDefinitionsInContext(ctx context.Context, actor models.AgentConfig, actorOK bool) (context.Context, []llm.ToolDefinition, func(), error) {
 	noopRelease := func() {}
-	if !actorOK || g.executor == nil {
+	executor := g.executorForContext(ctx)
+	if !actorOK || executor == nil {
 		return ctx, nil, noopRelease, nil
 	}
 	pinnedCtx := ctx
 	release := noopRelease
 	var definitions []llm.ToolDefinition
-	if leased, ok := g.executor.(runtimeGatewayLeasedContextAwareExecutor); ok {
+	if leased, ok := executor.(runtimeGatewayLeasedContextAwareExecutor); ok {
 		var err error
 		pinnedCtx, definitions, release, err = leased.AcquireToolDefinitionsForActorInContext(ctx, actor)
 		if err != nil {
@@ -830,10 +854,10 @@ func (g *Gateway) acquireToolDefinitionsInContext(ctx context.Context, actor mod
 		if release == nil {
 			release = noopRelease
 		}
-	} else if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
+	} else if contextAware, ok := executor.(runtimeGatewayContextAwareExecutor); ok {
 		definitions = contextAware.ToolDefinitionsForActorInContext(ctx, actor)
 	} else {
-		definitions = g.executor.ToolDefinitionsForActor(actor)
+		definitions = executor.ToolDefinitionsForActor(actor)
 	}
 	seen := make(map[string]struct{}, len(definitions))
 	for _, definition := range definitions {
@@ -857,17 +881,36 @@ func (g *Gateway) acquireToolDefinitionsInContext(ctx context.Context, actor mod
 }
 
 func (g *Gateway) requestToolCapabilitiesInContext(ctx context.Context, actor models.AgentConfig, actorOK bool, definitions []llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {
-	if g.executor == nil || !actorOK {
+	executor := g.executorForContext(ctx)
+	if executor == nil || !actorOK {
 		return toolcapabilities.Set{}, false
 	}
 	names := make([]string, 0, len(definitions))
 	for _, definition := range definitions {
 		names = append(names, definition.Name)
 	}
-	if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
+	if contextAware, ok := executor.(runtimeGatewayContextAwareExecutor); ok {
 		return contextAware.ToolCapabilitiesForActorInContext(ctx, actor, names, requestAllowed), true
 	}
-	return g.executor.ToolCapabilitiesForActor(actor, names, requestAllowed), true
+	return executor.ToolCapabilitiesForActor(actor, names, requestAllowed), true
+}
+
+func (g *Gateway) executorForContext(ctx context.Context) runtimeGatewayExecutor {
+	if dispatch, ok := llm.ForkChatToolDispatchFromContext(ctx); ok {
+		return dispatch
+	}
+	if authority, ok := runtimeeffects.AuthorityFromContext(ctx); ok && authority.Kind == runtimeeffects.AuthorityConversationForkChat {
+		return nil
+	}
+	return g.executor
+}
+
+func (g *Gateway) executeToolInContext(ctx context.Context, name string, input any) (any, error) {
+	executor := g.executorForContext(ctx)
+	if executor == nil {
+		return nil, g.newGatewayError(ErrCodeToolExecFailed, "mcp.tools.call.execute", nil, map[string]any{"dependency": "exact_tool_executor"})
+	}
+	return executor.Execute(ctx, name, input)
 }
 
 func (g *Gateway) authorize(r *http.Request) error {
@@ -917,12 +960,32 @@ func (g *Gateway) runtimeTurnContextForRequest(r *http.Request, operation string
 	if turn.CapabilitySurface == nil && len(turn.ForkSandboxAllowed) == 0 {
 		return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
 	}
+	if turn.CapabilitySurface == nil {
+		if turn.ForkSandboxDispatch == nil || turn.ForkSandboxDispatch.Validate(g.baseContextForResolvedTurn(r.Context(), turn)) != nil {
+			return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "sandbox_executor_missing_or_foreign"})
+		}
+	}
 	if turn.CapabilitySurface != nil {
 		if !capabilitySurfaceMatchesActorConfig(*turn.CapabilitySurface, turn.Actor) {
 			return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
 		}
+		if turn.CapabilitySurface.Authority.Kind == managedcapabilities.AuthorityStartupProbe && turn.HasLifecycleToken {
+			plan, planErr := turn.LifecycleToken.Identity.Plan()
+			if planErr != nil || plan != turn.CapabilitySurface.ActorPlan || g.hooks.ValidateActivationProbe == nil {
+				return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "activation_probe_owner_missing_or_foreign"})
+			}
+			if err := g.hooks.ValidateActivationProbe(turn.LifecycleToken); err != nil {
+				return TurnContext{}, g.newGatewayError(ErrCodeContextStale, operation, err, nil)
+			}
+		}
 	}
 	return turn, nil
+}
+
+func isActivationProbeContext(ctx context.Context) bool {
+	surface, ok := managedcapabilities.FromContext(ctx)
+	_, hasToken := runtimeeffects.LifecycleTokenFromContext(ctx)
+	return ok && hasToken && surface.Authority.Kind == managedcapabilities.AuthorityStartupProbe
 }
 
 func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
@@ -945,6 +1008,9 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 		ctx = runtimeeffects.WithAuthority(ctx, turn.EffectAuthority)
 		ctx = runtimeeffects.WithExecutionMode(ctx, turn.EffectAuthority.ExecutionMode)
 	}
+	if turn.ForkSandboxDispatch != nil {
+		ctx = turn.ForkSandboxDispatch.WithContext(ctx)
+	}
 	if turn.HasLifecycleToken {
 		ctx = runtimeeffects.WithLifecycleToken(ctx, turn.LifecycleToken)
 	} else if turn.DifferentOwner != "" {
@@ -952,6 +1018,9 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 	}
 	if turn.HasLogicalIdentity {
 		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, turn.LogicalIdentity)
+	}
+	if turn.HasToolOutputCall {
+		ctx = turn.ToolOutputCall.WithContext(ctx)
 	}
 	if g.hooks.WithActor != nil {
 		ctx = g.hooks.WithActor(ctx, turn.Actor)
