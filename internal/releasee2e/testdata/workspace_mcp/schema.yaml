@@ -5,4 +5,4 @@ stages:
   complete: {terminal: true}
 pins:
   inputs:
-    events: [work.requested]
+    - work.requested
