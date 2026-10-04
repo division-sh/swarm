@@ -29,8 +29,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 )
 
 const (
@@ -56,7 +58,7 @@ func TestManagedProvidersExecuteCanonicalNotifyHumanThroughSelectedStore(t *test
 				t.Fatalf("real executor definitions = %#v, want canonical notify_human descriptor", definitions)
 			}
 
-			provider := newManagedHITLProviderFixture(t, backend, actor)
+			provider := newManagedHITLProviderFixture(t, backend, actor, exec)
 			ctx := managedHITLProviderContext(t, provider.harness, actor)
 			seed := managedHITLProviderSeed(t, actor, provider.runtime)
 			event := eventtest.ExistingRunRootIngress(
@@ -166,7 +168,7 @@ func containsExactQueuedToolResult(value any) bool {
 	return false
 }
 
-func newManagedHITLProviderFixture(t *testing.T, backend string, actor models.AgentConfig) *managedHITLProviderFixture {
+func newManagedHITLProviderFixture(t *testing.T, backend string, actor models.AgentConfig, executor *Executor) *managedHITLProviderFixture {
 	t.Helper()
 	fixture := &managedHITLProviderFixture{harness: effecttest.New(), backend: backend}
 	fixture.harness.Token.AgentID = actor.ID
@@ -247,10 +249,27 @@ func newManagedHITLProviderFixture(t *testing.T, backend string, actor models.Ag
 	}
 	probe := managedEffectCommittedProbe{Harness: fixture.harness}
 	controller := runtimeeffects.NewCompletionController(probe, probe, probe, probe).WithExecutionPosture(posture)
-	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{
+	factory := llm.RuntimeFactory{
 		Cfg: cfg, Sessions: registry, LiveSessions: llm.NewTransientLiveSessionAcquirer(registry), LockOwner: "hitl-provider-test",
 		Credentials: runtimecredentials.NewEnvStore(), CompletionController: controller,
-	}, nil)
+	}
+	if backend == llmselection.BackendMock {
+		turns := runtimemcp.NewTurnContextRegistry(models.ActorFromContext)
+		gateway := runtimemcp.NewGateway(executor, "hitl-mock-gateway", runtimemcp.GatewayHooks{
+			WithActor: models.WithActor, ActorFromContext: models.ActorFromContext,
+			ResolveTurnContext: turns.ResolveTurnContext, ObserveCapabilityEvidence: turns.ObserveCapabilityEvidence,
+			ObserveCapabilityMismatch: turns.ObserveCapabilityMismatch, ObserveMCPProviderCall: turns.ObserveMCPProviderCall,
+		})
+		server := httptest.NewServer(gateway.Handler())
+		t.Cleanup(server.Close)
+		binding, err := toolgateway.NewRuntimeOwnedBinding(toolgateway.TransportHTTP, server.URL+"/mcp", server.URL+"/mcp", "hitl-mock-gateway", toolgateway.LifecycleOwnerServeBoot, toolgateway.SourceBoundMCPListener)
+		if err != nil {
+			t.Fatal(err)
+		}
+		factory.Workspaces = mockProviderHostWorkspace(t)
+		factory.MCPTurns, factory.ToolGateway = turns, binding
+	}
+	runtimes, err := llm.NewAgentRuntimeSet(profile, factory, nil)
 	if err != nil {
 		t.Fatalf("build %s runtime: %v", backend, err)
 	}

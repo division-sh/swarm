@@ -61,8 +61,12 @@ func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
 		t.Fatalf("docker build call published directly to runtime image tag:\n%s", build)
 	}
 	tempImage := workspaceBuildTaggedImageFromCall(t, build)
-	if strings.Contains(build, sourceRoot) || strings.Contains(build, tempCWD) {
-		t.Fatalf("docker build call used source checkout or current directory:\n%s", build)
+	// TMPDIR may itself be below the checkout. Compare actual input arguments,
+	// not a parent-path substring shared by an owned temporary build context.
+	arguments := strings.Fields(build)
+	buildContext := arguments[len(arguments)-1]
+	if buildContext == sourceRoot || buildContext == tempCWD || !strings.HasPrefix(filepath.Base(buildContext), "swarm-workspace-build-context-") {
+		t.Fatalf("docker build context is not an owned temporary directory:\n%s", build)
 	}
 	if !strings.Contains(build, "Dockerfile.workspace-") {
 		t.Fatalf("docker build call did not use materialized embedded Dockerfile:\n%s", build)
