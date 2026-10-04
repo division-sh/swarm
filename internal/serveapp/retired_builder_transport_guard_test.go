@@ -63,6 +63,7 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"internal/store/selected/boundary_test.go":                                          1,
 		"internal/store/testdata/persistence_authority_findings.tsv":                        1,
 		"internal/userfacing/human_code_projection_cli_test.go":                             5,
+		"scripts/rewrite-value-slots-2556/intent.json":                                      1,
 	}
 	classificationDocuments := map[string]bool{
 		".github/audit-artifacts/issue-2550-preimplementation.md": true,
@@ -250,6 +251,8 @@ func isExplicitUnrelatedBuilderText(relative, line string) bool {
 	case relative == "internal/store/testdata/persistence_authority_findings.tsv" && strings.Contains(lower, "runtimefactorybuilder"):
 		return true
 	case relative == "internal/userfacing/human_code_projection_cli_test.go" && strings.Contains(lower, "strings.builder"):
+		return true
+	case relative == "scripts/rewrite-value-slots-2556/intent.json" && strings.Contains(lower, "var pins, connects strings.builder"):
 		return true
 	default:
 		return false
