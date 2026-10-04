@@ -71,6 +71,18 @@ func verifyDeploymentWorkflowOptions(ctx context.Context, cfg RuntimeConfigLoadR
 
 // This is presentation accounting around calls to existing semantic owners,
 // not a check registry or an alternative admission implementation.
+func verifyDeploymentBoundedObservation(ctx context.Context, budget time.Duration, result *runtime.WorkflowContractValidationResult, id, owner, subject string, failureClass failures.Class, inspect func(context.Context) error) bool {
+	return verifyDeploymentObservation(ctx, result, id, owner, subject, failureClass, func(ctx context.Context) error {
+		bounded, cancel := context.WithTimeout(ctx, budget)
+		defer cancel()
+		err := inspect(bounded)
+		if bounded.Err() != nil {
+			return bounded.Err()
+		}
+		return err
+	})
+}
+
 func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowContractValidationResult, id, owner, subject string, failureClass failures.Class, inspect func(context.Context) error) bool {
 	observation := bootverify.AdmissionObservation{
 		CheckID: id, Owner: owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
@@ -204,7 +216,7 @@ func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePl
 			verifyDeploymentObservation(ctx, result, "provider_environment_admission", "internal/runtime/llm.ValidateProviderAdmissionEnvironment", actorSubject, failures.ClassSchemaInvalid, func(context.Context) error {
 				return llm.ValidateProviderAdmissionEnvironment(profile)
 			})
-			verifyDeploymentObservation(ctx, result, "provider_credential_admission", "internal/runtime/llm.ProviderCredentialResolver.Resolve", actorSubject, failures.ClassAuthenticationNeeded, func(ctx context.Context) error {
+			verifyDeploymentBoundedObservation(ctx, verifyLocalDeadline, result, "provider_credential_admission", "internal/runtime/llm.ProviderCredentialResolver.Resolve", actorSubject, failures.ClassAuthenticationNeeded, func(ctx context.Context) error {
 				_, err := llm.NewProviderCredentialResolver(opts.ProviderCredentials).Resolve(ctx, profile)
 				return err
 			})

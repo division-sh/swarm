@@ -11,11 +11,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
@@ -103,6 +106,55 @@ func TestVerifyDeploymentObservationPreservesFailureAndCancellation(t *testing.T
 	}
 }
 
+func TestVerifyDeploymentObservationBudgetsAndCancellation(t *testing.T) {
+	for _, budget := range []time.Duration{verifyLocalDeadline, verifyRemoteDeadline, verifyCleanupDeadline} {
+		t.Run(budget.String(), func(t *testing.T) {
+			result := runtime.WorkflowContractValidationResult{}
+			start := time.Now()
+			if !verifyDeploymentBoundedObservation(context.Background(), budget, &result, "bounded", "test.owner", "exact:subject", failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+				deadline, ok := ctx.Deadline()
+				if !ok || deadline.After(time.Now().Add(budget)) || deadline.Before(start.Add(budget)) {
+					t.Fatalf("observation deadline %v does not enforce %v", deadline, budget)
+				}
+				return nil
+			}) {
+				t.Fatalf("successful bounded observation failed: %+v", result.BootReport)
+			}
+		})
+	}
+	for _, cancelParent := range []bool{false, true} {
+		t.Run(fmt.Sprintf("completion_after_deadline/cancel=%v", cancelParent), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := runtime.WorkflowContractValidationResult{}
+			if verifyDeploymentBoundedObservation(ctx, 10*time.Millisecond, &result, "bounded", "test.owner", "exact:subject", failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+				if cancelParent {
+					cancel()
+				}
+				<-ctx.Done()
+				return nil
+			}) {
+				t.Fatal("completion after cancellation/deadline became success")
+			}
+			decision := result.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{})
+			if decision.Complete || decision.Interrupted != cancelParent || decision.FailureClass != failures.ClassDependencyUnavailable || result.BootReport.Observations[0].Status != bootverify.AdmissionUnavailable {
+				t.Fatalf("deadline/cancellation disposition: %+v %+v", decision, result.BootReport)
+			}
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	result := runtime.WorkflowContractValidationResult{}
+	verifyDeploymentBoundedObservation(ctx, verifyRemoteDeadline, &result, "bounded", "test.owner", "exact:subject", failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+		actual, _ := ctx.Deadline()
+		if !actual.Equal(deadline) {
+			t.Fatal("observation extended its caller's total deadline")
+		}
+		return nil
+	})
+}
+
 func TestVerifyDeploymentManagedCatalogConsumesLoadedSourceWithoutExecution(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
@@ -135,6 +187,94 @@ func TestVerifyDeploymentManagedCatalogConsumesLoadedSourceWithoutExecution(t *t
 	}
 	if _, err := os.Stat(filepath.Join(root, ".swarm")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("static catalog verification created runtime state: %v", err)
+	}
+}
+
+func TestVerifyFreshSQLiteSchemaAccountsAbsenceWithoutClaimingPossession(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	storePath := filepath.Join(t.TempDir(), "fresh.db")
+	if err := os.WriteFile(storePath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "runtime.yaml")
+	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, fmt.Sprintf(
+		"llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\nstore: {backend: sqlite, sqlite: {path: %q}}\n", storePath)))
+	var out, diagnostic bytes.Buffer
+	code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+	var result verifyCommandResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
+	}
+	assertVerifyFreshStoreAccounting(t, code, result)
+	if data, err := os.ReadFile(storePath); err != nil || len(data) != 0 {
+		t.Fatalf("inspection initialized the fresh database: bytes=%d err=%v", len(data), err)
+	}
+	for _, sidecar := range []string{"-wal", "-shm", ".startup.lock"} {
+		if _, err := os.Stat(storePath + sidecar); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("fresh inspection created %s: %v", sidecar, err)
+		}
+	}
+}
+
+func TestVerifyFreshPostgresSchemaAccountsAbsenceWithoutClaimingPossession(t *testing.T) {
+	dsn, db, _ := testutil.StartEmptyPostgres(t)
+	connection, err := testpostgres.ParseConnection(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parameters := connection.Parameters()
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_VERIFY_TEST_PASSWORD", parameters.Password)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	configPath := filepath.Join(t.TempDir(), "runtime.yaml")
+	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, fmt.Sprintf(
+		"llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\nstore: {backend: postgres}\ndatabase: {host: %q, port: %d, name: %q, user: %q, password_env: SWARM_VERIFY_TEST_PASSWORD, sslmode: %q}\n",
+		parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)))
+	var out, diagnostic bytes.Buffer
+	code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+	var result verifyCommandResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
+	}
+	assertVerifyFreshStoreAccounting(t, code, result)
+	var tables int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'`).Scan(&tables); err != nil || tables != 0 {
+		t.Fatalf("verification initialized fresh PostgreSQL: tables=%d err=%v", tables, err)
+	}
+}
+
+func assertVerifyFreshStoreAccounting(t *testing.T, code int, result verifyCommandResult) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, observation := range result.Observations {
+		switch observation.CheckID {
+		case "selected_store_access", "selected_store_schema", "selected_store_cleanup":
+			if observation.Status != bootverify.AdmissionPassed {
+				t.Fatalf("fresh store inspection failed: %+v", observation)
+			}
+		case "startup_process_possession":
+			if observation.Status != bootverify.AdmissionNotRun {
+				t.Fatalf("fresh schema fabricated possession: %+v", observation)
+			}
+		case "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "pending_reset_admission", "retained_route_admission", "selected_fork_recovery_admission", "retained_actor_admission":
+			if observation.Status != bootverify.AdmissionNotApplicable || !strings.Contains(observation.Reason, "canonical schema inspection") {
+				t.Fatalf("proven absent domain mistaken for unavailable or observed rows: %+v", observation)
+			}
+		default:
+			continue
+		}
+		seen[observation.CheckID] = true
+	}
+	if len(seen) != 11 || code == 0 || result.OK || result.AdmissionComplete {
+		t.Fatalf("fresh-store accounting: seen=%v exit=%d result=%+v", seen, code, result)
+	}
+	preparation := false
+	for _, obligation := range result.ExecutionObligations {
+		preparation = preparation || obligation.ID == "store_schema_preparation"
+	}
+	if !preparation {
+		t.Fatal("schema preparation was silently claimed completed")
 	}
 }
 
