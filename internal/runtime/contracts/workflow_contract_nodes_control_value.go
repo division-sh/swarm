@@ -73,26 +73,9 @@ func projectNodeGuardValue(value yamlsource.Value) (*GuardSpec, error) {
 		}
 	}
 	if checks, present := fields["checks"]; present {
-		items, err := checks.Sequence()
+		out.Checks, err = projectNodeGuardChecksValue(checks)
 		if err != nil {
 			return nil, err
-		}
-		for _, item := range items {
-			checkFields, err := nodeValueFields(item, "guard.checks", map[string]struct{}{"id": {}, "check": {}})
-			if err != nil {
-				return nil, err
-			}
-			var check GuardCheck
-			if err := nodeValueTexts(checkFields, map[string]*string{"id": &check.ID}, false); err != nil {
-				return nil, err
-			}
-			if expression, present := checkFields["check"]; present {
-				check.Check, err = projectNodeScalarExpression(expression, "guard.checks.check", true)
-				if err != nil {
-					return nil, err
-				}
-			}
-			out.Checks = append(out.Checks, check)
 		}
 	}
 	if onFail, present := fields["on_fail"]; present {
@@ -103,6 +86,32 @@ func projectNodeGuardValue(value yamlsource.Value) (*GuardSpec, error) {
 	}
 	if out.ID == "" && out.Check == "" && len(out.Checks) == 0 && out.OnFail == "" && out.PolicyRef == "" {
 		return nil, nil
+	}
+	return out, nil
+}
+
+func projectNodeGuardChecksValue(value yamlsource.Value) ([]GuardCheck, error) {
+	items, err := value.Sequence()
+	if err != nil {
+		return nil, err
+	}
+	var out []GuardCheck
+	for _, item := range items {
+		fields, err := nodeValueFields(item, "guard.checks", map[string]struct{}{"id": {}, "check": {}})
+		if err != nil {
+			return nil, err
+		}
+		var check GuardCheck
+		if err := nodeValueTexts(fields, map[string]*string{"id": &check.ID}, false); err != nil {
+			return nil, err
+		}
+		if expression, present := fields["check"]; present {
+			check.Check, err = projectNodeScalarExpression(expression, "guard.checks.check", true)
+			if err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, check)
 	}
 	return out, nil
 }
