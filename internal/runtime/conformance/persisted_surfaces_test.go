@@ -1360,6 +1360,8 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		RunLifecycleCandidates:      pg,
 		RuntimeLogStore:             pg,
 		ManagerStore:                pg,
+		EffectsStore:                pg,
+		ManagedCapabilitiesStore:    pg,
 		ManagerLifecycleDiagnostics: pg,
 		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
 		SessionResetter:             pg,
