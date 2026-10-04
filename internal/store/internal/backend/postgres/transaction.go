@@ -43,7 +43,7 @@ func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context
 		if operation == nil {
 			return nil
 		}
-		return errors.Join(operation(ctx, tx), ctx.Err())
+		return errors.Join(operation(b.inspectionSQLContext(ctx), tx), ctx.Err())
 	}
 	_, err := b.runTransactionOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, false, operation)
 	return err

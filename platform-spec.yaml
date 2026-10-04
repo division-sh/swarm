@@ -9027,7 +9027,31 @@ engine:
         decision without DDL, schema stamping, process possession or domain writes. Fresh supported
         state names boot preparation as unperformed; unavailable or partial domain readers never
         mean empty state. Inspection scope is revoked when the callback ends and cannot be escaped
-        by supplying a different context.
+        by supplying a different context. The PostgreSQL inspection-only pool uses the existing
+        observation socket owner to bound native connection, read and transaction cleanup I/O;
+        a context deadline alone is not proof that driver I/O is bounded. Runtime pools and
+        retained process-authority sessions do not inherit verifier deadlines. Cancellation or
+        uncertain transaction cleanup disposes the exact observation transport and is visible.
+      possession_observation: >
+        Selected inspection may make one transient nonblocking try-lock and checked immediate
+        release through the existing process-possession owner. This is a separately timed kernel
+        observation outside the MVCC snapshot, not authority, holder identity, a retained lease,
+        or evidence that future boot acquisition will succeed. It may momentarily contend with
+        another observer. Durable lineage is inspected independently in the consistent snapshot;
+        a free kernel lock cannot override corrupt or repair-required lineage. SQLite uses only
+        the existing safe engine-disjoint .possession coordinate: canonical path, supported local
+        filesystem, owner-only mode on the possession coordinate, current-user-owned regular
+        single-link files, no symlinks, and opened/current
+        database and coordinate identities. Missing, unsafe or replaced coordinates are incomplete
+        or refused, never free. Observation never creates, truncates, repairs, replaces or removes
+        either file and never locks database or WAL bytes. PostgreSQL uses an independent session
+        with the same frozen native configuration and exact production advisory-lock key. Native
+        I/O is deadline-bound; acquisition ambiguity, cancellation or failed exact-session unlock
+        physically discards that session instead of returning possible possession to a pool.
+        Release, disposal and cancellation callbacks are joined within the separate five-second
+        cleanup tail; cleanup failures are visible and nonzero. Boot independently acquires and
+        retains actual process possession and records its authority. Portable verify and describe
+        do not run this observation.
       retained_sources: >
         Run-bundle availability owns ordinary-versus-standing eligibility. Pinned-source admission
         consumes that reader and the exact admitted hash set; a required missing reader or failed
@@ -9043,6 +9067,29 @@ engine:
         a generation grant, excludes selected-fork bindings, and is not execution ownership.
         Dynamic readiness filtering shares the same standing-disposition owner. Boot separately
         proves current process and generation ownership and retains recovery/hydration effects.
+      retained_fork_actor_admission: >
+        Selected-fork inspection shares the actual retained binding, preparation, execution,
+        source-artifact fingerprint, finite-feed and recovery-disposition owners. Its prospective
+        disposition is not an acknowledged recovery, executable process authority or a grant.
+        Immutable retained artifacts are decoded by the existing loader without filesystem
+        projection. Retained ordinary actors first consume the same declaration reconciliation
+        projection as startup, then the same persisted descriptor, posture, intent, subscription,
+        memory-ownership and build-configuration checks. Flow-readiness actors do not borrow
+        static declaration replacement. Foreign selected-fork actors consume their exact selected
+        source rather than the ordinary source's configuration. Inspection neither persists
+        reconciliation nor hydrates a manager or constructs an actor/provider runtime.
+        After the consistent read callback ends, retained source/configuration values consume
+        the existing scoped model, prompt, workspace, credential and completed MCP-catalog
+        admission owners. Remote observations do not retain an MVCC transaction or escape its
+        revoked read role. Actual recovery, lifecycle replacement, workspace preparation and
+        provider-owned visibility/authorization remain separately named execution obligations.
+      predicate_ratchet: >
+        In addition to the existing registered-check purpose census, a test-only source census
+        pins the audited startup predicate owners and verify consumers, including boot-local
+        refusals and post-registry clauses. A changed owner, added local refusal, removed consumer
+        or reclassified clause requires explicit audit-row/proof accounting and reviewed refresh.
+        It is not a second production validator or registry; source hashes are change detectors,
+        not execution proof or permission to claim semantic closure.
       observation_protocol: >
         Required observations have a 60-second aggregate budget, five seconds for local socket or
         metadata steps, fifteen seconds for configured subprocess or remote discovery steps and

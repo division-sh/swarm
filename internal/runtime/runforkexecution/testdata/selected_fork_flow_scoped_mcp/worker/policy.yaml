@@ -1,0 +1,11 @@
+# API preparation has a concrete fallback; CLI profiles retain native WebSearch.
+web_search_provider:
+  provider: custom
+  http:
+    method: GET
+    url: http://127.0.0.1:1/search
+  response_path: results
+  field_mapping:
+    title: title
+    url: url
+    snippet: snippet
