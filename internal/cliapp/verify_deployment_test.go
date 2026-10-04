@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -169,5 +170,70 @@ func TestVerifyDeploymentOptionsPreserveFrozenConfigAfterFileRemoval(t *testing.
 	}
 	if opts.Purpose != bootverify.ExecutionValidation || opts.Credentials == nil || opts.ProviderCredentials == nil || opts.ManagedCredentials == nil || opts.AllowHarnessInputs || opts.AllowHarnessOutputs || opts.MCPDiscoveryTimeout != verifyRemoteDeadline || !strings.EqualFold(opts.LLMProfile.ID, "anthropic") {
 		t.Fatalf("deployment intent changed after admission: %#v", opts)
+	}
+}
+
+func TestVerifyListenerDriverProvesOccupiedAndReleasedExactBindings(t *testing.T) {
+	for _, occupied := range []bool{false, true} {
+		t.Run(fmt.Sprintf("occupied=%v", occupied), func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			root := t.TempDir()
+			var addresses []string
+			for range 2 {
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				addresses = append(addresses, listener.Addr().String())
+				if occupied {
+					t.Cleanup(func() {
+						if err := listener.Close(); err != nil {
+							t.Error(err)
+						}
+					})
+				} else if err := listener.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(root, "runtime.yaml")
+			writeRuntimeConfigText(t, path, fmt.Sprintf("serve: {api_listen_addr: '%s', mcp_listen_addr: '%s'}\n", addresses[0], addresses[1]))
+			cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation}}
+			inspectVerifyListeners(context.Background(), root, cfg, &result)
+			seen := map[string]bool{}
+			for _, observation := range result.BootReport.Observations {
+				if observation.CheckID != "listener_availability" {
+					continue
+				}
+				wantStatus := bootverify.AdmissionPassed
+				if occupied {
+					wantStatus = bootverify.AdmissionFailed
+				}
+				if observation.Status != wantStatus || observation.StartedAt.IsZero() || observation.FinishedAt.Before(observation.StartedAt) {
+					t.Fatalf("incorrect actual-binding evidence: %+v", observation)
+				}
+				seen[observation.Subject] = true
+			}
+			if !seen["api:"+addresses[0]] || !seen["mcp:"+addresses[1]] || len(seen) != 2 || len(result.BootReport.ExecutionObligations) != 2 {
+				t.Fatalf("lost exact configured binding or execution obligation: %+v", result.BootReport)
+			}
+			if decision := result.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{}); decision.Complete == occupied {
+				t.Fatalf("occupied bindings were admitted or valid observations incomplete: %+v", decision)
+			}
+			if !occupied {
+				for _, address := range addresses {
+					listener, err := net.Listen("tcp", address)
+					if err != nil {
+						t.Fatalf("verifier retained configured address %s: %v", address, err)
+					}
+					if err := listener.Close(); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+		})
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/failures"
-	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -41,6 +40,11 @@ func inspectVerifyWorkspaceDependencies(ctx context.Context, cfg RuntimeConfigLo
 			defer cancel()
 			_, err = workspace.InspectHostPrerequisites(local, configured)
 			return err
+		})
+		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+			CheckID: "workspace_cli_version_observation", Owner: "internal/cliapp.DecideWorkspaceBackend", Subject: subject,
+			Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotApplicable,
+			Reason: "canonical host workspace admission excludes Claude CLI execution before this observer is reachable",
 		})
 		return
 	}
@@ -76,8 +80,12 @@ func inspectVerifyWorkspaceDependencies(ctx context.Context, cfg RuntimeConfigLo
 		}
 		return err
 	})
-	profile, err := cfg.Config.LLMBackendProfile()
-	if err != nil || profile.ID != llmselection.BackendClaudeCLI {
+	if !workspaceBackendHasReason(backend.Reasons, WorkspaceReasonClaudeCLI) {
+		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+			CheckID: "workspace_cli_version_observation", Owner: "internal/cliapp.DecideWorkspaceBackend", Subject: subject,
+			Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotApplicable,
+			Reason: "the exact selected actor census does not require Claude CLI execution",
+		})
 		return
 	}
 	verifyDeploymentObservation(ctx, result, "workspace_cli_version_observation", "internal/runtime/workspace.DockerManager.ProbeWorkspaceCLICommand", "command:"+cfg.Config.LLM.ClaudeCLI.Command+"@"+imageID, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
