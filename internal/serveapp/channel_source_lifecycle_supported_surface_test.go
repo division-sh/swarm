@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -154,6 +155,22 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 					successorPlan := ""
 					if !clear {
+						var freshGenerations int
+						if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_generations`).Scan(&freshGenerations); err != nil || freshGenerations != 0 {
+							t.Fatalf("reset created a standing generation without admitted ingress credentials: count=%d err=%v", freshGenerations, err)
+						}
+						stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
+						restore := installChannelOnboardingCLIInput(t, "source-reset-signing-secret\n")
+						t.Cleanup(restore)
+						code := executeCLI(context.Background(), []string{
+							"--config", h.opts.ConfigPath, "secrets", "set", "webhook_signing.telegram", "--stdin",
+						}, stdout, stderr, nil)
+						restore()
+						if code != 0 {
+							t.Fatalf("provision retained-source ingress credential: code=%d %s", code, stderr.String())
+						}
+						h.stop(t)
+						h.start(t)
 						var successorRun string
 						if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&successorRun); err != nil {
 							t.Fatal(err)

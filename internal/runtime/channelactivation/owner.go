@@ -279,6 +279,11 @@ func (o *Owner) replaceContext(ctx context.Context, publication channelonboardin
 		o.changed = sync.NewCond(&o.mu)
 	}
 	predecessor := o.current
+	if admit != nil && o.accepting && predecessor != nil && predecessor.admit != nil && predecessor.publication.Generation().Equal(publication.Generation()) {
+		err := predecessor.admit(ctx, predecessor.publication)
+		o.mu.Unlock()
+		return err
+	}
 	o.accepting = false
 	stopWakeup := context.AfterFunc(ctx, func() {
 		o.mu.Lock()
