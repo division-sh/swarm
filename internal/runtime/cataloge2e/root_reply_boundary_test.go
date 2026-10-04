@@ -1,10 +1,16 @@
 package cataloge2e
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -49,6 +55,7 @@ func proveRootReplyBoundary(t *testing.T, rootRequester bool) {
 				h.waitForExpectedEmittedEvents(expected, 20*time.Second)
 				h.waitForCatalogStoreQuiescence(20 * time.Second)
 				assertRootReplyEvidence(t, h, expected, 3)
+				assertRootReplyRefusals(t, h, explicit)
 				// Discarding the original acknowledgments and replaying the same
 				// requests must consume committed evidence, never resend effects.
 				for _, step := range steps {
@@ -71,8 +78,89 @@ func proveRootReplyBoundary(t *testing.T, rootRequester bool) {
 				}
 				h.waitForCatalogStoreQuiescence(20 * time.Second)
 				assertRootReplyEvidence(t, h, expected, 3)
+				assertRootReplyRefusals(t, h, explicit)
 			})
 		}
+	}
+}
+
+func assertRootReplyRefusals(t *testing.T, h *runtimeHarness, explicit bool) {
+	t.Helper()
+	var backend interface {
+		bus.PreparedPublishEventReader
+		replycontext.Store
+	} = h.pg
+	if h.sqlite != nil {
+		backend = h.sqlite
+	}
+	var contextID, requestID, acceptedID string
+	if err := h.db.QueryRowContext(h.ctx, `SELECT reply_context_id, request_event_id, accepted_reply_event_id
+		FROM reply_contexts WHERE run_id=$1 ORDER BY reply_context_id LIMIT 1`, catalogRuntimeRunID).Scan(&contextID, &requestID, &acceptedID); err != nil {
+		t.Fatal(err)
+	}
+	request, found, err := backend.LoadPreparedPublishEvent(h.ctx, requestID)
+	if err != nil || !found || len(request.DeliveryRoutes) != 1 {
+		t.Fatalf("request readback=%+v found=%v error=%v", request, found, err)
+	}
+	accepted, found, err := backend.LoadPreparedPublishEvent(h.ctx, acceptedID)
+	if err != nil || !found {
+		t.Fatalf("reply readback=%+v found=%v error=%v", accepted, found, err)
+	}
+	carried := request.DeliveryRoutes[0].Context
+	if carried.ReplyContextID() != contextID {
+		t.Fatal("reply context lost in request readback")
+	}
+	for _, tc := range []struct {
+		name, failure string
+		stale, wrong  bool
+	}{
+		{name: "distinct-second", failure: runtimepinrouting.FailureReplyAlreadyTerminal.Code()},
+		{name: "stale", failure: runtimepinrouting.FailureStaleArrival.Code(), stale: true},
+		{name: "wrong-correlation", failure: runtimepinrouting.FailureStaleArrival.Code(), wrong: true},
+	} {
+		if tc.wrong && !explicit {
+			continue
+		}
+		t.Run(tc.name, func(t *testing.T) {
+			original := accepted.Event.Event()
+			payload := original.Payload()
+			if tc.wrong {
+				var object map[string]any
+				if err := json.Unmarshal(payload, &object); err != nil {
+					t.Fatal(err)
+				}
+				object["request_id"] = "not-the-original-request"
+				payload, err = json.Marshal(object)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			event := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), original.Type(), original.Producer(), "", payload,
+				original.ChainDepth(), events.LineageFromEvent(original), events.EnvelopeForSourceRoute(events.EventEnvelope{}, original.Envelope().Source), original.RoutingSource(), time.Now().UTC())
+			context := carried
+			if tc.stale {
+				context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:missing"}}
+			}
+			ctx := events.WithDeliveryContext(h.ctx, context)
+			var before, after int
+			if err := h.db.QueryRowContext(h.ctx, `SELECT count(*) FROM events WHERE run_id=$1`, catalogRuntimeRunID).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := h.rt.Bus.CheckPublishRecipientPlan(ctx, event)
+			if err != nil || len(plan.DeliveryRoutes) != 0 || plan.TargetFailure != tc.failure {
+				t.Fatalf("late reply preflight=%+v error=%v want=%s", plan, err, tc.failure)
+			}
+			if err := h.db.QueryRowContext(h.ctx, `SELECT count(*) FROM events WHERE run_id=$1`, catalogRuntimeRunID).Scan(&after); err != nil {
+				t.Fatal(err)
+			}
+			if before != after {
+				t.Fatalf("preflight mutated event count: %d -> %d", before, after)
+			}
+			record, err := backend.LoadReplyContext(h.ctx, contextID)
+			if err != nil || record.State != replycontext.StateTerminal || record.AcceptedReplyEventID != acceptedID {
+				t.Fatalf("preflight changed terminal reply: %+v error=%v", record, err)
+			}
+		})
 	}
 }
 
