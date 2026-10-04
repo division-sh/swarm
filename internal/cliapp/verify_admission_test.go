@@ -93,7 +93,11 @@ func TestVerifyPortableAdmissionOutputParity(t *testing.T) {
 				t.Fatalf("unchecked readiness hidden: %q", text)
 			}
 			for _, observation := range result.Observations {
-				if observation.Status == runtimebootverify.AdmissionNotRun && !strings.Contains(text, "not_run: "+observation.CheckID+" @ source:"+result.SourceLabel) {
+				subject := observation.Subject
+				if subject == "source:"+result.BundleHash {
+					subject = "source:" + result.SourceLabel
+				}
+				if observation.Status == runtimebootverify.AdmissionNotRun && !strings.Contains(text, "not_run: "+observation.CheckID+" @ "+subject) {
 					t.Fatalf("%s erased unperformed check %s: %s", mode, observation.CheckID, text)
 				}
 			}
@@ -115,6 +119,35 @@ func TestVerifyAdmissionExitCategories(t *testing.T) {
 	} {
 		if got := verifyAdmissionExitCode(item.decision); got != item.want {
 			t.Fatalf("decision=%#v exit=%d want=%d", item.decision, got, item.want)
+		}
+	}
+}
+
+func TestVerifyHumanAdmissionSubjectsPreserveExactMachineEvidence(t *testing.T) {
+	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	foreign := "bundle-v2:sha256:" + strings.Repeat("b", 64)
+	output := verifyCommandResult{BundleHash: hash, SourceLabel: "Reception@1.2.3"}
+	for _, row := range []struct{ subject, want string }{
+		{"source:" + hash, "source:Reception@1.2.3"},
+		{"fork:exact-id/source:" + hash, "fork:exact-id/source:Reception@1.2.3"},
+		{"source:" + foreign, "source:" + foreign},
+		{"project:/exact/project", "project:/exact/project"},
+		{"source:" + hash + "/nested", "source:" + hash + "/nested"},
+	} {
+		output.Observations = []runtimebootverify.AdmissionObservation{{CheckID: "check", Status: runtimebootverify.AdmissionNotRun, Subject: row.subject}}
+		if !strings.Contains(strings.Join(verifyAdmissionTextLines(output), "\n"), "not_run: check @ "+row.want+" (") {
+			t.Fatalf("human display lost scoped identity for %q", row.subject)
+		}
+		data, err := json.Marshal(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var machine verifyCommandResult
+		if err := json.Unmarshal(data, &machine); err != nil {
+			t.Fatal(err)
+		}
+		if machine.BundleHash != hash || machine.Observations[0].Subject != row.subject {
+			t.Fatalf("human projection changed machine evidence: %s", data)
 		}
 	}
 }

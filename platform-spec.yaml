@@ -9083,6 +9083,9 @@ engine:
         admission owners. Remote observations do not retain an MVCC transaction or escape its
         revoked read role. Actual recovery, lifecycle replacement, workspace preparation and
         provider-owned visibility/authorization remain separately named execution obligations.
+        Composed retained-fork findings, observations and obligations retain their exact fork
+        invocation coordinate, including when multiple forks use the same source artifact.
+        Private fork catalogs never replace the ordinary source's completed catalog.
       predicate_ratchet: >
         In addition to the existing registered-check purpose census, a test-only source census
         pins the audited startup predicate owners and verify consumers, including boot-local

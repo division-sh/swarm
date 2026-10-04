@@ -79,6 +79,9 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 					if err != nil {
 						return nil, nil, err
 					}
+					if err := selected.BootstrapSchema(ctx, schema); err != nil {
+						return nil, nil, errors.Join(err, selected.Close())
+					}
 					return selected, selected.Close, nil
 				}
 				connection, err := testpostgres.ParseConnection(dsn)

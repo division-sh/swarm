@@ -713,7 +713,7 @@ func cliOutputFunctionCalls(t *testing.T) map[string]map[string]bool {
 					return true
 				}
 				switch ident.Name {
-				case "bindCLIOutputFlags", "renderCLIOutput", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState", "writeCLILabeledDetail":
+				case "bindCLIOutputFlags", "renderCLIOutput", "renderVerifyCommandResult", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState", "writeCLILabeledDetail":
 					calls[fn.Name.Name][ident.Name] = true
 				}
 				return true
