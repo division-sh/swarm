@@ -18,6 +18,7 @@ var ruleFieldOptions = map[string]struct{}{
 	"else":              {},
 	"default":           {},
 	"advances_to":       {},
+	"terminate":         {},
 	"emit":              {},
 	"activity":          {},
 	"data_accumulation": {},

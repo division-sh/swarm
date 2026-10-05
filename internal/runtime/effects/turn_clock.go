@@ -56,12 +56,13 @@ type ExternalAttemptLaunch struct {
 // TurnCancellation is durable intent, not proof that provider work or the
 // delivery/directive has finished. Those owners must acknowledge their joins.
 type TurnCancellation struct {
-	Committed   bool
-	Requested   bool
-	Origin      CompletionOrigin
-	Reason      deliverylifecycle.CancellationReason
-	CauseEvent  string
-	RequestedAt time.Time
+	Committed     bool
+	Requested     bool
+	OriginSettled bool
+	Origin        CompletionOrigin
+	Reason        deliverylifecycle.CancellationReason
+	CauseEvent    string
+	RequestedAt   time.Time
 }
 
 type TurnLifetimeStore interface {

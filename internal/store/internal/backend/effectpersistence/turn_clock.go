@@ -90,17 +90,17 @@ func launchBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT run_id::text,agent_id,flow_instance,bound_ns,bound_emit,first_attempt_id::text,first_launched_at,deadline_at,timeout_event_id::text,cancel_reason,settled_at
+	query := `SELECT run_id::text,agent_id,flow_instance,bound_ns,bound_emit,first_attempt_id::text,first_launched_at,timeout_event_id::text,cancel_reason,settled_at
 		FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid FOR UPDATE`
 	if !postgres {
-		query = `SELECT run_id,agent_id,flow_instance,bound_ns,bound_emit,first_attempt_id,first_launched_at,deadline_at,timeout_event_id,cancel_reason,settled_at
+		query = `SELECT run_id,agent_id,flow_instance,bound_ns,bound_emit,first_attempt_id,first_launched_at,timeout_event_id,cancel_reason,settled_at
 			FROM runtime_agent_turn_lifetimes WHERE turn_id=?`
 	}
 	var bound sql.NullInt64
 	var runID, agentID, flow string
 	var emit, first, event, canceled sql.NullString
-	var launched, deadline, settled any
-	if err := tx.QueryRowContext(ctx, query, turnID).Scan(&runID, &agentID, &flow, &bound, &emit, &first, &launched, &deadline, &event, &canceled, &settled); err != nil {
+	var launched, settled any
+	if err := tx.QueryRowContext(ctx, query, turnID).Scan(&runID, &agentID, &flow, &bound, &emit, &first, &launched, &event, &canceled, &settled); err != nil {
 		return nil, fmt.Errorf("lock logical turn launch: %w", err)
 	}
 	if runID != attempt.Authority.Target.RunID || agentID != attempt.Authority.Target.AgentID || flow != attempt.Authority.Target.FlowInstance {
@@ -122,28 +122,25 @@ func launchBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 		if err != nil || !valid {
 			return nil, fmt.Errorf("logical provider turn first launch is invalid: %v", err)
 		}
-		clock.DeadlineAt, _, err = sqliteTimeValue(deadline)
-		if err != nil {
-			return nil, err
+		if clock.Timeout != nil {
+			clock.DeadlineAt = clock.LaunchedAt.Add(clock.Timeout.After)
 		}
 		return clock, clock.Validate()
 	}
 	clock.FirstAttempt, clock.LaunchedAt = attempt.AttemptID, launchedAt.UTC()
-	var deadlineValue any
 	if clock.Timeout != nil {
 		clock.DeadlineAt = clock.LaunchedAt.Add(clock.Timeout.After)
-		deadlineValue = clock.DeadlineAt
 	}
 	if err := clock.Validate(); err != nil {
 		return nil, err
 	}
-	query = `UPDATE runtime_agent_turn_lifetimes SET first_attempt_id=$1::uuid,first_launched_at=$2,deadline_at=$3
-		WHERE turn_id=$4::uuid AND first_attempt_id IS NULL AND cancel_reason IS NULL AND settled_at IS NULL`
+	query = `UPDATE runtime_agent_turn_lifetimes SET first_attempt_id=$1::uuid,first_launched_at=$2
+		WHERE turn_id=$3::uuid AND first_attempt_id IS NULL AND cancel_reason IS NULL AND settled_at IS NULL`
 	if !postgres {
-		query = `UPDATE runtime_agent_turn_lifetimes SET first_attempt_id=?,first_launched_at=?,deadline_at=?
+		query = `UPDATE runtime_agent_turn_lifetimes SET first_attempt_id=?,first_launched_at=?
 			WHERE turn_id=? AND first_attempt_id IS NULL AND cancel_reason IS NULL AND settled_at IS NULL`
 	}
-	result, err := tx.ExecContext(ctx, query, clock.FirstAttempt, clock.LaunchedAt, deadlineValue, turnID)
+	result, err := tx.ExecContext(ctx, query, clock.FirstAttempt, clock.LaunchedAt, turnID)
 	if err != nil {
 		return nil, fmt.Errorf("commit first logical turn launch: %w", err)
 	}

@@ -1232,6 +1232,14 @@ func (a *Adapter) ValidateCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cl
 	return err
 }
 
+func (a *Adapter) providerOriginPendingTx(ctx context.Context, tx *sql.Tx, claim Claim) (bool, error) {
+	disposition, err := a.providerOriginRecoveryDisposition(ctx, tx, claim)
+	if err != nil {
+		return false, err
+	}
+	return disposition != providerOriginRecoveryAlreadyTerminal, nil
+}
+
 func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql.Tx, claim Claim) (providerOriginRecoveryDisposition, error) {
 	if tx == nil {
 		return 0, fmt.Errorf("provider origin recovery transaction is required")

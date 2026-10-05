@@ -3967,6 +3967,7 @@ handler_specification:
       branch_fields:
         condition: string — expression evaluated against entity state and policy
         advances_to: string — target state
+        terminate: Optional boolean transition cancellation intent; requires advances_to on this entry.
         emit: string or object — event to emit, optionally with local fields payload construction
       _note: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching
         condition executes.
@@ -3974,6 +3975,15 @@ handler_specification:
       field: advances_to
       type: string
       purpose: Set the platform lifecycle state exposed as _entity.current_state to the target state. Skipped if on_complete already advanced.
+    terminate:
+      field: terminate
+      type: boolean
+      purpose: >-
+        Opt in to cancellation of predecessor work through the actual selected authored
+        transition. This property requires advances_to on its own carrier. Omission or
+        false declares no cancellation; neither a destination label nor stage movement
+        supplies implicit cancellation. The intent is committed with that transition,
+        while canceled settlement waits for the exact work's effects and cleanup joins.
     sets_gate:
       field: sets_gate
       type: string
@@ -4267,6 +4277,7 @@ handler_specification:
         emit: string or object — rule-local event to emit, or an eventless object with fields only when participating in
           rules emit template specialization.
         advances_to: string — optional state change
+        terminate: Optional boolean transition cancellation intent; requires advances_to on this row.
         data_accumulation: object — optional data write (same format as handler-level)
         description: string — human-readable note
       admission_rule: >-
@@ -5266,6 +5277,12 @@ handler_specification:
     side_effect_resolution:
       advances_to: Handler-level advances_to is the default transition target. A matched rule with a non-empty advances_to
         overrides the handler-level target for that execution only.
+      terminate: >-
+        Cancellation belongs to the carrier that supplies the selected advances_to.
+        A selected rule/on_complete/join outcome with its own advances_to uses its own
+        terminate value, never the displaced handler's. If it inherits the handler's
+        advances_to, it consumes the handler's terminate value. Unselected entries
+        grant no cancellation, and terminate cannot be declared without advances_to.
       sets_gate: sets_gate is handler-level only in the supported handler/rule vocabulary. Rules, on_complete entries,
         and join outcome entries do not declare or override sets_gate.
       data_accumulation: Handler-level data_accumulation supplements the selected rule/on_complete/join-outcome data_accumulation in
@@ -16789,6 +16806,9 @@ platform_tables:
         recovery consume those immutable coordinates. This is not an execution
         serializer, replay registry, resource lifecycle phase, or new work origin.
         Origin settlement remains owned by the delivery/directive owner.
+        The durable deadline is the canonical first_launched_at plus the exact
+        bound_ns duration, not a second rounded timestamp. The effects owner
+        computes that same deadline for launch readback and timeout decisions.
       ddl: |
         CREATE TABLE runtime_agent_turn_lifetimes (
             turn_id UUID PRIMARY KEY,
@@ -16801,7 +16821,6 @@ platform_tables:
             bound_emit TEXT CHECK (bound_emit IS NULL OR NULLIF(TRIM(bound_emit), '') IS NOT NULL),
             first_attempt_id UUID,
             first_launched_at TIMESTAMPTZ,
-            deadline_at TIMESTAMPTZ,
             timeout_event_id UUID,
             cancel_reason TEXT CHECK (cancel_reason IN ('terminate', 'turn_timeout')),
             cancel_cause_event_id UUID,
@@ -16810,10 +16829,10 @@ platform_tables:
             created_at TIMESTAMPTZ NOT NULL,
             UNIQUE (origin_kind, origin_id),
             CHECK ((bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL) OR (bound_ns IS NOT NULL AND bound_emit IS NOT NULL AND timeout_event_id IS NOT NULL)),
-            CHECK ((first_attempt_id IS NULL AND first_launched_at IS NULL AND deadline_at IS NULL) OR (first_attempt_id IS NOT NULL AND first_launched_at IS NOT NULL AND ((bound_ns IS NULL AND deadline_at IS NULL) OR (bound_ns IS NOT NULL AND deadline_at IS NOT NULL)))),
+            CHECK ((first_attempt_id IS NULL AND first_launched_at IS NULL) OR (first_attempt_id IS NOT NULL AND first_launched_at IS NOT NULL)),
             CHECK ((cancel_reason IS NULL AND cancel_cause_event_id IS NULL AND cancel_requested_at IS NULL) OR (cancel_reason IS NOT NULL AND cancel_cause_event_id IS NOT NULL AND cancel_requested_at IS NOT NULL)),
             INDEX idx_agent_turn_lifetimes_instance (run_id, flow_instance) WHERE settled_at IS NULL,
-            INDEX idx_agent_turn_lifetimes_deadline (deadline_at) WHERE deadline_at IS NOT NULL AND settled_at IS NULL
+            INDEX idx_agent_turn_lifetimes_bounded (first_launched_at) WHERE bound_ns IS NOT NULL AND first_launched_at IS NOT NULL AND settled_at IS NULL
         );
     runtime_provider_attempt_drains:
       description: >-
@@ -39813,6 +39832,12 @@ agent_lifecycle_authority:
           rejection: Arbitrary values and publisher Authority, Admission, Controller, execution mode, runtime lineage, or equivalent execution identity never cross the handoff. Missing or conflicting receiver-owned state fails closed; key blacklists, context-value delegation, authority shadowing, and compatibility fallbacks are forbidden.
   transitions:
     operations: [spawn, hydrate, materialize, start, restart, reconfigure, source_set_rebind, source_set_retire, process_takeover, teardown, self_release, shutdown, reset]
+    execution_lease_identity: >-
+      The existing coordinator retains each exact execution lease object under its
+      decision lock. Release removes only that lease from its captured generation,
+      once; an identified settling carrier cannot decrement another acquisition or
+      a replacement generation. Retirement joins close only after the exact set is
+      empty. A copied count or arbitrary subtraction is not cleanup authority.
     serialization: >
       All creators, replacers, destroyers, and self-release paths serialize through one per-agent coordinator decision
       point. A pending predecessor retirement retains typed exact transition authority, not an operation mutex or

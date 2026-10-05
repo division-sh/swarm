@@ -27,6 +27,7 @@ type schemaQueryer interface {
 }
 
 type providerDrainDeliveryOwner interface {
+	ProviderOriginPendingTx(context.Context, *sql.Tx, runtimedelivery.Claim) (bool, error)
 	ValidateProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim) error
 	RenewProviderOriginTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, time.Duration) error
 	SettleProviderOriginSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration) error
@@ -35,6 +36,7 @@ type providerDrainDeliveryOwner interface {
 }
 
 type providerDrainDirectiveOwner interface {
+	ProviderDirectiveOriginPendingTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, string, runtimeagentidentity.Identity) (bool, error)
 	ValidateProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, string, runtimeagentidentity.Identity) error
 	RenewProviderDirectiveOriginTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, time.Time, time.Duration) error
 	SettleProviderDirectiveOriginTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperationState, runtimefailures.Envelope, time.Time) error

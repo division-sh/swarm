@@ -29,6 +29,36 @@ func (s *AgentSQLiteOwner) ValidateProviderDirectiveOriginTx(ctx context.Context
 	return requireProviderDirectiveOrigin(op, origin, runID, identity)
 }
 
+func (s *AgentPostgresOwner) ProviderDirectiveOriginPendingTx(ctx context.Context, tx *sql.Tx, origin runtimeagentcontrol.DirectiveExecutionOrigin, runID string, identity runtimeagentidentity.Identity) (bool, error) {
+	op, found, err := loadPostgresDirectiveOperationByID(ctx, tx, origin.OperationID, true)
+	if err != nil || !found {
+		return false, fmt.Errorf("load exact directive turn origin: found=%t error=%v", found, err)
+	}
+	return providerDirectiveOriginPending(op, origin, runID, identity)
+}
+
+func (s *AgentSQLiteOwner) ProviderDirectiveOriginPendingTx(ctx context.Context, tx *sql.Tx, origin runtimeagentcontrol.DirectiveExecutionOrigin, runID string, identity runtimeagentidentity.Identity) (bool, error) {
+	op, found, err := loadSQLiteDirectiveOperationByID(ctx, tx, origin.OperationID)
+	if err != nil || !found {
+		return false, fmt.Errorf("load exact directive turn origin: found=%t error=%v", found, err)
+	}
+	return providerDirectiveOriginPending(op, origin, runID, identity)
+}
+
+func providerDirectiveOriginPending(op runtimeagentcontrol.DirectiveOperation, origin runtimeagentcontrol.DirectiveExecutionOrigin, runID string, identity runtimeagentidentity.Identity) (bool, error) {
+	if origin.Validate() != nil || origin.OperationID != op.OperationID || origin.ExecutionOwnerID != op.ExecutionOwnerID || op.ResolvedRunID != runID || op.AgentIdentity.Normalize() != identity.Normalize() {
+		return false, fmt.Errorf("directive turn origin contradicts exact operation ownership")
+	}
+	switch op.State {
+	case runtimeagentcontrol.DirectiveOperationExecuting:
+		return true, nil
+	case runtimeagentcontrol.DirectiveOperationExecuted, runtimeagentcontrol.DirectiveOperationSucceeded, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate:
+		return false, nil
+	default:
+		return false, fmt.Errorf("directive turn origin has invalid state %q", op.State)
+	}
+}
+
 func requireProviderDirectiveOrigin(op runtimeagentcontrol.DirectiveOperation, origin runtimeagentcontrol.DirectiveExecutionOrigin, runID string, identity runtimeagentidentity.Identity) error {
 	if err := origin.Validate(); err != nil {
 		return err

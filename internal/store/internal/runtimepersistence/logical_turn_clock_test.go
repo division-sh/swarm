@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -24,11 +25,11 @@ func TestLogicalTurnClockStartsAtFirstLaunchBothStores(t *testing.T) {
 		ctx := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), bound)
 		ctx = withManagedCompletionTestSurface(t, ctx, authority, "claude_cli")
 		first := beginLogicalClockCompletion(t, ctx, "first-tool-round")
-		var launched, deadline any
-		if err := selected.db.QueryRowContext(ctx, `SELECT first_launched_at,deadline_at FROM runtime_agent_turn_lifetimes`).Scan(&launched, &deadline); err != nil {
+		var launched any
+		if err := selected.db.QueryRowContext(ctx, `SELECT first_launched_at FROM runtime_agent_turn_lifetimes`).Scan(&launched); err != nil {
 			t.Fatal(err)
 		}
-		if launched != nil || deadline != nil {
+		if launched != nil {
 			t.Fatal("authorization started the provider clock")
 		}
 		now := time.Now().UTC().Truncate(time.Microsecond)
@@ -56,6 +57,30 @@ func TestLogicalTurnClockStartsAtFirstLaunchBothStores(t *testing.T) {
 		unbounded := runtimeeffects.WithTurnTimeout(ctx, nil)
 		if _, err := beginManagedCompletionForTest(t, runtimeeffects.WithLogicalOperationIdentity(unbounded, "removed-bound"), "claude_cli", []byte("removed-bound")); err == nil {
 			t.Fatal("same business turn accepted removal of its bound")
+		}
+	})
+}
+
+func TestLogicalTurnClockPreservesNanosecondBoundBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		store := selected.selected.(completionSettlementTestStore)
+		if selected.postgres {
+			store = admitTestPostgresStore(t, selected.db)
+		}
+		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
+		authority := fixture.authority
+		authority.BudgetScopes = nil
+		ctx := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Nanosecond, Emit: "investigation.aborted"})
+		ctx = withManagedCompletionTestSurface(t, ctx, authority, "claude_cli")
+		first := beginLogicalClockCompletion(t, ctx, "nanosecond-bound")
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		launch, err := store.MarkExternalAttemptLaunched(ctx, first.Attempt(), now)
+		if err != nil || !launch.Committed || launch.Turn == nil {
+			t.Fatalf("first launch: %+v err=%v", launch, err)
+		}
+		repeated, err := store.MarkExternalAttemptLaunched(ctx, first.Attempt(), now.Add(time.Second))
+		if err != nil || !repeated.Committed || repeated.Turn == nil || !repeated.Turn.DeadlineAt.Equal(now.Add(time.Nanosecond)) {
+			t.Fatalf("store rounded or reset the declared bound: first=%+v repeat=%+v err=%v", launch, repeated, err)
 		}
 	})
 }
@@ -189,4 +214,55 @@ func TestLogicalTurnDirectiveClockDoesNotCreateDeliveryBothStores(t *testing.T) 
 		}
 		requireProviderDirectiveDeliveryCount(t, fixture, before)
 	})
+}
+
+func TestLogicalTurnTimeoutCannotRewriteCompletedOriginBothStores(t *testing.T) {
+	for _, kind := range []string{"delivery", "directive"} {
+		t.Run(kind, func(t *testing.T) {
+			forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+				store := requireProviderDirectiveStore(t, fixture)
+				ctx := fixture.context
+				adapter := "claude_cli"
+				var operation runtimeagentcontrol.DirectiveOperation
+				if kind == "directive" {
+					origin, op, event := admitProviderDirectiveOrigin(t, fixture, store, "completed-bounded-directive")
+					operation = op
+					ctx = providerDirectiveContext(t, fixture, origin, event, "completed-bounded-directive")
+					adapter = "anthropic_api"
+				} else {
+					ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, adapter)
+					ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "completed-bounded-delivery")
+				}
+				ctx = runtimeeffects.WithTurnTimeout(ctx, &timeridentity.TurnTimeout{After: time.Minute, Emit: "investigation.aborted"})
+				handle, err := beginManagedCompletionForTest(t, ctx, adapter, []byte("completed-bounded-origin"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := handle.MarkLaunched(ctx); err != nil {
+					t.Fatal(err)
+				}
+				clock, found := handle.LogicalTurnClock()
+				if !found {
+					t.Fatal("provider launch did not retain its logical turn clock")
+				}
+				if kind == "delivery" {
+					if _, err := store.(deliverylifecycle.Store).SettleSuccess(ctx, fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if _, err := store.RecordDirectiveExecuted(ctx, operation.OperationID, handle.Attempt().Origin.Directive.ExecutionOwnerID, directiveOperationResponseForTest(operation), time.Now().UTC()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				result, err := store.(runtimeeffects.TurnLifetimeStore).RequestTurnTimeout(ctx, handle.Attempt(), clock.DeadlineAt)
+				if err != nil || !result.Committed || !result.OriginSettled || result.Requested || result.Reason != "" || result.CauseEvent != "" {
+					t.Fatalf("completed origin rewritten by late timeout: %+v err=%v", result, err)
+				}
+				var reason, cause sql.NullString
+				if err := fixture.db.QueryRowContext(ctx, `SELECT cancel_reason,CAST(cancel_cause_event_id AS TEXT) FROM runtime_agent_turn_lifetimes`).Scan(&reason, &cause); err != nil || reason.Valid || cause.Valid {
+					t.Fatalf("late timeout fabricated canceled evidence: reason=%v cause=%v err=%v", reason, cause, err)
+				}
+			})
+		})
+	}
 }
