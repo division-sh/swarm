@@ -181,7 +181,7 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	}}}, registry, "worker-1", nil, nil)
 	runtime.liveSessions = newTransientLiveSessionAcquirer(registry)
 	runtime.apiURL = server.URL
-	runtime.apiKey = "test-key"
+	runtime.credentialCache = providerCredentialCache{value: "test-key"}
 	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
 	ctx := testManagedConversationContext(t, harness, "agent-1", "support/inst-1", "support")
 	actor, _ := runtimeactors.ActorFromContext(ctx)
@@ -271,7 +271,7 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
 	runtime.apiURL = server.URL
-	runtime.apiKey = "test-key"
+	runtime.credentialCache = providerCredentialCache{value: "test-key"}
 
 	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-missing-usage"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
 	ctx = withTestStatelessMemory(t, ctx, "agent-1", "test/stateless")

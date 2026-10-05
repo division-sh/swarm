@@ -29,7 +29,7 @@ type OpenAICompatibleRuntime struct {
 	lockOwner            string
 	httpClient           *http.Client
 	baseURL              string
-	apiKey               string
+	credentialCache      providerCredentialCache
 	events               EventPublisher
 	providerAdmission    *ProviderAdmissionRegistry
 	credentials          ProviderCredentialResolver
@@ -241,12 +241,8 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(r.apiKey) == "" {
-		credential, err := r.credentials.Resolve(ctx, profile)
-		if err != nil {
-			return nil, err
-		}
-		r.apiKey = credential.Value
+	if err := r.credentialCache.resolve(ctx, r.credentials, profile); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(r.baseURL) == "" {
 		baseURL, err := llmselection.ResolveBaseURL(profile, r.cfg.LLM.OpenAICompatible.BaseURL)
@@ -485,7 +481,7 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 		return nil, openAICompatibleResponse{}, nil, fmt.Errorf("build openai-compatible request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("authorization", "Bearer "+r.apiKey)
+	req.Header.Set("authorization", "Bearer "+r.credentialCache.snapshot())
 	var attempt *runtimeeffects.Handle
 	if managed == nil {
 		attempt, err = runtimeeffects.BeginCompletion(ctx, "openai_compatible", payload, nil)
