@@ -1114,3 +1114,24 @@ construction flag; extend the same finite ledger with the deletion and updated
 whole-file hash. The native compiled read/emit journey and truthful static
 doctor both pass (15.337s); the ledger check remains byte-identical. Runtime
 construction, model selection and all business assertions are unchanged.
+
+## Post-rebase startup predicate census
+
+Core exposed the new master `TestVerifyBootStartupPredicateCensus` ratchet:
+the old snapshot omits this branch's truthful static diagnostic and startup
+consumers. The existing generator refreshes only those changed body identities;
+unchanged owner hashes remain unchanged. Add listener provenance,
+runtime activation observation, unpublished-generation proof, mock startup
+probe and target-local MCP admission to the finite audited source list.
+
+The #2560 census A15-A18/P13-P16 families consume the listener/diagnostic owner
+but do not confer live reachability. #2555's compiled static text/JSON proof
+checks that distinction. A11/A18/A25/P09/P15/P21 cover mock/Claude planning,
+normal activation, prepared/executable selected activation and source-bound
+factory composition. Their exact #2555 proofs are the target-local admission
+matrices, actual Docker refused/retried activation, selected gateway loss,
+fork-chat isolation, every-launch CLI controls and compiled host/Docker paths.
+Source selection, credentials, recovery inventory and selected-store mutation
+remain their existing separate owners; no local guard or refusal is deleted.
+The negative census mutation still rejects an unaudited startup refusal.
+Regeneration is not credited as execution proof; core must pass again.
