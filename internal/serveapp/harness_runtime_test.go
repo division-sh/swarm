@@ -22,9 +22,6 @@ func TestServeRejectsRetiredPinMarkersBeforeRuntime(t *testing.T) {
 			SourceRoot: canonicalrouting.CopyRetiredPinMarker(t, input), PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
 		}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 		want := "must be a scalar text"
-		if input {
-			want = `field "source" is not supported`
-		}
 		if err == nil || !strings.Contains(err.Error(), want) || loaded.bundle != nil {
 			t.Fatalf("source admission published retired marker: input=%t loaded=%#v error=%v", input, loaded, err)
 		}

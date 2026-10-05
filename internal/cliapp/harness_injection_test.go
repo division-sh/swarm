@@ -52,9 +52,6 @@ func TestVerifyRejectsRetiredHarnessMarkersAtSourceAdmission(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
 			want := "must be a scalar text"
-			if input {
-				want = "field \"source\" is not supported"
-			}
 			if code == 0 || !strings.Contains(stderr.String(), want) || strings.Contains(stdout.String(), "verify ok") {
 				t.Fatalf("retired marker admitted: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
