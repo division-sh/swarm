@@ -1,17 +1,20 @@
 describe: source=telegram-agent@1.0.0
 source authority: projection_only_existing_contract_owners
 validation: structural; live readiness: not evaluated
+root constructor: (no arguments)
 flows:
   - telegram-chat (template)
     events:
       - telegram.reply_requested (fields: chat_id, text)
     primary entity: chat
     instance: field=conversation_reference identity=run + flow + instance_key
+    constructor: inbound.telegram.text_message key=conversation_reference supplied=[]
   - telegram-ingress (static)
     activation: standing
     ingress: alias=chat
       - provider=telegram admission=pack-required signing_secret=webhook_signing.telegram
     primary entity: telegram_service
+    constructor: (no arguments)
 routing topology: routing-topology/v1
   source authority: projection_only_existing_contract_owners
   root input sources:

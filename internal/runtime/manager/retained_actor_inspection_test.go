@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -32,7 +33,7 @@ func (p *retainedActorReaderProbe) ObserveOrdinaryRunSource(ctx context.Context,
 }
 
 func TestRetainedActorInspectionUsesDeclarationProjectionBeforeHydration(t *testing.T) {
-	source := loadFilesystemStaticAgentSource(t)
+	source := loadRootAndFlowStaticAgentSource(t)
 	bundle, _ := semanticview.Bundle(source)
 	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	if err != nil {
@@ -97,15 +98,25 @@ func TestRetainedActorInspectionUsesDeclarationProjectionBeforeHydration(t *test
 }
 
 func TestRetainedActorInspectionDoesNotRewriteReadinessActorsOrHideReadFailure(t *testing.T) {
-	source := loadFilesystemStaticAgentSource(t)
+	source := loadRootAndFlowStaticAgentSource(t)
 	bundle, _ := semanticview.Bundle(source)
 	fact, _ := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	options := AgentManagerOptions{ExecutionPosture: executionposture.Live, LLMBackend: llmselection.BackendAnthropic, RequireModelResolution: true}
-	blueprints, err := ResolveStaticTopologyBlueprints(options, source)
+	runID := uuid.NewString()
+	root := flowidentity.Stored(source, ".", runID, runID, runID, "")
+	child, err := flowidentity.KeylessChild(source, root, "ops-flow")
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor, err := blueprints[0].Materialize(uuid.NewString())
+	constructed, err := ConstructedFlowMaterialization(source, runID, child, map[string]any{})
+	if err != nil || len(constructed.Agents) != 1 {
+		t.Fatalf("constructed readiness actor: %+v %v", constructed, err)
+	}
+	blueprint, err := ResolveAgentMaterializationBlueprint(options, constructed.Agents[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := blueprint.Materialize(runID)
 	if err != nil {
 		t.Fatal(err)
 	}

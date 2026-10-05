@@ -337,7 +337,8 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 		core: runtime.RuntimeDeps{
 			EventStore: selected,
 			EventBusDurable: runtimebus.DurableDependencies{
-				ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+				ScenarioSetup: selected,
+				ReplyContext:  selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 				FlowRouteTopology: selected, FlowRouteRollback: selected,
 				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
@@ -391,7 +392,8 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 		core: runtime.RuntimeDeps{
 			EventStore: selected,
 			EventBusDurable: runtimebus.DurableDependencies{
-				ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+				ScenarioSetup: selected,
+				ReplyContext:  selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 				FlowRouteTopology: selected, FlowRouteRollback: selected,
 				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,

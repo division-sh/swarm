@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
@@ -26,7 +27,8 @@ func toolEventTestContext(actor models.AgentConfig) context.Context {
 		EntityID:     actor.EffectiveEntityID(),
 		FlowInstance: actor.CanonicalFlowPath(),
 	}
-	return runtimebus.WithInboundEvent(unmanagedToolTestContext(), toolTestInboundEvent("tool.execution.requested", nil, envelope, mode))
+	ctx := correlation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID)
+	return runtimebus.WithInboundEvent(ctx, toolTestInboundEvent("tool.execution.requested", nil, envelope, mode))
 }
 
 func toolTestInboundEvent(eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, mode executionmode.Mode) events.Event {

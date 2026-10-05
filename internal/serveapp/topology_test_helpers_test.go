@@ -109,6 +109,10 @@ func (*supervisorTestRetainedSession) CommitAgentLifecycleTransition(context.Con
 	return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("supervisor test session has no agent lifecycle rows")
 }
 
+func (*supervisorTestRetainedSession) RebindFlowReadinessSourceSet(context.Context, runtimemanager.FlowReadinessSourceSetRebindRequest, runtimemanager.ProcessExecutionBinding) (runtimemanager.FlowReadinessSourceSetRebindResult, error) {
+	return runtimemanager.FlowReadinessSourceSetRebindResult{}, errors.New("supervisor test session has no readiness rows")
+}
+
 func (s *supervisorTestRetainedSession) Release(context.Context) error {
 	s.mu.Lock()
 	if s.released {

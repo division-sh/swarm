@@ -231,7 +231,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if unavailable {
 					// Invalidate the real receiver only after materialization, publication
 					// and claim commit. Its target and business fields remain untouched.
-					result, err := rt.DB.Exec(`UPDATE entity_state SET current_state='done' WHERE run_id=$1 AND entity_id=$2 AND current_state='active'`, claim.RunID(), receiver.ID)
+					result, err := rt.DB.Exec(`UPDATE flow_instances SET current_state='done' WHERE run_id=$1 AND entity_id=$2 AND current_state='active'`, claim.RunID(), receiver.ID)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -282,8 +282,8 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 						receiver.Fields["processed_token"] = "receiver-proof"
 					}
 					forkRows["consumer"] = receiver
-					if !reflect.DeepEqual(forkRows, readForkReceiverRows(t, rt, claim.RunID())) {
-						t.Fatal("receiver execution changed child or producer state beyond its exact authored write or availability fault")
+					if actual := readForkReceiverRows(t, rt, claim.RunID()); !reflect.DeepEqual(forkRows, actual) {
+						t.Fatalf("receiver execution changed child or producer state beyond its exact authored write or availability fault: expected=%+v actual=%+v", forkRows, actual)
 					}
 					if unavailable {
 						var emitted int
@@ -317,8 +317,8 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					}
 					receiver.State = "done"
 					forkRows["consumer"] = receiver
-					if !reflect.DeepEqual(forkRows, readForkReceiverRows(t, rt, claim.RunID())) {
-						t.Fatal("stale runtime claim changed receiver or producer state")
+					if actual := readForkReceiverRows(t, rt, claim.RunID()); !reflect.DeepEqual(forkRows, actual) {
+						t.Fatalf("stale runtime claim changed receiver or producer state: expected=%+v actual=%+v", forkRows, actual)
 					}
 					var fields string
 					var revision int

@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -92,13 +93,12 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			})
 
 			instance := artifactActionResultWorkflowInstance()
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
-			}
+			instance.WorkflowVersion = source.WorkflowVersion()
+			seedRuntimeTestPreparedInstance(t, ctx, pg, pc, instance)
 			if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 				RunID: templateInstanceDeliveryRunID,
 				Route: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"),
-			}}); err != nil {
+			}, Instance: runtimeflowidentity.Derive(source, "repo-scaffold", "inst-1")}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
 
@@ -133,8 +133,8 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 				FROM events
 				WHERE event_name = $1 AND source_event_id = $2::uuid
 			`, []any{resultEventType, tc.requestEventID})
-			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, "repo-scaffold/inst-1")
-			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, "repo-scaffold/inst-1")
+			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, "repo-scaffold/inst-1", artifactActionResultEntityID)
+			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, "repo-scaffold/inst-1", artifactActionResultEntityID)
 			waitArtifactActionResultHandlerStarted(t, ctx, db, resultHandlerStarted, resultEventID)
 			waitArtifactActionResultDBCount(t, ctx, db, `
 				SELECT COUNT(*)
@@ -145,7 +145,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 				  AND status = 'delivered'
 				  AND settled_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
-			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold/inst-1"), repoNodeID)
+			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold/inst-1", artifactActionResultEntityID), repoNodeID)
 			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, repoNodeID)
 		})
 	}
@@ -248,9 +248,39 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 				},
 			})
 
-			instance := artifactActionResultStaticWorkflowInstance()
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
+			root := runtimeflowidentity.Stored(source, ".", templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, "")
+			parent, err := runtimeflowidentity.KeylessChild(source, root, "repo-scaffold")
+			if err != nil {
+				t.Fatal(err)
+			}
+			instances := []runtimeflowidentity.Instance{root, parent}
+			if childRequest {
+				child, err := runtimeflowidentity.KeylessChild(source, parent, tc.requestFlowPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				instances = append(instances, child)
+			}
+			for _, coordinate := range instances {
+				if err := coordinate.ValidateConstruction(source, templateInstanceDeliveryRunID); err != nil {
+					t.Fatal(err)
+				}
+				topology, found := semanticview.WorkflowStageTopology(source, coordinate.TemplateID)
+				if !found {
+					t.Fatal("component receiver topology is missing")
+				}
+				initial, err := topology.InitialStoredStage()
+				if err != nil {
+					t.Fatal(err)
+				}
+				fields, _ := entityruntime.ResolveForFlow(source, coordinate.TemplateID)
+				seedRuntimeTestPreparedInstance(t, ctx, pg, pc, runtimepipeline.WorkflowInstance{
+					InstanceID: coordinate.InstanceID, StorageRef: coordinate.InstancePath, EntityID: coordinate.EntityID,
+					EntityType: fields.EntityType, Fields: map[string]any{},
+					ParentFlowID: coordinate.ParentRoute.FlowID, ParentFlowInstance: coordinate.ParentRoute.FlowInstance, ParentEntityID: coordinate.ParentEntityID,
+					WorkflowName: coordinate.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+					CurrentState: initial.ID(), StageDefined: topology.StageCount() != 0,
+				})
 			}
 
 			requestPayload, err := json.Marshal(map[string]any{
@@ -269,16 +299,16 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 				0,
 				templateInstanceDeliveryRunID,
 				events.EnvelopeForSourceRoute(
-					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), tc.requestFlowPath),
-					events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: tc.requestFlowPath, EntityID: artifactActionResultEntityID},
+					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, parent.EntityID), tc.requestFlowPath),
+					events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: tc.requestFlowPath, EntityID: parent.EntityID},
 				),
-				eventtest.StaticFlowRoutingSource("repo-scaffold", tc.requestFlowPath, artifactActionResultEntityID), time.Now().UTC(),
+				eventtest.StaticFlowRoutingSource("repo-scaffold", tc.requestFlowPath, parent.EntityID), time.Now().UTC(),
 			)
 			if childRequest {
 				requestEvent = eventtest.ExistingRunRootIngressWithRoutingSource(tc.requestEventID,
 					events.EventType("start.requested"), "test", "", requestPayload, 0, templateInstanceDeliveryRunID,
-					events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID),
-					eventtest.RootRoutingSource(artifactActionResultEntityID), time.Now().UTC())
+					events.EnvelopeForEntityID(events.EventEnvelope{}, root.EntityID),
+					eventtest.RootRoutingSource(root.EntityID), time.Now().UTC())
 			}
 
 			if err := bus.Publish(ctx, requestEvent); err != nil {
@@ -297,7 +327,7 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 				if err := json.Unmarshal([]byte(rawSource), &sourceRoute); err != nil {
 					t.Fatal(err)
 				}
-				if sourceRoute.FlowID != tc.requestFlowPath || sourceRoute.FlowInstance != tc.requestFlowPath || sourceRoute.EntityID != "" {
+				if sourceRoute.FlowID != tc.requestFlowPath || sourceRoute.FlowInstance != tc.requestFlowPath || sourceRoute.EntityID != runtimeflowidentity.EntityID(tc.requestFlowPath) || sourceRoute.EntityID == parent.EntityID {
 					t.Fatalf("child request borrowed parent state ownership: %s", rawSource)
 				}
 			}
@@ -306,8 +336,8 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 				FROM events
 				WHERE event_name = $1 AND source_event_id = $2::uuid
 			`, []any{resultEventType, requestEventID})
-			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, tc.wantFlowPath)
-			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, tc.wantFlowPath)
+			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, tc.wantFlowPath, parent.EntityID)
+			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, tc.wantFlowPath, parent.EntityID)
 			waitArtifactActionResultHandlerStarted(t, ctx, db, resultHandlerStarted, resultEventID)
 			waitArtifactActionResultDBCount(t, ctx, db, `
 				SELECT COUNT(*)
@@ -318,7 +348,7 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 				  AND status = 'delivered'
 				  AND settled_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
-			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON(tc.wantFlowPath), repoNodeID)
+			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON(tc.wantFlowPath, parent.EntityID), repoNodeID)
 			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, repoNodeID)
 		})
 	}
@@ -347,14 +377,7 @@ func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 	}
 }
 
-func artifactActionResultStaticWorkflowInstance() runtimepipeline.WorkflowInstance {
-	instance := artifactActionResultWorkflowInstance()
-	instance.InstanceID = "repo-scaffold"
-	instance.StorageRef = "repo-scaffold"
-	return instance
-}
-
-func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, db *sql.DB, eventID, resultKind, wantFlowInstance string) {
+func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, db *sql.DB, eventID, resultKind, wantFlowInstance, wantEntityID string) {
 	t.Helper()
 	var entityID, flowInstance, sourceRouteJSON, payloadJSON string
 	if err := db.QueryRowContext(ctx, `
@@ -364,8 +387,8 @@ func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, d
 	`, eventID).Scan(&entityID, &flowInstance, &sourceRouteJSON, &payloadJSON); err != nil {
 		t.Fatalf("query result event context: %v", err)
 	}
-	if entityID != artifactActionResultEntityID {
-		t.Fatalf("result event entity_id = %q, want %q", entityID, artifactActionResultEntityID)
+	if entityID != wantEntityID {
+		t.Fatalf("result event entity_id = %q, want %q", entityID, wantEntityID)
 	}
 	if flowInstance != wantFlowInstance {
 		t.Fatalf("result event flow_instance = %q, want %s", flowInstance, wantFlowInstance)
@@ -380,8 +403,8 @@ func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, d
 	if got := strings.TrimSpace(asRuntimeTestString(sourceRoute["flow_instance"])); got != wantFlowInstance {
 		t.Fatalf("source route flow_instance = %q, want %s: %#v", got, wantFlowInstance, sourceRoute)
 	}
-	if got := strings.TrimSpace(asRuntimeTestString(sourceRoute["entity_id"])); got != artifactActionResultEntityID {
-		t.Fatalf("source route entity_id = %q, want %s: %#v", got, artifactActionResultEntityID, sourceRoute)
+	if got := strings.TrimSpace(asRuntimeTestString(sourceRoute["entity_id"])); got != wantEntityID {
+		t.Fatalf("source route entity_id = %q, want %s: %#v", got, wantEntityID, sourceRoute)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
@@ -392,9 +415,9 @@ func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, d
 	}
 }
 
-func assertArtifactActionResultNodeRoute(t *testing.T, ctx context.Context, db *sql.DB, eventID, wantFlowInstance string) {
+func assertArtifactActionResultNodeRoute(t *testing.T, ctx context.Context, db *sql.DB, eventID, wantFlowInstance, wantEntityID string) {
 	t.Helper()
-	wantRoute := artifactActionResultDeliveryTargetRouteJSON(wantFlowInstance)
+	wantRoute := artifactActionResultDeliveryTargetRouteJSON(wantFlowInstance, wantEntityID)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		var got int
@@ -493,8 +516,8 @@ func waitArtifactActionResultDBCount(t *testing.T, ctx context.Context, db *sql.
 	}
 }
 
-func artifactActionResultDeliveryTargetRouteJSON(flowInstance string) string {
-	return `{"kind":"existing_entity","route":{"flow_instance":"` + flowInstance + `","entity_id":"` + artifactActionResultEntityID + `"}}`
+func artifactActionResultDeliveryTargetRouteJSON(flowInstance, entityID string) string {
+	return `{"kind":"existing_entity","route":{"flow_instance":"` + flowInstance + `","entity_id":"` + entityID + `"}}`
 }
 
 func asRuntimeTestString(value any) string {

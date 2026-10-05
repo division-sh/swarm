@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,24 +14,97 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
+
+func constructWorkflowMutationFixture(t *testing.T, backend, flowID string, at time.Time) (receiverConfigActivationFixture, runtimepipeline.WorkflowEngineStateRecord) {
+	t.Helper()
+	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
+		"schema.yaml":             "name: workflow-mutation\n",
+		flowID + "/schema.yaml":   "name: " + flowID + "\ninstance: receiver_key\nstages:\n  active: {initial: true}\n  done: {}\npins:\n  inputs: [construct.requested]\n",
+		flowID + "/entities.yaml": "review_item:\n  receiver_key: text\n  account_id: {type: text, initial: preserved}\n  handled: boolean?\n",
+		flowID + "/events.yaml":   "construct.requested:\n",
+	}, nil)
+	runID := correlation.RunIDFromContext(f.ctx)
+	req := sqliteFlowActivationRequest(f.bundle, flowID, "receiver", "", flowID+"/receiver")
+	req.OccurredAt = at
+	req.Config = map[string]any{"receiver_key": "receiver"}
+	req.ConstructorInput, req.ResolvedKey = "construct.requested", "receiver"
+	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
+	activation, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, activation)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct workflow mutation source: %+v %v", committed, err)
+	}
+	persisted, err := activation.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := persisted.State
+	record.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+	record.ExpectedState, record.ExpectedRevision = "active", 1
+	record.CurrentState = "done"
+	record.Fields = json.RawMessage(`{"receiver_key":"receiver","account_id":"preserved","handled":true}`)
+	record.EnteredStageAt, record.UpdatedAt = at.Add(time.Minute), at.Add(time.Minute)
+	return f, record
+}
+
+func workflowMutationDeliveryEntry(t *testing.T, record runtimepipeline.WorkflowEngineStateRecord, node identity.ExecutableNode, event events.Event, claim runtimedelivery.Claim) runtimepipeline.WorkflowEngineStateRecord {
+	t.Helper()
+	// This writer fixture supplies a compiled transition and an actually claimed
+	// occurrence; it does not stand in for an authored handler execution proof.
+	graph := runtimecontracts.BuildWorkflowStageTopology(record.Identity.Route.ScopeKey, "active", []string{"active", "done"}, nil,
+		[]runtimecontracts.HandlerTransitionSemantic{{Node: node, EventType: string(event.Type()), AdvancesTo: "done"}}, nil, nil)
+	compiled, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{Node: node, HandlerEvent: string(event.Type()), AdvanceCarrier: runtimecontracts.HandlerAdvanceCarrierHandler}, "active", "done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition, err := workflowlifecycle.NewCompiledTransition(compiled, handlerselection.NotApplicable(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err := workflowlifecycle.NewAcceptedEvent(record.Identity.Route, identity.NormalizeEntityID(record.EntityID), event.ID(), string(event.Type()), event.ExecutionMode(), record.UpdatedAt, &transition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err = effect.WithExecutionOccurrence("delivery", claim.DeliveryID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, found, err := effect.StageEntry(record.Identity)
+	if err != nil || !found {
+		t.Fatalf("prepare exact mutation stage entry: found=%v err=%v", found, err)
+	}
+	var bookkeeping map[string]any
+	if err := json.Unmarshal(record.Bookkeeping, &bookkeeping); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowlifecycle.StoreStageEntry(bookkeeping, entry); err != nil {
+		t.Fatal(err)
+	}
+	record.Bookkeeping, err = json.Marshal(bookkeeping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
 
 func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
-			owner, ok := selected.(runtimepipeline.WorkflowEngineMutationOwner)
-			if !ok {
-				t.Fatalf("%s selected store does not expose the workflow mutation owner", backend)
-			}
-
 			for _, test := range []struct {
 				name            string
 				preSettle       bool
@@ -42,11 +116,12 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 				t.Run(test.name, func(t *testing.T) {
 					flowID := "engine-delivery-" + uuid.NewString()
 					instancePath := flowID + "/receiver"
-					entityID := uuid.NewString()
 					createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-					seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
+					fixture, record := constructWorkflowMutationFixture(t, backend, flowID, createdAt)
+					selected, db, ctx, runID := fixture.store.(stateOnlyAcquisitionStore), fixture.db, fixture.ctx, correlation.RunIDFromContext(fixture.ctx)
+					owner, entityID := fixture.store.(runtimepipeline.WorkflowEngineMutationOwner), record.EntityID
 
-					node := mustPersistenceRootNode("engine-settlement")
+					node := mustPersistenceNode(flowID, "engine-settlement")
 					route := events.DeliveryRoute{
 						Recipient: events.MustNodeDeliveryRecipient(node),
 						Target: events.MustExistingEntityTarget(events.RouteIdentity{
@@ -65,6 +140,7 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 					if err != nil {
 						t.Fatalf("claim workflow engine delivery fixture: %v", err)
 					}
+					record = workflowMutationDeliveryEntry(t, record, node, event, claimed.Claim)
 					if test.preSettle {
 						if _, err := selected.SettleSuccess(
 							ctx,
@@ -77,7 +153,7 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 						}
 					}
 
-					record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
+					before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
 					committed, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
 						State: record,
 						DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
@@ -89,7 +165,10 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 						if err == nil {
 							t.Fatal("stale delivery claim committed the workflow engine mutation")
 						}
-						assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
+						assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "active", 1, 1)
+						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")) {
+							t.Fatal("stale delivery claim changed constructed state or history")
+						}
 						return
 					}
 					if err != nil {
@@ -115,17 +194,12 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
-			owner, ok := selected.(runtimepipeline.WorkflowEngineMutationOwner)
-			if !ok {
-				t.Fatalf("%s selected store does not expose the workflow mutation owner", backend)
-			}
-
 			flowID := "engine-fan-out-" + uuid.NewString()
 			instancePath := flowID + "/receiver"
-			entityID := uuid.NewString()
 			createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-			seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
+			fixture, record := constructWorkflowMutationFixture(t, backend, flowID, createdAt)
+			selected, db, ctx, runID := fixture.store.(stateOnlyAcquisitionStore), fixture.db, fixture.ctx, correlation.RunIDFromContext(fixture.ctx)
+			owner, entityID := fixture.store.(runtimepipeline.WorkflowEngineMutationOwner), record.EntityID
 
 			node := mustPersistenceNode(flowID, "engine-fan-out")
 			targetRoute := events.RouteIdentity{FlowID: flowID, FlowInstance: instancePath, EntityID: entityID}
@@ -146,6 +220,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			if err != nil {
 				t.Fatalf("claim workflow engine fan-out fixture: %v", err)
 			}
+			record = workflowMutationDeliveryEntry(t, record, node, event, claimed.Claim)
 
 			element := runtimecontracts.FanOutElementRef{
 				FlowPath:     flowID,
@@ -184,7 +259,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 					RunID: runID, TriggeringDeliveryID: claimed.Claim.DeliveryID(), ElementRef: element,
 				},
 				PlanRef: runtimecontracts.FanOutPlanRef{
-					BundleHash: "bundle-v2:sha256:" + strings.Repeat("1", 64), ElementRef: element,
+					BundleHash: fixture.bundle.SourceArtifact.BundleHash(), ElementRef: element,
 					SemanticDigest: sourceDigest,
 				},
 				Source:      fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: event.ID(), Field: "candidate_ids"},
@@ -232,7 +307,6 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			if err := barrier.Validate(); err != nil {
 				t.Fatalf("validate workflow engine fan-out barrier: %v", err)
 			}
-			record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
 			hostile := barrier
 			hostile.IntentKey.RunID = uuid.NewString()
 			if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{

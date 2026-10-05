@@ -216,6 +216,9 @@ type SourceSetTransitionAdmission interface {
 	RecordPredecessorProcessBinding(ProcessExecutionBinding) error
 	PredecessorProcessBinding(ProcessExecutionBinding) (ProcessExecutionBinding, bool)
 	Done() <-chan struct{}
+	// TerminalDrain releases settlement waits only after aggregate admission
+	// fencing. It never certifies a successful source-set refresh.
+	TerminalDrain() <-chan struct{}
 }
 
 type AgentLifecycleDiagnosticPersistence interface {

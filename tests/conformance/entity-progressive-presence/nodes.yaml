@@ -4,7 +4,6 @@ owner:
   produces: [work.consume, work.completed]
   event_handlers:
     work.opened:
-      create_entity: true
       advances_to: assess
     work.annotated:
       guard:

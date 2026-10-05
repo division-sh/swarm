@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -31,7 +30,7 @@ type stageRecoverySelectedStore interface {
 	budgetspend.Store
 	sourceArtifactReader
 	sourceartifactfixture.Writer
-	CreateEntity(context.Context, runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error)
+	SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
 }
 
 type countedStageRecoveryStore struct {
@@ -97,13 +96,12 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 			for i, artifact := range artifacts {
 				runs[i] = uuid.NewString()
 				sourceartifactfixture.RequireArtifact(t, runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), selected, artifact)
-				entitySource, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifact.BundleHash())
+				_, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifact.BundleHash())
 				if err != nil {
 					t.Fatalf("load retained entity source %d: %v", i, err)
 				}
 				fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runs[i], Artifact: artifact, StartedAt: time.Now().UTC()}
 				storetest.RequireRun(t, ctx, selected, fixture)
-				seedStageRecoveryFlowInstance(t, ctx, db, backend, runs[i])
 				initial := "ready"
 				entityID := sharedEntity
 				if i == 1 {
@@ -111,10 +109,13 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				} else if i == 2 {
 					initial = "pending"
 				}
+				seedStageRecoveryFlowInstance(t, ctx, db, backend, runs[i], entityID, initial, i != 2)
 				createCtx := runtimecorrelation.WithRunID(runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), runs[i])
-				if _, err := selected.CreateEntity(createCtx, runtimetools.EntityCreateRecord{
-					RunID: runs[i], EntityID: entityID, FlowInstance: "child", EntityType: "item", CurrentState: initial,
-					Source: entitySource, CreatedAt: time.Now().UTC(), Writer: runtimetools.EntityMutationWriter{Type: "agent", ID: "stage-recovery-proof", HandlerStep: "create_entity"},
+				if _, err := selected.SetupScenarioEntities(createCtx, runtimepipeline.ScenarioSetupRequest{
+					RunID: runs[i], CreatedAt: time.Now().UTC(),
+					Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
+						Alias: "retained", EntityID: entityID, FlowInstance: "child", EntityType: "item", CurrentState: initial,
+					}},
 				}); err != nil {
 					t.Fatalf("create retained entity %d: %v", i, err)
 				}
@@ -250,13 +251,16 @@ func stageRecoveryArtifact(t *testing.T, stages string) *sourceartifact.Admitted
 	return artifact
 }
 
-func seedStageRecoveryFlowInstance(t *testing.T, ctx context.Context, db *sql.DB, backend, runID string) {
+func seedStageRecoveryFlowInstance(t *testing.T, ctx context.Context, db *sql.DB, backend, runID, entityID, stage string, stageDefined bool) {
 	t.Helper()
-	query := "INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES (?, 'child', 'child', 'static', '{}', 'active')"
+	// This is a physical budget projection fixture, not executable construction.
+	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+		VALUES (?, 'child', 'child', ?, 'item', ?, 'static', '{}', 'active', ?, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
 	if backend == "postgres" {
-		query = "INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES ($1::uuid, 'child', 'child', 'static', '{}'::jsonb, 'active')"
+		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+			VALUES ($1::uuid, 'child', 'child', $2::uuid, 'item', $3, 'static', '{}'::jsonb, 'active', $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, NOW(), NOW(), NOW())`
 	}
-	if _, err := db.ExecContext(ctx, query, runID); err != nil {
+	if _, err := db.ExecContext(ctx, query, runID, entityID, stage, stageDefined); err != nil {
 		t.Fatalf("seed selected child flow instance: %v", err)
 	}
 }

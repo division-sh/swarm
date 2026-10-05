@@ -26,6 +26,7 @@ func toolTestSourceWithDeclaredAgent(t testing.TB, bundle *runtimecontracts.Work
 	if bundle.FlowSources == nil {
 		bundle.FlowSources = map[string]runtimecontracts.FlowSource{}
 	}
+	bundle.RootSchema = &bundle.FlowTree.Root.Schema
 	for id, view := range bundle.FlowTree.ByID {
 		if view != nil {
 			bundle.FlowSchemas[id] = view.Schema
@@ -140,10 +141,26 @@ func toolTestAttachFlowView(bundle *runtimecontracts.WorkflowContractBundle, flo
 		return nil
 	}
 	if bundle.FlowTree.Root == nil {
-		bundle.FlowTree.Root = detached
-	} else {
-		bundle.FlowTree.Root.Children = append(bundle.FlowTree.Root.Children, *detached)
+		bundle.FlowTree.Root = &runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
 	}
+	parent := bundle.FlowTree.Root
+	parts := strings.Split(flowID, "/")
+	for n := 1; n < len(parts); n++ {
+		path := strings.Join(parts[:n], "/")
+		var child *runtimecontracts.FlowContractView
+		for index := range parent.Children {
+			if parent.Children[index].Paths.FlowPath == path {
+				child = &parent.Children[index]
+				break
+			}
+		}
+		if child == nil {
+			parent.Children = append(parent.Children, runtimecontracts.FlowContractView{Path: path, Paths: runtimecontracts.FlowContractPaths{FlowPath: path}})
+			child = &parent.Children[len(parent.Children)-1]
+		}
+		parent = child
+	}
+	parent.Children = append(parent.Children, *detached)
 	toolTestReindexFlowTree(bundle)
 	return find(bundle.FlowTree.Root)
 }
@@ -155,11 +172,15 @@ func toolTestReindexFlowTree(bundle *runtimecontracts.WorkflowContractBundle) {
 	if bundle.FlowTree.ByPath == nil {
 		bundle.FlowTree.ByPath = map[string]*runtimecontracts.FlowContractView{}
 	}
-	var index func(*runtimecontracts.FlowContractView)
-	index = func(view *runtimecontracts.FlowContractView) {
+	if bundle.FlowTree.Root.Paths.FlowPath == "" {
+		bundle.FlowTree.Root.Paths.FlowPath, bundle.FlowTree.Root.Path = ".", "."
+	}
+	var index func(*runtimecontracts.FlowContractView, *runtimecontracts.FlowContractView)
+	index = func(view, parent *runtimecontracts.FlowContractView) {
 		if view == nil {
 			return
 		}
+		view.Parent = parent
 		if id := strings.TrimSpace(view.Paths.FlowPath); id != "" {
 			bundle.FlowTree.ByID[id] = view
 		}
@@ -167,8 +188,8 @@ func toolTestReindexFlowTree(bundle *runtimecontracts.WorkflowContractBundle) {
 			bundle.FlowTree.ByPath[path] = view
 		}
 		for childIndex := range view.Children {
-			index(&view.Children[childIndex])
+			index(&view.Children[childIndex], view)
 		}
 	}
-	index(bundle.FlowTree.Root)
+	index(bundle.FlowTree.Root, nil)
 }

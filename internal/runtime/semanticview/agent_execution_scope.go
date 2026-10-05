@@ -19,9 +19,15 @@ type AgentExecutionSemanticScope struct {
 	hasFlow     bool
 }
 
+// AgentExecutionConstruction is implemented by the canonical constructed
+// instance. It validates construction facts, not agent lifecycle permission.
+type AgentExecutionConstruction interface {
+	ValidateAgentExecution(Source, agentidentity.Identity, string, string) error
+}
+
 // ResolveAgentPlanExecutionSemanticScope resolves a run-bound plan through the
 // same declaration and route checks as a configured actor, without launching it.
-func ResolveAgentPlanExecutionSemanticScope(source Source, runID string, plan agentidentity.Plan) (AgentExecutionSemanticScope, error) {
+func ResolveAgentPlanExecutionSemanticScope(source Source, runID string, plan agentidentity.Plan, construction AgentExecutionConstruction) (AgentExecutionSemanticScope, error) {
 	identity, err := plan.Live(runID)
 	if err != nil {
 		return AgentExecutionSemanticScope{}, err
@@ -32,10 +38,10 @@ func ResolveAgentPlanExecutionSemanticScope(source Source, runID string, plan ag
 		return AgentExecutionSemanticScope{}, fmt.Errorf("agent plan has no exact declaration for %s", identity.Description())
 	}
 	actor.FlowID = declaration.OwnerFlowID
-	return ResolveAgentExecutionSemanticScope(source, actor)
+	return ResolveAgentExecutionSemanticScope(source, actor, construction)
 }
 
-func ResolveAgentExecutionSemanticScope(source Source, actor models.AgentConfig) (AgentExecutionSemanticScope, error) {
+func ResolveAgentExecutionSemanticScope(source Source, actor models.AgentConfig, construction AgentExecutionConstruction) (AgentExecutionSemanticScope, error) {
 	if source == nil {
 		return AgentExecutionSemanticScope{}, fmt.Errorf("agent execution semantic scope requires semantic source")
 	}
@@ -84,25 +90,16 @@ func ResolveAgentExecutionSemanticScope(source Source, actor models.AgentConfig)
 	if identity.Route.Presence != agentidentity.RoutePresent {
 		return AgentExecutionSemanticScope{}, fmt.Errorf("flow agent declaration %q requires a concrete flow identity route", ownerFlowID)
 	}
-	flowPath := strings.Trim(strings.TrimSpace(flow.Path), "/")
-	if flowPath == "" {
-		flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(ownerFlowID)), "/")
-	}
-	if flowPath == "" {
-		return AgentExecutionSemanticScope{}, fmt.Errorf("agent declaration owner flow %q has no semantic path", ownerFlowID)
-	}
-	route := identity.Route.Normalize()
 	switch strings.TrimSpace(flow.Mode) {
-	case runtimecontracts.FlowModeTemplate:
-		if route.ScopeKey != flowPath || route.InstancePath == flowPath || !strings.HasPrefix(route.InstancePath, flowPath+"/") {
-			return AgentExecutionSemanticScope{}, fmt.Errorf("template agent execution route %q is not a concrete instance of declaration flow %q", route.InstancePath, flowPath)
-		}
-	case runtimecontracts.FlowModeStatic:
-		if route.InstancePath != flowPath {
-			return AgentExecutionSemanticScope{}, fmt.Errorf("agent execution route %q conflicts with declaration flow path %q", route.InstancePath, flowPath)
-		}
+	case runtimecontracts.FlowModeTemplate, runtimecontracts.FlowModeStatic:
 	default:
 		return AgentExecutionSemanticScope{}, fmt.Errorf("agent declaration owner flow %q has unsupported mode %q", ownerFlowID, flow.Mode)
+	}
+	if construction == nil {
+		return AgentExecutionSemanticScope{}, fmt.Errorf("agent execution semantic scope requires its exact constructed flow owner")
+	}
+	if err := construction.ValidateAgentExecution(source, identity, ownerFlowID, actor.EffectiveEntityID()); err != nil {
+		return AgentExecutionSemanticScope{}, fmt.Errorf("agent execution construction: %w", err)
 	}
 	scope.flow = flow
 	scope.hasFlow = true

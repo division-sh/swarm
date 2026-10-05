@@ -170,8 +170,6 @@ func BuildWorkflowStageTopology(
 				loopKind, loopID = kind, strings.TrimSpace(id)
 				handlerStages = []string{strings.TrimSpace(transition.Loop.From)}
 			}
-		} else if transition.CreateEntity && initial != "" {
-			handlerStages = []string{initial}
 		}
 		topology.Handlers = append(topology.Handlers, WorkflowHandlerStageScope{
 			Node:      transition.Node,

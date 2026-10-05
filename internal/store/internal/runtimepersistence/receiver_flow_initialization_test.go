@@ -88,7 +88,7 @@ func TestReceiverFlowInitializationPublicationBothStores(t *testing.T) {
 					t.Fatalf("routes/activations: %d/%d; commit=%+v", len(command.Commit.DeliveryRoutes), len(command.Activations), command.Commit)
 				}
 				for _, route := range command.Commit.DeliveryRoutes {
-					if !route.Initialization.FlowLifecycle() || !route.Materialization.Empty() {
+					if !route.Initialization.FlowLifecycle() {
 						t.Fatalf("invented node dependency: %+v", route)
 					}
 				}

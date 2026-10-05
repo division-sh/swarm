@@ -42,6 +42,7 @@ type EventCommitOwner interface {
 }
 
 type eventCommitTxStore interface {
+	RequireActiveSourceTx(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
 	resourceSourceOwner() *storedurabledata.Owner
 	commitFanOutPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission) (runtimebus.CommittedPublication, error)
 	syncRunCountersTx(context.Context, *mutationprotocol.Attempt, string) error

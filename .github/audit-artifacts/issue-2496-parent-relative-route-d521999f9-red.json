@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "source_head": "d521999f9a69cbb78a1925793121d51d9c310f13",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "qualification_ledger_parent": "40c8048842fc8338497fee67ca369a6ad48d6600",
+  "command": "go test ./internal/runtime/bus -json -count=1 -run '^(TestRouteTopologyConstructionKeepsParentRelativeKeylessChild|TestRouteTableKeylessConstructionPublishesExactRunOwners)$'",
+  "exit_code": 1,
+  "receipt": "/tmp/agent-e-2496-parent-relative-route-regression-frozen.log",
+  "receipt_sha256": "9038b66371c30ad361c909ce51a77a311b43544eabc01fd4dce37c980467eaf6",
+  "first_test_event": "2026-10-03T04:06:07.328333755Z",
+  "last_test_event": "2026-10-03T04:06:07.489547025Z",
+  "roots": [
+    {
+      "test": "TestRouteTopologyConstructionKeepsParentRelativeKeylessChild",
+      "status": "fail",
+      "elapsed": 0.14
+    },
+    {
+      "test": "TestRouteTableKeylessConstructionPublishesExactRunOwners",
+      "status": "pass",
+      "elapsed": 0.01
+    }
+  ],
+  "cells": [
+    {
+      "test": "TestRouteTopologyConstructionKeepsParentRelativeKeylessChild/left/activation",
+      "status": "fail",
+      "elapsed": 0.01
+    },
+    {
+      "test": "TestRouteTopologyConstructionKeepsParentRelativeKeylessChild/left/descriptor_preview",
+      "status": "fail",
+      "elapsed": 0.01
+    },
+    {
+      "test": "TestRouteTopologyConstructionKeepsParentRelativeKeylessChild/right/activation",
+      "status": "fail",
+      "elapsed": 0
+    },
+    {
+      "test": "TestRouteTopologyConstructionKeepsParentRelativeKeylessChild/right/descriptor_preview",
+      "status": "fail",
+      "elapsed": 0.01
+    },
+    {
+      "test": "TestRouteTableKeylessConstructionPublishesExactRunOwners/.",
+      "status": "pass",
+      "elapsed": 0
+    },
+    {
+      "test": "TestRouteTableKeylessConstructionPublishesExactRunOwners/producer",
+      "status": "pass",
+      "elapsed": 0
+    },
+    {
+      "test": "TestRouteTableKeylessConstructionPublishesExactRunOwners/consumer",
+      "status": "pass",
+      "elapsed": 0
+    }
+  ],
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/bus",
+      "status": "fail",
+      "elapsed": 0.161
+    }
+  ],
+  "exact_errors": [
+    {
+      "test": "TestRouteTopologyConstructionKeepsParentRelativeKeylessChild/left/activation",
+      "error": "routing_derivation_operation_test.go:187: topology rejected canonical parent-relative construction: derive publication activation route 1: flow-instance route identity is inconsistent: scope \"outer/left/sink/final\" and instance \"final\" derive path \"outer/left/sink/final/final\", not \"outer/left/sink/same-revision/final\""
+    },
+    {
+      "test": "TestRouteTopologyConstructionKeepsParentRelativeKeylessChild/left/descriptor_preview",
+      "error": "routing_derivation_operation_test.go:187: topology rejected canonical parent-relative construction: flow-instance route identity is inconsistent: scope \"outer/left/sink/final\" and instance \"final\" derive path \"outer/left/sink/final/final\", not \"outer/left/sink/same-revision/final\""
+    },
+    {
+      "test": "TestRouteTopologyConstructionKeepsParentRelativeKeylessChild/right/activation",
+      "error": "routing_derivation_operation_test.go:187: topology rejected canonical parent-relative construction: derive publication activation route 1: flow-instance route identity is inconsistent: scope \"outer/right/sink/final\" and instance \"final\" derive path \"outer/right/sink/final/final\", not \"outer/right/sink/same-revision/final\""
+    },
+    {
+      "test": "TestRouteTopologyConstructionKeepsParentRelativeKeylessChild/right/descriptor_preview",
+      "error": "routing_derivation_operation_test.go:187: topology rejected canonical parent-relative construction: flow-instance route identity is inconsistent: scope \"outer/right/sink/final\" and instance \"final\" derive path \"outer/right/sink/final/final\", not \"outer/right/sink/same-revision/final\""
+    }
+  ],
+  "limits": [
+    "Four exact component cells reproduce the parent-relative keyless-child rejection. The existing three root/static controls pass with malformed-path, foreign-run and exact retirement assertions unchanged. This is deliberately RED regression evidence, not runtime-class qualification.",
+    "The fixture is the same admitted lifecycle nested-template source as the both-store public failure, but these component cases use the existing descriptor stub and no selected store, provider or execution. They do not substitute for SQLite/PostgreSQL public journey/recovery proof.",
+    "The descriptor-backed preview uses only the existing keyed parent in the keyed-only active census; the new keyless child arrives through the constructor include request. It does not invent a keyless descriptor or a new nested-keyed construction grammar.",
+    "Production and authoritative spec remain unchanged. The regression is parked separately while parent-relative topology disposition5964992264 awaits reviewer-e; nothing is pushed or claimed fixed."
+  ]
+}

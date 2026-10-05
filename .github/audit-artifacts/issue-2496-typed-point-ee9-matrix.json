@@ -1,0 +1,257 @@
+{
+  "source_head": "e230f3b97ee10aa4b11e0716f36ea4dc4f840f7d",
+  "master_base": "ee9b091526f89154a425c1f1d1321085aa9b832b",
+  "command": "go run ./cmd/swarm-test -- -json -race -count=3 -run seven named branch/schema/public roots; four exact packages",
+  "receipt": "/tmp/agent-e-2496-typed-branch-ee9-final-matrix.log",
+  "result": "pass",
+  "cells": [
+    {
+      "test": "TestSelectedBranchDivergenceExactPointBothStores/sqlite/event/running",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchDivergenceExactPointBothStores/sqlite/event/completed",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchDivergenceExactPointBothStores/sqlite/deployment_revision/running",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchDivergenceExactPointBothStores/sqlite/deployment_revision/completed",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchDivergenceExactPointBothStores/postgres/event/running",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchDivergenceExactPointBothStores/postgres/event/completed",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchDivergenceExactPointBothStores/postgres/deployment_revision/running",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchDivergenceExactPointBothStores/postgres/deployment_revision/completed",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointActivationAtomicityBothStores/sqlite/event/running",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedDeploymentExternalEffectRecoveryBothStores/authorized/sqlite",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointActivationAtomicityBothStores/sqlite/event/cancelled",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointActivationAtomicityBothStores/sqlite/deployment_revision/running",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedDeploymentExternalEffectRecoveryBothStores/authorized/postgres",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointActivationAtomicityBothStores/sqlite/deployment_revision/cancelled",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedDeploymentExternalEffectRecoveryBothStores/response_observed/sqlite",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointActivationAtomicityBothStores/postgres/event/running",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedDeploymentExternalEffectRecoveryBothStores/response_observed/postgres",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointActivationAtomicityBothStores/postgres/event/cancelled",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointActivationAtomicityBothStores/postgres/deployment_revision/running",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointActivationAtomicityBothStores/postgres/deployment_revision/cancelled",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedDeploymentExternalEffectRecoveryBothStores/settled/sqlite",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointCleanupIsolationBothStores/sqlite/event/discard",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedDeploymentExternalEffectRecoveryBothStores/settled/postgres",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointCleanupIsolationBothStores/sqlite/event/reset",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestDeploymentSourceChangedPinPublicForkAndLostResponse/root/sqlite",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointCleanupIsolationBothStores/sqlite/deployment_revision/discard",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "permanent operation refusal with full transactional non-mutation"
+    },
+    {
+      "test": "TestDeploymentSourceChangedPinPublicForkAndLostResponse/root/postgres",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointCleanupIsolationBothStores/sqlite/deployment_revision/reset",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointCleanupIsolationBothStores/postgres/event/discard",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointCleanupIsolationBothStores/postgres/event/reset",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestDeploymentSourceChangedPinPublicForkAndLostResponse/singleton/sqlite",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestSelectedBranchPointCleanupIsolationBothStores/postgres/deployment_revision/discard",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "permanent operation refusal with full transactional non-mutation"
+    },
+    {
+      "test": "TestSelectedBranchPointCleanupIsolationBothStores/postgres/deployment_revision/reset",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestDeploymentSourceChangedPinPublicForkAndLostResponse/singleton/postgres",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestEventSourceChangedPinPublicForkAndLostResponse/root/sqlite",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestEventSourceChangedPinPublicForkAndLostResponse/root/postgres",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestEventSourceChangedPinPublicForkAndLostResponse/singleton/sqlite",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    },
+    {
+      "test": "TestEventSourceChangedPinPublicForkAndLostResponse/singleton/postgres",
+      "repetitions": 3,
+      "result": "pass",
+      "expectation": "all unchanged named positive/negative assertions"
+    }
+  ],
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "seconds": 13.447
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/schemastore",
+      "seconds": 14.254
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "seconds": 159.764
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/conformance",
+      "seconds": 260.13
+    }
+  ],
+  "scope": "Actual backend/native schema and public RPC readback against admitted private source artifacts. Not public publication or paid-provider qualification.",
+  "negative_boundary": "Two cleanup cells preserve permanent deployment operations through exact discard refusal. No operation-free deployment capability, invented event or expanded replay."
+}

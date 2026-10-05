@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -108,7 +107,7 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 		return nil, errors.New("ask_human requires pinned bundle hash")
 	}
 
-	source, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, actor.EffectiveEntityID())
+	source, err := e.agentExecutionRoutingSource(ctx, actor)
 	if err != nil {
 		return nil, fmt.Errorf("admit human-task requester source: %w", err)
 	}

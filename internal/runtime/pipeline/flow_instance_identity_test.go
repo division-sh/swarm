@@ -7,8 +7,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *testing.T) {
@@ -39,39 +42,23 @@ func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *te
 	}
 }
 
-func TestFlowInstanceIdentity_CreateEntityUsesTypedPathAndLogicalInstance(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-gates-in-child-flow")
-
-	handler, ok := source.ExecutableNodeEventHandler(pipelineSourceNode(t, source, "child", "validator"), "validate.start")
-	if !ok {
-		t.Fatal("expected validator handler for validate.start")
+func TestFlowInstanceIdentity_ConstructorUsesTypedPathAndLogicalInstance(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-dynamic-flow-instance")
+	instance := deriveFlowInstanceIdentity(source, "worker", "inst-1")
+	if instance.InstancePath != "worker/inst-1" || instance.InstanceID != "inst-1" || instance.EntityID != FlowInstanceEntityID(instance.InstancePath) {
+		t.Fatalf("constructor identity = %#v", instance)
 	}
-	state := &WorkflowState{
-		EntityID: "11111111-1111-1111-1111-111111111111",
-		Metadata: map[string]any{},
-	}
+}
 
-	entityID, _, err := resolveHandlerEntityIDForFlow(source, "child", handler, state.EntityID, mustEvent("child/validate.start", state.EntityID), state)
+func TestFlowInstanceIdentity_RootConstructorAndExecutionShareRoute(t *testing.T) {
+	source := semanticview.Wrap(compiledAdapterSource(t))
+	constructed := runtimeflowidentity.Stored(source, ".", testPipelineRunID, testPipelineRunID, "", "")
+	execution, err := workflowInstanceRouteForExecution(source, ".", testPipelineRunID)
 	if err != nil {
-		t.Fatalf("resolveHandlerEntityIDForFlow: %v", err)
+		t.Fatal(err)
 	}
-
-	if got := strings.TrimSpace(state.EntityID); got != entityID {
-		t.Fatalf("state.EntityID = %q, want %q", got, entityID)
-	}
-	instanceID := strings.TrimSpace(state.Control.InstanceID)
-	if instanceID == "" {
-		t.Fatal("expected typed logical instance_id")
-	}
-	flowPath := strings.TrimSpace(state.Control.FlowPath)
-	if flowPath != "child" {
-		t.Fatalf("flow_path = %q, want child", flowPath)
-	}
-	if got := strings.TrimSpace(state.Control.StorageRef); got != flowPath {
-		t.Fatalf("storage_ref = %q, want %q", got, flowPath)
-	}
-	if wantEntityID := FlowInstanceEntityID(flowPath); entityID != wantEntityID {
-		t.Fatalf("entityID = %q, want canonical flow entity id %q", entityID, wantEntityID)
+	if execution != constructed.Route() || execution.ScopeKey != "." || execution.InstancePath != testPipelineRunID {
+		t.Fatalf("root execution route %#v disagrees with constructor %#v", execution, constructed.Route())
 	}
 }
 
@@ -138,38 +125,76 @@ func TestFlowInstanceIdentity_ResolveEmittedEntityID(t *testing.T) {
 
 func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+	root := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), testPipelineRunID, testPipelineRunID, runtimeflowidentity.EntityID(testPipelineRunID), "")
+	child, err := runtimeflowidentity.KeylessChild(source, root, "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild, err := runtimeflowidentity.KeylessChild(source, child, "child/grandchild")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	instance := WorkflowInstance{
-		WorkflowName: "child/grandchild",
-		StorageRef:   "child/grandchild/inst-1",
-		InstanceID:   "inst-1",
-		EntityType:   "test_entity",
+		WorkflowName: grandchild.TemplateID, StorageRef: grandchild.InstancePath,
+		InstanceID: grandchild.InstanceID, EntityID: grandchild.EntityID, EntityType: "test_entity",
+		ParentFlowID: grandchild.ParentRoute.FlowID, ParentFlowInstance: grandchild.ParentRoute.FlowInstance, ParentEntityID: grandchild.ParentEntityID,
 	}
 
-	if workflowInstanceOwnedByFlow(source, instance, "child", "") {
+	if workflowInstanceOwnedByFlow(source, instance, "child", testPipelineRunID) {
 		t.Fatal("did not expect child to own child/grandchild/inst-1")
 	}
-	if !workflowInstanceOwnedByFlow(source, instance, "child/grandchild", "") {
+	if !workflowInstanceOwnedByFlow(source, instance, "child/grandchild", testPipelineRunID) {
 		t.Fatal("expected grandchild to own child/grandchild/inst-1")
 	}
 }
 
-func TestWorkflowInstanceRouteForPersistedUsesAuthoredNestedSingletonScope(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
-	instance := WorkflowInstance{
-		WorkflowName: "child/grandchild",
-		StorageRef:   "child/grandchild",
-		InstanceID:   "grandchild",
-		EntityType:   "test_entity",
-	}
-
-	route, err := workflowInstanceRouteForPersisted(source, instance)
+func TestWorkflowInstanceOwnedByFlowPreservesConstructedParent(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyLifecycleNestedTemplates(t), runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
-		t.Fatalf("persisted nested singleton route: %v", err)
+		t.Fatal(err)
 	}
-	want := runtimeflowidentity.StoredRoute("child/grandchild", "grandchild", "child/grandchild")
-	if route != want {
-		t.Fatalf("persisted nested singleton route = %#v, want %#v", route, want)
+	source := semanticview.Wrap(bundle)
+	parent := runtimeflowidentity.Derive(source, "outer/left/sink", "same-revision")
+	child, err := runtimeflowidentity.KeylessChild(source, parent, parent.TemplateID+"/final")
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := WorkflowInstance{
+		WorkflowName: child.TemplateID, InstanceID: child.InstanceID, StorageRef: child.InstancePath, EntityID: child.EntityID,
+		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*WorkflowInstance)
+		valid  bool
+	}{
+		{name: "exact", valid: true},
+		{name: "missing_parent", mutate: func(i *WorkflowInstance) { i.ParentFlowInstance = "" }},
+		{name: "crossed_parent", mutate: func(i *WorkflowInstance) {
+			other := runtimeflowidentity.Derive(source, parent.TemplateID, "other-revision")
+			i.ParentFlowInstance, i.ParentEntityID = other.InstancePath, other.EntityID
+		}},
+		{name: "foreign_parent_flow", mutate: func(i *WorkflowInstance) { i.ParentFlowID = "outer/right/sink" }},
+		{name: "altered_parent_entity", mutate: func(i *WorkflowInstance) { i.ParentEntityID = parent.EntityID + "-altered" }},
+		{name: "reconstructed_absolute_path", mutate: func(i *WorkflowInstance) {
+			i.StorageRef = child.ScopeKey
+			i.EntityID = runtimeflowidentity.EntityID(i.StorageRef)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			instance := valid
+			if tc.mutate != nil {
+				tc.mutate(&instance)
+			}
+			if got := workflowInstanceOwnedByFlow(source, instance, child.TemplateID, testPipelineRunID); got != tc.valid {
+				t.Fatalf("construction admission=%v want=%v: %+v", got, tc.valid, instance)
+			}
+			if workflowInstanceOwnedByFlow(source, instance, parent.TemplateID, testPipelineRunID) {
+				t.Fatal("parent context granted parent execution ownership")
+			}
+		})
 	}
 }
 
@@ -202,6 +227,48 @@ func TestRequireWorkflowInstanceIdentityRejectsMissingAndMismatchedFacts(t *test
 	wrongRoute.StorageRef = "review/instance-2"
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, wrongRoute); err == nil || !strings.Contains(err.Error(), "disagrees") {
 		t.Fatalf("mismatched route error = %v", err)
+	}
+}
+
+func TestWorkflowConstructionSourceIdentityRejectsNormalizedImpostors(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+	root := runtimeflowidentity.Stored(source, ".", testPipelineRunID, testPipelineRunID, runtimeflowidentity.EntityID(testPipelineRunID), "")
+	child, err := runtimeflowidentity.KeylessChild(source, root, "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(testPipelineRunID, child.Route())
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := WorkflowInstance{WorkflowName: child.TemplateID, StorageRef: child.InstancePath, InstanceID: child.InstanceID, EntityID: child.EntityID,
+		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID}
+	if actual, err := valid.ConstructionIdentity(owner); err != nil || actual != child {
+		t.Fatalf("exact construction source header: actual=%#v err=%v", actual, err)
+	}
+	for _, field := range []string{"workflow", "storage", "instance", "entity", "parent_flow", "parent_instance", "parent_entity"} {
+		t.Run(field, func(t *testing.T) {
+			bad := valid
+			switch field {
+			case "workflow":
+				bad.WorkflowName += " "
+			case "storage":
+				bad.StorageRef += " "
+			case "instance":
+				bad.InstanceID += " "
+			case "entity":
+				bad.EntityID += " "
+			case "parent_flow":
+				bad.ParentFlowID += " "
+			case "parent_instance":
+				bad.ParentFlowInstance += " "
+			case "parent_entity":
+				bad.ParentEntityID += " "
+			}
+			if _, err := bad.ConstructionIdentity(owner); err == nil {
+				t.Fatal("malformed source header was normalized into authority")
+			}
+		})
 	}
 }
 

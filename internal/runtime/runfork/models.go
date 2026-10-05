@@ -185,19 +185,28 @@ type RunForkDeliveryEventReplayResult struct {
 const (
 	RunForkMaterializedEntitySnapshotMetadataOwner = "runtime.run_fork.materialized_entity_snapshot_metadata"
 
-	RunForkMaterializedEntitySnapshotMetadataSourceEntityState = "source_entity_state"
+	RunForkMaterializedEntitySnapshotMetadataSourceEntityState  = "source_entity_state"
+	RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance = "source_flow_instance"
 )
 
 type RunForkMaterializedEntitySnapshotMetadata struct {
 	// FlowConfig is the exact flow_instances.config envelope recorded with
 	// the entity metadata at the selected revision, not current flow state.
-	FlowConfig   json.RawMessage `json:"flow_config,omitempty"`
-	Owner        string          `json:"owner"`
-	FlowInstance string          `json:"flow_instance"`
-	EntityType   string          `json:"entity_type"`
-	Slug         string          `json:"slug,omitempty"`
-	Name         string          `json:"name,omitempty"`
-	Source       string          `json:"source"`
+	FlowConfig     json.RawMessage `json:"flow_config,omitempty"`
+	Owner          string          `json:"owner"`
+	FlowInstance   string          `json:"flow_instance"`
+	EntityType     string          `json:"entity_type"`
+	Slug           string          `json:"slug,omitempty"`
+	Name           string          `json:"name,omitempty"`
+	Source         string          `json:"source"`
+	StageDefined   bool            `json:"stage_defined"`
+	FlowTemplate   string          `json:"flow_template"`
+	Mode           string          `json:"mode"`
+	Status         string          `json:"status,omitempty"`
+	CreatedAt      time.Time       `json:"created_at,omitempty"`
+	UpdatedAt      time.Time       `json:"updated_at,omitempty"`
+	TerminatedAt   time.Time       `json:"terminated_at,omitempty"`
+	EnteredStateAt time.Time       `json:"entered_state_at,omitempty"`
 }
 
 const (
@@ -1160,7 +1169,7 @@ type RunForkSelectedContractWorkflowState struct {
 	EntityType      string
 	FlowID          string
 	WorkflowVersion string
-	ExecutionMode   executionmode.Mode // Template readiness generation only; static state has no execution mode.
+	ExecutionMode   executionmode.Mode // Exact attachment readiness posture; SourceEvents is separate delivery evidence.
 	Mode            string
 	AddressKind     RunForkSelectedContractWorkflowStateAddressKind
 	Route           runtimeflowidentity.Route

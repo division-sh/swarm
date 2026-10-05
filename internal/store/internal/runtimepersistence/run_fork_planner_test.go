@@ -557,12 +557,7 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
 		t, runID, "node-a", "flow-a/1", entityID, "relevant", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
 	))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, 'flow-a/2', 'flow-a', 'template', '{}'::jsonb, 'active', $2)
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed relevant flow instance: %v", err)
-	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, uuid.NewString(), "flow-a/2", "flow-a", "", "waiting", "{}", at.Add(-time.Minute))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO routing_rules (
 			run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at

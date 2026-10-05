@@ -860,6 +860,9 @@ func commitFanOutChunk(
 		return runtimepipeline.CommittedFanOutChunk{}, err
 	}
 	result, _ = outcome.Value()
+	for index, publication := range result.Publications {
+		result.Publications[index] = publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
+	}
 	// Keep post-commit failures out of the runtime's mutation retry path.
 	result.PostCommitFailure = err
 	return result, nil

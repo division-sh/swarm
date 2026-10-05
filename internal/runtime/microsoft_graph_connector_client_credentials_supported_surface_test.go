@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -33,9 +34,9 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 
 		const (
 			runID        = "8c000000-0000-0000-0000-000000000001"
-			entityID     = "8c000000-0000-0000-0000-000000000002"
 			flowInstance = boundedProviderFlowID
 		)
+		entityID := runtimeflowidentity.EntityID(flowInstance)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")
@@ -62,9 +63,9 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 	t.Run("sqlite", func(t *testing.T) {
 		const (
 			runID        = "8d000000-0000-0000-0000-000000000001"
-			entityID     = "8d000000-0000-0000-0000-000000000002"
 			flowInstance = boundedProviderFlowID
 		)
+		entityID := runtimeflowidentity.EntityID(flowInstance)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")

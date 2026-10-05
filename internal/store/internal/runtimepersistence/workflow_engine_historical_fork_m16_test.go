@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -46,8 +47,26 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			state := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "waiting", 7, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC))
-			state.EntityType, state.Mode = "root", "static"
+			identity, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(".", runID, runID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			instance, found, err := fixture.store.(pipeline.WorkflowInstancePersistenceReader).LoadWorkflowInstance(ctx, identity)
+			if err != nil || !found {
+				t.Fatalf("load constructed source before handler: found=%t err=%v", found, err)
+			}
+			state := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, instance.CurrentState, instance.Revision, instance.CreatedAt)
+			state.EntityType, state.Mode, state.StageDefined = instance.EntityType, instance.Mode, instance.StageDefined
+			state.WorkflowVersion = instance.WorkflowVersion
+			state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+			config, err := pipeline.WorkflowInstanceConfigPayloadForRoute(identity.Route, instance.WorkflowVersion, instance.Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state.Config, err = json.Marshal(config)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if _, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection(), SideEffects: []string{"handler_completed"}}}); err != nil {
 				t.Fatal(err)
 			}
@@ -74,9 +93,9 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 			m16RequireWork(t, postPlan, eventID, runfork.RunForkPendingClassificationDeliveredCompleted)
 			m16RequireWork(t, postPlan, postEvent.ID(), runfork.RunForkPendingClassificationDeliveredCompleted)
 			m16RequireEntity(t, fixture.db, postFork.ForkRunID, postFork.ForkRunID, "done", 1, "handled", true)
-			// The completed frontier has no receiver to initialize; unlike the
-			// pending pre-handler cut it must not invent a live companion.
-			m16RequireCompanion(t, fixture.db, postFork.ForkRunID, 0)
+			// Construction survives the completed frontier; the historical
+			// header is projected even when no delivery needs initialization.
+			m16RequireCompanion(t, fixture.db, postFork.ForkRunID, 1)
 			m16RequireCompanion(t, fixture.db, runID, 1)
 			m16RequireEntity(t, fixture.db, preFork.ForkRunID, preFork.ForkRunID, "waiting", 1, "marker", "source-owned")
 			m16RequireEntity(t, fixture.db, runID, runID, "done", 8, "handled", true)

@@ -44,7 +44,7 @@ func startLifecycleTemplateRuntime(t *testing.T, backend servedparity.Backend, r
 func readLifecycleTemplateGate(t *testing.T, rt servedControlProofRuntime, runID, entityID, flow string) gateruntime.Activation {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&raw); err != nil {
+	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND flow_template=$3`, runID, entityID, flow).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var buckets map[string]map[string]any
@@ -73,7 +73,7 @@ func requireLifecycleTemplateEntity(t *testing.T, rt servedControlProofRuntime, 
 	t.Helper()
 	for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline); {
 		var entity, instance string
-		err := rt.DB.QueryRow(`SELECT e.entity_id,e.flow_instance FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.instance_path=e.flow_instance WHERE e.run_id=$1 AND f.flow_template=$2 AND e.current_state=$3`, runID, flow, state).Scan(&entity, &instance)
+		err := rt.DB.QueryRow(`SELECT f.entity_id,f.instance_path FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.entity_id=f.entity_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.flow_template=$2 AND f.current_state=$3`, runID, flow, state).Scan(&entity, &instance)
 		if err == nil {
 			return entity, instance
 		}

@@ -13,6 +13,7 @@ var (
 	ErrChainDepthExceeded           = errors.New("engine: chain depth exceeded")
 	ErrMissingSemanticSource        = errors.New("engine: semantic source is required")
 	ErrMissingStateRepo             = errors.New("engine: state repository is required")
+	ErrUnconstructedWorkflowTarget  = failures.New(failures.ClassTargetUnreachable, "workflow_target_unconstructed", "workflow-runtime", "execute_handler", nil)
 	ErrMissingMutationOwner         = errors.New("engine: mutation owner is required")
 	ErrMissingEntityLocker          = errors.New("engine: entity locker is required")
 	ErrMissingNodeID                = errors.New("engine: node id is required")

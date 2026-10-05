@@ -70,6 +70,13 @@ type WorkflowLifecycleMutationPlan struct {
 	RequestCompletionCandidate bool
 }
 
+func emptyCommittedWorkflowLifecycleMutation(committed CommittedWorkflowLifecycleMutation) bool {
+	return len(committed.Wakeups) == 0 &&
+		len(committed.Cancellations) == 0 &&
+		len(committed.GenericScheduleActivations) == 0 &&
+		len(committed.GenericScheduleCancellations) == 0
+}
+
 type WorkflowScheduleMutationKind string
 
 const (
@@ -338,7 +345,7 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 		if activation.TimerEventType() == joinCompleteEvent && activation.OutcomePending && !activation.OutcomeFired {
 			continue
 		}
-		command, err := joinSchedule(pc.SemanticSource(), entityID.String(), route, activation, mode)
+		command, err := joinSchedule(pc.SemanticSource(), owner, *instance, activation, mode)
 		if err != nil {
 			return err
 		}
@@ -444,7 +451,7 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	if err := pc.planWorkflowJoinEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, effect.ExecutionMode(), effect.OccurredAt(), &prepared.Commit); err != nil {
 		return err
 	}
-	if err := pc.planWorkflowGateEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, cause.EventType, effect.OccurredAt(), prepared); err != nil {
+	if err := pc.planWorkflowGateEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, effect, prepared); err != nil {
 		return err
 	}
 	return nil
@@ -525,6 +532,13 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 	if instance == nil || entityID.IsZero() {
 		return nil
 	}
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
+	if err != nil {
+		return err
+	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, *instance); err != nil {
+		return err
+	}
 	carrier, err := workflowInstanceStateCarrier(*instance)
 	if err != nil {
 		return fmt.Errorf("decode join state: %w", err)
@@ -534,7 +548,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 		return fmt.Errorf("list join state: %w", err)
 	}
 	if nextStage == "" {
-		return pc.planPendingJoinContinuations(runID, entityID.String(), route, activations, mode, occurredAt, plan)
+		return pc.planPendingJoinContinuations(owner, *instance, activations, mode, occurredAt, plan)
 	}
 	entry, found, err := runtimeworkflowlifecycle.LoadStageEntry(instance.Bookkeeping)
 	if err != nil || !found {
@@ -552,7 +566,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 			return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 		}
 		if !activation.FireAt.IsZero() {
-			command, err := joinSchedule(pc.SemanticSource(), entityID.String(), route, activation, mode)
+			command, err := joinSchedule(pc.SemanticSource(), owner, *instance, activation, mode)
 			if err != nil {
 				return err
 			}
@@ -564,10 +578,6 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 	now := occurredAt.UTC()
 	if now.IsZero() {
 		return fmt.Errorf("workflow join lifecycle requires an exact occurrence time")
-	}
-	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
-	if err != nil {
-		return err
 	}
 	for _, joinPlan := range workflowJoinPlansForStage(pc.SemanticSource(), owner, nextStage) {
 		if joinPlan.Mode != runtimecontracts.WorkflowJoinModeArrival {
@@ -637,7 +647,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 		if activation.FireAt.IsZero() {
 			continue
 		}
-		command, err := joinSchedule(pc.SemanticSource(), entityID.String(), route, activation, mode)
+		command, err := joinSchedule(pc.SemanticSource(), owner, *instance, activation, mode)
 		if err != nil {
 			return err
 		}
@@ -648,7 +658,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 	return nil
 }
 
-func (pc *PipelineCoordinator) planPendingJoinContinuations(runID, entityID string, route runtimeflowidentity.Route, activations []joinruntime.Activation, mode executionmode.Mode, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {
+func (pc *PipelineCoordinator) planPendingJoinContinuations(owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, activations []joinruntime.Activation, mode executionmode.Mode, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {
 	for _, activation := range activations {
 		if !activation.OutcomePending || activation.TimerCancelled || activation.TimerHandle().Kind() != timeridentity.TimerHandleJoinComplete {
 			continue
@@ -662,24 +672,24 @@ func (pc *PipelineCoordinator) planPendingJoinContinuations(runID, entityID stri
 			if err != nil {
 				return err
 			}
-			command, err := joinSchedule(pc.SemanticSource(), entityID, route, deadline, mode)
+			command, err := joinSchedule(pc.SemanticSource(), owner, instance, deadline, mode)
 			if err != nil {
 				return err
 			}
-			command.RunID = runID
+			command.RunID = owner.RunID
 			plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_closed", CancelledAt: occurredAt})
 		}
-		command, err := joinSchedule(pc.SemanticSource(), entityID, route, activation, mode)
+		command, err := joinSchedule(pc.SemanticSource(), owner, instance, activation, mode)
 		if err != nil {
 			return err
 		}
-		command.RunID = runID
+		command.RunID = owner.RunID
 		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: command})
 	}
 	return nil
 }
 
-func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, runID string, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time, prepared *PreparedWorkflowLifecycleMutation) error {
+func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, runID string, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentStage, nextStage string, effect runtimeworkflowlifecycle.Effect, prepared *PreparedWorkflowLifecycleMutation) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return fmt.Errorf("workflow gate lifecycle requires exact run identity")
@@ -689,9 +699,13 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, runID
 	if instance == nil || entityID.IsZero() || nextStage == "" || currentStage == nextStage {
 		return nil
 	}
-	now := occurredAt.UTC()
+	now := effect.OccurredAt().UTC()
 	if now.IsZero() {
 		return fmt.Errorf("workflow gate lifecycle requires an exact occurrence time")
+	}
+	sourceEvent := effect.EventType()
+	if effect.Kind() == runtimeworkflowlifecycle.KindInitialEntry {
+		sourceEvent = "state:" + nextStage
 	}
 	carrier, err := workflowInstanceStateCarrier(*instance)
 	if err != nil {
@@ -708,7 +722,7 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, runID
 		if activation.Status == gateruntime.StatusDecisionCommitted {
 			return fmt.Errorf("stage %s cannot exit while decision card %s has a committed verdict awaiting its frozen route", currentStage, activation.CardID)
 		}
-		if !activation.Supersede(firstNonEmptyString(sourceEvent, "stage_exited"), now) {
+		if !activation.Supersede(effect.EventType(), now) {
 			continue
 		}
 		if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
@@ -721,7 +735,7 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, runID
 		if err != nil {
 			return fmt.Errorf("load decision card %s for supersession: %w", activation.CardID, err)
 		}
-		evt, err := workflowGateSupersededEvent(card, activation, *instance, now)
+		evt, err := workflowGateExitSupersededEvent(card, activation, *instance, runID, effect)
 		if err != nil {
 			return err
 		}

@@ -57,6 +57,9 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 		return runtimeinbound.CommitResult{}, outcome.Err()
 	}
 	result.Acknowledged = true
+	for index, publication := range result.Publications {
+		result.Publications[index] = publication.WithCommitAcknowledgment()
+	}
 	return result, outcome.Err()
 }
 

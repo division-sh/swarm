@@ -1,0 +1,87 @@
+{
+  "source_head": "caf1e5b4df728b4c9df7a0896b1d25d58ce06586",
+  "master_base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "preserved_pre_rebase_head": "1a6aa1dd9",
+  "rebase": "All 80 local commits rebased cleanly; only upstream CI admission/tests/inventory differ from preserved source.",
+  "runtime_spec_consumer_equality": "git diff 1a6aa1dd9 caf1e5b4d --exit-code -- platform-spec.yaml internal/runtime internal/serveapp internal/store internal/cliapp: EXIT 0",
+  "ci": {
+    "roots": [
+      "TestCIDraftAdmissionAndReadyTransitions",
+      "TestCIDraftSkipsPlanAndProofExpansion",
+      "TestWorkflowUnconditionalGateAndExecutableAggregate",
+      "TestWorkflowNativeUnionIsRequired",
+      "TestCIRequiredSummaryRefusesDraftQualification",
+      "TestCISameSHARequiredContextTransition",
+      "TestCIConcurrencyNamespaceIsolation",
+      "TestGeneratedPublisherUsesOnlyAutomaticPRQualification",
+      "TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired"
+    ],
+    "failures": [],
+    "skips": [],
+    "packages": [
+      {
+        "package": "github.com/division-sh/swarm/cmd/swarm-complexity",
+        "status": "pass",
+        "elapsed_seconds": 0.013
+      },
+      {
+        "package": "github.com/division-sh/swarm/cmd/swarm-unused",
+        "status": "pass",
+        "elapsed_seconds": 0.051
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/testtiming",
+        "status": "pass",
+        "elapsed_seconds": 0.686
+      }
+    ],
+    "command": "go test -json -count=1 -run '^(TestCIDraftAdmissionAndReadyTransitions|TestCIDraftSkipsPlanAndProofExpansion|TestCIRequiredSummaryRefusesDraftQualification|TestCISameSHARequiredContextTransition|TestCIConcurrencyNamespaceIsolation|TestGeneratedPublisherUsesOnlyAutomaticPRQualification|TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired|TestWorkflowUnconditionalGateAndExecutableAggregate|TestWorkflowNativeUnionIsRequired)$' ./internal/testtiming ./cmd/swarm-complexity ./cmd/swarm-unused",
+    "receipt": "/tmp/agent-e-2496-ci-admission-current-master.log"
+  },
+  "complexity": {
+    "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+    "head": "caf1e5b4df728b4c9df7a0896b1d25d58ce06586",
+    "base_summary": {
+      "cognit": {
+        "callables": 19634,
+        "at_least_30": 578,
+        "at_least_50": 193,
+        "maximum": 302
+      },
+      "cyclo": {
+        "callables": 19634,
+        "at_least_30": 265,
+        "at_least_50": 53,
+        "maximum": 185
+      }
+    },
+    "head_summary": {
+      "cognit": {
+        "callables": 19628,
+        "at_least_30": 575,
+        "at_least_50": 193,
+        "maximum": 302
+      },
+      "cyclo": {
+        "callables": 19628,
+        "at_least_30": 261,
+        "at_least_50": 55,
+        "maximum": 185
+      }
+    },
+    "hotspot_count_increased": false,
+    "command": "go run ./cmd/swarm-complexity -head HEAD -base 0fa24140aaa05e397509f451ba780fef3a260867 -evidence /tmp/agent-e-2496-complexity-current-master",
+    "receipt": "/tmp/agent-e-2496-complexity-current-master.log",
+    "exit_code": 0,
+    "policy_changed": false
+  },
+  "size": {
+    "measurement": "git diff --numstat --no-renames origin/master -- '*.go' ':(exclude)**/*_test.go'",
+    "files": 199,
+    "additions": 7701,
+    "deletions": 7799,
+    "net": -98,
+    "readiness_core_lines": 386
+  },
+  "closure": "No chosen-class closure, final-head default or hosted CI claim; the three posted dispositions remain open and remote a9ba49485 is unchanged."
+}

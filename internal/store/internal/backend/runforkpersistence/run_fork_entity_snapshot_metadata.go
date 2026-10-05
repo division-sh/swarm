@@ -12,6 +12,36 @@ type runForkMaterializedEntitySnapshotMetadataAdmission struct {
 	Blockers     []runfork.RunForkUnsupportedBlocker
 }
 
+// Runnable historical consumers need both sides of the same fixed snapshot.
+// A header-only lookup cannot validate state; imported state cannot supply it.
+func loadRunForkConstructedEntityState(snapshot *runForkRevisionSnapshot, entityID string) (runfork.RunForkEntityState, error) {
+	if snapshot == nil {
+		return runfork.RunForkEntityState{}, fmt.Errorf("constructed entity requires a fixed-revision snapshot")
+	}
+	states, err := loadRunForkEntityStates(snapshot)
+	if err != nil {
+		return runfork.RunForkEntityState{}, err
+	}
+	states, _, err = attachRunForkMaterializedEntitySnapshotMetadata(snapshot, states)
+	if err != nil {
+		return runfork.RunForkEntityState{}, err
+	}
+	for _, state := range states {
+		if state.EntityID != entityID {
+			continue
+		}
+		metadata := state.MaterializationMetadata
+		if metadata == nil {
+			return runfork.RunForkEntityState{}, fmt.Errorf("entity %s has no admitted fixed-revision header metadata", entityID)
+		}
+		if metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
+			return runfork.RunForkEntityState{}, fmt.Errorf("entity %s requires constructed-header evidence, not imported state", entityID)
+		}
+		return state, nil
+	}
+	return runfork.RunForkEntityState{}, fmt.Errorf("entity %s has no reconstructed state in the fixed revision", entityID)
+}
+
 func attachRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState) ([]runfork.RunForkEntityState, runForkMaterializedEntitySnapshotMetadataAdmission, error) {
 	if err := validateRunForkEntityMetadataOwners(snapshot); err != nil {
 		return nil, runForkMaterializedEntitySnapshotMetadataAdmission{}, err
@@ -46,6 +76,10 @@ func attachRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSn
 			continue
 		}
 		out[i].MaterializationMetadata = &metadata
+		if metadata.Source == runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
+			entered := metadata.EnteredStateAt
+			out[i].EnteredStateAt = &entered
+		}
 	}
 	return out, admission, nil
 }
@@ -69,17 +103,41 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 	}
 	flowInstance := strings.TrimSpace(sourceState.FlowInstance)
 	entityType := strings.TrimSpace(sourceState.EntityType)
-	if flowInstance == "" || entityType == "" {
+	source := runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState
+	switch sourceState.ConstructionKind {
+	case "constructed":
+		source = runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance
+		if len(sourceState.FlowConfig) == 0 || sourceState.CreatedAt.IsZero() || sourceState.UpdatedAt.IsZero() || sourceState.EnteredStateAt.IsZero() || sourceState.Status == "" ||
+			sourceState.CurrentState == "" || sourceState.CurrentState != entity.CurrentState || sourceState.FlowTemplate == "" || (sourceState.Mode != "static" && sourceState.Mode != "template") ||
+			(sourceState.Status == "terminated") != !sourceState.TerminatedAt.IsZero() {
+			return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove constructed header metadata for entity %s", entityID), false
+		}
+	case "imported_state":
+		if entityType == "" {
+			return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization imported state has no entity type for %s", entityID), false
+		}
+	default:
+		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization has unknown construction evidence for entity %s", entityID), false
+	}
+	if flowInstance == "" {
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
 	}
 	return runfork.RunForkMaterializedEntitySnapshotMetadata{
-		FlowConfig:   append([]byte(nil), sourceState.FlowConfig...),
-		Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
-		FlowInstance: flowInstance,
-		EntityType:   entityType,
-		Slug:         strings.TrimSpace(sourceState.Slug),
-		Name:         strings.TrimSpace(sourceState.Name),
-		Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState,
+		FlowConfig:     append([]byte(nil), sourceState.FlowConfig...),
+		Owner:          runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
+		FlowInstance:   flowInstance,
+		EntityType:     entityType,
+		Slug:           strings.TrimSpace(sourceState.Slug),
+		Name:           strings.TrimSpace(sourceState.Name),
+		Source:         source,
+		StageDefined:   sourceState.StageDefined,
+		FlowTemplate:   sourceState.FlowTemplate,
+		Mode:           sourceState.Mode,
+		Status:         sourceState.Status,
+		CreatedAt:      sourceState.CreatedAt,
+		UpdatedAt:      sourceState.UpdatedAt,
+		TerminatedAt:   sourceState.TerminatedAt,
+		EnteredStateAt: sourceState.EnteredStateAt,
 	}, "", true
 }
 

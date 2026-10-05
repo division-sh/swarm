@@ -567,15 +567,54 @@ func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Contex
 	if materialized, decision, handled, err := r.lifecycle.Materialize(ctx, evt, plan, values, descriptors); handled || err != nil {
 		return materialized, decision, err
 	}
+	if !plan.RequiresRuntimeResolution() && r.routeTable != nil {
+		parent := templateInstanceLifecycleParentRoute(evt, plan)
+		target, found, err := r.routeTable.constructedChildConnectTarget(evt.RunID(), plan.ReceiverEndpoint().Readback().FlowID, parent)
+		if err != nil {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, err
+		}
+		if found {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{Target: target}, TemplateInstanceLifecycleDecision{}, nil
+		}
+	}
 	return runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
 		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(values),
 		Descriptors: descriptors,
 	}), TemplateInstanceLifecycleDecision{}, nil
 }
 
+// A matched compiled connection supplies permission; the constructor supplies
+// the already-installed child's concrete coordinate. Parent context grants none.
+func (rt *RouteTable) constructedChildConnectTarget(runID, flowID string, parent runtimeflowidentity.ParentRoute) (events.RouteIdentity, bool, error) {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	var target events.RouteIdentity
+	parentRelative := false
+	for owner, instance := range rt.instanceOwners {
+		if owner.RunID != runID || instance.TemplateID != flowID || instance.InstancePath == instance.ScopeKey {
+			continue
+		}
+		parentRelative = true
+		if instance.ParentRoute != parent || parent.Empty() {
+			continue
+		}
+		if !target.Empty() {
+			return events.RouteIdentity{}, false, fmt.Errorf("constructed child connection has ambiguous exact parent ownership for %s", flowID)
+		}
+		target = events.RouteIdentity{FlowID: instance.TemplateID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID}
+	}
+	if parentRelative && target.Empty() {
+		return events.RouteIdentity{}, false, fmt.Errorf("constructed child connection has no exact parent ownership for %s", flowID)
+	}
+	return target, !target.Empty(), nil
+}
+
 func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx context.Context, runID string, decision TemplateInstanceLifecycleDecision) error {
 	if decision.Action != templateInstanceLifecycleActionPreviewCreate {
 		return nil
+	}
+	if decision.Activation == nil {
+		return errors.New("connect route preview requires its canonical construction plan")
 	}
 	var preview *connectRoutePlanPreviewRoutes
 	if ctx != nil {
@@ -609,6 +648,7 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx co
 	}
 	if err := preview.table.addFlowInstanceRouteForContextWithInputProducers(ctx, FlowInstanceRouteMaterializationRequest{
 		Identity:            liveIdentity,
+		Instance:            decision.Activation.Identity,
 		ActivationVariables: decision.ActivationVariables(),
 	}, preview.inputProducers); err != nil {
 		return err
@@ -657,6 +697,13 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	matched := r.matchedPlans(ctx, evt)
 	for _, plan := range matched {
 		if !plan.RequiresRuntimeResolution() {
+			if r.routeTable != nil {
+				target, found, err := r.routeTable.constructedChildConnectTarget(evt.RunID(), plan.ReceiverEndpoint().Readback().FlowID, templateInstanceLifecycleParentRoute(evt, plan))
+				if err == nil && found {
+					add(target)
+					continue
+				}
+			}
 			materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{})
 			add(materialized.Target)
 			for _, route := range materialized.TargetSet {

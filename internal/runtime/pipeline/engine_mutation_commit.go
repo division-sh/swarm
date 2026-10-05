@@ -7,14 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
 // EnginePublicationPlanner converts engine emission intents into immutable
@@ -39,14 +40,14 @@ const (
 	WorkflowEngineStateTransitionUnknown WorkflowEngineStateTransition = iota
 	WorkflowEngineStateTransitionCreateStateAndCompanion
 	WorkflowEngineStateTransitionUpdateStateAndCompanion
-	WorkflowEngineStateTransitionUpdateStateCreateCompanion
+	WorkflowEngineStateTransitionPreserveStateAndCompanion
 )
 
 func (t WorkflowEngineStateTransition) Valid() bool {
 	switch t {
 	case WorkflowEngineStateTransitionCreateStateAndCompanion,
 		WorkflowEngineStateTransitionUpdateStateAndCompanion,
-		WorkflowEngineStateTransitionUpdateStateCreateCompanion:
+		WorkflowEngineStateTransitionPreserveStateAndCompanion:
 		return true
 	default:
 		return false
@@ -58,26 +59,20 @@ func (t WorkflowEngineStateTransition) CreatesState() bool {
 }
 
 func (t WorkflowEngineStateTransition) UpdatesState() bool {
-	return t == WorkflowEngineStateTransitionUpdateStateAndCompanion ||
-		t == WorkflowEngineStateTransitionUpdateStateCreateCompanion
-}
-
-func (t WorkflowEngineStateTransition) CreatesLifecycleCompanion() bool {
-	return t == WorkflowEngineStateTransitionCreateStateAndCompanion ||
-		t == WorkflowEngineStateTransitionUpdateStateCreateCompanion
-}
-
-func (t WorkflowEngineStateTransition) UpdatesLifecycleCompanion() bool {
 	return t == WorkflowEngineStateTransitionUpdateStateAndCompanion
+}
+
+func (t WorkflowEngineStateTransition) PreservesState() bool {
+	return t == WorkflowEngineStateTransitionPreserveStateAndCompanion
 }
 
 func WorkflowEngineStateTransitionForPresence(presence WorkflowTargetPersistencePresence) (WorkflowEngineStateTransition, error) {
 	switch presence {
 	case WorkflowTargetPersistenceAbsent:
-		return WorkflowEngineStateTransitionCreateStateAndCompanion, nil
+		return WorkflowEngineStateTransitionUnknown, fmt.Errorf("ordinary workflow mutation requires a constructed header")
 	case WorkflowTargetPersistenceStateOnly:
-		return WorkflowEngineStateTransitionUpdateStateCreateCompanion, nil
-	case WorkflowTargetPersistenceComplete:
+		return WorkflowEngineStateTransitionUnknown, fmt.Errorf("ordinary workflow mutation cannot repair imported state without construction")
+	case WorkflowTargetPersistenceComplete, WorkflowTargetPersistenceCompleteFieldless:
 		return WorkflowEngineStateTransitionUpdateStateAndCompanion, nil
 	case WorkflowTargetPersistenceLifecycleOnly:
 		return WorkflowEngineStateTransitionUnknown, fmt.Errorf("workflow engine mutation rejects lifecycle companion without state")
@@ -97,6 +92,7 @@ type WorkflowEngineStateRecord struct {
 	Mode             string
 	Status           string
 	CurrentState     string
+	StageDefined     bool
 	EntityType       string
 	Slug             string
 	Name             string
@@ -124,7 +120,10 @@ func (r WorkflowEngineStateRecord) Validate() error {
 		return fmt.Errorf("workflow engine state record requires workflow and current state")
 	}
 	if strings.TrimSpace(r.EntityType) == "" {
-		return fmt.Errorf("workflow engine state record requires exact entity contract")
+		var fields map[string]any
+		if err := json.Unmarshal(r.Fields, &fields); err != nil || fields == nil || len(fields) != 0 {
+			return fmt.Errorf("fieldless workflow header requires an empty field projection")
+		}
 	}
 	if strings.TrimSpace(r.Mode) == "" || strings.TrimSpace(r.Status) == "" {
 		return fmt.Errorf("workflow engine state record requires mode and status")
@@ -167,8 +166,8 @@ func (r WorkflowEngineStateRecord) Validate() error {
 
 type WorkflowEngineMutationCommand struct {
 	State                   WorkflowEngineStateRecord
-	EntitylessTarget        events.DeliveryTargetOwnership
-	EntitylessRunID         string
+	AcceptedEvent           *workflowlifecycle.Effect
+	AcceptedEventSource     correlation.SourceArtifactFact
 	GateRouteAdmissionRunID string
 	Lifecycle               WorkflowLifecycleMutationPlan
 	ProposedEffects         []WorkflowEngineProposedEffect
@@ -244,41 +243,38 @@ func (p WorkflowEngineProposedEffect) Validate() error {
 }
 
 func (c WorkflowEngineMutationCommand) Validate() error {
-	entityless := !c.EntitylessTarget.Empty()
+	if !c.State.Transition.UpdatesState() && !c.State.Transition.PreservesState() {
+		return fmt.Errorf("ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions")
+	}
 	runID := strings.TrimSpace(c.State.Identity.RunID)
-	if entityless {
-		if err := c.EntitylessTarget.Validate(); err != nil {
-			return fmt.Errorf("workflow engine entityless target: %w", err)
+	if err := c.State.Validate(); err != nil {
+		return err
+	}
+	if err := c.Lifecycle.ValidateState(c.State); err != nil {
+		return fmt.Errorf("workflow engine lifecycle plan: %w", err)
+	}
+	if c.State.Transition.PreservesState() {
+		if err := c.AcceptedEventSource.Validate(); err != nil {
+			return fmt.Errorf("accepted-event preservation source: %w", err)
 		}
-		if !c.EntitylessTarget.EntitylessReceiver() {
-			return fmt.Errorf("workflow engine entityless mutation requires entityless_receiver target ownership")
+		cause := c.AcceptedEvent
+		if cause == nil {
+			return fmt.Errorf("preserved constructed state requires exact accepted-event evidence")
 		}
-		runID = strings.TrimSpace(c.EntitylessRunID)
-		if runID == "" {
-			return fmt.Errorf("workflow engine entityless mutation requires exact run identity")
+		_, transition := cause.Transition()
+		if cause.Kind() != workflowlifecycle.KindAcceptedEvent || transition || cause.Route() != c.State.Identity.Route ||
+			cause.EntityID().String() != c.State.EntityID || cause.EventID() == "" || cause.EventType() == "" ||
+			cause.OccurredAt().IsZero() || !cause.ExecutionMode().Valid() {
+			return fmt.Errorf("preserved constructed state has inconsistent accepted-event evidence")
 		}
-		if !workflowEngineStateRecordEmpty(c.State) {
-			return fmt.Errorf("workflow engine entityless mutation cannot carry workflow state")
+		if c.State.ExpectedState != c.State.CurrentState || c.Lifecycle.StageEntry != nil ||
+			len(c.Lifecycle.Timers) == 0 || len(c.Lifecycle.Schedules) != 0 || len(c.Lifecycle.GateCards) != 0 ||
+			len(c.ProposedEffects) != 0 || len(c.Publications) != 0 || c.RouteRetirement != nil ||
+			c.PostCommit.FlowDeactivation != nil || c.FanOutIntent != nil || c.FanOutBarrier != nil || c.FanOutBarrierCompletion != nil {
+			return fmt.Errorf("preserved constructed state permits only accepted-event timer reactions and exact settlement")
 		}
-		if c.Lifecycle.StageEntry != nil || len(c.Lifecycle.Timers)+len(c.Lifecycle.Schedules)+len(c.Lifecycle.GateCards) > 0 || c.Lifecycle.RequestCompletionCandidate {
-			return fmt.Errorf("workflow engine entityless mutation cannot carry lifecycle effects")
-		}
-		if len(c.ProposedEffects) > 0 {
-			return fmt.Errorf("workflow engine entityless mutation cannot carry proposed effects")
-		}
-		if c.RouteRetirement != nil || c.PostCommit.FlowDeactivation != nil {
-			return fmt.Errorf("workflow engine entityless mutation cannot carry lifecycle post-commit work")
-		}
-	} else {
-		if strings.TrimSpace(c.EntitylessRunID) != "" {
-			return fmt.Errorf("workflow engine state mutation cannot carry entityless run identity")
-		}
-		if err := c.State.Validate(); err != nil {
-			return err
-		}
-		if err := c.Lifecycle.ValidateState(c.State); err != nil {
-			return fmt.Errorf("workflow engine lifecycle plan: %w", err)
-		}
+	} else if c.AcceptedEvent != nil || c.AcceptedEventSource != (correlation.SourceArtifactFact{}) {
+		return fmt.Errorf("accepted-event preservation evidence requires the preservation projection")
 	}
 	if gateRunID := strings.TrimSpace(c.GateRouteAdmissionRunID); gateRunID != "" && gateRunID != runID {
 		return fmt.Errorf("workflow gate route admission run %s disagrees with engine mutation run %s", gateRunID, runID)
@@ -359,16 +355,6 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 	return nil
 }
 
-func workflowEngineStateRecordEmpty(record WorkflowEngineStateRecord) bool {
-	return record.Identity.IsZero() && strings.TrimSpace(record.EntityID) == "" &&
-		strings.TrimSpace(record.WorkflowName) == "" && strings.TrimSpace(record.WorkflowVersion) == "" &&
-		strings.TrimSpace(record.Mode) == "" && strings.TrimSpace(record.Status) == "" && strings.TrimSpace(record.CurrentState) == "" &&
-		strings.TrimSpace(record.EntityType) == "" && strings.TrimSpace(record.Slug) == "" && strings.TrimSpace(record.Name) == "" &&
-		len(record.Fields) == 0 && len(record.Bookkeeping) == 0 && len(record.Gates) == 0 && len(record.Accumulator) == 0 && len(record.Config) == 0 && len(record.InitialFields) == 0 &&
-		record.EnteredStageAt.IsZero() && record.CreatedAt.IsZero() && record.UpdatedAt.IsZero() && record.TerminatedAt.IsZero() &&
-		strings.TrimSpace(record.ExpectedState) == "" && record.ExpectedRevision == 0 && record.Transition == WorkflowEngineStateTransitionUnknown
-}
-
 func workflowEngineStateRecord(
 	owner runtimeflowidentity.RunScopedFlowInstance,
 	instance WorkflowInstance,
@@ -424,7 +410,7 @@ func workflowEngineStateRecord(
 	record := WorkflowEngineStateRecord{
 		Identity: owner, EntityID: identity.RowID(),
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
-		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState,
+		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,
 		EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
 		Fields: fields, Bookkeeping: bookkeeping, Gates: gates, Accumulator: accumulator, Config: config, InitialFields: initialFields,
 		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),

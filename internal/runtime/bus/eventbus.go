@@ -27,7 +27,6 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 // EventInterceptor runs deterministic coordination in the publish path.
@@ -103,6 +102,7 @@ type EventBus struct {
 // DurableDependencies is the exact selected-store contract consumed by a
 // durable EventBus. EventStore is never inspected to discover these roles.
 type DurableDependencies struct {
+	ScenarioSetup         ScenarioSetupCommitOwner
 	ReplyContext          runtimereplycontext.Store
 	RunLifecycle          runtimerunlifecycle.OperationOwner
 	DeliveryLifecycle     runtimedelivery.Store
@@ -954,7 +954,10 @@ func (eb *EventBus) deriveFlowInstanceRouteTopologyFromDescriptors(
 		}
 	}
 	for _, descriptor := range descriptors {
-		route := runtimeflowidentity.StoredRoute("", descriptor.InstanceID, descriptor.FlowInstance)
+		if descriptor.Identity.InstanceID != descriptor.InstanceID || descriptor.Identity.InstancePath != descriptor.FlowInstance || descriptor.Identity.TemplateID != descriptor.FlowTemplate || descriptor.Identity.EntityID != descriptor.EntityID {
+			return nil, nil, errors.New("active flow-instance descriptor lost its exact construction identity")
+		}
+		route := descriptor.Identity.Route()
 		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(descriptor.RunID, route)
 		if err != nil {
 			return nil, nil, fmt.Errorf("compose active flow-instance descriptor identity: %w", err)
@@ -962,7 +965,7 @@ func (eb *EventBus) deriveFlowInstanceRouteTopologyFromDescriptors(
 		if identity == exclude || (include != nil && identity == include.Identity) {
 			continue
 		}
-		templateID, found := staged.flowInstanceTemplateID(identity.Route)
+		templateID, found := staged.FlowInstanceTemplateID(identity.Route)
 		if !found {
 			continue
 		}
@@ -977,6 +980,7 @@ func (eb *EventBus) deriveFlowInstanceRouteTopologyFromDescriptors(
 		}
 		added, err := staged.addFlowInstanceRouteForTopology(FlowInstanceRouteMaterializationRequest{
 			Identity:            identity,
+			Instance:            descriptor.Identity,
 			ActivationVariables: descriptor.AddressFields,
 		}, &inputProducers)
 		if err != nil {
@@ -1061,8 +1065,8 @@ func (eb *EventBus) RetireCommittedFlowInstanceRoute(retirement runtimepipeline.
 	if retirement.ActivationAttemptID == "" {
 		return nil
 	}
-	if parsed, err := uuid.Parse(retirement.ActivationAttemptID); err != nil || parsed == uuid.Nil || parsed.String() != retirement.ActivationAttemptID {
-		return errors.New("committed flow route retirement requires canonical activation attempt id")
+	if _, err := runtimeflowidentity.ParseActivationAttemptID(retirement.ActivationAttemptID); err != nil {
+		return err
 	}
 	eb.mu.RLock()
 	table := eb.routeTable

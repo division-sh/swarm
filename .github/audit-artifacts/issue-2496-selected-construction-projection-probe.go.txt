@@ -1,0 +1,96 @@
+package runforkreadiness
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/google/uuid"
+)
+
+// Diagnostic component probe at 0e3d6d99c; not fork execution or a default-suite test.
+func TestSelectedKeylessActorProjectionProbe(t *testing.T) {
+	root := canonicalrouting.CopySelectedInputAgentProbe(t)
+	childDir := filepath.Join(root, "templ/child")
+	if err := os.MkdirAll(childDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"schema.yaml": "name: child\npins:\n  inputs:\n    events: [work.ready]\n",
+		"events.yaml": "work.ready:\n",
+		"agents.yaml": "worker:\n  model: regular\n  intent:\n    inline: Consume the exact selected input.\n  subscriptions: [work.ready]\n",
+	} {
+		if err := os.WriteFile(filepath.Join(childDir, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, runID := semanticview.Wrap(bundle), uuid.NewString()
+	parent := flowidentity.Derive(source, "templ", "one")
+	child, err := flowidentity.KeylessChild(source, parent, "templ/child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.ValidateConstruction(source, runID); err != nil {
+		t.Fatal(err)
+	}
+	owner, found := semanticview.AgentDeclarationOwner(source, "templ/child", "worker")
+	if !found {
+		t.Fatal("missing exact agent declaration")
+	}
+	name, err := agentidentity.DeclaredName("worker", owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := child.Route().AgentIdentityRoute()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := agentidentity.NewPlan(name, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipient, err := forkrecipient.NewLocal(forkrecipient.Input{Recipient: events.MustAgentDeliveryRecipient(agent.AgentID()), Path: child.InstancePath, AgentPlan: agent, HandlerEvent: "work.ready"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := time.Now().UTC()
+	plan := runfork.RunForkPlan{SourceRunID: runID, Entities: []runfork.RunForkEntityState{{
+		EntityID: child.EntityID, CurrentState: "active", EnteredStateAt: &entered,
+		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
+			Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
+			Mode: "static", FlowTemplate: "templ/child", FlowInstance: child.InstancePath,
+			FlowConfig: selectedAgentHeaderConfig(t, child),
+		},
+	}}}
+	if _, found, err := selectedContractReadinessEntityForRoute(source, plan, "templ/child", child.InstancePath); err != nil || !found {
+		t.Errorf("fixed receiving header lookup: found=%v err=%v", found, err)
+	}
+	planning := runfork.RunForkSelectedContractRecipientPlanning{RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{SourceEventID: "input", EventName: "work.ready", Recipients: []runfork.RunForkContractFrontierRecipient{recipient}}}}
+	projection, err := Project(plan, source, planning, map[string]executionmode.Mode{"input": executionmode.Live}, templateAdmissionRequest(t).ModelOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, blueprint := range projection.Blueprints {
+		t.Logf("projected actor: %s", blueprint.Identity.Description())
+		if blueprint.Identity == agent {
+			return
+		}
+	}
+	t.Fatalf("fixed constructor owns %s; projection omitted exact actor %s (states=%d, flows=%d)", child.InstancePath, agent.Description(), len(projection.States), len(projection.Flows))
+}

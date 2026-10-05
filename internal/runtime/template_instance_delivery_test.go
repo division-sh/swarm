@@ -79,12 +79,12 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		DeliveryStore:       pg,
 		FlowRoutes:          bus,
 	})
-	seedTemplateInstanceDeliveryRouteOwner(t, ctx, db)
+	seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
 
 	if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: templateInstanceDeliveryRunID,
 		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
-	}}); err != nil {
+	}, Instance: runtimeflowidentity.Derive(source, "operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := "99999999-9999-4999-8999-999999999902"
@@ -137,11 +137,16 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedTemplateInstanceDeliveryRouteOwner(t, ctx, db)
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner: runtimeTestEventBusWorkOwner(t, bus), Module: newRuntimeTestWorkflowModule(t, source),
+		Persistence: runtimepipeline.NewWorkflowPersistence(pg), RunLifecycle: pg,
+		PipelineObligations: pg.PipelineObligations(), DeliveryStore: pg, FlowRoutes: bus,
+	})
+	seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
 	if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: templateInstanceDeliveryRunID,
 		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
-	}}); err != nil {
+	}, Instance: runtimeflowidentity.Derive(source, "operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := runtimeInternalDeliveriesForTest(t, bus, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
@@ -168,8 +173,8 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	select {
 	case got := <-ch:
 		defer func() { _ = got.Complete() }()
-		if got.FlowInstance() != "operating/inst-1" || got.EntityID() != "" {
-			t.Fatalf("delivered route identity flow=%q entity=%q, want explicit entityless operating/inst-1 receiver", got.FlowInstance(), got.EntityID())
+		if got.FlowInstance() != "operating/inst-1" || got.EntityID() != runtimeflowidentity.EntityID("operating/inst-1") {
+			t.Fatalf("delivered route identity flow=%q entity=%q, want exact constructed operating/inst-1 receiver", got.FlowInstance(), got.EntityID())
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("workflow-runtime carrier did not receive concrete template event")
@@ -188,17 +193,13 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	`, 0, eventID, templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator"))
 }
 
-func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, db *sql.DB) {
+func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, selected runtimebus.FlowInstanceActivationCommitOwner, pc *runtimepipeline.PipelineCoordinator, source semanticview.Source) {
 	t.Helper()
-	// This scenario proves entityless system-node routing, so it establishes the
-	// exact route lifecycle owner without introducing an entity-state target.
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (
-			run_id, instance_path, flow_template, mode, config, status, created_at
-		) VALUES ($1::uuid, $2, $3, $4, '{}'::jsonb, $5, $6)
-	`, templateInstanceDeliveryRunID, "operating/inst-1", "operating", "template", "active", time.Now().UTC()); err != nil {
-		t.Fatalf("seed run-scoped template route owner: %v", err)
-	}
+	seedRuntimeTestPreparedInstance(t, ctx, selected, pc, runtimepipeline.WorkflowInstance{
+		InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: runtimeflowidentity.EntityID("operating/inst-1"),
+		WorkflowName: "operating", WorkflowVersion: source.WorkflowVersion(), Mode: "template",
+		CurrentState: "initializing", StageDefined: true, EntityType: "operating_state", Fields: map[string]any{"instance_id": "inst-1"},
+	})
 }
 
 func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(t *testing.T) {
@@ -254,6 +255,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
+	constructExternalRuntimeTestRoot(t, ctx, manager, source)
 	bus.SetInterceptors(pc)
 
 	spinup := eventtest.ExistingRunRootIngress(
@@ -376,6 +378,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	}, pg))
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
 	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
+	constructExternalRuntimeTestRoot(t, ctx, manager, source)
 	bus.SetInterceptors(pc)
 
 	spinup := eventtest.ExistingRunRootIngress(
@@ -570,6 +573,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	}))
 
 	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
+	constructExternalRuntimeTestRoot(t, ctx, manager, source)
 	mailbox := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999913",
 		events.EventType("approval.completed"),
@@ -700,6 +704,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
+	constructExternalRuntimeTestRoot(t, ctx, manager, source)
 
 	mailbox := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999912",

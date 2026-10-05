@@ -2,6 +2,7 @@ package releasee2e
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
+	sqlitelib "modernc.org/sqlite/lib"
 )
 
 // H retains the selected database across real child generations. The controls
@@ -220,11 +224,13 @@ func withStandingOperatorWriteFault(t *testing.T, root string, store goldenStore
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if store.name == "sqlite" {
-		if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_standing_operator BEFORE UPDATE ON standing_services BEGIN SELECT RAISE(ABORT, 'injected standing operator failure'); END`); err != nil {
+		if err := execStandingFaultDDL(ctx, db, `CREATE TRIGGER fail_standing_operator BEFORE UPDATE ON standing_services BEGIN SELECT RAISE(ABORT, 'injected standing operator failure'); END`, nil); err != nil {
 			t.Fatal(err)
 		}
 		defer func() {
-			if _, err := db.ExecContext(context.Background(), `DROP TRIGGER fail_standing_operator`); err != nil {
+			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := execStandingFaultDDL(cleanup, db, `DROP TRIGGER fail_standing_operator`, nil); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -247,4 +253,25 @@ func withStandingOperatorWriteFault(t *testing.T, root string, store goldenStore
 		}()
 	}
 	run()
+}
+
+// Fault setup competes with the live child's writer; only native BUSY is retried.
+func execStandingFaultDDL(ctx context.Context, db *sql.DB, statement string, busyObserved func()) error {
+	var lastBusy error
+	err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
+		_, err := db.ExecContext(ctx, statement)
+		var native *sqlite.Error
+		if errors.As(err, &native) && native.Code()&0xff == sqlitelib.SQLITE_BUSY {
+			lastBusy = err
+			if busyObserved != nil {
+				busyObserved()
+			}
+			return false, nil
+		}
+		return err == nil, err
+	})
+	if err != nil {
+		return errors.Join(err, lastBusy)
+	}
+	return nil
 }

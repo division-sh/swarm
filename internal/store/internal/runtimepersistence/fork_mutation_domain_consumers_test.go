@@ -16,8 +16,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// The source session is an explicit fixture; all five domain histories below
-// are written by the ordinary engine mutation owner, not inserted audit rows.
+// Construction and the source session are explicit component fixtures; all
+// subsequent domain histories use the ordinary engine mutation owner.
 func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -27,8 +27,11 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 			captureFanOutBarrierForkRevision(t, ctx, f.db, runID, backend == "postgres")
 			owner := f.store.(pipeline.WorkflowEngineMutationOwner)
 			created := f.source.turn1At.Add(-90 * time.Second)
-			record := stateOnlyWorkflowEngineMutationRecord(t, runID, "flow/forkchat", "flow/forkchat", entityID, "", 0, created)
-			record.Transition = pipeline.WorkflowEngineStateTransitionCreateStateAndCompanion
+			seedWorkflowHeaderProjectionFixture(t, ctx, f.db, runID, entityID, "flow/forkchat", "flow/forkchat", "review_item", "draft", "{}", created)
+			seedWorkflowTargetStateForTransition(t, backend, f.db, runID, entityID, "flow/forkchat", "draft", 1, created)
+			record := stateOnlyWorkflowEngineMutationRecord(t, runID, "flow/forkchat", "flow/forkchat", entityID, "draft", 1, created)
+			record.Mode = "static"
+			record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 			var wantFields, wantAtomic map[string]any
 			for step := 0; step < 3; step++ {
 				fields := map[string]any{"a": map[string]any{"b": "authored", "c": "neighbor"}}
@@ -47,7 +50,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 				if _, err := owner.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
 					t.Fatalf("ordinary domain writer step %d: %v", step, err)
 				}
-				record.ExpectedState, record.ExpectedRevision = record.CurrentState, int64(step+1)
+				record.ExpectedState, record.ExpectedRevision = record.CurrentState, int64(step+2)
 				record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 				wantFields, wantAtomic = fields, atomic
 			}
@@ -82,8 +85,9 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 			requireRunFixtureForTest(t, foreignCtx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: foreignRun, StartedAt: created, BundleHash: f.source.bundleHash})
 			foreign := record
 			foreign.Identity.RunID = foreignRun
-			foreign.ExpectedState, foreign.ExpectedRevision, foreign.CurrentState = "", 0, "foreign"
-			foreign.Transition = pipeline.WorkflowEngineStateTransitionCreateStateAndCompanion
+			seedWorkflowHeaderProjectionFixture(t, foreignCtx, f.db, foreignRun, entityID, "flow/forkchat", "flow/forkchat", "review_item", "draft", "{}", created)
+			seedWorkflowTargetStateForTransition(t, backend, f.db, foreignRun, entityID, "flow/forkchat", "draft", 1, created)
+			foreign.ExpectedState, foreign.ExpectedRevision, foreign.CurrentState = "draft", 1, "foreign"
 			if _, err := owner.CommitWorkflowEngineMutation(foreignCtx, pipeline.WorkflowEngineMutationCommand{State: foreign}); err != nil {
 				t.Fatal(err)
 			}

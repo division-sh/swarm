@@ -378,6 +378,10 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 			)
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(fixture.bundleHash))
 			runCtx := runtimecorrelation.WithRunID(ctx, fixture.runID)
+			construction := sqliteFlowActivationRequest(bundle, ".", fixture.runID, "", fixture.runID)
+			construction.Instance = runtimeflowidentity.Stored(semanticview.Wrap(bundle), ".", fixture.runID, fixture.runID, fixture.runID, "")
+			construction.OccurredAt = fixture.createdAt
+			constructHistoricalSourceFixture(t, runCtx, owner.(agentFixtureFlowStore), construction)
 			scope, ok := runtimeauthoractivity.ScopeFromContext(runCtx)
 			if !ok {
 				t.Fatal("mixed-route proof requires exact author scope")
@@ -493,7 +497,7 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 					materializing++
 				}
 			}
-			if materializing != 1 {
+			if materializing != 0 {
 				t.Fatalf("multi-route plan materializing targets = %d in %#v", materializing, commands[2].Commit.DeliveryRoutes)
 			}
 
@@ -536,7 +540,7 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 					readbackMaterializing++
 				}
 			}
-			if committedEvents != 3 || committedDeliveries != 4 || outcomesCount != 4 || readbackMaterializing != 1 {
+			if committedEvents != 3 || committedDeliveries != 4 || outcomesCount != 4 || readbackMaterializing != 0 {
 				t.Fatalf("mixed-route durable facts = events:%d deliveries:%d outcomes:%d", committedEvents, committedDeliveries, outcomesCount)
 			}
 
@@ -996,13 +1000,6 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			completing := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
 			ctx = testAuthorActivityContextForBundle(completing.bundleHash)
-			flowInsert := `INSERT OR IGNORE INTO flow_instances (run_id,instance_path,flow_template,mode,config,status) VALUES (?,?,?,'static','{}','active')`
-			if postgres {
-				flowInsert = `INSERT INTO flow_instances (run_id,instance_path,flow_template,mode,config,status) VALUES ($1::uuid,$2,$3,'static','{}'::jsonb,'active') ON CONFLICT (run_id,instance_path) DO NOTHING`
-			}
-			if _, err := db.ExecContext(ctx, flowInsert, completing.runID, semanticRunFixtureFlow, semanticRunFixtureFlow); err != nil {
-				t.Fatalf("seed terminal fan-out flow: %v", err)
-			}
 			if err := materializeCompletedRunEntityForTest(ctx, selected, completing.runID); err != nil {
 				t.Fatalf("seed terminal fan-out entity: %v", err)
 			}
@@ -1513,7 +1510,7 @@ func TestRunForkFanOutMaterializationRetainsExactEntityRevisionSource(t *testing
 			caused_by_event, writer_type, writer_id, handler_step, created_at
 		) VALUES
 			($5::uuid,$1::uuid,$2::uuid,'authored_field','items','null'::jsonb,$3::jsonb,$4::uuid,'platform','fan-out-test','source', $6),
-			($7::uuid,$1::uuid,$2::uuid,'lifecycle_state','','null'::jsonb,'"queued"'::jsonb,$4::uuid,'platform','fan-out-test','source', $6)
+			($7::uuid,$1::uuid,$2::uuid,'lifecycle_state','','null'::jsonb,'"pending"'::jsonb,$4::uuid,'platform','fan-out-test','source', $6)
 	`, fixture.runID, entityID, itemsJSON, fixture.eventID, mutationID, createdAt, uuid.NewString()); err != nil {
 		t.Fatalf("seed entity fan-out source revision: %v", err)
 	}

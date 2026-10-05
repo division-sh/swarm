@@ -423,6 +423,11 @@ func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T
 	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "review", "review/inst-1")
 	source := testContractFrontierTemplateSource(t)
+	unconstructed, err := AdmitContractFrontier(ContractFrontierRequest{Plan: plan, Source: source})
+	if err != nil || len(unconstructed.FrontierEvents) != 1 || len(unconstructed.FrontierEvents[0].DerivedRecipients) != 0 || !hasBlocker(unconstructed.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("route path invented construction: admission=%+v err=%v", unconstructed, err)
+	}
+	plan = withConstructedHeader(t, plan, source, "review", "inst-1")
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -522,6 +527,7 @@ func TestAdmitContractFrontier_UsesExactPersistedReceiverOwnersForTemplateRoute(
 			plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
 			tc.mutate(&plan.PendingWork[0])
 			source := testContractFrontierTemplateSource(t)
+			plan = withConstructedHeader(t, plan, source, "review", "inst-1")
 
 			admission, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan: plan, Source: source,
@@ -683,6 +689,7 @@ func testContractFrontierTemplateSource(t testing.TB) semanticview.Source {
 			Name:    "test-workflow",
 			Version: "v-test",
 		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": review.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByPath: map[string]*runtimecontracts.FlowContractView{

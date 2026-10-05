@@ -4,7 +4,6 @@ intake:
   produces: [agent.requested]
   event_handlers:
     task.assigned:
-      create_entity: true
       advances_to: active
       data_accumulation:
         writes:

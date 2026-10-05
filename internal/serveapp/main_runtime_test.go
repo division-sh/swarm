@@ -57,6 +57,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -84,6 +85,7 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -414,20 +416,19 @@ func TestServeRuntimeContextStandingTargetsPreservesNonExecutableDeclarations(t 
 
 type terminalSourceSetCapability struct {
 	runtimestartupownership.ProcessCapability
-	err error
+	t *testing.T
 }
 
 func (c terminalSourceSetCapability) CurrentSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
-	return runtimeagenttopology.SourceSetPlan{}, false, c.err
+	c.t.Fatal("terminal shutdown queried the source set to resume refresh")
+	return runtimeagenttopology.SourceSetPlan{}, false, errors.New("terminal source-set query")
 }
 
 func (terminalSourceSetCapability) TerminalResult() (runtimestartupownership.TerminalResult, bool) {
 	return runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable}, true
 }
 
-func TestProcessLifecycleShutdownContinuesAfterTerminalCapabilitySettlementFailure(t *testing.T) {
-	settlementErr := errors.New("ownership session is terminal")
-	stopped := false
+func TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability(t *testing.T) {
 	rt := &runtimepkg.Runtime{Bus: &runtimebus.EventBus{}}
 	hash := runtimeContextTestHash("a")
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
@@ -439,21 +440,22 @@ func TestProcessLifecycleShutdownContinuesAfterTerminalCapabilitySettlementFailu
 		t.Fatal(err)
 	}
 	supervisor := &processLifecycleSupervisor{
-		processCapability: terminalSourceSetCapability{err: settlementErr},
+		processCapability: terminalSourceSetCapability{t: t},
 		runtimeContexts:   manager,
 		currentRT:         rt,
 		shutdownRuntime: func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
-			stopped = true
+			t.Fatal("registered runtime retirement bypassed its aggregate owner")
 			return nil
 		},
 	}
 
 	err = supervisor.ShutdownProcessWithOptions(context.Background(), runtimepkg.DefaultShutdownOptions())
-	if !errors.Is(err, settlementErr) {
-		t.Fatalf("shutdown error = %v, want settlement error", err)
+	var possession *runtimestartupownership.PossessionError
+	if !errors.As(err, &possession) || possession.Cause != runtimestartupownership.TerminalOwnershipUnprovable {
+		t.Fatalf("shutdown error = %v, want exact terminal ownership failure", err)
 	}
-	if !stopped {
-		t.Fatal("terminal ownership settlement failure prevented runtime shutdown")
+	if lookup := manager.LookupBundleHashStatus(hash); lookup.Loaded() {
+		t.Fatal("terminal ownership failure prevented aggregate runtime withdrawal")
 	}
 	if supervisor.CurrentRuntime() != nil {
 		t.Fatal("terminal ownership shutdown retained the runtime projection")
@@ -2438,6 +2440,34 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	t.Helper()
 	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt, "run-control-release-"+uuid.NewString())
 	keyPrefix := "issue-1864-" + rt.Backend + "-" + runID
+	var owner runtimepipelineobligation.Store
+	if rt.SQLite != nil {
+		owner = rt.SQLite.PipelineObligations()
+	} else {
+		owner = rt.Postgres.PipelineObligations()
+	}
+	// Node settlement can precede its initial gate's supersession handoff. The
+	// handed-only proof must start after that real publication work has settled.
+	initialCtx, cancelInitial := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
+	defer cancelInitial()
+	for {
+		summary, err := owner.SummarizeRun(initialCtx, runID)
+		if err != nil {
+			t.Fatalf("read initial pipeline work: %v\n%s", err, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		}
+		if summary.TerminalNonSuccess != 0 {
+			t.Fatalf("initial construction has non-success work: %+v\n%s", summary, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		}
+		if !summary.HasOpenWork() {
+			break
+		}
+		select {
+		case <-initialCtx.Done():
+			t.Fatalf("initial construction did not settle: %+v\n%s", summary, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	cancelInitial()
 
 	pauseKey := keyPrefix + "-run-pause"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
@@ -2467,12 +2497,6 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	waitCtx, cancelWait := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
 	defer cancelWait()
 	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
-	var owner runtimepipelineobligation.Store
-	if rt.SQLite != nil {
-		owner = rt.SQLite.PipelineObligations()
-	} else {
-		owner = rt.Postgres.PipelineObligations()
-	}
 	// Use the canonical owner to establish handed-only debt explicitly; the
 	// public publication above remains unhanded while the run is paused.
 	work, err := owner.ClaimEvent(waitCtx, queued.EventID, runtimepipelineobligation.PurposePublication)
@@ -2488,7 +2512,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		t.Fatal(err)
 	}
 	if summary.HasOpenWork() || summary.TerminalNonSuccess != 0 {
-		t.Fatalf("handed-only public continue has event-level work: %+v", summary)
+		t.Fatalf("handed-only public continue has event-level work: %+v\n%s", summary, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
 	}
 	synchronizer, ok := rt.Runtime.Bus.DeliveryContinuationOwner().(interface{ Synchronize(context.Context) error })
 	if !ok {
@@ -2961,8 +2985,6 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 			FROM entity_mutations
 			WHERE run_id = $1::uuid
 			  AND entity_id = $2::uuid
-			  AND writer_type = 'platform'
-			  AND writer_id = 'test.setup_entities'
 		`
 		mutationArgs = []any{runID, entityID}
 	case "sqlite":
@@ -2971,16 +2993,69 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 			FROM entity_mutations
 			WHERE run_id = ?
 			  AND entity_id = ?
-			  AND writer_type = 'platform'
-			  AND writer_id = 'test.setup_entities'
 		`
 		mutationArgs = []any{runID, entityID}
 	}
 	if err := db.QueryRowContext(context.Background(), mutationQuery, mutationArgs...).Scan(&mutations); err != nil {
 		t.Fatalf("%s count setup entity mutations: %v", backend, err)
 	}
-	if mutations != 2 {
-		t.Fatalf("%s setup mutation rows = %d, want 2", backend, mutations)
+	if mutations != 3 {
+		rows, err := db.QueryContext(context.Background(), `SELECT writer_type, writer_id, handler_step, domain, path, count(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 GROUP BY writer_type, writer_id, handler_step, domain, path ORDER BY writer_type, writer_id, handler_step, domain, path`, runID, entityID)
+		if err != nil {
+			t.Fatalf("%s inspect setup mutation ownership: %v", backend, err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var writerType, writerID, domain, path string
+			var step sql.NullString
+			var count int
+			if err := rows.Scan(&writerType, &writerID, &step, &domain, &path, &count); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("setup mutation authority: type=%s writer=%s step=%s domain=%s path=%s count=%d", writerType, writerID, step.String, domain, path, count)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		t.Fatalf("%s setup constructor mutation rows = %d, want 3", backend, mutations)
+	}
+	rows, err := db.QueryContext(context.Background(), `SELECT domain, path, old_value, new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='create' ORDER BY domain, path`, runID, entityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var actual []string
+	for rows.Next() {
+		var domain, path, after string
+		var before sql.NullString
+		if err := rows.Scan(&domain, &path, &before, &after); err != nil {
+			t.Fatal(err)
+		}
+		if before.Valid {
+			t.Fatalf("setup constructor mutation overwrote existing %s/%s: %s", domain, path, before.String)
+		}
+		actual = append(actual, domain+"/"+path)
+		switch domain + "/" + path {
+		case "authored_field/score":
+			if after != "5" {
+				t.Fatalf("setup constructor score mutation = %s, want 5", after)
+			}
+		case "lifecycle_state/":
+			if after != `"waiting"` {
+				t.Fatalf("setup constructor stage mutation = %s, want waiting", after)
+			}
+		case "bookkeeping/stage_entry":
+			var entry map[string]any
+			if err := canonicaljson.DecodeInto([]byte(after), &entry); err != nil || entry["stage"] != "waiting" {
+				t.Fatalf("setup constructor stage-entry mutation = %s, err=%v", after, err)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"authored_field/score", "bookkeeping/stage_entry", "lifecycle_state/"}; !reflect.DeepEqual(actual, want) {
+		t.Fatalf("setup constructor mutation identities = %v, want %v", actual, want)
 	}
 }
 
@@ -3012,6 +3087,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	bundleHash := bundleFact.BundleHash()
 	var cards decisioncard.Store
 	workflow := rt.Runtime.Pipeline
+	workflowVersion := workflow.SemanticSource().WorkflowVersion()
 	var seedEvent func(context.Context, events.Event) error
 	var insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
 	switch rt.Backend {
@@ -3078,12 +3154,33 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatal("served decision-card fixture requires canonical root flow identity")
 	}
 	entityType := servedRequiredRootEntityType(t, workflow)
-	if _, err := workflow.MaterializeInitialEntry(materializeCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-		EntityType: entityType,
-	}, now); err != nil {
-		t.Fatalf("seed gated workflow instance: %v", err)
+	{
+		construction3123Ctx := materializeCtx
+		construction3123At := now
+		construction3123Instance, construction3123Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction3123Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
+			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: workflowVersion,
+			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
+			EntityType: entityType,
+		}, construction3123At)
+		if err != nil {
+			t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction3123Command, err := flowactivationfixture.Command(construction3123Ctx, construction3123Instance, construction3123Lifecycle, construction3123At)
+		if err != nil {
+			t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction3123Committed, err := any(cards).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction3123Ctx, construction3123Command)
+		if err != nil {
+			t.Fatalf("seed gated workflow instance: %v", err)
+		}
+		if err == nil && !construction3123Committed.Acknowledged {
+			t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction3123Committed.Acknowledged && construction3123Committed.Created {
+			if finalizeErr := workflow.FinalizeInitialEntryLifecycle(construction3123Ctx, construction3123Committed.Lifecycle); finalizeErr != nil {
+				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}, InputOrder: []string{"score"}},
@@ -3109,7 +3206,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		ExecutionMode: executionmode.Live,
 		Anchor:        anchor,
 		Snapshot:      snapshot,
-		BundleHash:    bundleHash, WorkflowVersion: "1.0.0",
+		BundleHash:    bundleHash, WorkflowVersion: workflowVersion,
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
 		Provenance:       provenance, CreatedAt: now,
 	})
@@ -4310,12 +4407,33 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatal("served run-control fixture requires canonical root flow identity")
 	}
 	entityType := servedRequiredRootEntityType(t, workflow)
-	if _, err := workflow.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)}, runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-		EntityType: entityType,
-	}, now); err != nil {
-		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
+	{
+		construction4356Ctx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+		construction4356At := now
+		construction4356Instance, construction4356Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction4356Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
+			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
+			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
+			EntityType: entityType,
+		}, construction4356At)
+		if err != nil {
+			t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction4356Command, err := flowactivationfixture.Command(construction4356Ctx, construction4356Instance, construction4356Lifecycle, construction4356At)
+		if err != nil {
+			t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction4356Committed, err := any(cards).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction4356Ctx, construction4356Command)
+		if err != nil {
+			t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
+		}
+		if err == nil && !construction4356Committed.Acknowledged {
+			t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction4356Committed.Acknowledged && construction4356Committed.Created {
+			if finalizeErr := workflow.FinalizeInitialEntryLifecycle(construction4356Ctx, construction4356Committed.Lifecycle); finalizeErr != nil {
+				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Run stop review", map[string]any{"operation": "run.stop"}, outcomes)
 	if err != nil {
@@ -5629,6 +5747,7 @@ func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID str
 		servedEventPublishDebugQuery(t, db, backend, "event_deliveries", runID),
 		servedEventPublishDebugQuery(t, db, backend, "settled_delivery_attempts", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_receipts", runID),
+		servedEventPublishDebugQuery(t, db, backend, "pipeline_obligations", runID),
 		servedEventPublishDebugQuery(t, db, backend, "dead_letters", runID),
 		servedEventPublishDebugQuery(t, db, backend, "delivery_agents", runID),
 		servedEventPublishDebugQuery(t, db, backend, "runtime_logs", runID),
@@ -5648,7 +5767,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "entity_state":
 			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = $1::uuid ORDER BY fi.instance_path LIMIT 5`
+			sqlText = `SELECT instance_path, flow_template, status FROM flow_instances WHERE run_id = $1::uuid ORDER BY instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
@@ -5657,8 +5776,10 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT o.delivery_id::text, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = $1::uuid ORDER BY o.settled_at, o.delivery_id LIMIT 8`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
+		case "pipeline_obligations":
+			sqlText = `SELECT e.event_id::text, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = $1::uuid ORDER BY e.created_at, e.event_id LIMIT 12`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), COALESCE(d.failure->>'class', ''), COALESCE(d.failure->'detail'->>'code', ''), COALESCE(d.failure->'detail'->'attributes'->>'validation_error', '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), d.failure::text FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
 		case "delivery_agents":
 			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = $1::uuid ORDER BY d.created_at LIMIT 8`
 		case "runtime_logs":
@@ -5671,7 +5792,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "entity_state":
 			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = ? ORDER BY fi.instance_path LIMIT 5`
+			sqlText = `SELECT instance_path, flow_template, status FROM flow_instances WHERE run_id = ? ORDER BY instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
@@ -5680,8 +5801,10 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT o.delivery_id, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = ? ORDER BY o.settled_at, o.delivery_id LIMIT 8`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
+		case "pipeline_obligations":
+			sqlText = `SELECT e.event_id, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = ? ORDER BY e.created_at, e.event_id LIMIT 12`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), COALESCE(json_extract(d.failure, '$.class'), ''), COALESCE(json_extract(d.failure, '$.detail.code'), ''), COALESCE(json_extract(d.failure, '$.detail.attributes.validation_error'), '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), d.failure FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
 		case "delivery_agents":
 			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = ? ORDER BY d.created_at LIMIT 8`
 		case "runtime_logs":
@@ -6243,18 +6366,18 @@ func servedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, ent
 	switch backend {
 	case "postgres":
 		if strings.TrimSpace(entityID) != "" {
-			sqlText = `SELECT COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+			sqlText = `SELECT current_state FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 			args = []any{runID, entityID}
 		} else {
-			sqlText = `SELECT entity_id::text, COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid AND current_state = $2 ORDER BY created_at, entity_id LIMIT 1`
+			sqlText = `SELECT entity_id::text, current_state FROM flow_instances WHERE run_id = $1::uuid AND current_state = $2 ORDER BY created_at, entity_id LIMIT 1`
 			args = []any{runID, wantState}
 		}
 	case "sqlite":
 		if strings.TrimSpace(entityID) != "" {
-			sqlText = `SELECT COALESCE(current_state, '') FROM entity_state WHERE run_id = ? AND entity_id = ?`
+			sqlText = `SELECT current_state FROM flow_instances WHERE run_id = ? AND entity_id = ?`
 			args = []any{runID, entityID}
 		} else {
-			sqlText = `SELECT entity_id, COALESCE(current_state, '') FROM entity_state WHERE run_id = ? AND current_state = ? ORDER BY created_at, entity_id LIMIT 1`
+			sqlText = `SELECT entity_id, current_state FROM flow_instances WHERE run_id = ? AND current_state = ? ORDER BY created_at, entity_id LIMIT 1`
 			args = []any{runID, wantState}
 		}
 	default:
@@ -7506,7 +7629,7 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	}
 }
 
-func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID, currentState, entityName, writerID string, at time.Time) {
+func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -7514,41 +7637,21 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		BundleHash: bundleHash,
 	})
+	if entityID != runID {
+		t.Fatal("selected root fixture must use the constructed run entity")
+	}
+	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
-		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
+		events.EventEnvelope{EntityID: entityID, FlowInstance: runID, Scope: events.EventScopeEntity}, at)
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, event,
 		[]events.DeliveryRoute{{
 			Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, subscriberID)),
-			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
-				FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(subscriberID),
+			Target: events.MustExistingEntityTarget(events.RouteIdentity{
+				FlowID: ".", FlowInstance: runID, EntityID: runID,
 			}),
 		}})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, to_jsonb($5::text), $3::uuid, 'platform', $6, 'seed', $4),
-			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, to_jsonb($7::text), $3::uuid, 'platform', $6, 'seed', $4)
-	`, runID, entityID, eventID, at, currentState, writerID, entityName); err != nil {
-		t.Fatalf("seed mutations: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', $4,
-			$5, '{}'::jsonb, jsonb_build_object('name', $4::text), '{}'::jsonb, 1,
-			$3, $3, $3
-		)
-	`, runID, entityID, at, entityName, currentState); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 }
 
@@ -8661,9 +8764,9 @@ func startOwnedMockLifecycleTestProcess(t *testing.T, repo, retainedRoot string,
 	t.Helper()
 	t.Log("proof_surface=H in-process retained mock lifecycle; not public serve/test")
 	return startRuntimeTestProcessWithRunner(t, repo, opts, func(ctx context.Context, root string, opts cliapp.ServeOptions) int {
-		code, err := runOwnedMockLifecycle(ctx, root, retainedRoot, opts, apiv1.AuthTokenResolution{
+		code, err := runOwnedLifecycle(ctx, root, retainedRoot, opts, apiv1.AuthTokenResolution{
 			Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Source: "internal-lifecycle-parent", Explicit: true,
-		})
+		}, executionposture.MockOnly, "")
 		if err != nil {
 			fmt.Fprintf(opts.Output, "internal lifecycle setup: %v\n", err)
 		}

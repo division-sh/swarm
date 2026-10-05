@@ -41,6 +41,8 @@ func TestLocalSourceRecipientsAgreeForFrontierAndHistory(t *testing.T) {
 				plan.PendingWork[0].RoutingSource = tc.from
 				// A different historical receiver is evidence, not the source.
 				plan.PendingWork[0].FlowInstance = sibling
+				plan = withConstructedHeader(t, plan, source, "worker-flow", "worker-001")
+				plan = withConstructedHeader(t, plan, source, "worker-flow", "worker-002")
 				before := recipientAuthorityJSON(t, plan)
 				got, _ := recipientAuthorityAdmit(t, plan, source, classification)
 				if tc.want {

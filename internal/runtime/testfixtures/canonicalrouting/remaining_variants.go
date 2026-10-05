@@ -200,7 +200,6 @@ fork.probe:
   subscribes_to: [order.started]
   event_handlers:
     order.started:
-      create_entity: true
       data_accumulation:
         source_event: order.started
         writes:

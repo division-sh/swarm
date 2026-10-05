@@ -17,41 +17,69 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
 
 func workflowGateSupersededEvent(card decisioncard.Card, activation gateruntime.Activation, instance WorkflowInstance, now time.Time) (events.Event, error) {
 	var noEvent events.Event
-	payload, err := canonicaljson.Bytes(map[string]any{
-		"card_id": activation.CardID, "anchor_kind": decisioncard.AnchorKindStageGate, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
-	})
+	facts, err := workflowGateSupersededEventFacts(card, activation, instance, now)
 	if err != nil {
 		return noEvent, err
 	}
+	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: card.RunID})
+}
+
+func workflowGateExitSupersededEvent(card decisioncard.Card, activation gateruntime.Activation, instance WorkflowInstance, runID string, effect workflowlifecycle.Effect) (events.Event, error) {
+	var noEvent events.Event
+	transition, ok := effect.Transition()
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
 		return noEvent, err
 	}
-	if err := validateStageGateInstanceOwner(anchor, instance, activation); err != nil {
+	if effect.Kind() != workflowlifecycle.KindAcceptedEvent || !ok ||
+		transition.From() != activation.Stage || transition.To() != instance.CurrentState ||
+		card.RunID != runID || anchor.Route != effect.Route() || anchor.EntityID != effect.EntityID().String() ||
+		card.ExecutionMode != effect.ExecutionMode() || activation.SupersededReason != effect.EventType() {
+		return noEvent, fmt.Errorf("stage-gate supersession requires its exact accepted transition and owner")
+	}
+	facts, err := workflowGateSupersededEventFacts(card, activation, instance, effect.OccurredAt())
+	if err != nil {
 		return noEvent, err
+	}
+	return events.NewCausalRuntimeControlEvent(events.CausalRuntimeEventInput{
+		Facts:   facts,
+		Lineage: events.EventLineage{RunID: runID, ParentEventID: effect.EventID(), ExecutionMode: effect.ExecutionMode()},
+	})
+}
+
+func workflowGateSupersededEventFacts(card decisioncard.Card, activation gateruntime.Activation, instance WorkflowInstance, now time.Time) (events.EventFacts, error) {
+	payload, err := canonicaljson.Bytes(map[string]any{
+		"card_id": activation.CardID, "anchor_kind": decisioncard.AnchorKindStageGate, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
+	})
+	if err != nil {
+		return events.EventFacts{}, err
+	}
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		return events.EventFacts{}, err
+	}
+	if err := validateStageGateInstanceOwner(anchor, instance, activation); err != nil {
+		return events.EventFacts{}, err
+	}
+	if anchor.StageActivationID != activation.ActivationID || card.CardID != activation.CardID {
+		return events.EventFacts{}, fmt.Errorf("stage-gate supersession disagrees with its exact card activation")
 	}
 	routingSource, err := card.Anchor.ControlRoutingSource()
 	if err != nil {
-		return noEvent, err
+		return events.EventFacts{}, err
 	}
-	evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
-		Facts: events.EventFacts{
-			ID: uuid.NewString(), Type: events.EventType("mailbox.card_superseded"),
-			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
-			Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.Route.InstancePath),
-			RoutingSource: routingSource, CreatedAt: now.UTC(), ExecutionMode: card.ExecutionMode,
-		},
-		RunID: card.RunID,
-	})
-	if err != nil {
-		return noEvent, err
-	}
-	return evt, nil
+	return events.EventFacts{
+		ID: uuid.NewString(), Type: events.EventType("mailbox.card_superseded"),
+		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
+		Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.Route.InstancePath),
+		RoutingSource: routingSource, CreatedAt: now.UTC(), ExecutionMode: card.ExecutionMode,
+	}, nil
 }
 
 func workflowGatePlanForInstance(pc *PipelineCoordinator, instance WorkflowInstance, stage string) (string, runtimecontracts.WorkflowGatePlan, bool) {
@@ -76,8 +104,16 @@ func workflowGateBundleHash(ctx context.Context, pc *PipelineCoordinator) string
 }
 
 func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, runID string, route runtimeflowidentity.Route, entityID identity.EntityID, instance WorkflowInstance, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan, frozenOutcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (decisioncard.Card, error) {
-	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
+	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("validate stage-gate owner: %w", err)
+	}
+	constructed, err := instance.ConstructionIdentity(owner)
+	if err != nil {
+		return decisioncard.Card{}, fmt.Errorf("validate stage-gate construction: %w", err)
+	}
+	if constructed.EntityID != entityID.String() {
+		return decisioncard.Card{}, fmt.Errorf("stage-gate entity conflicts with its constructed owner")
 	}
 	contextSnapshot := make(map[string]any, len(plan.Context))
 	for name, expression := range plan.Context {
@@ -104,12 +140,15 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, ru
 		return decisioncard.Card{}, fmt.Errorf("admit decision card provenance: %w", err)
 	}
 	anchorFlowID := strings.TrimSpace(plan.FlowID)
+	if anchorFlowID != constructed.TemplateID {
+		return decisioncard.Card{}, fmt.Errorf("stage-gate declaration conflicts with its constructed owner")
+	}
 	sourceRoute := events.RouteIdentity{EntityID: entityID.String()}
 	if anchorFlowID != "" {
 		sourceRoute.FlowID = anchorFlowID
 		sourceRoute.FlowInstance = route.InstancePath
 	}
-	anchorSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(pc.SemanticSource(), anchorFlowID, sourceRoute)
+	anchorSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(pc.SemanticSource(), runID, constructed, sourceRoute)
 	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("admit stage-gate owner source: %w", err)
 	}

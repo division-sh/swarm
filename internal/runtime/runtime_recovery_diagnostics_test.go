@@ -23,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -414,15 +413,6 @@ type startupReadinessFinalizationStore struct {
 	items []runtimepipeline.DynamicFlowRuntimeReadiness
 }
 
-func (*startupReadinessFinalizationStore) MaterializeInitialEntry(
-	context.Context,
-	runtimeflowidentity.RunScopedFlowInstance,
-	runtimepipeline.WorkflowInstance,
-	time.Time,
-) (runtimepipeline.WorkflowInitialMaterializationResult, error) {
-	return 0, errors.New("unexpected readiness materialization")
-}
-
 func (*startupReadinessFinalizationStore) PrepareInitialEntryLifecycle(
 	context.Context,
 	runtimeflowidentity.RunScopedFlowInstance,
@@ -509,16 +499,20 @@ func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessFo
 	return result, nil
 }
 
-func (*startupReadinessFinalizationStore) BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+func (*startupReadinessFinalizationStore) BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
 	return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("unexpected readiness activation admission")
+}
+
+func (*startupReadinessFinalizationStore) ResolveDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationResolution, error) {
+	return runtimepipeline.DynamicFlowRuntimeActivationResolution{}, errors.New("unexpected readiness activation resolution")
 }
 
 func (*startupReadinessFinalizationStore) VerifyDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
 	return errors.New("unexpected readiness activation verification")
 }
 
-func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.DynamicFlowRuntimeReadinessPlan, time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, errors.New("unexpected readiness topology completion")
+func (*startupReadinessFinalizationStore) AdvanceFlowAttachment(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.FlowAttachmentPhase, time.Time) (runtimepipeline.FlowAttachmentAdvanceResult, error) {
+	return runtimepipeline.FlowAttachmentAdvanceResult{}, errors.New("unexpected readiness topology completion")
 }
 
 func (*startupReadinessFinalizationStore) RetireDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
@@ -547,6 +541,10 @@ func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, runtim
 
 func (*startupReadinessFinalizationStore) Load(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
 	return runtimepipeline.WorkflowInstance{}, false, errors.New("unexpected readiness workflow load")
+}
+
+func (*startupReadinessFinalizationStore) LoadConstructedFlowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance, identity.EntityID) (runtimepipeline.WorkflowInstance, bool, error) {
+	return runtimepipeline.WorkflowInstance{}, false, errors.New("unexpected readiness constructed workflow load")
 }
 
 func (*startupReadinessFinalizationStore) LoadRouteRecoveryProjection(

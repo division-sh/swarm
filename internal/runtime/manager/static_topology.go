@@ -35,10 +35,8 @@ func (am *AgentManager) CompileStaticTopologyDesiredAgents(source semanticview.S
 }
 
 // FinalizeCommittedAgentReadiness makes every committed agent delivery's exact
-// run-owned lifecycle executable before dispatch. Static declaration plans are
-// materialized here because this is the first boundary that owns a committed
-// run; dynamic and standing agents must already have been materialized by their
-// dedicated readiness owners.
+// already-constructed run-owned lifecycle executable before dispatch. It cannot
+// materialize a declaration independently of its flow attachment owner.
 func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
 	if am == nil || am.lifecycle == nil {
 		return errors.New("committed agent readiness requires manager lifecycle ownership")
@@ -50,8 +48,6 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 	if err := am.requireRunExecutionOwnership(ctx, runID); err != nil {
 		return err
 	}
-	var staticByPlan map[runtimeagentidentity.Plan]staticAgentBlueprint
-	var admission runtimeagenttopology.Admission
 	seen := make(map[runtimeagentidentity.Identity]struct{}, len(routes))
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if err := ctx.Err(); err != nil {
@@ -82,68 +78,10 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 			return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
 		case committedRouteUnavailable:
 			return fmt.Errorf("committed agent %s is unavailable in lifecycle phase %s", identity.Description(), readiness.State.Phase)
-		case committedRouteExistingExecution:
-			if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
-				if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
-					return err
-				}
-			}
-			continue
 		}
-		// Existing admitted cells need their execution grant, not permission to
-		// create a new static declaration. In particular, a selected runtime does
-		// not own the normal startup topology merely because it owns such a cell.
-		if staticByPlan == nil {
-			var err error
-			admission, err = am.staticTopologyAdmission()
-			if err != nil {
+		if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
+			if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
 				return err
-			}
-			blueprints, err := am.resolvedStaticTopologyBlueprints(am.semanticSource)
-			if err != nil {
-				return err
-			}
-			staticByPlan = make(map[runtimeagentidentity.Plan]staticAgentBlueprint, len(blueprints))
-			for _, blueprint := range blueprints {
-				staticByPlan[blueprint.Identity.Normalize()] = blueprint
-			}
-		}
-		plan, err := identity.Plan()
-		if err != nil {
-			return err
-		}
-		blueprint, static := staticByPlan[plan.Normalize()]
-		if !static {
-			if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
-				if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-		record, err := blueprint.Materialize(runID)
-		if err != nil {
-			return err
-		}
-		record.Topology = admission
-		materialized, err := record.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		if materialized != identity {
-			return fmt.Errorf("static declaration materialized %s instead of committed route %s", materialized.Description(), identity.Description())
-		}
-		if err := am.spawnAgentInternal(ctx, record, true); err != nil {
-			if !errors.Is(err, ErrAgentAlreadyExists) {
-				if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
-					return err
-				}
-				continue
-			}
-			if _, readyErr := am.ensureExecutableAgentLifecycle(ctx, identity); readyErr != nil {
-				if err := am.committedRouteFinalizeError(ctx, identity, readyErr); err != nil {
-					return err
-				}
 			}
 		}
 	}
@@ -418,6 +356,7 @@ type PreparedDurableTopologySourceSetRebind struct {
 	bindings           []durableTopologySourceSetBinding
 	locked             []*agentLifecycleCell
 	done               bool
+	attachmentLocked   bool
 }
 
 func validateDurableSourceSetLifecycleState(state AgentLifecycleState) (runtimeagentidentity.Identity, string, error) {
@@ -557,6 +496,9 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		bindings: make([]durableTopologySourceSetBinding, 0, len(blueprints)),
 		locked:   make([]*agentLifecycleCell, 0, len(blueprints)),
 	}
+	am.dynamicFlowRetirementMu.Lock()
+	am.dynamicFlowAttachmentMu.Lock()
+	prepared.attachmentLocked = true
 	am.lifecycle.sourceSetPublishMu.Lock()
 	releaseOnError := true
 	defer func() {
@@ -770,6 +712,11 @@ func (p *PreparedDurableTopologySourceSetRebind) release() {
 	}
 	p.locked = nil
 	p.manager.lifecycle.sourceSetPublishMu.Unlock()
+	if p.attachmentLocked {
+		p.manager.dynamicFlowAttachmentMu.Unlock()
+		p.manager.dynamicFlowRetirementMu.Unlock()
+		p.attachmentLocked = false
+	}
 }
 
 func (p *PreparedDurableTopologySourceSetRebind) Abort() {
@@ -833,12 +780,17 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 	} else if !sourceSetBindingIsAdjacent(p.currentBinding, targetBinding) {
 		return errors.New("durable topology source-set rebind target is not the adjacent runtime generation")
 	}
+	// The generation writer has already rotated. Selecting that writer keeps
+	// retry and exact settlement live; the aggregate gate still blocks execution
+	// and no lifecycle/resource projection is published before all commits.
+	p.manager.lifecycle.replacePersistence(store)
 
 	subordinate, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		return err
 	}
 	committedBindings := make([]ProcessExecutionBinding, len(p.bindings))
+	requests := make([]AgentLifecycleTransition, len(p.bindings))
 	for index, item := range p.bindings {
 		operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{
 			"agent-durable-source-set-rebind-v1", strings.TrimSpace(operationScopeID), p.plan.Revision, item.identityKey,
@@ -848,14 +800,26 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 			item.identity, item.targetTopology, "source_set_rebind", item.revision, planHash,
 			targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
 		)
-		result, commitErr := p.manager.lifecycle.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
+		requests[index] = AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: "source_set_rebind", RequestHash: requestHash,
 			Identity: item.identity, AgentID: item.identity.AgentID(), Trigger: "source_set_rebind",
 			ExpectedEpoch: item.epoch, ExpectedGeneration: item.generation, ExpectedPhase: item.phase,
 			TargetEpoch: item.epoch, TargetGeneration: item.generation, TargetPhase: item.phase,
 			ConfigRevision: item.revision, RunMode: item.runMode, Subordinate: subordinate,
 			Topology: item.targetTopology, Now: time.Now().UTC(),
-		})
+			DiagnosticOrigin: p.manager.lifecycle.diagnosticOrigin,
+		}
+	}
+	flowResults, attempts, err := p.rebindFlowReadiness(context.WithoutCancel(ctx), store, requests, targetBinding)
+	if err != nil {
+		return err
+	}
+	for index, item := range p.bindings {
+		result, flow := flowResults[index]
+		var commitErr error
+		if !flow {
+			result, commitErr = p.manager.lifecycle.commitLifecycleTransition(context.WithoutCancel(ctx), store, requests[index])
+		}
 		if commitErr != nil {
 			return fmt.Errorf("rebind durable topology for %s: %w", item.identity.Description(), commitErr)
 		}
@@ -867,7 +831,14 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 		committedBindings[index] = result.ProcessBinding
 	}
 
-	p.manager.lifecycle.replacePersistence(store)
+	p.manager.dynamicFlowReadinessMu.Lock()
+	for key, receipt := range attempts {
+		active := p.manager.dynamicFlowActiveAttempts[key]
+		if active != nil {
+			active.receipt = receipt
+		}
+	}
+	p.manager.dynamicFlowReadinessMu.Unlock()
 	p.manager.lifecycle.mu.Lock()
 	for _, item := range p.bindings {
 		cell := p.manager.lifecycle.cells[item.identity]
@@ -993,11 +964,11 @@ func (am *AgentManager) resolvedStaticTopologyBlueprints(source semanticview.Sou
 // ResolveStaticTopologyBlueprints is the runless declaration compiler used by
 // startup topology and deployment admission, including required flow agents.
 func ResolveStaticTopologyBlueprints(options AgentManagerOptions, source semanticview.Source) ([]AgentMaterializationBlueprint, error) {
-	ordinary, err := staticAgentBlueprintRecords(source)
+	ordinary, err := StaticAgentMaterializationBlueprints(source)
 	if err != nil {
 		return nil, err
 	}
-	required, err := staticFlowRequiredAgentBlueprintRecords(source)
+	required, err := StaticFlowRequiredAgentMaterializationBlueprints(source)
 	if err != nil {
 		return nil, err
 	}
@@ -1036,15 +1007,21 @@ func (am *AgentManager) PreRunAgentMaterializationBlueprints() ([]AgentMateriali
 	if am == nil {
 		return nil, nil
 	}
-	return am.resolvedStaticTopologyBlueprints(am.semanticSource)
-}
-
-func (am *AgentManager) resolvedStaticTopologyRecords(runID string, source semanticview.Source) ([]PersistedAgent, error) {
-	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
+	ordinary, err := staticAgentDeclarationPreflightBlueprints(am.semanticSource)
 	if err != nil {
 		return nil, err
 	}
-	return materializeStaticAgentBlueprints(runID, blueprints)
+	required, err := staticRequiredDeclarationPreflightBlueprints(am.semanticSource)
+	if err != nil {
+		return nil, err
+	}
+	blueprints := append(ordinary, required...)
+	for i := range blueprints {
+		if err := am.resolveAgentModel(&blueprints[i].Config); err != nil {
+			return nil, err
+		}
+	}
+	return blueprints, nil
 }
 
 func desiredAgentsFromBlueprints(blueprints []staticAgentBlueprint, coordinate runtimeagenttopology.SourceCoordinate) ([]runtimeagenttopology.DesiredAgent, error) {

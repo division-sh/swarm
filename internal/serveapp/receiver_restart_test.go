@@ -3,14 +3,18 @@ package serveapp
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -76,12 +80,29 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 			if err := db.QueryRow(`SELECT CAST(delivery_target_route AS TEXT) FROM event_deliveries WHERE delivery_id=$1`, claim.DeliveryID()).Scan(&before); err != nil {
 				t.Fatal(err)
 			}
+			constructionBefore := receiverConstructionReceipts(t, db, published.RunID)
+			if len(constructionBefore) != 2 {
+				t.Fatalf("creating publication did not construct exactly root and child: %+v", constructionBefore)
+			}
 			if code := first.stop(); code != 0 {
 				t.Fatalf("first serve exit=%d\n%s", code, first.outputString())
 			}
+			if err := os.RemoveAll(root); err != nil {
+				t.Fatal(err)
+			}
+			opts.SourceRoot = ""
 			opts.TestWorkflowNodeHandlerStartHook = nil
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
-			second := startServeRuntimeTestProcess(t, opts)
+			retainedRoot := t.TempDir()
+			second := startRuntimeTestProcessWithRunner(t, repoRootForTest(), opts, func(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
+				code, err := runOwnedLifecycle(ctx, repo, retainedRoot, opts, apiv1.AuthTokenResolution{
+					Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Explicit: true, Source: "internal-lifecycle-parent",
+				}, executionposture.Live, bundle)
+				if err != nil {
+					t.Error(err)
+				}
+				return code
+			})
 			second.waitForReadyLine()
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString()) + "/v1/rpc"
 			waitServedRunDeliveryQuiescence(t, db, backend, published.RunID)
@@ -91,6 +112,10 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 			}
 			if before != after || status != "delivered" {
 				t.Fatalf("restart changed/lost exact child: before=%s after=%s status=%s", before, after, status)
+			}
+			t.Log("proof_surface=public initial serve; H in-process retained-artifact live-node restart with public RPC readback, not public persisted-hash boot or real-provider qualification")
+			if receipts := receiverConstructionReceipts(t, db, published.RunID); !reflect.DeepEqual(constructionBefore, receipts) {
+				t.Fatalf("hash-only restart changed immutable construction: before=%+v after=%+v", constructionBefore, receipts)
 			}
 			var entities int
 			if err := db.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id=$1 AND current_state='done'`, published.RunID).Scan(&entities); err != nil {
@@ -109,4 +134,25 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 			}
 		})
 	}
+}
+
+func receiverConstructionReceipts(t *testing.T, db *sql.DB, runID string) map[string]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT instance_path, CAST(projection AS TEXT) FROM workflow_instance_initial_materializations WHERE run_id=$1`, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	receipts := make(map[string]string)
+	for rows.Next() {
+		var path, projection string
+		if err := rows.Scan(&path, &projection); err != nil {
+			t.Fatal(err)
+		}
+		receipts[path] = projection
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return receipts
 }

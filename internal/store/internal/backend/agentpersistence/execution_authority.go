@@ -193,6 +193,29 @@ func VerifyFlowActivationRetirementBindingTx(ctx context.Context, tx *sql.Tx, re
 	return nil
 }
 
+// A grant stamp identifies the process which installed the attachment. It is
+// evidence, not attachment identity; write admission still checks the live grant.
+func VerifyFlowActivationAttemptProcessTx(ctx context.Context, tx *sql.Tx, stamp string, binding runtimeprocessbinding.Binding) error {
+	if err := VerifyFlowActivationRetirementBindingTx(ctx, tx, binding); err != nil {
+		return err
+	}
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, stamp).Scan(&raw); err != nil {
+		return fmt.Errorf("load attachment process evidence: %w", err)
+	}
+	var evidence startupownership.GrantEvidence
+	if err := canonicaljson.DecodeInto(raw, &evidence); err != nil {
+		return err
+	}
+	if err := evidence.Validate(); err != nil {
+		return err
+	}
+	if !processBindingForGrant(evidence).SameProcessExecution(binding) {
+		return errors.New("flow attachment belongs to a different process execution binding")
+	}
+	return nil
+}
+
 // FlowActivationRetirementHasForeignSuccessorTx permits a joined predecessor
 // to finish after takeover without treating an invented binding as ownership.
 func FlowActivationRetirementHasForeignSuccessorTx(ctx context.Context, tx *sql.Tx, successorGrantID string, retired runtimeprocessbinding.Binding) (bool, error) {

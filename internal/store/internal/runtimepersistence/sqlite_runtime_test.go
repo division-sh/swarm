@@ -22,7 +22,6 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -722,12 +721,13 @@ type sqliteFlowActivationBus struct {
 }
 
 type sqliteFlowActivationPublication struct {
-	bus     *sqliteFlowActivationBus
-	attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt
+	bus      *sqliteFlowActivationBus
+	attempt  runtimepipeline.DynamicFlowRuntimeActivationAttempt
+	identity runtimeflowidentity.RunScopedFlowInstance
 }
 
 func (p sqliteFlowActivationPublication) Retire() error {
-	return p.bus.RetireFlowInstanceRouteForAttempt(p.attempt)
+	return p.bus.RetireFlowInstanceRouteForAttempt(p.identity, p.attempt)
 }
 
 type sqliteFlowActivationRoutePreparation struct {
@@ -755,6 +755,7 @@ func configureSQLiteFlowActivationLifecycle(
 	selected *SQLiteRuntimeStore,
 	bus *sqliteFlowActivationBus,
 	bundle *runtimecontracts.WorkflowContractBundle,
+	configure ...func(*runtimepipeline.PipelineCoordinatorOptions),
 ) *runtimepipeline.PipelineCoordinator {
 	t.Helper()
 	source := semanticview.Wrap(bundle)
@@ -762,7 +763,7 @@ func configureSQLiteFlowActivationLifecycle(
 		source: source,
 		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
+	options := runtimepipeline.PipelineCoordinatorOptions{
 		ExecutionPosture:        executionposture.Live,
 		Module:                  module,
 		Persistence:             runtimepipeline.NewWorkflowPersistence(selected),
@@ -777,7 +778,13 @@ func configureSQLiteFlowActivationLifecycle(
 		HumanTaskExpiry:         selected,
 		DeliveryRuntime:         workflowTestBus{},
 		WorkOwner:               storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
-	})
+	}
+	for _, apply := range configure {
+		if apply != nil {
+			apply(&options)
+		}
+	}
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, options)
 
 }
 
@@ -892,7 +899,7 @@ func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRouteForAttempt(_ 
 		if owner != attempt.ID() {
 			return nil, errors.New("flow route predecessor remains published")
 		}
-		return sqliteFlowActivationPublication{bus: b, attempt: attempt}, nil
+		return sqliteFlowActivationPublication{bus: b, identity: req.Identity, attempt: attempt}, nil
 	}
 	for _, existing := range b.routeRequests {
 		if existing.Identity == req.Identity {
@@ -904,15 +911,14 @@ func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRouteForAttempt(_ 
 	}
 	b.routeAttempts[req.Identity] = attempt.ID()
 	b.routeRequests = append(b.routeRequests, req)
-	return sqliteFlowActivationPublication{bus: b, attempt: attempt}, nil
+	return sqliteFlowActivationPublication{bus: b, identity: req.Identity, attempt: attempt}, nil
 }
 
-func (b *sqliteFlowActivationBus) RetireFlowInstanceRouteForAttempt(attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+func (b *sqliteFlowActivationBus) RetireFlowInstanceRouteForAttempt(identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
 	if err := attempt.Validate(); err != nil {
 		return err
 	}
-	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(attempt.RunID(), runtimeflowidentity.RouteForInstancePath(attempt.InstancePath()))
-	if err != nil {
+	if err := identity.Validate(); err != nil {
 		return err
 	}
 	b.mu.Lock()
@@ -1122,7 +1128,7 @@ func assertSQLiteActivatedAgentFlowTopologies(
 		if err != nil || !found {
 			t.Fatalf("load readiness owner for %s: found=%v err=%v", path, found, err)
 		}
-		fingerprint, err := canonicaljson.Hash(readiness.Plan)
+		fingerprint, err := readiness.Plan.Hash()
 		if err != nil {
 			t.Fatalf("fingerprint readiness owner for %s: %v", path, err)
 		}
@@ -1131,14 +1137,14 @@ func assertSQLiteActivatedAgentFlowTopologies(
 			t.Fatalf("build exact readiness topology for %s: %v", path, err)
 		}
 		var attemptID string
-		var attemptRevision int64
-		if err := selected.backend.QueryRowContext(ctx, `SELECT activation_attempt_id, activation_attempt_revision FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`, runID, path).Scan(&attemptID, &attemptRevision); err != nil {
+		if err := selected.backend.QueryRowContext(ctx, `SELECT activation_attempt_id FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`, runID, path).Scan(&attemptID); err != nil {
 			t.Fatalf("load exact activation attempt for %s: %v", path, err)
 		}
-		if attemptRevision <= 0 || uint64(attemptRevision) != readiness.PlanRevision {
-			t.Fatalf("activation attempt revision for %s = %d, want %d", path, attemptRevision, readiness.PlanRevision)
+		ordinal, err := runtimeflowidentity.ParseActivationAttemptID(attemptID)
+		if err != nil || ordinal != readiness.AttemptOrdinal {
+			t.Fatalf("activation attempt for %s = %s, want %d: %v", path, attemptID, readiness.AttemptOrdinal, err)
 		}
-		want, err = want.WithFlowActivationAttempt(attemptID, uint64(attemptRevision))
+		want, err = want.WithFlowActivationAttempt(attemptID)
 		if err != nil {
 			t.Fatalf("bind exact activation attempt for %s: %v", path, err)
 		}
@@ -1557,37 +1563,32 @@ func assertSQLiteRuntimeCount(t *testing.T, store *SQLiteRuntimeStore, query str
 }
 
 func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
-	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
+	f := newReceiverConfigActivationFixtureWithDocuments(t, "sqlite", false, map[string]string{
 		"schema.yaml":        "name: persistence-proof\n",
-		"root/schema.yaml":   "name: root\nstages:\n  qualified: {initial: true}\n",
-		"root/entities.yaml": "company:\n  score: decimal\n",
-	})
-	options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)
-	options.Module = sqliteFlowActivationWorkflowModule{source: semanticview.Wrap(bundle)}
-	owner := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, options)
+		"root/schema.yaml":   "name: root\ninstance: company_id\nstages:\n  qualified: {initial: true}\npins:\n  inputs:\n    - company.opened\n",
+		"root/entities.yaml": "company:\n  company_id: text\n  score: {type: numeric, initial: 9}\n",
+		"root/events.yaml":   "company.opened:\n",
+	}, nil)
+	ctx, owner := f.ctx, f.workflows
+	store := f.store.(*SQLiteRuntimeStore)
+	runID := runtimecorrelation.RunIDFromContext(ctx)
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
 	createdAt := time.Now().UTC()
-	if _, err := owner.MaterializeInitialEntry(ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath("root/acme")}, runtimepipeline.WorkflowInstance{
-		InstanceID:      "acme",
-		StorageRef:      "root/acme",
-		EntityID:        entityID,
-		Slug:            "acme",
-		Name:            "Acme",
-		EntityType:      "company",
-		WorkflowName:    "root",
-		WorkflowVersion: "v1",
-		CurrentState:    "qualified",
-		EnteredStageAt:  createdAt,
-		Fields:          map[string]any{"score": float64(9)},
-		StateBuckets:    map[string]any{"evidence": map[string]any{"seed": true}},
-	}, createdAt); err != nil {
-		t.Fatalf("materialize workflow instance: %v", err)
+	req := sqliteFlowActivationRequest(f.bundle, "root", "acme", "", "root/acme")
+	req.Config = map[string]any{"company_id": "acme"}
+	req.ConstructorInput, req.ResolvedKey = "company.opened", "acme"
+	req.Bookkeeping = map[string]any{"evidence": map[string]any{"seed": true}}
+	req.OccurredAt = createdAt
+	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "company.opened", "constructor-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, createdAt)
+	plan, err := f.manager.PrepareFlowInstanceActivation(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This component proof also covers persistence of declared display metadata.
+	plan.Instance.Slug, plan.Instance.Name = "acme", "Acme"
+	committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct workflow instance: commit=%+v err=%v", committed, err)
 	}
 	loaded, ok, err := owner.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
 		RunID: runID,

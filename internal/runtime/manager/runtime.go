@@ -138,12 +138,23 @@ func (am *AgentManager) Shutdown() error {
 	return am.ShutdownWithOptions(DefaultShutdownOptions())
 }
 
+// CheckShutdownAdmission keeps individual retirement from joining work behind
+// an unresolved whole-set fence. Only its aggregate owner may enable draining.
+func (am *AgentManager) CheckShutdownAdmission() error {
+	am.lifecycle.mu.Lock()
+	defer am.lifecycle.mu.Unlock()
+	if sourceSetTransitionTerminalDraining(am.lifecycle.sourceSetTransition) {
+		return nil
+	}
+	return am.lifecycle.sourceSetTransitionConflictLocked("shutdown_manager", runtimeagentidentity.Identity{})
+}
+
 func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	grace, err := ResolveShutdownGrace(opts.Grace)
 	if err != nil {
 		return err
 	}
-	if err := am.lifecycle.sourceSetTransitionConflict("shutdown_manager"); err != nil {
+	if err := am.CheckShutdownAdmission(); err != nil {
 		return err
 	}
 	transition := am.lifecycle.requestShutdownTransition()
@@ -1652,7 +1663,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 		}
-		if err := preparedRoute.Publish(); err != nil {
+		if err := publishPreparedAgentRoute(preparedRoute); err != nil {
 			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(fmt.Errorf("publish generation-owned agent route: %w", err), abortErr, cleanupPrepared())
 		}
@@ -1673,6 +1684,19 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		loopWorkLease = nil
 	}
 	return replaceExecutionResult{previous: current.Config, config: candidate.Config, transitioned: true}, nil
+}
+
+func publishPreparedAgentRoute(route runtimebus.AgentRoutePreparation) (result error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if cause, ok := recovered.(error); ok {
+				result = fmt.Errorf("prepared agent route publication panicked: %w", cause)
+			} else {
+				result = fmt.Errorf("prepared agent route publication panicked: %v", recovered)
+			}
+		}
+	}()
+	return route.Publish()
 }
 
 func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *agentExecutionProjection, loopCtx context.Context, done chan struct{}, workLease *worklifetime.Lease, executionOwner worklifetime.Occurrence) {

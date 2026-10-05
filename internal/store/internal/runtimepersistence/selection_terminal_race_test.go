@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -18,16 +19,18 @@ func TestFinalSelectionTerminalizationVersusEngineCommitBothStores(t *testing.T)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, order := range []string{"engine_first", "terminal_first", "concurrent"} {
 			t.Run(backend+"/"+order, func(t *testing.T) {
-				selected, db, parent, runID := openStateOnlyAcquisitionStore(t, backend)
+				flow, instance := "selection-race", "selection-race/receiver"
+				created := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+				fixture, record := constructWorkflowMutationFixture(t, backend, flow, created)
+				selected, db, parent, runID := fixture.store.(stateOnlyAcquisitionStore), fixture.db, fixture.ctx, correlation.RunIDFromContext(fixture.ctx)
 				ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 				defer cancel()
 				engine := selected.(runtimepipeline.WorkflowEngineMutationOwner)
 				lifecycle := selected.(runlifecycle.OperationOwner)
-				flow, instance, entity := "selection-race", "selection-race/receiver", uuid.NewString()
-				created := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				seedWorkflowTargetStateForTransition(t, backend, db, runID, entity, instance, "active", 1, created)
+				entity := record.EntityID
+				node := mustPersistenceNode(flow, "engine-settlement")
 				route := events.DeliveryRoute{
-					Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("engine-settlement")),
+					Recipient: events.MustNodeDeliveryRecipient(node),
 					Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flow, FlowInstance: instance, EntityID: entity}),
 				}
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "engine.delivery.requested", "fixture", "", []byte(`{}`), 0, runID,
@@ -39,12 +42,13 @@ func TestFinalSelectionTerminalizationVersusEngineCommitBothStores(t *testing.T)
 				if err != nil {
 					t.Fatal(err)
 				}
+				record = workflowMutationDeliveryEntry(t, record, node, event, claimed.Claim)
 				fact, err := handlerselection.NoMatch(handlerselection.ContextRules)
 				if err != nil {
 					t.Fatal(err)
 				}
 				command := runtimepipeline.WorkflowEngineMutationCommand{
-					State:           stateOnlyWorkflowEngineMutationRecord(t, runID, flow, instance, entity, "active", 1, created),
+					State:           record,
 					DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, RuleSelection: fact, SideEffects: []string{"handler_completed"}},
 				}
 				commit := func() error { _, err := engine.CommitWorkflowEngineMutation(ctx, command); return err }
@@ -86,7 +90,7 @@ func TestFinalSelectionTerminalizationVersusEngineCommitBothStores(t *testing.T)
 					if snapshot.Status != runtimedelivery.StatusDeadLetter || !final.Equal(handlerselection.NotApplicable()) {
 						t.Fatalf("terminal winner lost nonexecution truth: %+v", snapshot)
 					}
-					assertWorkflowTargetTransitionRows(t, backend, db, runID, entity, instance, "", "active", 1, 0)
+					assertWorkflowTargetTransitionRows(t, backend, db, runID, entity, instance, flow, "active", 1, 1)
 				}
 				var count, open int
 				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, snapshot.DeliveryID).Scan(&count); err != nil || count != 1 {

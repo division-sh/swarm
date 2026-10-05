@@ -11,6 +11,38 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
+func TestEventSchemaCopyPreservesRequiredSequencePresence(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		required []string
+		valid    bool
+	}{
+		{"empty", []string{}, true},
+		{"required", []string{"detail"}, true},
+		{"nil", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := map[string]any{
+				"type": "object", "properties": map[string]any{"detail": map[string]any{"type": "string"}},
+				"required": tc.required, "additionalProperties": false,
+			}
+			copied := cloneEventSchemaMap(schema)
+			if !reflect.DeepEqual(copied, schema) {
+				t.Fatalf("schema copy changed sequence presence: before=%#v after=%#v", schema, copied)
+			}
+			if _, err := AdmitToolInputSchemaMap(copied); (err == nil) != tc.valid {
+				t.Fatalf("copied schema admission: %v; want valid=%t", err, tc.valid)
+			}
+			if len(tc.required) != 0 {
+				copied["required"].([]string)[0] = "changed"
+				if tc.required[0] != "detail" {
+					t.Fatal("schema copy shares its required sequence")
+				}
+			}
+		})
+	}
+}
+
 func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypesWithoutInferringPresence(t *testing.T) {
 	registry := EventSchemaRegistryFromCatalog(map[string]EventCatalogEntry{
 		"scan.requested": {

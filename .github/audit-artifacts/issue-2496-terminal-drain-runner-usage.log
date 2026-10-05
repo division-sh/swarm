@@ -1,0 +1,2 @@
+usage: go run ./cmd/swarm-test [--full | -- <focused go test args...>]
+exit status 2

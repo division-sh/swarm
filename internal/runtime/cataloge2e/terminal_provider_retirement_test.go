@@ -177,7 +177,7 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 				h := newRuntimeHarnessWithTerminalProvider(t, root, backend, true, nil, probe)
 				defer probe.once.Do(func() { close(probe.release) })
 				path := "worker-flow/worker-001"
-				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")
 				if activity && launched && os.Getenv("SWARM_2412_COST_DIAGNOSTICS") == "1" {
 					var selected any = h.sqlite
 					if h.pg != nil {

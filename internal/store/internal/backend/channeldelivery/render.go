@@ -37,7 +37,7 @@ func PersistRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, frozen 
 	if !found {
 		return "", false, fmt.Errorf("channel render principal is unavailable")
 	}
-	plan, found, err := LoadCurrentPlan(ctx, tx, deliveryID, postgres)
+	plan, found, err := LoadDestinationCurrentPlan(ctx, tx, deliveryID, postgres)
 	if err != nil {
 		return "", false, err
 	}

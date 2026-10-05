@@ -1,0 +1,996 @@
+{
+  "base": "fd7a457aa454d8165b3002499a1971638f201d11",
+  "source": "0c4961208da7b14b6eb9875ea2c31f230a985100",
+  "boundary": "Exact compiled stdout hashes verified against the original master snapshot and the current RED capture. Master capture changes only expected hashes to expose original stdout; it is characterization, not a green execution receipt. All semantic differences remain listed, not normalized or accepted automatically.",
+  "before_receipt": {
+    "file": "/home/youmew/dev/swarm/worktrees/agent-e-2496-fd7-master-capture.log",
+    "sha256": "196ce6eec12dbc85dcfc97045d38bf2c50d1955109614ba3d6bf08c8eaf18d6f"
+  },
+  "after_receipt": {
+    "file": "/home/youmew/dev/swarm/worktrees/agent-e-2496-fd7-compiled-registry.log",
+    "sha256": "d7880d175a1cde64394b1b417646458ea0d179b0f21486526e7e03fcc2f68b8d"
+  },
+  "rows": [
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-text",
+      "before": "090583fed353fc2f55b7e51cda6707a654b516937d28b384d5129847a74cc0ca",
+      "after": "f2225b0dd3976996e67ff14fe05b2f999d0a8580c8b7a8e9712487dc9e4f1a70",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: account.ready key=account_id supplied=[]",
+        "    constructor: (no arguments)"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-json",
+      "before": "5cd6308f01a4b7e18073c109e057a5f5e64973f3b8485e75f95ff35d3cca0759",
+      "after": "40d94f764d8da951c4240e96488867ec909a8acddc9b2c7a240bce8e1bcf76a0",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2375,
+      "differences": [
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "input": "account.ready",
+              "no_arguments": false,
+              "key_field": "account_id"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-quiet",
+      "stdout_sha256": "f85a052bcd8cf6093d8e79f960f5f4389709840f2888ee176ce849e23f6dfe53",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-text",
+      "before": "090583fed353fc2f55b7e51cda6707a654b516937d28b384d5129847a74cc0ca",
+      "after": "f2225b0dd3976996e67ff14fe05b2f999d0a8580c8b7a8e9712487dc9e4f1a70",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: account.ready key=account_id supplied=[]",
+        "    constructor: (no arguments)"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-json",
+      "before": "5cd6308f01a4b7e18073c109e057a5f5e64973f3b8485e75f95ff35d3cca0759",
+      "after": "40d94f764d8da951c4240e96488867ec909a8acddc9b2c7a240bce8e1bcf76a0",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2375,
+      "differences": [
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "input": "account.ready",
+              "no_arguments": false,
+              "key_field": "account_id"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-no-color",
+      "before": "090583fed353fc2f55b7e51cda6707a654b516937d28b384d5129847a74cc0ca",
+      "after": "f2225b0dd3976996e67ff14fe05b2f999d0a8580c8b7a8e9712487dc9e4f1a70",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: account.ready key=account_id supplied=[]",
+        "    constructor: (no arguments)"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-text",
+      "stdout_sha256": "4e85f66b68b3428055ca54c5d1ff3146aeb08d4c1923d57b1efd64cb1b0c39f1",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-json",
+      "stdout_sha256": "cdd9f1199c913404f4c983cd6a88227df286be69db2028735ee6b91236fd89ee",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-quiet",
+      "stdout_sha256": "0b978d387a2f9408ea2af84988014b80e51acf3e53e239742206db0475919b0d",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-text",
+      "before": "f32013825c09fc268025e338ce975508bd0eaa40bb280b6f1a57558dea1b9597",
+      "after": "cf111366b295648d630b8b2fac53cb210422a2424b0873f7ef9151781185aa17",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: (no arguments)",
+        "    constructor: validation.requested key=validation_case_id supplied=[]"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-json",
+      "before": "89312b8c9b61aaf966d27dc4bacc525f642938595bace9404dbe86f459c98fa1",
+      "after": "f8e9030c8eed96859ad2334df3761615090096045b28c8911374f1741fcde036",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2375,
+      "differences": [
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "input": "validation.requested",
+              "no_arguments": false,
+              "key_field": "validation_case_id"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-quiet",
+      "stdout_sha256": "d86bd7c32de092910a7ca87cf00988a2216947a24d479a323ca7bd6c836a9af3",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-text",
+      "before": "f32013825c09fc268025e338ce975508bd0eaa40bb280b6f1a57558dea1b9597",
+      "after": "cf111366b295648d630b8b2fac53cb210422a2424b0873f7ef9151781185aa17",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: (no arguments)",
+        "    constructor: validation.requested key=validation_case_id supplied=[]"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-json",
+      "before": "89312b8c9b61aaf966d27dc4bacc525f642938595bace9404dbe86f459c98fa1",
+      "after": "f8e9030c8eed96859ad2334df3761615090096045b28c8911374f1741fcde036",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2375,
+      "differences": [
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "input": "validation.requested",
+              "no_arguments": false,
+              "key_field": "validation_case_id"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-no-color",
+      "before": "f32013825c09fc268025e338ce975508bd0eaa40bb280b6f1a57558dea1b9597",
+      "after": "cf111366b295648d630b8b2fac53cb210422a2424b0873f7ef9151781185aa17",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: (no arguments)",
+        "    constructor: validation.requested key=validation_case_id supplied=[]"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-text",
+      "stdout_sha256": "68d31678f5be68a3ea45990ee04e35dcb077a4b1a49de9e73dc1beb6e3fbcd67",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-json",
+      "stdout_sha256": "638ec5e423f1f39f9c76c6b8b4d833402b5642eba3f21003a82de374a6b2eb67",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-quiet",
+      "stdout_sha256": "c6f4a60511ce8f17e6ae3c384537fb41f82c2f287d8eba09a43379fc2b83f561",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-text",
+      "before": "8b010750663ccd831f34f5f53a313ed5fc8d1344413e7a2796658e1f01aaf227",
+      "after": "47340bad5e4632e7aaa764c3eaadca16fd048585d5a2f7d2d22ba1c92987c813",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: inbound.telegram.text_message key=conversation_reference supplied=[]",
+        "    constructor: (no arguments)"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-json",
+      "before": "6460effcd97f98cddc47f092f230c300ea9f20eae3427c26804fa0f8324ca3b3",
+      "after": "d3908d064eb57633c5929a413b0232c64982d4bb0b45926531696a225ab731ec",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2375,
+      "differences": [
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "input": "inbound.telegram.text_message",
+              "no_arguments": false,
+              "key_field": "conversation_reference"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-quiet",
+      "stdout_sha256": "b835ca55bdbb1d5d61a8a29cbdd30ef63375ce387a5bdf5a60f49c659c9061d8",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-text",
+      "before": "ced2dc3a5e0c1826802800491e11a36d046779335b34f4c7839d5564fd31fafb",
+      "after": "7656569e271bd94e2289ba83a3a232e8d7918eda48ec709d61a23baff85f0eaf",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: inbound.telegram.text_message key=conversation_reference supplied=[]",
+        "    constructor: (no arguments)"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-json",
+      "before": "ea361c091c71e97d684f2179cc52599a98fd461e1eaf48f548d83b73ed77963f",
+      "after": "d0a76eca009ea345b0226fee679d5b5e28054da86b937e05ca900e6df57d146f",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2375,
+      "differences": [
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "input": "inbound.telegram.text_message",
+              "no_arguments": false,
+              "key_field": "conversation_reference"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-no-color",
+      "before": "8b010750663ccd831f34f5f53a313ed5fc8d1344413e7a2796658e1f01aaf227",
+      "after": "47340bad5e4632e7aaa764c3eaadca16fd048585d5a2f7d2d22ba1c92987c813",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: inbound.telegram.text_message key=conversation_reference supplied=[]",
+        "    constructor: (no arguments)"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-text",
+      "stdout_sha256": "5be2d5444abf97675937143f5723b788a4aba5e01b124e8a5364053dacd5a0ff",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-json",
+      "stdout_sha256": "179e7404c4aed757ef09f9a8743dd90df016565639c5335ef6c0bb2e17225e32",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-quiet",
+      "stdout_sha256": "47f733bd1d9d366934c2a518160cbba27df3b47068252025bd75df338d9b01b3",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-text",
+      "before": "6386a117b41582c82d8a842bb1e785d43efb84dfc3cad4f2a02e27b8141b84f2",
+      "after": "eddd864dab9dde753da20dbf199e82039d9fc33fb5f9054dcbe7dcd77520fc93",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: (no arguments)",
+        "    constructor: operating.report.requested key=operating_instance_id supplied=[]",
+        "    constructor: operating.reported key=portfolio_id supplied=[]",
+        "    constructor: portfolio.setup key=portfolio_id supplied=[]",
+        "    constructor: period.reported key=period_id supplied=[portfolio_id]",
+        "    constructor: period.setup key=period_id supplied=[expected_operating_ids, portfolio_id]"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-json",
+      "before": "356d5d5d5dd78239fc423854204c8ffe9a9e21cc054d5765210df854e6e19ba1",
+      "after": "aa2de796e6bf2c734cfc476305689c834cda93fd576b242623c3bb084394e53c",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2375,
+      "differences": [
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "input": "operating.report.requested",
+              "no_arguments": false,
+              "key_field": "operating_instance_id"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/2/constructors",
+          "after": [
+            {
+              "input": "operating.reported",
+              "no_arguments": false,
+              "key_field": "portfolio_id"
+            },
+            {
+              "input": "portfolio.setup",
+              "no_arguments": false,
+              "key_field": "portfolio_id"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/3/constructors",
+          "after": [
+            {
+              "input": "period.reported",
+              "no_arguments": false,
+              "key_field": "period_id",
+              "supplied_fields": [
+                "portfolio_id"
+              ]
+            },
+            {
+              "input": "period.setup",
+              "no_arguments": false,
+              "key_field": "period_id",
+              "supplied_fields": [
+                "expected_operating_ids",
+                "portfolio_id"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-quiet",
+      "stdout_sha256": "f147f59101c21222ea26f39408f11c78fc76d827ccf2a5463a471bfeb8a3d89b",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-text",
+      "before": "a8524950e9f63fce1d5fd30bdedff82a4bebf7f0fa50193cd97b527c417db225",
+      "after": "58fc42ce0b60ee9f2aa2035191abe1b01a94398443ec2b0530cfadb2c80dea49",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: (no arguments)",
+        "    constructor: operating.report.requested key=operating_instance_id supplied=[]",
+        "    constructor: operating.reported key=portfolio_id supplied=[]",
+        "    constructor: portfolio.setup key=portfolio_id supplied=[]",
+        "    constructor: period.reported key=period_id supplied=[portfolio_id]",
+        "    constructor: period.setup key=period_id supplied=[expected_operating_ids, portfolio_id]"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-json",
+      "before": "8e5fd9514b3260c6eb872d6d9d445a7282349d90fc399c85e2935b3c361f0746",
+      "after": "035beaf40b78b95702d653e1a3e67a2e553dbbe51517942d6cff7a90a44168e9",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2375,
+      "differences": [
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "input": "operating.report.requested",
+              "no_arguments": false,
+              "key_field": "operating_instance_id"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/2/constructors",
+          "after": [
+            {
+              "input": "operating.reported",
+              "no_arguments": false,
+              "key_field": "portfolio_id"
+            },
+            {
+              "input": "portfolio.setup",
+              "no_arguments": false,
+              "key_field": "portfolio_id"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/3/constructors",
+          "after": [
+            {
+              "input": "period.reported",
+              "no_arguments": false,
+              "key_field": "period_id",
+              "supplied_fields": [
+                "portfolio_id"
+              ]
+            },
+            {
+              "input": "period.setup",
+              "no_arguments": false,
+              "key_field": "period_id",
+              "supplied_fields": [
+                "expected_operating_ids",
+                "portfolio_id"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-no-color",
+      "before": "6386a117b41582c82d8a842bb1e785d43efb84dfc3cad4f2a02e27b8141b84f2",
+      "after": "eddd864dab9dde753da20dbf199e82039d9fc33fb5f9054dcbe7dcd77520fc93",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: (no arguments)",
+        "    constructor: operating.report.requested key=operating_instance_id supplied=[]",
+        "    constructor: operating.reported key=portfolio_id supplied=[]",
+        "    constructor: portfolio.setup key=portfolio_id supplied=[]",
+        "    constructor: period.reported key=period_id supplied=[portfolio_id]",
+        "    constructor: period.setup key=period_id supplied=[expected_operating_ids, portfolio_id]"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-text",
+      "stdout_sha256": "bfead8a7c6742f825ae536c1ee1089df440966f920efed6a344c60da7e96ac0a",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-json",
+      "stdout_sha256": "6993774157618225d8ada629158d8d5501e0f6cf4bba8c2d8876441b3b9ae6ac",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-quiet",
+      "stdout_sha256": "995e660da9c0a68dead683d6cb3319333555e168e31d416e22bb9a0d3200b2ee",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-text",
+      "before": "af218c4f47b6085e771eacdedb9f76b83982c2f78e9d08069f402cd3e59a7e26",
+      "after": "33a4b71e6f4406769387230a573d45559014adf29088310ade94c709c37b1ea3",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: candidate.requested key=candidate_id supplied=[]",
+        "    constructor: (no arguments)"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-json",
+      "before": "c378f6c7f6a1e642ee9ebe6a43bcbdcb068824aa078915506ee7275aa888c4c1",
+      "after": "c7efcb90821b53d187a37934de12b478050e97b142b534edab57bcac826583e5",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2446,
+      "differences": [
+        {
+          "path": "$/workflow_version",
+          "before": "bundle-v2:sha256:14e06f956d622f01b772947bfd3787e127480720ba47a4cafc2f3d4e560abfc2",
+          "after": "bundle-v2:sha256:24725bccc90a96a1e9f4eca932806982ed2e8f70f8c8182741fdfb0eb40b8eda"
+        },
+        {
+          "path": "$/source_hash",
+          "before": "bundle-v2:sha256:14e06f956d622f01b772947bfd3787e127480720ba47a4cafc2f3d4e560abfc2",
+          "after": "bundle-v2:sha256:24725bccc90a96a1e9f4eca932806982ed2e8f70f8c8182741fdfb0eb40b8eda"
+        },
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "input": "candidate.requested",
+              "no_arguments": false,
+              "key_field": "candidate_id"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/routing_topology/consumers/1/source_line",
+          "before": 38,
+          "after": 37,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/consumers/4/source_line",
+          "before": 16,
+          "after": 15,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/consumers/12/source_line",
+          "before": 17,
+          "after": 16,
+          "source_file_before": "scout/nodes.yaml",
+          "source_file_after": "scout/nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/edges/2/consumer/source_line",
+          "before": 16,
+          "after": 15,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/edges/4/consumer/source_line",
+          "before": 17,
+          "after": 16,
+          "source_file_before": "scout/nodes.yaml",
+          "source_file_after": "scout/nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/edges/7/consumer/source_line",
+          "before": 17,
+          "after": 16,
+          "source_file_before": "scout/nodes.yaml",
+          "source_file_after": "scout/nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/edges/13/consumer/source_line",
+          "before": 38,
+          "after": 37,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        }
+      ]
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-quiet",
+      "stdout_sha256": "c03cabee0165f30ac763f02c5847daad03931c4060393137d882d68e9e2a7012",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-text",
+      "before": "206f349dae45fa48534f5591439cdb18aab7f6be1d3785ee72763c9486aabd63",
+      "after": "00d588772cdd0681bb0fcae4926dddf71210229b659f492161c836ffcd9cf704",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: candidate.requested key=candidate_id supplied=[]",
+        "    constructor: (no arguments)",
+        "      - collecting -> scouting (handler.advances_to Lg.c2VhcmNoLWludGFrZQ on search.requested)",
+        "      - scouting -> scouting (handler.advances_to Lg.c2VhcmNoLWludGFrZQ on search.requested)",
+        "      - active -> active (handler.advances_to c2NvdXQ.c2NvdXQtaW50YWtl on scout.requested)"
+      ],
+      "constructor_only": false
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-json",
+      "before": "d17f87f0911b37c1bc7a24814429ee6bae2668fe2ffb9b1b8102eff96344ef5a",
+      "after": "f9b865072ce46b8820e5714d95b66c8331f0b574b4d652f1c3da09948b430156",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 2446,
+      "differences": [
+        {
+          "path": "$/workflow_version",
+          "before": "bundle-v2:sha256:14e06f956d622f01b772947bfd3787e127480720ba47a4cafc2f3d4e560abfc2",
+          "after": "bundle-v2:sha256:24725bccc90a96a1e9f4eca932806982ed2e8f70f8c8182741fdfb0eb40b8eda"
+        },
+        {
+          "path": "$/source_hash",
+          "before": "bundle-v2:sha256:14e06f956d622f01b772947bfd3787e127480720ba47a4cafc2f3d4e560abfc2",
+          "after": "bundle-v2:sha256:24725bccc90a96a1e9f4eca932806982ed2e8f70f8c8182741fdfb0eb40b8eda"
+        },
+        {
+          "path": "$/root/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/flows/0/constructors",
+          "after": [
+            {
+              "input": "candidate.requested",
+              "no_arguments": false,
+              "key_field": "candidate_id"
+            }
+          ]
+        },
+        {
+          "path": "$/flows/1/constructors",
+          "after": [
+            {
+              "no_arguments": true
+            }
+          ]
+        },
+        {
+          "path": "$/stage_graphs/0/edges",
+          "removed": [],
+          "added": [
+            {
+              "from": [
+                "collecting"
+              ],
+              "to": "scouting",
+              "source": "handler.advances_to",
+              "node_id": "Lg.c2VhcmNoLWludGFrZQ",
+              "handler_event": "search.requested",
+              "event_type": "search.requested"
+            },
+            {
+              "from": [
+                "scouting"
+              ],
+              "to": "scouting",
+              "source": "handler.advances_to",
+              "node_id": "Lg.c2VhcmNoLWludGFrZQ",
+              "handler_event": "search.requested",
+              "event_type": "search.requested"
+            }
+          ],
+          "order_unchanged_for_retained_edges": true
+        },
+        {
+          "path": "$/stage_graphs/2/edges",
+          "removed": [],
+          "added": [
+            {
+              "from": [
+                "active"
+              ],
+              "to": "active",
+              "source": "handler.advances_to",
+              "node_id": "c2NvdXQ.c2NvdXQtaW50YWtl",
+              "handler_event": "scout.requested",
+              "event_type": "scout.requested"
+            }
+          ],
+          "order_unchanged_for_retained_edges": true
+        },
+        {
+          "path": "$/routing_topology/consumers/1/source_line",
+          "before": 38,
+          "after": 37,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/consumers/4/source_line",
+          "before": 16,
+          "after": 15,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/consumers/12/source_line",
+          "before": 17,
+          "after": 16,
+          "source_file_before": "scout/nodes.yaml",
+          "source_file_after": "scout/nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/edges/2/consumer/source_line",
+          "before": 16,
+          "after": 15,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/edges/4/consumer/source_line",
+          "before": 17,
+          "after": 16,
+          "source_file_before": "scout/nodes.yaml",
+          "source_file_after": "scout/nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/edges/7/consumer/source_line",
+          "before": 17,
+          "after": 16,
+          "source_file_before": "scout/nodes.yaml",
+          "source_file_after": "scout/nodes.yaml"
+        },
+        {
+          "path": "$/routing_topology/edges/13/consumer/source_line",
+          "before": 38,
+          "after": 37,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        }
+      ]
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-no-color",
+      "before": "af218c4f47b6085e771eacdedb9f76b83982c2f78e9d08069f402cd3e59a7e26",
+      "after": "33a4b71e6f4406769387230a573d45559014adf29088310ade94c709c37b1ea3",
+      "removed_lines": [],
+      "added_lines": [
+        "root constructor: (no arguments)",
+        "    constructor: candidate.requested key=candidate_id supplied=[]",
+        "    constructor: (no arguments)"
+      ],
+      "constructor_only": true
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-text",
+      "stdout_sha256": "1b5fc30037ca171c7d94ff4c8719020e836bc3a9738badf6d2730a3ecbe13b1b",
+      "disposition": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-json",
+      "before": "66657ffd552bf164408ada1094026268e10cff40b748160bb91222efbfbd2ce6",
+      "after": "20c679a9e1947d5ea64d2735281ab90ad7905a3188ea51a693b6aaf2c81ba7dc",
+      "provenance_disposition": "Every changed source filename equals the actual spec digest replacement; changed lines use the exact git-diff source mapping except the explicitly recorded authorized typed-point DDL replacement.",
+      "verified_provenance_changes": 0,
+      "differences": [
+        {
+          "path": "$/consumers/1/source_line",
+          "before": 38,
+          "after": 37,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        },
+        {
+          "path": "$/consumers/4/source_line",
+          "before": 16,
+          "after": 15,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        },
+        {
+          "path": "$/consumers/12/source_line",
+          "before": 17,
+          "after": 16,
+          "source_file_before": "scout/nodes.yaml",
+          "source_file_after": "scout/nodes.yaml"
+        },
+        {
+          "path": "$/edges/2/consumer/source_line",
+          "before": 16,
+          "after": 15,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        },
+        {
+          "path": "$/edges/4/consumer/source_line",
+          "before": 17,
+          "after": 16,
+          "source_file_before": "scout/nodes.yaml",
+          "source_file_after": "scout/nodes.yaml"
+        },
+        {
+          "path": "$/edges/7/consumer/source_line",
+          "before": 17,
+          "after": 16,
+          "source_file_before": "scout/nodes.yaml",
+          "source_file_after": "scout/nodes.yaml"
+        },
+        {
+          "path": "$/edges/13/consumer/source_line",
+          "before": 38,
+          "after": 37,
+          "source_file_before": "nodes.yaml",
+          "source_file_after": "nodes.yaml"
+        }
+      ]
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-quiet",
+      "stdout_sha256": "9511636c853ebd7b3f45207c6de487346217f313816b7d7bceb617bca2b70289",
+      "disposition": "unchanged"
+    }
+  ],
+  "full_comparison_sha256": "ba3a6ca6c6825c2de66b4a581f8fc08d5ceaff4cd1f57b0daf931264cfd6e900",
+  "full_comparison_evidence": "swarm-docs: docs/audits/evidence/2496-rebased/0c4961208-fd7-describe-comparison.json.gz"
+}

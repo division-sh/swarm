@@ -19,7 +19,7 @@ accounts:
 	ctx, executor := newEntityToolTestExecutorWithBundle(t, actor, bundle)
 	for _, populated := range []bool{false, true} {
 		if populated {
-			mustCreateEntityID(t, ctx, executor, map[string]any{"flow_instance": "review/inst-1", "fields": map[string]any{"metadata": map[string]any{}}})
+			seedImportedEntityForToolTest(t, ctx, map[string]any{"flow_instance": "review/inst-1", "fields": map[string]any{"metadata": map[string]any{}}})
 		}
 		for _, tool := range []string{"query_entities", "query_metrics"} {
 			for _, expression := range []string{

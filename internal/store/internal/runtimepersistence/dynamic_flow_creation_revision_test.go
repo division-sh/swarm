@@ -138,11 +138,18 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if string(gotPlan) != string(wantPlan) || !replaced.TopologyReadyAt.IsZero() {
-					t.Fatalf("replacement was not complete or retained old topology readiness: got=%s want=%s readiness=%v", gotPlan, wantPlan, replaced.TopologyReadyAt)
+				if string(gotPlan) != string(wantPlan) || replaced.Phase != current.Phase || replaced.AttemptState != "superseded" || replaced.AttemptOrdinal != current.AttemptOrdinal {
+					t.Fatalf("replacement changed installed progress before exact cleanup or retained admission: got=%s want=%s readiness=%+v", gotPlan, wantPlan, replaced)
+				}
+				if err := f.selected.VerifyDynamicFlowRuntimeActivationAttempt(ctx, f.attempt); err == nil {
+					t.Fatal("superseded source retained executable attempt authority")
 				}
 				if err := f.selected.RetireDynamicFlowRuntimeActivationAttempt(ctx, f.attempt); err != nil {
 					t.Fatalf("settle superseded creation attempt: %v", err)
+				}
+				settled := load()
+				if settled.Phase != replaced.Phase || settled.AttemptState != "retired" || settled.AttemptOrdinal != replaced.AttemptOrdinal {
+					t.Fatalf("retirement changed predecessor progress or failed to settle it: %+v", settled)
 				}
 				sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: source.BundleHash()}}, nil)
 				if err != nil {
@@ -169,12 +176,16 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(ctx, desired, replaced.PlanRevision, binding)
+				admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(desired, settled.AttemptOrdinal, settled.AttemptState, binding))
 				if err != nil || !admitted.Acknowledged {
 					t.Fatalf("admit revised activation: %+v err=%v", admitted, err)
 				}
 				f.attempt = admitted.Attempt
-				if committed, err := f.workflow.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, f.attempt, desired, time.Now().UTC()); err != nil || !committed.Acknowledged {
+				successor := load()
+				if successor.Phase != runtimepipeline.FlowAttachmentPlanned || successor.AttemptState != "accepted" || successor.AttemptOrdinal != settled.AttemptOrdinal+1 || f.attempt.Ordinal() != successor.AttemptOrdinal {
+					t.Fatalf("admission did not mint one fresh planned successor: %+v", successor)
+				}
+				if committed, err := completeFlowAttachmentFixture(ctx, f.workflow, f.attempt, time.Now().UTC()); err != nil || !committed.Acknowledged {
 					t.Fatalf("revised topology: %v", err)
 				}
 				if oldPublished {

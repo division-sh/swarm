@@ -111,10 +111,10 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 							t.Fatal(err)
 						}
 					}
-					seedWorkflowTargetStateForTransition(t, backend.name, fixture.db, runID, runID, runID, "pending", 1, at)
-					if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET entity_type='root' WHERE run_id=$1`, runID); err != nil {
-						t.Fatal(err)
-					}
+					constructed := commitPreparedWorkflowAggregateFixture(t, ctx, fixture.store.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
+						InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "root", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+						Mode: "static", StageDefined: true, CurrentState: "pending", Fields: map[string]any{}, CreatedAt: at, EnteredStageAt: at,
+					}, at)
 					routeID := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runID}
 					route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(routeID)}
 					triggerPayload := map[string]any{"items": []string{"one", "two"}}
@@ -166,7 +166,10 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						t.Fatal(err)
 					}
 					barrier := fanoutbarrier.Registration{IntentKey: intent.Key, PlanRef: intent.PlanRef, Handle: handle, Route: intent.Capsule.Route, EntityID: runID, RoutingSource: controlSource, ExecutionMode: trigger.ExecutionMode(), CreatedAt: at}
-					record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "pending", 1, at)
+					record := constructed
+					record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+					record.ExpectedState, record.ExpectedRevision = "pending", 1
+					record.UpdatedAt = at.Add(time.Second)
 					record.CurrentState, record.EntityType, record.Mode = "review", "root", "static"
 					record.Accumulator = json.RawMessage(forkTestJSON(t, buckets))
 					beforeUnsafe := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")

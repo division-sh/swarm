@@ -46,7 +46,8 @@ func TestRecoveredSelectedReceiverConfigPreservesNumericKinds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			route := flowidentity.RouteForInstancePath("worker-flow/one")
 			state := runfork.RunForkSelectedContractWorkflowState{
-				Route: route, EntityID: "entity-one", EntityType: "worker", FlowID: "worker-flow",
+				AddressKind: runfork.RunForkSelectedContractWorkflowStateExact,
+				Route:       route, EntityID: "entity-one", EntityType: "worker", FlowID: "worker-flow",
 				WorkflowVersion: "version-one", Mode: "template", Config: map[string]any{"value": tc.sealed},
 			}
 			reader := &receiverConfigRecoveryReader{instance: pipeline.WorkflowInstance{

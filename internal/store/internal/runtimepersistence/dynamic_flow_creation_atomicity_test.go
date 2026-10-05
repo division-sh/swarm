@@ -28,6 +28,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -44,6 +45,8 @@ type dynamicFlowCreationAtomicityStore interface {
 	sourceartifactfixture.Writer
 	externalStoreTestDurableEventBusStore
 	runtimepipeline.WorkflowPersistenceOwner
+	runtimebus.FlowInstanceActivationCommitOwner
+	runtimemanager.ManagerPersistence
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
 	decisioncard.Store
@@ -143,11 +146,11 @@ func TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores(t
 			if err != nil || !found {
 				t.Fatalf("load successor plan: found=%v err=%v", found, err)
 			}
-			admitted, err := fixture.selected.BeginDynamicFlowRuntimeActivation(fixture.ctx, readiness.Plan, readiness.PlanRevision, fixture.attempt.ProcessBinding())
+			admitted, err := fixture.selected.BeginDynamicFlowRuntimeActivation(fixture.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, fixture.attempt.ProcessBinding()))
 			if err != nil || !admitted.Acknowledged || admitted.Attempt.ID() == stale.attempt.ID() {
 				t.Fatalf("admit same-plan successor: result=%+v err=%v", admitted, err)
 			}
-			if ready, err := fixture.workflow.MarkDynamicFlowRuntimeTopologyReadyForAttempt(fixture.ctx, admitted.Attempt, fixture.plan, time.Now().UTC()); err != nil || !ready.Acknowledged {
+			if ready, err := completeFlowAttachmentFixture(fixture.ctx, fixture.workflow, admitted.Attempt, time.Now().UTC()); err != nil || !ready.Acknowledged {
 				t.Fatalf("complete successor topology: ready=%+v err=%v", ready, err)
 			}
 			if err := stale.commit(); err == nil || !strings.Contains(err.Error(), "no longer current") {
@@ -160,6 +163,62 @@ func TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores(t
 			}
 			fixture.assertOccurrenceCounts(t, 1)
 		})
+	}
+}
+
+func TestDynamicFlowCreationSourceSetRebindBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, emitted := range []bool{false, true} {
+			name := "pending"
+			if emitted {
+				name = "emitted"
+			}
+			t.Run(backend+"/"+name, func(t *testing.T) {
+				f := newDynamicFlowCreationAtomicityFixture(t, backend)
+				if emitted {
+					if err := f.commit(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				before, found, err := f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
+				if err != nil || !found {
+					t.Fatalf("readiness before rebind: found=%v err=%v", found, err)
+				}
+				evidence, err := f.grant.Evidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				successor, err := f.process.IssueGenerationGrant(f.ctx, runtimestartupownership.GrantRequest{BundleHash: evidence.BundleHash, RuntimeInstanceID: evidence.RuntimeInstanceID, RuntimeGeneration: evidence.RuntimeGeneration + 1, SourceSetRevision: evidence.SourceSetRevision})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := successor.MarkProbesSettled(f.ctx, nil); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := successor.AdmitExecution(f.ctx); err != nil {
+					t.Fatal(err)
+				}
+				result, err := successor.(runtimemanager.FlowReadinessSourceSetRebindPersistence).RebindFlowReadinessSourceSet(f.ctx, runtimemanager.FlowReadinessSourceSetRebindRequest{Attempt: f.attempt, PlanHash: before.PlanHash})
+				if err != nil || result.Attempt.ID() != f.attempt.ID() {
+					t.Fatalf("rebind ready creation: %+v %v", result, err)
+				}
+				if err := f.grant.Retire(f.ctx); err != nil {
+					t.Fatal(err)
+				}
+				after, _, err := f.selected.LoadDynamicFlowRuntimeReadiness(f.ctx, f.runID, f.plan.Identity.Route())
+				if err != nil || after.Phase != before.Phase || after.AttemptOrdinal != before.AttemptOrdinal || !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
+					t.Fatalf("rebind repeated creation: before=%+v after=%+v err=%v", before, after, err)
+				}
+				if err := f.commit(); err == nil {
+					t.Fatal("retired writer repeated creation work")
+				}
+				f.attempt = result.Attempt
+				if err := f.commit(); err != nil {
+					t.Fatal(err)
+				}
+				f.assertOccurrenceCounts(t, 1)
+			})
+		}
 	}
 }
 
@@ -187,35 +246,25 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		t.Fatalf("unknown backend %q", backend)
 	}
 
+	bundle := dynamicFlowCreationAtomicityBundle(t)
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-	sourceFact := mustExternalStoreTestSourceArtifactFact()
+	ctx := runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(context.Background(), sourceFact), runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
+	ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
 	bundleHash := sourceFact.BundleHash()
 	if sqlite {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash})
+		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash, Artifact: bundle.SourceArtifact})
 	} else {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, Artifact: bundle.SourceArtifact})
 	}
 
-	bundle := dynamicFlowCreationAtomicityBundle(t)
 	occurredAt := time.Now().UTC().Truncate(time.Microsecond)
 	identity := runtimeflowidentity.Instance{
 		TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
 		InstancePath: "review/inst-1", EntityID: uuid.NewString(), HasStoredPath: true,
-	}
-	plan := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-		Identity: identity, RunID: runID,
-		BundleHash: bundleHash, WorkflowVersion: bundle.Semantics.Version, ExecutionMode: executionmode.Live,
-		CreationEvent: &runtimepipeline.DynamicFlowRuntimeCreationEventPlan{
-			EventID: uuid.NewString(), EventType: "review/inst-1/task.started",
-			RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,
-			Payload: []byte(`{"name":"alpha"}`), CreatedAt: occurredAt,
-		},
-	}
-	event, err := dynamicFlowCreationAtomicityEvent(plan)
-	if err != nil {
-		t.Fatalf("build creation event: %v", err)
 	}
 	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 	if !ok {
@@ -257,7 +306,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	})
 
 	parent := eventtest.ExistingRunRootIngress(
-		plan.CreationEvent.ParentEventID,
+		uuid.NewString(),
 		events.EventType("test.dynamic_flow.triggered"),
 		"",
 		runID,
@@ -265,19 +314,31 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		0,
 		runID,
 		events.EventEnvelope{},
-		occurredAt.Add(-time.Second),
+		occurredAt,
 	)
 	if err := eventBus.Publish(ctx, parent); err != nil {
 		t.Fatalf("publish causal parent: %v", err)
 	}
-	result, err := workflow.MaterializeInitialEntry(ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Route()}, runtimepipeline.WorkflowInstance{
-		InstanceID: "inst-1", StorageRef: identity.InstancePath, EntityID: identity.EntityID, WorkflowName: identity.TemplateID,
-		WorkflowVersion: bundle.Semantics.Version, RuntimeReadiness: &plan, CurrentState: "pending",
-		Config:     map[string]any{"name": "alpha"},
-		EntityType: "test_entity",
-	}, occurredAt)
-	if err != nil || result != runtimepipeline.WorkflowInitialMaterializationCreated {
-		t.Fatalf("materialize readiness: result=%d err=%v", result, err)
+	am := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: sourceFact,
+		SemanticSource: semanticview.Wrap(bundle), WorkflowInstances: workflow, DeliveryStore: selected,
+		WorkOwner: storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
+	}, selected))
+	activation, err := am.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(bundle), Instance: identity, Config: map[string]any{"name": "alpha"},
+		ConstructorInput: "task.started", ResolvedKey: "alpha", TriggerEvent: parent, OccurredAt: occurredAt,
+	})
+	if err != nil {
+		t.Fatalf("prepare canonical constructor: %v", err)
+	}
+	result, err := eventBus.CommitFlowInstanceActivation(ctx, activation)
+	if err != nil || !result.Acknowledged || !result.Created {
+		t.Fatalf("canonical constructor commit: %+v %v", result, err)
+	}
+	plan := activation.Readiness
+	event, err := dynamicFlowCreationAtomicityEvent(plan)
+	if err != nil {
+		t.Fatalf("build creation event: %v", err)
 	}
 	readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, identity.Route())
 	if err != nil || !found {
@@ -310,11 +371,11 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil {
 		t.Fatal(err)
 	}
-	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.PlanRevision, binding)
+	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
 	if err != nil || !admitted.Acknowledged {
 		t.Fatalf("begin creation activation: admitted=%+v err=%v", admitted, err)
 	}
-	if committed, err := workflow.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, admitted.Attempt, plan, occurredAt.Add(time.Second)); err != nil || !committed.Acknowledged {
+	if committed, err := completeFlowAttachmentFixture(ctx, workflow, admitted.Attempt, occurredAt.Add(time.Second)); err != nil || !committed.Acknowledged {
 		t.Fatalf("mark topology ready: %v", err)
 	}
 	return dynamicFlowCreationAtomicityFixture{
@@ -330,7 +391,7 @@ func dynamicFlowCreationAtomicityBundle(t *testing.T) *runtimecontracts.Workflow
 	root := t.TempDir()
 	for name, content := range map[string]string{
 		"schema.yaml":          "name: dynamic-creation-proof\n",
-		"review/schema.yaml":   "name: review\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    - task.started\nauto_emit_on_create:\n  event: task.started\n",
+		"review/schema.yaml":   "name: review\ninstance: name\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    - task.started\nauto_emit_on_create:\n  event: task.started\n",
 		"review/entities.yaml": "test_entity:\n  name: text\n",
 		"review/events.yaml":   "task.started:\n  name: text\n",
 	} {

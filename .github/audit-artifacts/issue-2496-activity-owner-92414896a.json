@@ -1,0 +1,921 @@
+{
+  "schema": 1,
+  "source_head": "92414896a",
+  "source_boundary": "Production Go, spec and test inputs were frozen at 92414896a before this command acquired capacity. Concurrent edits only changed audit documents/receipts and the separately measured complexity inventory, none consumed by these packages. No final default or hosted exact-head credit is claimed.",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "command": "go run ./cmd/swarm-test -- ./internal/runtime/pipeline ./internal/runtime/runforkexecution ./internal/serveapp -json -race -count=1 -run '^(TestReadOnlyActivityConsumesConstructedParentBeforeGeneration|TestLoopActivityRequestResultAndForkCarryGeneration|TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent|TestActivityBoringProof.*|TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer|Test(Mock)?Activity(SelectedFork)?SemanticResultExecutionParity|TestServedGeneratedActivityPublicationBothStores)$'",
+  "receipt": "/tmp/agent-e-2496-activity-owner-matrix-v1.log",
+  "receipt_sha256": "13a2c4fa758a3a08e996d91a937622526b36571d6b9900533a5409de6c5f4708",
+  "exit_code": 0,
+  "first_test_event": "2026-10-03T06:40:01.956899166Z",
+  "last_test_event": "2026-10-03T06:45:30.978044919Z",
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "action": "pass",
+      "elapsed": 11.468
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "action": "pass",
+      "elapsed": 21.974
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "action": "pass",
+      "elapsed": 298.616
+    }
+  ],
+  "root_count": 15,
+  "named_subtest_count": 132,
+  "fail_count": 0,
+  "skip_count": 0,
+  "root_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReusesRecordedResult",
+      "action": "pass",
+      "elapsed": 6.74
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultCompletesOncePostgres",
+      "action": "pass",
+      "elapsed": 0.75
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdentity",
+      "action": "pass",
+      "elapsed": 1.17
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofDuplicateRequestReusesRecordedReadResult",
+      "action": "pass",
+      "elapsed": 0.63
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentity",
+      "action": "pass",
+      "elapsed": 0.59
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofRetryIsBoundedAndTraced",
+      "action": "pass",
+      "elapsed": 0.36
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofRuntimeLogFailureDoesNotBlockReadOnlyActivity",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReadOnlyActivityConsumesConstructedParentBeforeGeneration",
+      "action": "pass",
+      "elapsed": 0.12
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestLoopActivityRequestResultAndForkCarryGeneration",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer",
+      "action": "pass",
+      "elapsed": 20.91
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores",
+      "action": "pass",
+      "elapsed": 240.58
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestActivitySemanticResultExecutionParity",
+      "action": "pass",
+      "elapsed": 16.77
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestMockActivitySemanticResultExecutionParity",
+      "action": "pass",
+      "elapsed": 15.13
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestMockActivitySelectedForkSemanticResultExecutionParity",
+      "action": "pass",
+      "elapsed": 25.06
+    }
+  ],
+  "named_cells": [
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReusesRecordedResult/sqlite",
+      "action": "pass",
+      "elapsed": 2.3
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReusesRecordedResult/postgres",
+      "action": "pass",
+      "elapsed": 4.44
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdentity/sqlite",
+      "action": "pass",
+      "elapsed": 0.63
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdentity/postgres",
+      "action": "pass",
+      "elapsed": 0.54
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofDuplicateRequestReusesRecordedReadResult/sqlite",
+      "action": "pass",
+      "elapsed": 0.18
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofDuplicateRequestReusesRecordedReadResult/postgres",
+      "action": "pass",
+      "elapsed": 0.44
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentity/sqlite",
+      "action": "pass",
+      "elapsed": 0.34
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentity/postgres",
+      "action": "pass",
+      "elapsed": 0.25
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofRetryIsBoundedAndTraced/sqlite",
+      "action": "pass",
+      "elapsed": 0.12
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestActivityBoringProofRetryIsBoundedAndTraced/postgres",
+      "action": "pass",
+      "elapsed": 0.24
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReadOnlyActivityConsumesConstructedParentBeforeGeneration/exact",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReadOnlyActivityConsumesConstructedParentBeforeGeneration/missing",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReadOnlyActivityConsumesConstructedParentBeforeGeneration/foreign_run",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReadOnlyActivityConsumesConstructedParentBeforeGeneration/foreign_flow",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReadOnlyActivityConsumesConstructedParentBeforeGeneration/foreign_entity",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReadOnlyActivityConsumesConstructedParentBeforeGeneration/missing_parent",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReadOnlyActivityConsumesConstructedParentBeforeGeneration/crossed_parent",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReadOnlyActivityConsumesConstructedParentBeforeGeneration/stale_generation",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/sqlite/manual_confirmation_does_not_authorize_another_write",
+      "action": "pass",
+      "elapsed": 0.89
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/sqlite/read-only_reexecutes_exactly_once",
+      "action": "pass",
+      "elapsed": 1.92
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/sqlite/succeeded_write_publishes_recorded_result",
+      "action": "pass",
+      "elapsed": 1.99
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/sqlite/failed_write_publishes_recorded_typed_failure",
+      "action": "pass",
+      "elapsed": 1.5
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/sqlite/uncertain_write_stays_uncertain_and_publishes_outcome-uncertain_failure",
+      "action": "pass",
+      "elapsed": 1.57
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/sqlite",
+      "action": "pass",
+      "elapsed": 12.05
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/postgres/manual_confirmation_does_not_authorize_another_write",
+      "action": "pass",
+      "elapsed": 0.45
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/postgres/read-only_reexecutes_exactly_once",
+      "action": "pass",
+      "elapsed": 0.61
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/postgres/succeeded_write_publishes_recorded_result",
+      "action": "pass",
+      "elapsed": 0.98
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/postgres/failed_write_publishes_recorded_typed_failure",
+      "action": "pass",
+      "elapsed": 0.69
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/postgres/uncertain_write_stays_uncertain_and_publishes_outcome-uncertain_failure",
+      "action": "pass",
+      "elapsed": 0.61
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer/postgres",
+      "action": "pass",
+      "elapsed": 8.86
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/read/success",
+      "action": "pass",
+      "elapsed": 2.25
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/read/exhausted",
+      "action": "pass",
+      "elapsed": 2.4
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/read/restart/success",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/read/restart/exhausted",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/read",
+      "action": "pass",
+      "elapsed": 19.63
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/approval/approve",
+      "action": "pass",
+      "elapsed": 2.76
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/approval/revise",
+      "action": "pass",
+      "elapsed": 2.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/approval/reject",
+      "action": "pass",
+      "elapsed": 2.13
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/approval/restart/approve",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/approval/restart/revise",
+      "action": "pass",
+      "elapsed": 0.05
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/approval/restart/reject",
+      "action": "pass",
+      "elapsed": 0.05
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/root/approval",
+      "action": "pass",
+      "elapsed": 20.92
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/read/success",
+      "action": "pass",
+      "elapsed": 1.73
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/read/exhausted",
+      "action": "pass",
+      "elapsed": 1.92
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/read/restart/success",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/read/restart/exhausted",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/read",
+      "action": "pass",
+      "elapsed": 13.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/approval/approve",
+      "action": "pass",
+      "elapsed": 2.35
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/approval/revise",
+      "action": "pass",
+      "elapsed": 2.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/approval/reject",
+      "action": "pass",
+      "elapsed": 2.3
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/approval/restart/approve",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/approval/restart/revise",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/approval/restart/reject",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/static/approval",
+      "action": "pass",
+      "elapsed": 20.16
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/read/success",
+      "action": "pass",
+      "elapsed": 2.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/read/exhausted",
+      "action": "pass",
+      "elapsed": 2.24
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/read/restart/success",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/read/restart/exhausted",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/read",
+      "action": "pass",
+      "elapsed": 14.39
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/approval/approve",
+      "action": "pass",
+      "elapsed": 2.67
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/approval/revise",
+      "action": "pass",
+      "elapsed": 2.46
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/approval/reject",
+      "action": "pass",
+      "elapsed": 2.47
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/approval/restart/approve",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/approval/restart/revise",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/approval/restart/reject",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/template/approval",
+      "action": "pass",
+      "elapsed": 21.74
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/read/success",
+      "action": "pass",
+      "elapsed": 2.31
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/read/exhausted",
+      "action": "pass",
+      "elapsed": 2.47
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/read/restart/success",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/read/restart/exhausted",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/read",
+      "action": "pass",
+      "elapsed": 14.93
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/approval/approve",
+      "action": "pass",
+      "elapsed": 2.83
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/approval/revise",
+      "action": "pass",
+      "elapsed": 2.8
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/approval/reject",
+      "action": "pass",
+      "elapsed": 3.16
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/approval/restart/approve",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/approval/restart/revise",
+      "action": "pass",
+      "elapsed": 0.05
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/approval/restart/reject",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/sqlite/nested_template/approval",
+      "action": "pass",
+      "elapsed": 23.55
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/read/success",
+      "action": "pass",
+      "elapsed": 0.43
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/read/exhausted",
+      "action": "pass",
+      "elapsed": 0.5
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/read/restart/success",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/read/restart/exhausted",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/read",
+      "action": "pass",
+      "elapsed": 11.15
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/approval/approve",
+      "action": "pass",
+      "elapsed": 0.83
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/approval/revise",
+      "action": "pass",
+      "elapsed": 0.65
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/approval/reject",
+      "action": "pass",
+      "elapsed": 0.6
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/approval/restart/approve",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/approval/restart/revise",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/approval/restart/reject",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/root/approval",
+      "action": "pass",
+      "elapsed": 12.28
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/read/success",
+      "action": "pass",
+      "elapsed": 0.56
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/read/exhausted",
+      "action": "pass",
+      "elapsed": 0.61
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/read/restart/success",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/read/restart/exhausted",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/read",
+      "action": "pass",
+      "elapsed": 9.23
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/approval/approve",
+      "action": "pass",
+      "elapsed": 0.76
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/approval/revise",
+      "action": "pass",
+      "elapsed": 0.64
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/approval/reject",
+      "action": "pass",
+      "elapsed": 0.64
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/approval/restart/approve",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/approval/restart/revise",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/approval/restart/reject",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/static/approval",
+      "action": "pass",
+      "elapsed": 13.11
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/read/success",
+      "action": "pass",
+      "elapsed": 0.62
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/read/exhausted",
+      "action": "pass",
+      "elapsed": 0.64
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/read/restart/success",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/read/restart/exhausted",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/read",
+      "action": "pass",
+      "elapsed": 8.93
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/approval/approve",
+      "action": "pass",
+      "elapsed": 0.82
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/approval/revise",
+      "action": "pass",
+      "elapsed": 0.73
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/approval/reject",
+      "action": "pass",
+      "elapsed": 0.7
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/approval/restart/approve",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/approval/restart/revise",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/approval/restart/reject",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/template/approval",
+      "action": "pass",
+      "elapsed": 13.68
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/read/success",
+      "action": "pass",
+      "elapsed": 0.66
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/read/exhausted",
+      "action": "pass",
+      "elapsed": 0.67
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/read/restart/success",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/read/restart/exhausted",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/read",
+      "action": "pass",
+      "elapsed": 9.14
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/approval/approve",
+      "action": "pass",
+      "elapsed": 0.87
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/approval/revise",
+      "action": "pass",
+      "elapsed": 0.75
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/approval/reject",
+      "action": "pass",
+      "elapsed": 0.74
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/approval/restart/approve",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/approval/restart/revise",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/approval/restart/reject",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestServedGeneratedActivityPublicationBothStores/postgres/nested_template/approval",
+      "action": "pass",
+      "elapsed": 14.55
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestActivitySemanticResultExecutionParity/default_sqlite",
+      "action": "pass",
+      "elapsed": 10.13
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestActivitySemanticResultExecutionParity/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.64
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestMockActivitySemanticResultExecutionParity/default_sqlite",
+      "action": "pass",
+      "elapsed": 8.99
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestMockActivitySemanticResultExecutionParity/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.14
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestMockActivitySelectedForkSemanticResultExecutionParity/default_sqlite",
+      "action": "pass",
+      "elapsed": 14.91
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestMockActivitySelectedForkSemanticResultExecutionParity/explicit_postgres",
+      "action": "pass",
+      "elapsed": 10.16
+    }
+  ],
+  "failures": [],
+  "skipped": []
+}

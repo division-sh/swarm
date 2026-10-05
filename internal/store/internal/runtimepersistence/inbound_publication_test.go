@@ -121,8 +121,8 @@ func runInboundPublicationProofMutation(t *testing.T, store inboundPublicationPr
 			return runtimeinbound.Record{}, errors.New("selected-store inbound publication did not acknowledge commit")
 		}
 		for index, publication := range result.Publications {
-			if publication.Acknowledged {
-				return runtimeinbound.Record{}, fmt.Errorf("transaction-local inbound publication %d claims commit acknowledgement", index)
+			if !publication.Acknowledged {
+				return runtimeinbound.Record{}, fmt.Errorf("committed inbound publication %d omitted commit acknowledgement", index)
 			}
 			if validationErr := publication.Validate(); validationErr != nil {
 				return runtimeinbound.Record{}, fmt.Errorf("validate committed publication %d: %w", index, validationErr)

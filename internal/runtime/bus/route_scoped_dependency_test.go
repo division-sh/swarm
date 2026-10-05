@@ -38,7 +38,7 @@ func TestCompiledRouteDependenciesPreserveCrossInstanceObserverInBothCreationOrd
 				rt.addTemplateSourceObserverLocked(observer)
 			}
 			for _, owner := range owners {
-				rt.instanceOwners[owner] = owner
+				rt.instanceOwners[owner] = runtimeflowidentity.Stored(nil, owner.Route.ScopeKey, owner.Route.InstancePath, owner.Route.InstanceID, runtimeflowidentity.EntityID(owner.Route.InstancePath), "")
 				rt.materializeTemplateSourceObserversLocked(owner)
 			}
 			if !observerFirst {
@@ -78,7 +78,7 @@ func TestObserverRouteReplacementRetainsOlderProducerFamilies(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			rt := newRouteTableWithGraph(nil, runtimepinrouting.CompiledConnectGraph{})
 			observerOwner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("observer", "one"))
-			rt.instanceOwners[observerOwner] = observerOwner
+			rt.instanceOwners[observerOwner] = runtimeflowidentity.Stored(nil, observerOwner.Route.ScopeKey, observerOwner.Route.InstancePath, observerOwner.Route.InstanceID, runtimeflowidentity.EntityID(observerOwner.Route.InstancePath), "")
 			for _, source := range []struct{ flow, event string }{{"producer", "work.ready"}, {"other", "other.ready"}} {
 				observe := routeTemplateSourceObserver{
 					RunID: busInternalTestRunID, SourceTemplatePath: source.flow, SourceLocalEvent: source.event,
@@ -91,7 +91,7 @@ func TestObserverRouteReplacementRetainsOlderProducerFamilies(t *testing.T) {
 			}
 			addProducer := func(flow, id, event string) {
 				owner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute(flow, id))
-				rt.instanceOwners[owner] = owner
+				rt.instanceOwners[owner] = runtimeflowidentity.Stored(nil, owner.Route.ScopeKey, owner.Route.InstancePath, owner.Route.InstanceID, runtimeflowidentity.EntityID(owner.Route.InstancePath), "")
 				rt.eventPath[owner.Route.InstancePath+"/"+event] = struct{}{}
 				rt.materializeTemplateSourceObserversLocked(owner)
 			}

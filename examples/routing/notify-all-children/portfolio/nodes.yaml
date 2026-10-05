@@ -8,7 +8,6 @@ portfolio-coordinator:
     - portfolio.notify.requested
   event_handlers:
     portfolio.opened:
-      create_entity: true
       data_accumulation:
         writes:
           - source_field: portfolio_id

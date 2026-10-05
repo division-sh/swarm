@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -186,5 +187,133 @@ func TestDoubleRetainsDeliveryAfterResponseLoss(t *testing.T) {
 	}
 	if registrations, confirmations := provider.OnboardingCounts(); registrations != 0 || confirmations != 2 {
 		t.Fatalf("duplicate confirmations not counted: %d/%d", registrations, confirmations)
+	}
+}
+
+func TestDoubleDeliveryBarrierSelectsExactlyOneMatchingMessage(t *testing.T) {
+	provider := &Double{}
+	arrived, release := provider.PauseDeliveryResponseMatching(func(payload map[string]any) bool {
+		// Predicates may resolve persisted evidence without holding the double's lock.
+		provider.Counts()
+		return payload["text"] == "selected"
+	})
+	t.Cleanup(release)
+	send := func(text string) <-chan *httptest.ResponseRecorder {
+		response := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			body, err := json.Marshal(map[string]any{"chat_id": "42", "text": text})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			writer := httptest.NewRecorder()
+			provider.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "/botcredential/sendMessage", bytes.NewReader(body)))
+			response <- writer
+		}()
+		return response
+	}
+	wantResponse := func(response <-chan *httptest.ResponseRecorder, wantID int) {
+		t.Helper()
+		select {
+		case writer := <-response:
+			var result struct {
+				OK     bool `json:"ok"`
+				Result struct {
+					MessageID int `json:"message_id"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(writer.Body.Bytes(), &result); err != nil || !result.OK || result.Result.MessageID != wantID {
+				t.Fatalf("delivery response=%s err=%v want message=%d", writer.Body.String(), err, wantID)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("delivery response did not complete")
+		}
+	}
+	wantResponse(send("unrelated before"), 1)
+	select {
+	case id := <-arrived:
+		t.Fatalf("unmatched message %d consumed the barrier", id)
+	default:
+	}
+	selected := send("selected")
+	select {
+	case id := <-arrived:
+		if id != 2 {
+			t.Fatalf("selected message=%d want=2", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("matching message did not reach the barrier")
+	}
+	wantResponse(send("unrelated after"), 3)
+	wantResponse(send("selected"), 4)
+	select {
+	case <-selected:
+		t.Fatal("another delivery released the selected response")
+	default:
+	}
+	release()
+	release()
+	wantResponse(selected, 2)
+	if _, count := provider.Counts(); count != 4 {
+		t.Fatalf("recorded %d deliveries want=4", count)
+	}
+}
+
+func TestDoubleNextDeliveryBarrierClaimsFirstAcceptedMessage(t *testing.T) {
+	provider := &Double{}
+	arrived, release := provider.PauseNextDeliveryResponse()
+	var workers sync.WaitGroup
+	t.Cleanup(func() { release(); workers.Wait() })
+	const count = 16
+	responses := make(chan *httptest.ResponseRecorder, count)
+	start := make(chan struct{})
+	for range count {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			writer := httptest.NewRecorder()
+			provider.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "/botcredential/sendMessage", bytes.NewBufferString(`{"chat_id":"42","text":"concurrent"}`)))
+			responses <- writer
+		}()
+	}
+	close(start)
+	select {
+	case <-arrived:
+	case <-time.After(time.Second):
+		t.Fatal("first accepted delivery did not reach the barrier")
+	}
+	seen := map[int]bool{}
+	readID := func() int {
+		t.Helper()
+		select {
+		case response := <-responses:
+			var result struct {
+				Result struct {
+					MessageID int `json:"message_id"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			id := result.Result.MessageID
+			if id < 1 || id > count || seen[id] {
+				t.Fatalf("invalid or duplicate delivery %d", id)
+			}
+			seen[id] = true
+			return id
+		case <-time.After(time.Second):
+			t.Fatal("unpaused delivery did not finish")
+			return 0
+		}
+	}
+	for range count - 1 {
+		if readID() == 1 {
+			t.Fatal("first accepted delivery did not own the barrier")
+		}
+	}
+	release()
+	if id := readID(); id != 1 {
+		t.Fatalf("released message=%d want=1", id)
 	}
 }

@@ -28,32 +28,44 @@ func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.Delive
 	if err := events.ValidateDeliveryRoutes([]events.DeliveryRoute{route}); err != nil {
 		return false, err
 	}
-	scope, instance, path, err := route.AgentIdentity.ExecutionCoordinates()
-	if err != nil {
-		return false, fmt.Errorf("receiver materialization agent coordinates: %w", err)
-	}
-	if path != route.Target.Route().FlowInstance {
-		return false, fmt.Errorf("receiver materialization target contradicts exact agent coordinates")
-	}
-	flow, err := flowidentity.NewRunScopedFlowInstance(route.AgentIdentity.RunID, flowidentity.StoredRoute(scope, instance, path))
+	target := route.Target.Route()
+	flow, err := flowidentity.NewRunScopedFlowInstance(route.AgentIdentity.RunID,
+		flowidentity.StoredRoute(target.FlowID, flowidentity.LogicalInstanceID(target.FlowInstance), target.FlowInstance))
 	if err != nil {
 		return false, err
+	}
+	if !flow.MatchesAgentRoute(route.AgentIdentity) {
+		return false, fmt.Errorf("receiver materialization target contradicts exact agent coordinates")
 	}
 	entity := identity.NormalizeEntityID(route.Target.Route().EntityID)
 	record, err := loadWorkflowTargetPersistence(ctx, tx, flow, entity, sqlite)
 	if err != nil {
 		return false, err
 	}
-	if record.Presence == pipeline.WorkflowTargetPersistenceLifecycleOnly {
-		return false, fmt.Errorf("receiver lifecycle survived without its materialized state")
+	if record.Presence == pipeline.WorkflowTargetPersistenceAbsent {
+		return false, nil
 	}
-	if record.Presence == pipeline.WorkflowTargetPersistenceComplete {
-		if _, err := record.DecodeComplete(flow.Route, entity); err != nil {
+	if !record.Presence.Constructed() {
+		return false, fmt.Errorf("receiver construction persistence is incomplete")
+	}
+	if _, err := record.DecodeComplete(flow.Route, entity); err != nil {
+		return false, err
+	}
+	if record.Lifecycle.Status == "terminated" {
+		return false, fmt.Errorf("materialized receiver lifecycle has terminated")
+	}
+	if !route.Initialization.Empty() {
+		if err := route.Initialization.ValidateRoute(route); err != nil {
 			return false, err
 		}
-		if record.Lifecycle.Status == "terminated" {
-			return false, fmt.Errorf("materialized receiver lifecycle has terminated")
+		var receipt []byte
+		if err := tx.QueryRowContext(ctx, `SELECT projection FROM workflow_instance_initial_materializations
+			WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3`, flow.RunID, flow.Route.InstancePath, entity.String()).Scan(&receipt); err != nil {
+			return false, fmt.Errorf("load exact receiver construction receipt: %w", err)
+		}
+		if err := pipeline.ValidateFlowConstructionPublication(receipt, flow, entity.String(), route.Initialization.CreatingEventID()); err != nil {
+			return false, err
 		}
 	}
-	return record.Presence.HasState(), nil
+	return true, nil
 }

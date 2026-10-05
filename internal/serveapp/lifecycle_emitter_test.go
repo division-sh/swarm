@@ -37,7 +37,7 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "loop-create",
 			})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", "waiting")
+			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, started.RunID, "waiting")
 			publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 				return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": event, "run_id": started.RunID, "source_event_id": started.EventID, "payload": payload, "idempotency_key": key,

@@ -325,7 +325,7 @@ func corruptSelectedForkRecoveredReadiness(t *testing.T, ctx context.Context, h 
 	case "termination_time":
 		query, value = `UPDATE flow_instances SET terminated_at = $3 WHERE run_id = $1 AND instance_path = $2`, time.Now().UTC()
 	case "wrong_type":
-		query, value = `UPDATE entity_state SET entity_type = $3 WHERE run_id = $1 AND flow_instance = $2`, "foreign"
+		query, value = `UPDATE flow_instances SET entity_type = $3 WHERE run_id = $1 AND instance_path = $2`, "foreign"
 	case "wrong_entity":
 		query, value = `UPDATE entity_state SET entity_id = $3 WHERE run_id = $1 AND flow_instance = $2`, uuid.NewString()
 	case "wrong_workflow":

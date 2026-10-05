@@ -29,12 +29,8 @@ func TestReceiverCompositionEntitylessLocalOnwardBothStores(t *testing.T) {
 				if status != "delivered" {
 					t.Fatalf("local onward receiver failed: %s %s", node, status)
 				}
-				if node == "collector" {
-					if !owner.EntitylessReceiver() {
-						t.Fatalf("earlier entityless receiver was upgraded by later local creation: %s", raw)
-					}
-				} else if !owner.MaterializingEntity() || owner.Route().EntityID != flowidentity.EntityID("sink") {
-					t.Fatalf("local receiver lacks its own canonical materialization: %s", raw)
+				if !owner.ExistingEntity() || owner.Route() != (events.RouteIdentity{EntityID: flowidentity.EntityID("sink"), FlowInstance: "sink", FlowID: "sink"}) {
+					t.Fatalf("local receiver lost its existing constructed owner: %s", raw)
 				}
 			}
 			var raw string
@@ -45,9 +41,10 @@ func TestReceiverCompositionEntitylessLocalOnwardBothStores(t *testing.T) {
 			if err := json.Unmarshal([]byte(raw), &source); err != nil {
 				t.Fatal(err)
 			}
-			if source.FlowInstance != "sink" || source.EntityID != "" {
+			if source != (events.RouteIdentity{FlowID: "sink", FlowInstance: "sink", EntityID: flowidentity.EntityID("sink")}) {
 				t.Fatalf("local emission borrowed source state: %s", raw)
 			}
+			requireReceiverConstructedInstance(t, rt, published.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "done", published.RunID, "ready", 3, map[string]any{"result": "emitted"})
 			requireReceiverPublicReadback(t, rt, published.RunID)
 		})
 	}

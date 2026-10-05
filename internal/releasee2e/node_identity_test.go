@@ -78,9 +78,18 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 			assertSelectedRootRejectsPrivatePublication(t, process, hash, binary, base, config, token, env,
 				map[string]any{"marker": "must-not-create"}, "left/entry.left", "right/entry.right", "left/nested/entry.nested", "work.routed")
 			persisted := map[string][]goldenEvent{}
+			persistedEntities := map[string][]goldenEntitySummary{}
 			for _, scope := range []string{".", "left", "right", "left/nested"} {
 				run, events := executeNodeIdentityWork(t, process, hash, scope, "before-"+scope)
 				persisted[run] = events
+				ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
+				entities, err := readGoldenEntities(ctx, process.rpc, run)
+				cancel()
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertNodeIdentityConstructedTree(t, entities, run, scope)
+				persistedEntities[run] = entities
 				for _, event := range events {
 					if event.EventName == "entry.root" {
 						assertFullEventPayloadReadback(t, process, event, binary, base, config, token, env)
@@ -106,6 +115,10 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 				got, err := listGoldenEvents(ctx, process.rpc, run)
 				if err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("restart readback: %v\nwant %#v\ngot %#v", err, want, got)
+				}
+				entities, err := readGoldenEntities(ctx, process.rpc, run)
+				if err != nil || !reflect.DeepEqual(entities, persistedEntities[run]) {
+					t.Fatalf("restart changed the complete constructed tree: %v\nwant %#v\ngot %#v", err, persistedEntities[run], entities)
 				}
 				for _, event := range got {
 					if event.EventName == "entry.root" {
@@ -199,7 +212,9 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 				}
 			}
 		}
-		return countGoldenEvents(observed, prefix+"work.processed") == 1 && diagnosis.Run.Status == "completed" && diagnosis.TestQuiescence.Ready, nil
+		// Unselected eager children remain pending. The selected handler settles,
+		// but the complete constructed tree must not claim whole-run completion.
+		return countGoldenEvents(observed, prefix+"work.processed") == 1 && diagnosis.Run.Status == "running" && diagnosis.TestQuiescence.Ready, nil
 	})
 	if err != nil {
 		diagnosisJSON, _ := json.Marshal(diagnosis)
@@ -251,6 +266,11 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 	if count != wantCount {
 		t.Fatalf("handler execution count = %d", count)
 	}
+	entities, err := readGoldenEntities(ctx, process.rpc, admitted.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNodeIdentityConstructedTree(t, entities, admitted.RunID, scope)
 	for other := range nodeIdentityScopes {
 		if other == scope {
 			continue
@@ -278,4 +298,38 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 		t.Fatal(err)
 	}
 	return admitted.RunID, observed
+}
+
+func assertNodeIdentityConstructedTree(t *testing.T, entities []goldenEntitySummary, runID, selectedScope string) {
+	t.Helper()
+	if len(entities) != len(nodeIdentityScopes) {
+		t.Fatalf("eager constructed tree has %d instances, want %d: %+v", len(entities), len(nodeIdentityScopes), entities)
+	}
+	wanted := make(map[string]string, len(nodeIdentityScopes))
+	entityIDs := map[string]string{
+		runID:         runID,
+		"left":        "84ed5257-7dbc-5111-855e-827abd36948b",
+		"right":       "60897d8d-cc87-5daa-b159-577bf736383b",
+		"left/nested": "a4327142-cbc0-50eb-9fb8-43f6a98ea9d0",
+	}
+	for scope := range nodeIdentityScopes {
+		path, stage := scope, "pending"
+		if scope == "." {
+			path = runID
+		}
+		if scope == selectedScope || selectedScope == "." && scope == "left" {
+			stage = "done"
+		}
+		wanted[path] = stage
+	}
+	for _, entity := range entities {
+		stage, found := wanted[entity.FlowInstance]
+		if !found || entity.RunID != runID || entity.EntityID != entityIDs[entity.FlowInstance] || entity.CurrentState != stage {
+			t.Fatalf("constructed tree lost exact instance/stage isolation: %+v, want %+v", entities, wanted)
+		}
+		delete(wanted, entity.FlowInstance)
+	}
+	if len(wanted) != 0 {
+		t.Fatalf("constructed tree omitted instances: %+v", wanted)
+	}
 }

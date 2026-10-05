@@ -1,0 +1,343 @@
+{
+  "source_head": "ccaab9ce3a4496f47dabd80f2733c5f47fe50562",
+  "rebased_production_source": "2abec8556117d30c61f892e23ebb213fe8d6b74f",
+  "master_base": "e63f4bdb197e473fe35e94f65ff3c77655957123",
+  "command": [
+    "go",
+    "run",
+    "./cmd/swarm-test",
+    "--",
+    "-json",
+    "-count=1",
+    "-run",
+    "^TestReadProofFactoringCompiledDescribe$",
+    "./internal/cliapp"
+  ],
+  "baseline": "issue-2496-C21-construction-source-master-e63f4bdb1",
+  "result": "PASS",
+  "package_seconds": 98.577,
+  "cells": 45,
+  "internal_repetitions_per_cell": 2,
+  "failures": [],
+  "skips": [],
+  "receipt": "/tmp/agent-e-2496-e63-rebased-accepted-describe.log",
+  "receipt_sha256": "07ec4e672de7e7cf7edd87d0a1f4e56fb71a7e2e6be10ccb647203aafaecad61",
+  "results": [
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-text",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "action": "pass",
+      "elapsed": 23.43
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-json",
+      "stdout_sha256": "bd4235fe0dfc5e63dfbd03b2653baebee5594eb8a53d34a55cd08946317d73dc",
+      "action": "pass",
+      "elapsed": 2.01
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-quiet",
+      "stdout_sha256": "eca9a9c76db7a4488e37e236e8467b4992e078a234075eee6e5274557f850118",
+      "action": "pass",
+      "elapsed": 2.01
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "action": "pass",
+      "elapsed": 2.04
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "bd4235fe0dfc5e63dfbd03b2653baebee5594eb8a53d34a55cd08946317d73dc",
+      "action": "pass",
+      "elapsed": 2.01
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-no-color",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "action": "pass",
+      "elapsed": 6.52
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-text",
+      "stdout_sha256": "4e85f66b68b3428055ca54c5d1ff3146aeb08d4c1923d57b1efd64cb1b0c39f1",
+      "action": "pass",
+      "elapsed": 2.08
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-json",
+      "stdout_sha256": "cdd9f1199c913404f4c983cd6a88227df286be69db2028735ee6b91236fd89ee",
+      "action": "pass",
+      "elapsed": 2.64
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-quiet",
+      "stdout_sha256": "0b978d387a2f9408ea2af84988014b80e51acf3e53e239742206db0475919b0d",
+      "action": "pass",
+      "elapsed": 5.56
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-text",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "action": "pass",
+      "elapsed": 6.34
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-json",
+      "stdout_sha256": "f98540d0a078ce19462064311950fc11d1eab2f461aae1b9464168d90061cf88",
+      "action": "pass",
+      "elapsed": 15.77
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-quiet",
+      "stdout_sha256": "e0e08278e2acaf3e8638fe233c9da5a6aeddc1dff4ff5eab647578efb627945f",
+      "action": "pass",
+      "elapsed": 10.74
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "action": "pass",
+      "elapsed": 10.82
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "f98540d0a078ce19462064311950fc11d1eab2f461aae1b9464168d90061cf88",
+      "action": "pass",
+      "elapsed": 14.75
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-no-color",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "action": "pass",
+      "elapsed": 15.06
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-text",
+      "stdout_sha256": "68d31678f5be68a3ea45990ee04e35dcb077a4b1a49de9e73dc1beb6e3fbcd67",
+      "action": "pass",
+      "elapsed": 19.11
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-json",
+      "stdout_sha256": "638ec5e423f1f39f9c76c6b8b4d833402b5642eba3f21003a82de374a6b2eb67",
+      "action": "pass",
+      "elapsed": 19.22
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-quiet",
+      "stdout_sha256": "c6f4a60511ce8f17e6ae3c384537fb41f82c2f287d8eba09a43379fc2b83f561",
+      "action": "pass",
+      "elapsed": 19
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-text",
+      "stdout_sha256": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "action": "pass",
+      "elapsed": 19.87
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-json",
+      "stdout_sha256": "c27e00d505979aa072004105b2ce637448ac2dc97130ffc52282b3a9960ac4dc",
+      "action": "pass",
+      "elapsed": 13.39
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-quiet",
+      "stdout_sha256": "744111e5fccbae512336302c6b0baf0ef2eb159842070ea72e4f98ceac7a4837",
+      "action": "pass",
+      "elapsed": 19.46
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "e293ed51bb5790be27ffe0ba6fbd0b0809b509ae84867f4888df701611e36c86",
+      "action": "pass",
+      "elapsed": 15.6
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "c694cae2d0a8b54dc911bc2045559eb9057ecddb21a757c595c1b5a38d609298",
+      "action": "pass",
+      "elapsed": 15.52
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-no-color",
+      "stdout_sha256": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "action": "pass",
+      "elapsed": 11.39
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-text",
+      "stdout_sha256": "5be2d5444abf97675937143f5723b788a4aba5e01b124e8a5364053dacd5a0ff",
+      "action": "pass",
+      "elapsed": 11.44
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-json",
+      "stdout_sha256": "179e7404c4aed757ef09f9a8743dd90df016565639c5335ef6c0bb2e17225e32",
+      "action": "pass",
+      "elapsed": 12.76
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-quiet",
+      "stdout_sha256": "47f733bd1d9d366934c2a518160cbba27df3b47068252025bd75df338d9b01b3",
+      "action": "pass",
+      "elapsed": 12.48
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-text",
+      "stdout_sha256": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "action": "pass",
+      "elapsed": 15.19
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-json",
+      "stdout_sha256": "11046a8f47b6264ff3bec9a3822d1f54f67889439351765f5f157f721c8e1fd3",
+      "action": "pass",
+      "elapsed": 15.05
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-quiet",
+      "stdout_sha256": "ec7cb0781f201870ae6f6b76e14a9936c687b8fbe6e8f0d9d327dc918cc2bb31",
+      "action": "pass",
+      "elapsed": 15.01
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "126e635b670c0a83830a0b31bbff5961f7d7e4196e03e0055dfd3ec1e681f7c5",
+      "action": "pass",
+      "elapsed": 15.32
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "121fc7d524dcfe09832f0a535241afee594d321250857adb8e9fe1be10805ddb",
+      "action": "pass",
+      "elapsed": 23.04
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-no-color",
+      "stdout_sha256": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "action": "pass",
+      "elapsed": 23.6
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-text",
+      "stdout_sha256": "bfead8a7c6742f825ae536c1ee1089df440966f920efed6a344c60da7e96ac0a",
+      "action": "pass",
+      "elapsed": 30.51
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-json",
+      "stdout_sha256": "6993774157618225d8ada629158d8d5501e0f6cf4bba8c2d8876441b3b9ae6ac",
+      "action": "pass",
+      "elapsed": 30.41
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-quiet",
+      "stdout_sha256": "995e660da9c0a68dead683d6cb3319333555e168e31d416e22bb9a0d3200b2ee",
+      "action": "pass",
+      "elapsed": 23.02
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-text",
+      "stdout_sha256": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620",
+      "action": "pass",
+      "elapsed": 23.12
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-json",
+      "stdout_sha256": "de15a5e75ff20f19c96034bbe9e3a46b2336c90fd3795e771e2906e2ce3fa446",
+      "action": "pass",
+      "elapsed": 22.26
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-quiet",
+      "stdout_sha256": "1fdddbc98da8f20c1e269ce9af09276b0c9390143c8977a9caa940b7ffcb9688",
+      "action": "pass",
+      "elapsed": 6.34
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "7c82c5b9b78c78b523d873a40399ced58a8bd87df4cf8ba06d6cfdc19aec624d",
+      "action": "pass",
+      "elapsed": 36.32
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "abee6724d5f6cdffb9e999cfe6229a357b543de4b2df53da756531018b9130ee",
+      "action": "pass",
+      "elapsed": 35.88
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-no-color",
+      "stdout_sha256": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620",
+      "action": "pass",
+      "elapsed": 30.59
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-text",
+      "stdout_sha256": "1b5fc30037ca171c7d94ff4c8719020e836bc3a9738badf6d2730a3ecbe13b1b",
+      "action": "pass",
+      "elapsed": 30.24
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-json",
+      "stdout_sha256": "20c679a9e1947d5ea64d2735281ab90ad7905a3188ea51a693b6aaf2c81ba7dc",
+      "action": "pass",
+      "elapsed": 6.01
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-quiet",
+      "stdout_sha256": "9511636c853ebd7b3f45207c6de487346217f313816b7d7bceb617bca2b70289",
+      "action": "pass",
+      "elapsed": 14.41
+    }
+  ],
+  "boundary": "Exact clean-head compiled describe only. Original provenance failures remain retained; no managed-default, C22 closure, provider or exact-head CI credit."
+}

@@ -63,7 +63,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				t.Fatal(err)
 			}
 			sourceRun, eventID := uuid.NewString(), uuid.NewString()
-			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID, uuid.NewString())
+			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
 			if err := os.RemoveAll(root); err != nil {
 				t.Fatal(err)
 			}

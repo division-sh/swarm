@@ -1257,7 +1257,7 @@
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.FinalizeCommittedAgentReadiness",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "68f5e8a80b944fa33cc8fce6b70b056d57ff801e8e4121fc3233be1ff8e32e83"
+    "body_sha256": "4e628fc526d67aace19b3b26fa067f1abc747579acfc95a33d55eb39b9a5bc10"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.HydrateStaticTopologyForStartup",
@@ -1269,13 +1269,13 @@
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.PreRunAgentMaterializationBlueprints",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "c1541328afca5b68c17162f424931b0b693b2968fc99c69f95625e195d1c6269"
+    "body_sha256": "d2f7a21667d6c11aea9331caa44744565c65b25ba1cf4a3d3a3737e9ddfbe7e8"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.PrepareDurableTopologySourceSetRebind",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "cf2d201fa0d0f2ec1b4c6bf07da39bea6b0176eaeb817a972bcac3221b8f5209"
+    "body_sha256": "8e2f667f7990858ff2a70279a74102f0a47c411ba6c2135d2699bc0b549ddee7"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.PrepareStaticTopologyForStartup",
@@ -1314,12 +1314,6 @@
     "body_sha256": "91c2e82045c4013ceaebc22e99bca6cbbf77ca22c71e726c6a354e98f005e6aa"
   },
   {
-    "owner": "internal/runtime/manager/static_topology.go::*AgentManager.resolvedStaticTopologyRecords",
-    "audit_rows": "A11,A24",
-    "proof_families": "P09,P20,P21",
-    "body_sha256": "1c4ab681311212ef96f112e9c74f8fc486a3da61f7415b59e86280d6c8937ee5"
-  },
-  {
     "owner": "internal/runtime/manager/static_topology.go::*AgentManager.retireRemovedStaticTopology",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
@@ -1335,7 +1329,7 @@
     "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.Commit",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "893c166b864b6a5076028671aaf22be644e92f4a20b557ef626f69568547b8f0"
+    "body_sha256": "a390447e2c3c1ffaace39fd4c40668d77e74d00ef23be1d267e4605dc7dc7cca"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.RetainForRetry",
@@ -1347,13 +1341,13 @@
     "owner": "internal/runtime/manager/static_topology.go::*PreparedDurableTopologySourceSetRebind.release",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "c6b26aa29d0ff3cc462802bcd289d6ab6dd3affe2fd4f8b0ce72ceb814b5eff0"
+    "body_sha256": "97f8aa8afb3f6273fea9203b69d69c3e2a315a44607e9d3f7035c67eb4cf80b9"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::ResolveStaticTopologyBlueprints",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "75d51deff823e29f072635185ee9c2d0a0e8d95098ac77d6eb21a8d3daa7f901"
+    "body_sha256": "b9869cb785ea10442a5f23a44c789deec45884bc8e3333332abff19a8ab5e83f"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::desiredAgentsFromBlueprints",
@@ -1635,7 +1629,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.stopWithOptions",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "fc26b7d1e75790aecea0345ee41100b6db839ade0d9940ab807f19a55ff64983"
+    "body_sha256": "8c4c27b3aa4342028f25c8059264ee42ab366da17121e480c7e17e28d91081fb"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.verifyBootPublished",
@@ -2913,7 +2907,7 @@
     "owner": "internal/serveapp/main.go::reconcileServeRuntimeStandingTargets",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "224327149871c637e267d911cd41126041253a811259744fc7f9cfa38235ede5"
+    "body_sha256": "ec1517a2abfe85a08b318f1a9cbdec12a543a25936b9ebcaf50acb67fd3d7208"
   },
   {
     "owner": "internal/serveapp/main.go::reconcileServeStandingServices",
@@ -3489,7 +3483,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedFiniteFeedRecoveryTopologiesTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "b3ac4a7d4957ad321d466b8da97b24a70fd4d731a4672a8ac173e291dd018861"
+    "body_sha256": "7e88cbf9dfde64dec8c3c420825a983f8d4c09e02e6aa49d22e803d4bf2c6a3a"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkActivatedOperationTx",

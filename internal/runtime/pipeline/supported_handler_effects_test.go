@@ -31,7 +31,6 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
   subscribes_to: [finding.received]
   event_handlers:
     finding.received:
-      create_entity: true
       data_accumulation:
         writes:
           - op: append
@@ -71,10 +70,27 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
 					ctx = testPipelineRunContext(t, db)
 				}
 				node := pipelineSourceNode(t, source, ".", "writer")
-				receiver := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: testPipelineRunID}
+				constructor, err := CompileFlowConstructor(source, semanticview.RootExecutionFlowID(source), "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				fields, err := constructor.InitialFields(nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Explicit component setup; public construction is qualified separately.
+				at := time.Now().UTC()
+				if err := store.create(ctx, WorkflowInstance{
+					InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: testPipelineRunID,
+					EntityType: "work", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+					CurrentState: "active", StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				receiver := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: testPipelineRunID, EntityID: testPipelineRunID}
 				ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
 					Recipient: events.MustNodeDeliveryRecipient(node),
-					Target:    events.MustMaterializingEntityTarget(receiver),
+					Target:    events.MustExistingEntityTarget(receiver),
 				})
 				producerID := eventtest.UUID("different-producer")
 				handler := bundle.Nodes["writer"].EventHandlers["finding.received"]
@@ -126,7 +142,7 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
 					}
 					if !failed {
 						emitted := bus.outboxIntent(i).Event
-						if emitted.SourceRoute() != (events.RouteIdentity{EntityID: receiver.EntityID}) || emitted.ParentEventID() != event.ID() || emitted.RunID() != event.RunID() || emitted.ChainDepth() != event.ChainDepth()+1 {
+						if emitted.RoutingSource().Kind() != events.RoutingSourceStaticFlow || emitted.SourceRoute() != receiver || emitted.ParentEventID() != event.ID() || emitted.RunID() != event.RunID() || emitted.ChainDepth() != event.ChainDepth()+1 {
 							t.Fatalf("emission lineage: %#v", emitted)
 						}
 					}

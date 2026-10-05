@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
@@ -604,6 +606,21 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		proveChannelBacklogSummaryOpenInbox(t, provider, callbackURL, signing, count)
 		return
 	}
+	cardMessages := map[string]int{}
+	if scenario == "draft_chooser" || scenario == "quoted_two" || scenario == "notice_uncertainty_readback" {
+		db, err := sql.Open(backend, observerDSN)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		cardMessages["telegram-ingress"] = waitChannelCardMessageID(t, db, backend, "telegram-ingress")
+		if scenario == "draft_chooser" || scenario == "quoted_two" {
+			cardMessages["telegram-stopped"] = waitChannelCardMessageID(t, db, backend, "telegram-stopped")
+			if cardMessages["telegram-ingress"] == cardMessages["telegram-stopped"] {
+				t.Fatal("independent standing cards share one provider message")
+			}
+		}
+	}
 	inputText := "ordinary business text"
 	if nativeInboxScenario {
 		deadline := time.Now().Add(15 * time.Second)
@@ -642,7 +659,6 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	var preconnectionNoticeID string
 	if scenario == "notice_uncertainty_readback" {
 		preconnectionNoticeID = onlyPublicChannelNoticeID(t, endpoint+"/v1/rpc", "")
-		waitChannelCardMessageID(t, provider, "telegram-ingress")
 		channelUncertaintySummaryEntry(t, provider)
 	}
 	if scenario == "delivery_loss_resend" || scenario == "notice_uncertainty_readback" {
@@ -683,8 +699,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if scenario == "verdict" || scenario == "verdict_ack_loss" || scenario == "required_input" || scenario == "invalid_input" || scenario == "edit_loss_resend" ||
 		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
 		cardMessageID := 2
-		if scenario == "quoted_two" {
-			cardMessageID = waitChannelCardMessageID(t, provider, "telegram-ingress")
+		if scenario == "quoted_two" || scenario == "draft_chooser" {
+			cardMessageID = cardMessages["telegram-ingress"]
 		}
 		deadline := time.Now().Add(15 * time.Second)
 		for provider.Delivery(cardMessageID-1) == nil {
@@ -826,14 +842,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if len(admitted.EventNames) != 0 {
 			t.Fatalf("draft begin leaked business events: %v", admitted.EventNames)
 		}
-		proveChannelBareInputChooser(t, provider, callbackURL, signing, restartInteraction)
+		proveChannelBareInputChooser(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["telegram-ingress"], restartInteraction)
 		return
 	}
 	if scenario == "quoted_two" {
 		if len(admitted.EventNames) != 0 {
 			t.Fatalf("quoted-draft begin leaked business events: %v", admitted.EventNames)
 		}
-		proveChannelQuotedTwoDrafts(t, provider, callbackURL, signing)
+		proveChannelQuotedTwoDrafts(t, provider, callbackURL, signing, cardMessages["telegram-stopped"], cardMessages["telegram-ingress"])
 		return
 	}
 	if (nativeInboxScenario || scenario == "verdict" || scenario == "verdict_ack_loss") && len(admitted.EventNames) != 0 {
@@ -1204,9 +1220,9 @@ func proveChannelInputControl(t *testing.T, provider *telegramapi.Double, callba
 	}
 }
 
-func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, restart func() (string, string)) {
+func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, stoppedMessageID, ingressMessageID int, restart func() (string, string)) {
 	t.Helper()
-	beginOtherChannelDraft(t, provider, callbackURL, signing, 3)
+	beginOtherChannelDraft(t, provider, callbackURL, signing, ingressMessageID, stoppedMessageID)
 	deadline := time.Now().Add(25 * time.Second)
 	answer := "private chooser answer"
 	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
@@ -1235,8 +1251,8 @@ func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, ca
 			}
 			markup, _ := delivery["reply_markup"].(map[string]any)
 			rows, _ := markup["inline_keyboard"].([]any)
-			if len(rows) < 2 {
-				t.Fatalf("chooser did not include both drafts: %v", delivery)
+			if len(rows) != 2 {
+				t.Fatalf("chooser did not include exactly the two admitted drafts: %v", delivery)
 			}
 			choice, _ := rows[1].([]any)
 			selected, _ := choice[0].(map[string]any)
@@ -1273,6 +1289,10 @@ func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, ca
 				t.Fatalf("chosen private answer echoed in card edit: %v", edit)
 			}
 			if strings.Contains(visible, "Decision: retire") {
+				messageID := fmt.Sprint(edit["message_id"])
+				if messageID != fmt.Sprint(stoppedMessageID) && messageID != fmt.Sprint(ingressMessageID) {
+					t.Fatalf("chooser decided an unrelated standing card: %v", edit)
+				}
 				decided++
 			}
 		}
@@ -1289,24 +1309,19 @@ func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, ca
 	}
 }
 
-func waitChannelCardMessageID(t *testing.T, provider *telegramapi.Double, flowName string) int {
+func waitChannelCardMessageID(t *testing.T, db *sql.DB, backend, flowName string) int {
 	t.Helper()
 	deadline := time.Now().Add(25 * time.Second)
-	for {
-		for index := 1; index <= 2; index++ {
-			card := provider.Delivery(index)
-			if card != nil && strings.Contains(fmt.Sprint(card["text"]), "Gate: "+flowName+" / active") {
-				return index + 1
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s card was not delivered: first=%v second=%v", flowName, provider.Delivery(1), provider.Delivery(2))
-		}
-		time.Sleep(20 * time.Millisecond)
+	_, runID, _ := loadServedStandingOwnerByFlow(t, db, backend, flowName)
+	cardID := waitChannelAnchorCard(t, db, runID, decisioncard.AnchorKindStageGate, flowName)
+	messageID := waitChannelAnchorReceipt(t, db, cardID)
+	if time.Now().After(deadline) {
+		t.Fatalf("exact standing card %s/%s exceeded its delivery deadline", runID, flowName)
 	}
+	return messageID
 }
 
-func beginOtherChannelDraft(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, cardMessageID int) {
+func beginOtherChannelDraft(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, firstMessageID, cardMessageID int) {
 	t.Helper()
 	deadline := time.Now().Add(25 * time.Second)
 	var second map[string]any
@@ -1350,7 +1365,7 @@ func beginOtherChannelDraft(t *testing.T, provider *telegramapi.Double, callback
 				prompts[fmt.Sprint(edit["message_id"])] = true
 			}
 		}
-		if prompts["2"] && prompts["3"] {
+		if prompts[fmt.Sprint(firstMessageID)] && prompts[fmt.Sprint(cardMessageID)] {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -1360,11 +1375,9 @@ func beginOtherChannelDraft(t *testing.T, provider *telegramapi.Double, callback
 	}
 }
 
-func proveChannelQuotedTwoDrafts(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+func proveChannelQuotedTwoDrafts(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, stoppedMessageID, ingressMessageID int) {
 	t.Helper()
-	stoppedMessageID := waitChannelCardMessageID(t, provider, "telegram-stopped")
-	ingressMessageID := waitChannelCardMessageID(t, provider, "telegram-ingress")
-	beginOtherChannelDraft(t, provider, callbackURL, signing, stoppedMessageID)
+	beginOtherChannelDraft(t, provider, callbackURL, signing, ingressMessageID, stoppedMessageID)
 	deadline := time.Now().Add(25 * time.Second)
 	for index, cardMessageID := range []int{stoppedMessageID, ingressMessageID} {
 		answer := fmt.Sprintf("private quoted answer %d", cardMessageID)

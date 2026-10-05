@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -23,15 +24,24 @@ import (
 )
 
 func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error) {
+	return s.CommitScenarioSetup(ctx, runtimebus.ScenarioSetupCommand{Setup: req})
+}
+
+func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command runtimebus.ScenarioSetupCommand) (runtimepipeline.ScenarioSetupResult, error) {
 	if s == nil || s.backend == nil {
 		return runtimepipeline.ScenarioSetupResult{}, fmt.Errorf("postgres scenario setup store is required")
 	}
-	req, err := normalizeScenarioSetupRequest(req)
+	req, err := normalizeScenarioSetupRequest(command.Setup)
 	if err != nil {
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
+	plans, topology, err := validateScenarioConstruction(ctx, req, command.Activations)
+	if err != nil {
+		return runtimepipeline.ScenarioSetupResult{}, err
+	}
 	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.ScenarioSetupResult, error) {
+		result := scenarioSetupResult(req)
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			fact, ok := runtimecorrelation.SourceArtifactFactFromContext(txctx)
 			if !ok {
@@ -48,7 +58,20 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 					return err
 				}
 			}
+			if len(plans) != 0 {
+				var err error
+				result.Activations, err = s.CommitFlowInstanceActivationsTx(txctx, attempt, plans)
+				if err != nil {
+					return err
+				}
+				if _, err := s.ReplaceFlowInstanceRouteTopologyTx(txctx, tx, topology); err != nil {
+					return err
+				}
+			}
 			for _, entity := range req.Entities {
+				if len(plans) != 0 && entity.EntityID == plans[0].Identity.EntityID {
+					continue
+				}
 				fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
 				if err != nil {
 					return err
@@ -95,25 +118,34 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 		if err != nil {
 			return runtimepipeline.ScenarioSetupResult{}, err
 		}
-		return scenarioSetupResult(req), nil
+		return result, nil
 	})
 	result, acknowledged := outcome.Value()
 	if !acknowledged {
 		return runtimepipeline.ScenarioSetupResult{}, outcome.Err()
 	}
-	return result, outcome.Err()
+	return acknowledgeScenarioSetup(result), outcome.Err()
 }
 
 func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error) {
+	return s.CommitScenarioSetup(ctx, runtimebus.ScenarioSetupCommand{Setup: req})
+}
+
+func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command runtimebus.ScenarioSetupCommand) (runtimepipeline.ScenarioSetupResult, error) {
 	if s == nil || s.backend == nil {
 		return runtimepipeline.ScenarioSetupResult{}, fmt.Errorf("sqlite scenario setup store is required")
 	}
-	req, err := normalizeScenarioSetupRequest(req)
+	req, err := normalizeScenarioSetupRequest(command.Setup)
 	if err != nil {
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
+	plans, topology, err := validateScenarioConstruction(ctx, req, command.Activations)
+	if err != nil {
+		return runtimepipeline.ScenarioSetupResult{}, err
+	}
 	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite scenario setup", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.ScenarioSetupResult, error) {
+		result := scenarioSetupResult(req)
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			fact, ok := runtimecorrelation.SourceArtifactFactFromContext(txctx)
 			if !ok {
@@ -130,7 +162,20 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 					return err
 				}
 			}
+			if len(plans) != 0 {
+				var err error
+				result.Activations, err = s.CommitFlowInstanceActivationsTx(txctx, attempt, plans)
+				if err != nil {
+					return err
+				}
+				if _, err := s.ReplaceFlowInstanceRouteTopologyTx(txctx, tx, topology); err != nil {
+					return err
+				}
+			}
 			for _, entity := range req.Entities {
+				if len(plans) != 0 && entity.EntityID == plans[0].Identity.EntityID {
+					continue
+				}
 				fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
 				if err != nil {
 					return err
@@ -176,13 +221,66 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 		if err != nil {
 			return runtimepipeline.ScenarioSetupResult{}, err
 		}
-		return scenarioSetupResult(req), nil
+		return result, nil
 	})
 	result, acknowledged := outcome.Value()
 	if !acknowledged {
 		return runtimepipeline.ScenarioSetupResult{}, outcome.Err()
 	}
-	return result, outcome.Err()
+	return acknowledgeScenarioSetup(result), outcome.Err()
+}
+
+func acknowledgeScenarioSetup(result runtimepipeline.ScenarioSetupResult) runtimepipeline.ScenarioSetupResult {
+	result.Acknowledged = true
+	for index, activation := range result.Activations {
+		result.Activations[index] = activation.WithCommitAcknowledgment()
+	}
+	return result
+}
+
+func validateScenarioConstruction(ctx context.Context, req runtimepipeline.ScenarioSetupRequest, activations []runtimebus.FlowInstanceActivationCommand) ([]runtimepipeline.FlowInstanceActivationPlan, []runtimebus.FlowInstanceRouteRecordSet, error) {
+	if len(activations) == 0 {
+		return nil, nil, nil
+	}
+	fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found || len(activations) != 1 {
+		return nil, nil, fmt.Errorf("scenario construction requires one selected root tree")
+	}
+	command := activations[0]
+	if err := command.Validate(); err != nil {
+		return nil, nil, err
+	}
+	plan := command.Plan
+	if plan.Readiness.RunID != req.RunID || plan.Readiness.BundleHash != fact.BundleHash() ||
+		plan.Identity.InstanceID != req.RunID || plan.Identity.InstancePath != req.RunID || plan.Identity.EntityID != req.RunID ||
+		plan.Identity.ParentEntityID != "" || plan.Identity.ParentRoute.FlowID != "" ||
+		plan.CreatingInput != (runtimepipeline.FlowConstructionInput{}) || plan.StandingGenerationReplacement ||
+		!plan.OccurredAt.Equal(req.CreatedAt) {
+		return nil, nil, fmt.Errorf("scenario construction lost its exact no-argument run owner")
+	}
+	for _, entity := range req.Entities {
+		if entity.EntityID != req.RunID {
+			continue
+		}
+		fields, gates, _, _, err := scenarioSetupEntityJSON(entity)
+		if err != nil {
+			return nil, nil, err
+		}
+		record, err := plan.PersistenceRecord()
+		if err != nil {
+			return nil, nil, err
+		}
+		matchesType := entity.EntityType == record.EntityType
+		if record.EntityType == "" {
+			matchesType = entity.EntityType == "default" && len(entity.Fields) == 0
+		}
+		if !matchesType || entity.CurrentState != record.CurrentState ||
+			!scenarioSetupJSONEqual(string(fields), record.Fields) || !scenarioSetupJSONEqual(string(gates), record.Gates) {
+			return nil, nil, fmt.Errorf("scenario construction changed explicit imported fields, stage or gates")
+		}
+		return []runtimepipeline.FlowInstanceActivationPlan{plan}, command.RouteTopology, nil
+	}
+	return nil, nil, fmt.Errorf("scenario construction has no exact root seed")
 }
 
 func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupRequest, error) {
@@ -354,15 +452,7 @@ func scenarioSetupJSONEqual(raw string, want json.RawMessage) bool {
 }
 
 func canonicalScenarioSetupJSON(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		raw = "{}"
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-		return "", err
-	}
-	canonical, err := json.Marshal(decoded)
+	canonical, err := canonicaljson.Canonicalize([]byte(raw))
 	if err != nil {
 		return "", err
 	}

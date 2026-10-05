@@ -43,7 +43,6 @@ pins:
   subscribes_to: [work.requested]
   event_handlers:
     work.requested:
-      create_entity: true
       advances_to: waiting
       emit:
         event: work.completed
@@ -98,7 +97,6 @@ pins:
   subscribes_to: [work.seeded, work.first, work.second]
   event_handlers:
     work.seeded:
-      create_entity: true
       advances_to: waiting
 `
 		handlers := []string{"first", "second"}
@@ -255,7 +253,6 @@ connect:
   subscribes_to: [work.completed]
   event_handlers:
     work.completed:
-      create_entity: true
       data_accumulation:
         writes:
           - target_field: result
@@ -324,10 +321,8 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 			if err != nil {
 				t.Fatal(err)
 			}
-			text := strings.ReplaceAll(string(raw), "      create_entity: true\n", "")
+			text := string(raw)
 			if file == "nodes.yaml" {
-				text = strings.Replace(text, "[work.requested, loop.start,", "[loop.start,", 1)
-				text = strings.Replace(text, "    work.requested:\n      advances_to: waiting\n", "", 1)
 			}
 			writeClosedVariantFile(t, root, prefix+file, text)
 		}
@@ -458,7 +453,6 @@ pins:
   subscribes_to: [work.requested]
   event_handlers:
     work.requested:
-      create_entity: true
       advances_to: review
 `
 	consumer := `collector:
@@ -518,7 +512,6 @@ pins:
   subscribes_to: [ordinary.repeated]
   event_handlers:
     ordinary.repeated:
-      create_entity: true
       data_accumulation:
         writes:
           - target_field: token
@@ -573,11 +566,8 @@ connect:
 	writeClosedVariantFile(t, root, "entities.yaml", "work: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   execution_type: system_node
-  subscribes_to: [work.requested, loop.start, loop.admit, loop.repeat, loop.close]
+  subscribes_to: [loop.start, loop.admit, loop.repeat, loop.close]
   event_handlers:
-    work.requested:
-      create_entity: true
-      advances_to: waiting
     loop.start:
       loop: {start: revision, from: waiting}
       advances_to: drafting
@@ -605,7 +595,6 @@ pins:
   subscribes_to: [loop.escaped]
   event_handlers:
     loop.escaped:
-      create_entity: true
       data_accumulation:
         writes:
           - target_field: revision_id

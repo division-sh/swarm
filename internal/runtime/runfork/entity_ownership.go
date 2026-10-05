@@ -48,8 +48,21 @@ func ProjectProducerOwnership(sourceRunID, forkRunID string, source events.Routi
 		return source, nil
 	}
 	route := source.Route()
-	root := source.Kind() == events.RoutingSourceRoot ||
-		(source.Kind() == events.RoutingSourceExternalIngress && (route.EntityID == sourceRunID || route.EntityID == forkRunID))
+	if source.Kind() == events.RoutingSourceStaticFlow && route.FlowID == "." {
+		if route.EntityID != "" && route.EntityID != route.FlowInstance {
+			return source, fmt.Errorf("root execution producer entity contradicts its exact run coordinate")
+		}
+		projected, err := ProjectExecutionRoute(sourceRunID, forkRunID, ".", flowidentity.StoredRoute(".", route.FlowInstance, route.FlowInstance))
+		if err != nil {
+			return source, err
+		}
+		route.FlowInstance = projected.InstancePath
+		if route.EntityID != "" {
+			route.EntityID = forkRunID
+		}
+		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode())
+	}
+	root := rootProducerSource(source, sourceRunID, forkRunID)
 	if root {
 		if route.EntityID != sourceRunID && route.EntityID != forkRunID {
 			return source, fmt.Errorf("root producer belongs to neither admitted run")
@@ -57,10 +70,17 @@ func ProjectProducerOwnership(sourceRunID, forkRunID string, source events.Routi
 		route.EntityID = forkRunID
 		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode())
 	}
-	if route.EntityID == sourceRunID || route.EntityID == forkRunID {
+	if route.EntityID == sourceRunID || route.EntityID == forkRunID || route.FlowInstance == sourceRunID || route.FlowInstance == forkRunID {
 		return source, fmt.Errorf("non-root producer cannot own the root entity")
 	}
 	return source, nil
+}
+
+func rootProducerSource(source events.RoutingSource, sourceRunID, forkRunID string) bool {
+	route := source.Route()
+	return source.Kind() == events.RoutingSourceRoot ||
+		(source.Kind() == events.RoutingSourceStaticFlow && route.FlowID == ".") ||
+		(source.Kind() == events.RoutingSourceExternalIngress && (route.EntityID == sourceRunID || route.EntityID == forkRunID))
 }
 
 // ProjectEntityOwnership changes only the canonical root coordinate. A copied
@@ -88,6 +108,23 @@ func ProjectEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance strin
 	return projection, nil
 }
 
+// ProjectParentRoute preserves recorded construction context, remapping only
+// the canonical root through the same owner as entity materialization.
+func ProjectParentRoute(sourceRunID, forkRunID string, parent flowidentity.ParentRoute) (flowidentity.ParentRoute, error) {
+	if parent.Empty() {
+		return parent, nil
+	}
+	if !parent.Complete() || parent != parent.Normalized() {
+		return flowidentity.ParentRoute{}, fmt.Errorf("fork parent projection requires exact recorded construction context")
+	}
+	projected, err := ProjectEntityOwnership(sourceRunID, forkRunID, parent.EntityID, parent.FlowInstance)
+	if err != nil {
+		return flowidentity.ParentRoute{}, err
+	}
+	parent.FlowInstance, parent.EntityID = projected.Fork.FlowInstance, projected.Fork.EntityID
+	return parent, nil
+}
+
 // ProjectSelectedContractSourceEvent is shared by persistent preparation and the
 // runtime container. It projects producer coordinates, never receiver state.
 // Calling it on an already child-projected event validates without reminting.
@@ -112,8 +149,7 @@ func ProjectSelectedContractSourceEvent(sourceRunID, forkRunID string, event Run
 	}
 	event.RoutingSource = source
 	route := source.Route()
-	root := source.Kind() == events.RoutingSourceRoot ||
-		(source.Kind() == events.RoutingSourceExternalIngress && (route.EntityID == sourceRunID || route.EntityID == forkRunID))
+	root := rootProducerSource(source, sourceRunID, forkRunID)
 	if event.EventName != RunForkSelectedContractPlatformActivityEvent {
 		return event, nil
 	}

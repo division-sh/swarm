@@ -1,0 +1,391 @@
+{
+  "schema": 1,
+  "base": "276d7723f9f6c66458d416a0554c107be373772b",
+  "closure": "not review-ready; source-attributed receipts, not final-head qualification",
+  "receipts": [
+    {
+      "head": "f8fc2d8ab",
+      "log": "/tmp/agent-e-2496-lifecycle-root-coordinate-revalidation.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestReleaseCompiledLifecycleJourneysBothStores",
+          "status": "pass",
+          "elapsed_seconds": 75.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledFrozenGateForkControlRefusalOnBothStores",
+          "status": "pass",
+          "elapsed_seconds": 2.46
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledRootLoopForkProjectsRevisionOnBothStores",
+          "status": "pass",
+          "elapsed_seconds": 2.46
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores",
+          "status": "pass",
+          "elapsed_seconds": 10.51
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledLoopTransitionReplayOnBothStores",
+          "status": "pass",
+          "elapsed_seconds": 3.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledTransitionRestartOnBothStores",
+          "status": "pass",
+          "elapsed_seconds": 10.13
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "status": "pass",
+          "elapsed_seconds": 103.668
+        }
+      ],
+      "failed_cells": [],
+      "skipped_cells": []
+    },
+    {
+      "head": "44f09d624",
+      "log": "/tmp/agent-e-2496-canonical-receiver-proof-revalidation.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores",
+          "status": "fail",
+          "elapsed_seconds": 27.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores",
+          "status": "pass",
+          "elapsed_seconds": 3.27
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "status": "fail",
+          "elapsed_seconds": 30.439
+        }
+      ],
+      "failed_cells": [
+        "TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores/default_sqlite/unavailable_after_commit",
+        "TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores/default_sqlite/newer_claim_store_fence",
+        "TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores/explicit_postgres/unavailable_after_commit",
+        "TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores/explicit_postgres/newer_claim_store_fence"
+      ],
+      "skipped_cells": []
+    },
+    {
+      "head": "4edd83eca",
+      "log": "/tmp/agent-e-2496-constructed-portfolio-readback-revalidation.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestA2PortfolioSupportedStreamSurfaceBothStores",
+          "status": "pass",
+          "elapsed_seconds": 5.27
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestA2PortfolioSupportedFiniteJoinSurfaceBothStores",
+          "status": "pass",
+          "elapsed_seconds": 7.99
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "status": "pass",
+          "elapsed_seconds": 13.275
+        }
+      ],
+      "failed_cells": [],
+      "skipped_cells": []
+    },
+    {
+      "head": "f9c371829",
+      "log": "/tmp/agent-e-2496-canonical-header-receiver-stage-revalidation.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestA2PortfolioPublicIndependentArrivalAdmissionBothStores",
+          "status": "pass",
+          "elapsed_seconds": 9.29
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores",
+          "status": "pass",
+          "elapsed_seconds": 22.99
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "status": "pass",
+          "elapsed_seconds": 32.319
+        }
+      ],
+      "failed_cells": [],
+      "skipped_cells": []
+    },
+    {
+      "head": "8b595a654",
+      "log": "/tmp/agent-e-2496-mailbox-activity-header-revalidation.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedLifecycleEmitterLoopEscapeJourney",
+          "status": "pass",
+          "elapsed_seconds": 3.32
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestMailboxRefusalAtPreparationAndCommitBothStores",
+          "status": "pass",
+          "elapsed_seconds": 74.37
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedGeneratedActivityPublicationBothStores",
+          "status": "pass",
+          "elapsed_seconds": 45.74
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "status": "pass",
+          "elapsed_seconds": 123.472
+        }
+      ],
+      "failed_cells": [],
+      "skipped_cells": []
+    },
+    {
+      "head": "d32c350338d58ff0c75040e5f2eef3356fede87b",
+      "log": "/tmp/agent-e-2496-repaired-provider-terminal-census.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores",
+          "status": "fail",
+          "elapsed_seconds": 3.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestRunForkRevisionProductionWriterCensusIsClosed",
+          "status": "pass",
+          "elapsed_seconds": 0.27
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores",
+          "status": "fail",
+          "elapsed_seconds": 61.57
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "status": "pass",
+          "elapsed_seconds": 0.281
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "status": "fail",
+          "elapsed_seconds": 64.761
+        }
+      ],
+      "failed_cells": [
+        "TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores/explicit_postgres",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/explicit_postgres",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay"
+      ],
+      "skipped_cells": []
+    },
+    {
+      "head": "d32c350338d58ff0c75040e5f2eef3356fede87b",
+      "log": "/tmp/agent-e-2496-describe-d32c35033.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe",
+          "status": "pass",
+          "elapsed_seconds": 45.57
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "status": "pass",
+          "elapsed_seconds": 100.668
+        }
+      ],
+      "failed_cells": [],
+      "skipped_cells": []
+    },
+    {
+      "head": "589cbb8ae",
+      "log": "/tmp/agent-e-2496-terminal-construction-unchanged-readback.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores",
+          "status": "pass",
+          "elapsed_seconds": 3.63
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "status": "pass",
+          "elapsed_seconds": 3.643
+        }
+      ],
+      "failed_cells": [],
+      "skipped_cells": []
+    },
+    {
+      "head": "3983f3a13364f4e0e3bded8b12ae632216f55927",
+      "log": "/tmp/agent-e-2496-root-agent-preparation-race.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentBlueprintUsesDeclaredRootScope",
+          "status": "pass",
+          "elapsed_seconds": 1.24
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStandingFlowAgentsBindAttemptBeforeManagerRun",
+          "status": "pass",
+          "elapsed_seconds": 0.28
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentPreparationUsesExactReadinessOwner",
+          "status": "pass",
+          "elapsed_seconds": 1.1
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentBlueprintUsesDeclaredRootScope",
+          "status": "pass",
+          "elapsed_seconds": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStandingFlowAgentsBindAttemptBeforeManagerRun",
+          "status": "pass",
+          "elapsed_seconds": 0.19
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentPreparationUsesExactReadinessOwner",
+          "status": "pass",
+          "elapsed_seconds": 1.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentBlueprintUsesDeclaredRootScope",
+          "status": "pass",
+          "elapsed_seconds": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStandingFlowAgentsBindAttemptBeforeManagerRun",
+          "status": "pass",
+          "elapsed_seconds": 0.19
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentPreparationUsesExactReadinessOwner",
+          "status": "pass",
+          "elapsed_seconds": 1.1
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "status": "pass",
+          "elapsed_seconds": 6.375
+        }
+      ],
+      "failed_cells": [],
+      "skipped_cells": []
+    },
+    {
+      "head": "3983f3a13364f4e0e3bded8b12ae632216f55927",
+      "log": "/tmp/agent-e-2496-provider-exact-root-preparation.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores",
+          "status": "fail",
+          "elapsed_seconds": 66.83
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "status": "fail",
+          "elapsed_seconds": 66.871
+        }
+      ],
+      "failed_cells": [
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/alpha/text",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/beta/text",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/alpha/text",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/beta/text",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite/alpha/text",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite/beta/text",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/explicit_postgres/alpha/text",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/explicit_postgres/beta/text",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/explicit_postgres",
+        "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay"
+      ],
+      "skipped_cells": []
+    },
+    {
+      "head": "aa1e18956",
+      "log": "/tmp/agent-e-2496-mixed-recipient-ownership-proof.log",
+      "roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestReceiverCompositionMixedAgentBothStores",
+          "status": "pass",
+          "elapsed_seconds": 6.37
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "status": "pass",
+          "elapsed_seconds": 6.405
+        }
+      ],
+      "failed_cells": [],
+      "skipped_cells": []
+    }
+  ]
+}

@@ -66,14 +66,14 @@ func TestSelectedForkRouteStageAcknowledgementControlsPublication(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+			attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", identity.RunID, identity.Route.InstancePath, binding)
 			if err != nil {
 				t.Fatal(err)
 			}
-			var published []selectedFlowActivation
-			err = publishSelectedContractFlowRoute(context.Background(), probe, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}, attempt, diagnostics, &published)
-			if probe.stages != 1 || probe.publishes != tc.wantPublish || probe.verifies != tc.wantVerify || len(published) != 1 {
-				t.Fatalf("stage/publish/verify/cleanup=%d/%d/%d/%d", probe.stages, probe.publishes, probe.verifies, len(published))
+			activation := selectedFlowActivation{attempt: attempt, identity: identity}
+			err = publishSelectedContractFlowRoute(context.Background(), probe, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}, attempt, diagnostics, &activation)
+			if probe.stages != 1 || probe.publishes != tc.wantPublish || probe.verifies != tc.wantVerify || activation.attempt != attempt || activation.identity != identity {
+				t.Fatalf("stage/publish/verify/cleanup=%d/%d/%d/%+v", probe.stages, probe.publishes, probe.verifies, activation)
 			}
 			if tc.ack {
 				if !errors.Is(diagnostics.err(), cleanup) || !errors.Is(err, tc.nextErr) {

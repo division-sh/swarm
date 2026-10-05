@@ -1,0 +1,306 @@
+{
+  "schema": 1,
+  "source_head": "92414896a",
+  "source_boundary": "Production Go, spec and test inputs were frozen at 92414896a before this command acquired capacity. Concurrent edits only changed audit documents/receipts and the separately measured complexity inventory, none consumed by these packages. No final default or hosted exact-head credit is claimed.",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "command": "go run ./cmd/swarm-test -- ./internal/cliapp -json -count=1 -run '^TestReadProofFactoringCompiledDescribe$'",
+  "receipt": "/tmp/agent-e-2496-describe-dispositions-accepted-v1.log",
+  "receipt_sha256": "f94ffd5dd940cc42196406108e321574a1745b8a940fdd1d3bd7c5fc06d5ab47",
+  "exit_code": 0,
+  "first_test_event": "2026-10-03T06:45:33.72744239Z",
+  "last_test_event": "2026-10-03T06:47:06.537011651Z",
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "action": "pass",
+      "elapsed": 92.81
+    }
+  ],
+  "root_count": 1,
+  "named_subtest_count": 45,
+  "fail_count": 0,
+  "skip_count": 0,
+  "root_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe",
+      "action": "pass",
+      "elapsed": 40.33
+    }
+  ],
+  "named_cells": [
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-text",
+      "action": "pass",
+      "elapsed": 0.31
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/routes-json",
+      "action": "pass",
+      "elapsed": 1.31
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-text",
+      "action": "pass",
+      "elapsed": 1.71
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-no-color",
+      "action": "pass",
+      "elapsed": 4.39
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-json",
+      "action": "pass",
+      "elapsed": 6.8
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-text",
+      "action": "pass",
+      "elapsed": 9.41
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-quiet",
+      "action": "pass",
+      "elapsed": 11.89
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-json",
+      "action": "pass",
+      "elapsed": 14.44
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/routes-quiet",
+      "action": "pass",
+      "elapsed": 14.84
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/routes-json",
+      "action": "pass",
+      "elapsed": 15.53
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/routes-text",
+      "action": "pass",
+      "elapsed": 15.96
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-text",
+      "action": "pass",
+      "elapsed": 16.26
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-no-color",
+      "action": "pass",
+      "elapsed": 16
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-json",
+      "action": "pass",
+      "elapsed": 15.29
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-quiet",
+      "action": "pass",
+      "elapsed": 15.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/routes-text",
+      "action": "pass",
+      "elapsed": 12.76
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-no-color",
+      "action": "pass",
+      "elapsed": 10.67
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-json",
+      "action": "pass",
+      "elapsed": 8.34
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-text",
+      "action": "pass",
+      "elapsed": 6.17
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/routes-text",
+      "action": "pass",
+      "elapsed": 3.62
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-quiet",
+      "action": "pass",
+      "elapsed": 3.56
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-json",
+      "action": "pass",
+      "elapsed": 2.89
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/routes-quiet",
+      "action": "pass",
+      "elapsed": 2.48
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-text",
+      "action": "pass",
+      "elapsed": 2.8
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/routes-json",
+      "action": "pass",
+      "elapsed": 2.74
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-json",
+      "action": "pass",
+      "elapsed": 7.7
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-quiet",
+      "action": "pass",
+      "elapsed": 7.78
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-json",
+      "action": "pass",
+      "elapsed": 12.26
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-text",
+      "action": "pass",
+      "elapsed": 12.83
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-no-color",
+      "action": "pass",
+      "elapsed": 16.88
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/routes-quiet",
+      "action": "pass",
+      "elapsed": 16.68
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-json",
+      "action": "pass",
+      "elapsed": 17.13
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-text",
+      "action": "pass",
+      "elapsed": 16.91
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-text",
+      "action": "pass",
+      "elapsed": 17.09
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-no-color",
+      "action": "pass",
+      "elapsed": 16.88
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-json",
+      "action": "pass",
+      "elapsed": 17.08
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-quiet",
+      "action": "pass",
+      "elapsed": 16.89
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-json",
+      "action": "pass",
+      "elapsed": 11.86
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/routes-json",
+      "action": "pass",
+      "elapsed": 16.18
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/routes-text",
+      "action": "pass",
+      "elapsed": 11.68
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-json",
+      "action": "pass",
+      "elapsed": 16.07
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-text",
+      "action": "pass",
+      "elapsed": 12.12
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-quiet",
+      "action": "pass",
+      "elapsed": 16.92
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-text",
+      "action": "pass",
+      "elapsed": 16.95
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/routes-quiet",
+      "action": "pass",
+      "elapsed": 16.88
+    }
+  ],
+  "failures": [],
+  "skipped": [],
+  "internal_repetitions_per_cell": 2
+}

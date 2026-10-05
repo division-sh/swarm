@@ -98,13 +98,15 @@ func (c channelDeliveryWorkerCards) ListDecisionCardChanges(_ context.Context, o
 
 type channelDeliveryWorkerStore struct {
 	runtimechanneldelivery.Store
-	planned        []string
-	changeCursor   int64
-	changed        []string
-	failOnSequence int64
-	freezeFailure  string
-	freezes        []string
-	readReceipts   []string
+	planned         []string
+	changeCursor    int64
+	changed         []string
+	failOnSequence  int64
+	freezeFailure   string
+	freezes         []string
+	readReceipts    []string
+	currentOverride *runtimechanneldelivery.Candidate
+	absent          bool
 }
 
 func (s *channelDeliveryWorkerStore) PlanOpenChannelCard(_ context.Context, cardID string) (bool, error) {
@@ -146,6 +148,12 @@ func (s *channelDeliveryWorkerStore) FreezeAndPersistChannelRender(_ context.Con
 }
 
 func (s *channelDeliveryWorkerStore) GetCurrentChannelDeliveryPlan(_ context.Context, deliveryID string) (runtimechanneldelivery.Candidate, bool, error) {
+	if s.absent {
+		return runtimechanneldelivery.Candidate{}, false, nil
+	}
+	if s.currentOverride != nil {
+		return *s.currentOverride, true, nil
+	}
 	plans, _ := s.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
 	for _, plan := range plans {
 		if plan.DeliveryID == deliveryID {
@@ -153,6 +161,24 @@ func (s *channelDeliveryWorkerStore) GetCurrentChannelDeliveryPlan(_ context.Con
 		}
 	}
 	return runtimechanneldelivery.Candidate{}, false, nil
+}
+
+func TestChannelDeliveryWorkerRechecksResponsibilityBeforeRender(t *testing.T) {
+	for _, cut := range []string{"source_lost", "accepted_work"} {
+		t.Run(cut, func(t *testing.T) {
+			selected := &channelDeliveryWorkerStore{absent: cut == "source_lost"}
+			if cut == "accepted_work" {
+				selected.currentOverride = &runtimechanneldelivery.Candidate{DeliveryID: "stale", State: "rendered", RecoveryPending: true}
+			}
+			d := &serveChannelDeliveryDispatcher{store: selected}
+			if err := d.reconcileDelivery(context.Background(), runtimechanneldelivery.Candidate{DeliveryID: "stale", State: "planned"}); err != nil {
+				t.Fatal(err)
+			}
+			if len(selected.freezes) != 0 || len(selected.readReceipts) != 0 {
+				t.Fatal("stale or recovery-owned candidate reached render/dispatch")
+			}
+		})
+	}
 }
 
 func (s *channelDeliveryWorkerStore) GetCurrentChannelSentReceipt(_ context.Context, deliveryID, operationID string) (runtimechanneldelivery.SentReceipt, bool, error) {

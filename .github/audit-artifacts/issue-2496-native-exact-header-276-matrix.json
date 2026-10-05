@@ -1,0 +1,703 @@
+{
+  "source_head": "a73cabe917975637ab655bc682239ec8d3c18859",
+  "base": "276d7723f9f6c66458d416a0554c107be373772b",
+  "receipt": "/tmp/agent-e-2496-native-ci-revalidation-exact-header.log",
+  "command": "go run ./cmd/swarm-test -- -json -count=1 -run <114 exact roots> ./internal/store/internal/runtimepersistence",
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "result": "pass",
+      "seconds": 127.877
+    }
+  ],
+  "root_count": 114,
+  "cell_count": 863,
+  "passing_cell_actions": 863,
+  "roots": [
+    {
+      "test": "TestA2JoinNativeCommitBoundaryOnBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestFlowInstanceRouteSourceProjectionBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreFlowInstanceRoutes",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreUpsertFlowInstanceRouteOwnsNamedTransaction",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactional",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreUpsertFlowInstanceRouteOwnsNamedTransaction",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsOwnsNamedTransaction",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreReplaceFlowInstanceRouteTopologyIsAtomic",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreReplaceFlowInstanceRouteTopologyIsAtomic",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestFlowInstanceRouteTopologyReplacementPreservesOlderObserverSources",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreDeleteFlowInstanceRouteOwnsNamedTransaction",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreRollbackFlowInstanceRouteOwnsNamedTransaction",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreFlowInstanceRoutes_NestedTemplateScope",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreFlowInstanceRouteDeletionRequiresCanonicalTermination",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreListFlowInstanceRoutesFiltersTerminatedInstances",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStoreListActiveFlowInstanceDescriptorsDoesNotReadAmbientTransaction",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestMutationDomainsReachBothForkConsumersBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestInboundEvidencePersistsTypedNoSubscriberByDesign",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestOperatorEntityReadOwnerListGetAggregateAndCursor",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestOperatorEventSnapshotInheritedLineageInterleavingBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_HelpersAndDescriptors",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeliveries",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverAgentBusinessNamespaceNativeBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverConfigActivationRaceAndRollbackBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverConfigEngineAtomicFaultMatrixBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverConfigPublicationContendersBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRepositoryEventBusSourceOperationLedgerIsExhaustive",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhenEntityNotTerminal",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkDeliveryRouteEvidenceBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkFanOutDeferredWorkRefusalBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestOrdinaryForkOfForkFanOutOriginWriterEvaluatorBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStoreParity",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresRunForkDeliveryEventReplayCommitsSettlementAtomically",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresRunForkDeliveryEventReplayExactDuplicatePreservesSettlement",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresOperatorEventReadbackProjectsRunForkReplaySettlement",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLineage",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkRevisionExactWriterContributions",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkRevisionFactBatchBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkSelectedStoreLifecycleParity",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkRevisionProductionWriterCensusIsClosed",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFrontier",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationTreatsSourceConversationHistoryAsLineage",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationKeepsCanonicalReplayScopesSourceLocal",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCouplingFailClosed",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPointEmission",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliveryFailClosed",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliveryWithoutConversationHistoryFailClosed",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsActiveSessionCoupling",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailClosed",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostTSourceTimerActivatesAsSelectedBranchDivergence",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostTSourceSessionDoesNotChangeFixedEventMaterialization",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostTSourceConversationHistoryActivatesAsBranchDivergence",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsBranchDivergence",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractActivationAllowsFreshForkConversationRows",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEvent",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformControlEvent",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLogDiagnostic",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRemoval",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkChangedDeclarationStateCorrespondenceBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkOwnershipEvidenceContradictionsBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkReceiverCompanionPresenceBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkProjectionFailurePhasesBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkWorkflowProjectionOmissionBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunLifecycleCompletionBlockerMatrixParity",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestCompletionPendingPipelineDefersOnlyUnusedFanOutFoldBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestCompletionPendingPipelineStillAdvancesFanOutBarriersBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestCompletionNonterminalEntityDefersOnlyUnusedFanOutFoldBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestCompletionNonterminalEntityStillAdvancesFanOutBarriersBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRunLifecycleOwnershipBoundaryGuard",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRuntimeLogs",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryActive",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedCompletionStageReadersBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestStandingServicePostureCensusRejectsEachLiveWorkFamilyBeforeMutation",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestWorkflowEngineHistoricalForkM16BothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestWorkflowEntityCollectionIncludesStateOnlyRowsOnBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenanceBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipelineTransaction",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestFlowRouteTopologyAcknowledgedFaultCompletesProcessFollowupBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    }
+  ],
+  "failures": []
+}

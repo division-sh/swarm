@@ -59,3 +59,8 @@ func (b Binding) Equal(other Binding) bool {
 		strings.TrimSpace(b.RuntimeInstanceID) == strings.TrimSpace(other.RuntimeInstanceID) &&
 		b.RuntimeGeneration == other.RuntimeGeneration
 }
+
+func (b Binding) SameProcessExecution(other Binding) bool {
+	return b.ProcessAuthorityID == other.ProcessAuthorityID && b.ProcessOwnerID == other.ProcessOwnerID &&
+		b.ProcessBootID == other.ProcessBootID && b.BundleHash == other.BundleHash && b.RuntimeInstanceID == other.RuntimeInstanceID
+}

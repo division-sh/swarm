@@ -3,6 +3,7 @@ package cataloge2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -132,18 +133,15 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 			assertCatalogRunScopedAgent(t, h, selected, runB, flowPath, "in_progress")
 
 			controller := runtimeruncontrol.NewController(selected, h.rt.Bus, runtimeruncontrol.Options{})
-			stopped, err := controller.Stop(catalogRunContext(h, runA), runtimeruncontrol.TransitionRequest{
+			snapshotA, err := selected.LoadRunLifecycleSnapshot(catalogRunContext(h, runA), runA)
+			if err != nil || snapshotA.Status != "completed" || snapshotA.EndedAt == nil {
+				t.Fatalf("run A completion snapshot = %#v err=%v", snapshotA, err)
+			}
+			_, err = controller.Stop(catalogRunContext(h, runA), runtimeruncontrol.TransitionRequest{
 				RunID: runA, Reason: "run-scoped identity proof", ControlledBy: "cataloge2e",
 			})
-			if err != nil {
-				t.Fatalf("stop run A: %v", err)
-			}
-			if stopped.Status != runtimeruncontrol.StatusCancelled {
-				t.Fatalf("run A stop status = %q", stopped.Status)
-			}
-			snapshotA, err := selected.LoadRunLifecycleSnapshot(catalogRunContext(h, runA), runA)
-			if err != nil || snapshotA.EndedAt == nil {
-				t.Fatalf("run A terminal snapshot = %#v err=%v", snapshotA, err)
+			if !errors.Is(err, runtimeruncontrol.ErrAlreadyTerminal) {
+				t.Fatalf("stop completed run A = %v, want terminal refusal", err)
 			}
 			select {
 			case err := <-publishB:
@@ -164,6 +162,12 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 
 			assertCatalogRunScopedFlowOwner(t, h, selected, runB, flowPath, "complete", false)
 			assertCatalogRunScopedAgent(t, h, selected, runB, flowPath, "delivered")
+			afterA, err := selected.LoadRunLifecycleSnapshot(catalogRunContext(h, runA), runA)
+			if err != nil || !reflect.DeepEqual(snapshotA, afterA) {
+				t.Fatalf("run B or refused stop changed completed run A: before=%#v after=%#v err=%v", snapshotA, afterA, err)
+			}
+			assertCatalogRunScopedFlowOwner(t, h, selected, runA, flowPath, "complete", false)
+			assertCatalogRunScopedAgent(t, h, selected, runA, flowPath, "delivered")
 			assertCatalogRunScopedPublicReadback(t, h, selected, runA, runB, flowPath)
 		})
 	}
@@ -381,31 +385,25 @@ func catalogRunContext(h *runtimeHarness, runID string) context.Context {
 
 func seedCatalogRootStateForRun(t testing.TB, h *runtimeHarness, runID string) {
 	t.Helper()
-	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.RouteForInstancePath(runID))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx := worklifetime.WithOccurrence(catalogRunContext(h, runID), h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-	_, err = h.workflow.MaterializeInitialEntry(ctx, owner, runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: runtimepipeline.FlowInstanceEntityID(runID),
-		WorkflowName: h.bundle.WorkflowName(), WorkflowVersion: h.bundle.WorkflowVersion(),
-		CurrentState: h.initialState, EnteredStageAt: h.startedAt, CreatedAt: h.startedAt,
-		EntityType: h.requireRootEntityType(),
-	}, h.startedAt)
-	if err != nil {
+	if err := h.rt.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(h.bundle),
+		Instance:       runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), ".", runID, runID, runID, ""),
+		OccurredAt:     h.startedAt,
+	}); err != nil {
 		t.Fatalf("materialize root state for run %s: %v", runID, err)
 	}
 }
 
-func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, runID, flowPath string) string {
+func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, runID, flowPath, constructorInput string) string {
 	t.Helper()
 	entityID := eventtest.UUID("run-scoped-selected-fork-worker")
 	at := time.Now().UTC()
 	ctx := worklifetime.WithOccurrence(catalogRunContext(h, runID), h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 	trigger := eventtest.ExistingRunRootIngress(
-		uuid.NewString(), "catalog.selected_fork_source_admitted", "cataloge2e", "", nil, 0, runID,
+		uuid.NewString(), events.EventType(constructorInput), "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, runID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at,
 	)
 	if err := h.rt.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
@@ -413,8 +411,8 @@ func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, r
 		Instance: runtimeflowidentity.Stored(
 			semanticview.Wrap(h.bundle), "worker-flow", flowPath, "worker-001", entityID, "",
 		),
-		Config:       map[string]any{"worker_id": "worker-001"},
-		Fields:       map[string]any{"worker_id": "worker-001"},
+		Config:           map[string]any{"worker_id": "worker-001"},
+		ConstructorInput: constructorInput, ResolvedKey: "worker-001",
 		TriggerEvent: trigger,
 		OccurredAt:   at,
 	}); err != nil {

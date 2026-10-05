@@ -81,11 +81,15 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 			h, db, bundleHash := startChannelAnchorJourney(t, backend, "anchor-token", false)
 			for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 				t.Run(string(kind), func(t *testing.T) {
+					flowInstance := "reviews"
+					if kind == decisioncard.AnchorKindHumanTask {
+						flowInstance = "observers"
+					}
 					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 						"event_name": "work.requested", "bundle_hash": bundleHash,
 						"payload": map[string]any{"seed": true}, "idempotency_key": "channel-anchor-" + string(kind),
 					})
-					gateID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+					gateID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 					waitChannelAnchorReceipt(t, db, gateID)
 					if kind != decisioncard.AnchorKindStageGate {
 						event := "observer.requested"
@@ -97,7 +101,7 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 							"payload": map[string]any{"seed": true}, "idempotency_key": "producer-" + string(kind),
 						})
 					}
-					cardID := waitChannelAnchorCard(t, db, seed.RunID, kind)
+					cardID := waitChannelAnchorCard(t, db, seed.RunID, kind, flowInstance)
 					messageID := waitChannelAnchorReceipt(t, db, cardID)
 					message := h.provider.Delivery(messageID - 1)
 					label := "Approve"
@@ -403,17 +407,51 @@ func TestScalar2556ChannelAnchorSourcePreservesGateText(t *testing.T) {
 	}
 }
 
-func waitChannelAnchorCard(t *testing.T, db *sql.DB, runID string, kind decisioncard.AnchorKind) string {
+func waitChannelAnchorCard(t *testing.T, db *sql.DB, runID string, kind decisioncard.AnchorKind, flowInstance string) string {
+	t.Helper()
+	return waitChannelAnchorCardInState(t, db, runID, kind, flowInstance, "")
+}
+
+func waitChannelAnchorCardInState(t *testing.T, db *sql.DB, runID string, kind decisioncard.AnchorKind, flowInstance, status string) string {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		var id string
-		err := db.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND anchor_kind=$2`, runID, string(kind)).Scan(&id)
-		if err == nil {
+		rows, err := db.Query(`SELECT card_id,CAST(anchor AS TEXT) FROM decision_cards WHERE run_id=$1 AND anchor_kind=$2 AND ($3='' OR status=$3)`, runID, string(kind), status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		id := ""
+		for rows.Next() {
+			var candidate, raw string
+			if err := rows.Scan(&candidate, &raw); err != nil {
+				t.Fatal(err)
+			}
+			anchor, err := decisioncard.DecodeAnchor(string(kind), []byte(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope, err := anchor.Scope()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scope.FlowInstance == flowInstance {
+				if id != "" {
+					t.Fatalf("multiple %s cards for exact %s/%s", kind, runID, flowInstance)
+				}
+				id = candidate
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != "" {
 			return id
 		}
-		if err != sql.ErrNoRows || time.Now().After(deadline) {
-			t.Fatalf("real %s producer did not commit a card: %v", kind, err)
+		if time.Now().After(deadline) {
+			t.Fatalf("real %s producer did not commit its exact %s/%s card", kind, runID, flowInstance)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

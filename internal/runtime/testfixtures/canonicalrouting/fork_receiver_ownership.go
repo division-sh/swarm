@@ -14,8 +14,7 @@ const (
 	ForkReceiverOptionalExisting
 	ForkReceiverRequiredExisting
 	ForkReceiverRequiredMissing
-	ForkReceiverAutoMaterializing
-	ForkReceiverExplicitCreate
+	ForkReceiverConstructorOwned
 )
 
 type ForkReceiver struct {
@@ -74,7 +73,6 @@ func CopyReceiverMaterializationCompetingNodes(t testing.TB) string {
   subscribes_to: [receiver.seeded]
   event_handlers:
     receiver.seeded:
-      create_entity: true
       advances_to: active
 collector:
 `)
@@ -145,7 +143,6 @@ connect:
     work.closed:
       advances_to: done
     child.ready:
-      create_entity: true
       advances_to: active
       data_accumulation:
         writes: [{target_field: token, value: payload.token}]
@@ -188,7 +185,7 @@ func CopyForkReceiverRepeatedOwnership(t testing.TB, receivers []ForkReceiver) s
 
 func CopyForkReceiverStaticAcquisitionRefusal(t testing.TB) string {
 	t.Helper()
-	root := CopyForkReceiverOwnership(t, []ForkReceiver{{Path: "consumer", Policy: ForkReceiverExplicitCreate}}, false)
+	root := CopyForkReceiverOwnership(t, []ForkReceiver{{Path: "consumer", Policy: ForkReceiverConstructorOwned}}, false)
 	applyClosedReplacement(t, filepath.Join(root, "producer/events.yaml"), "work.ready:\n", "work.ready:\n  entity_id: uuid?\n")
 	return root
 }
@@ -312,10 +309,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		case ForkReceiverOptionalAbsent, ForkReceiverOptionalExisting:
 		case ForkReceiverRequiredExisting, ForkReceiverRequiredMissing:
 			body = fmt.Sprintf("      guard:\n        id: exact_receiver_marker\n        check: has(entity.marker) && entity.marker == '%s-owned'\n", receiver.Path)
-		case ForkReceiverExplicitCreate:
-			body = "      create_entity: true\n"
-			fallthrough
-		case ForkReceiverAutoMaterializing:
+		case ForkReceiverConstructorOwned:
 			body += fmt.Sprintf("      advances_to: active\n      data_accumulation:\n        writes:\n          - target_field: marker\n            value: \"%s-created\"\n", receiver.Path)
 		default:
 			t.Fatalf("unknown fork receiver policy %d", receiver.Policy)

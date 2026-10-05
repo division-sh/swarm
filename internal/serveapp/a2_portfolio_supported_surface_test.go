@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"database/sql"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -209,6 +210,33 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			if len(created) != 4 {
 				t.Fatalf("ordinary operating creation count=%d, want 4 independent instances", len(created))
 			}
+			var header struct {
+				Run operatorread.RunHeader `json:"run"`
+			}
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": setup.RunID}, &header)
+			if header.Run.RunID != setup.RunID || header.Run.Status != "completed" || header.Run.EndedAt == nil || header.Run.Failure != nil {
+				t.Fatalf("finite join did not complete its exact run: %+v", header.Run)
+			}
+			for _, operating := range created {
+				key, ok := operating.Fields["operating_instance_id"].(string)
+				if !ok || key == "" {
+					t.Fatalf("constructed operating instance lost its typed key: %+v", operating)
+				}
+				if !reflect.DeepEqual(operating, requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "operating", "operating_instance_id", key)) {
+					t.Fatal("run completion changed its constructed operating instance")
+				}
+				ctx := servedControlProofAuthorActivityContext(t, rt)
+				var active []bus.ActiveFlowInstanceDescriptor
+				var err error
+				if rt.Backend == "postgres" {
+					active, err = rt.Postgres.ListActiveFlowInstanceDescriptorsForKey(ctx, setup.RunID, "operating", "entity.operating_instance_id", key)
+				} else {
+					active, err = rt.SQLite.ListActiveFlowInstanceDescriptorsForKey(ctx, setup.RunID, "operating", "entity.operating_instance_id", key)
+				}
+				if err != nil || len(active) != 0 {
+					t.Fatalf("completed run retained an active operating route: descriptors=%+v err=%v", active, err)
+				}
+			}
 			t.Log("root-triggered operating creations=4; complete typed ordered results: 2026-Q1=[int64(11), int64(22)], 2026-Q2=[int64(111), int64(222)]")
 			if code := process.stop(); code != 0 {
 				t.Fatalf("finite join successor serve exit=%d", code)
@@ -239,26 +267,27 @@ func requireA2PortfolioVerification(t *testing.T, root string) {
 
 func requireA2PortfolioKeyedEntity(t *testing.T, rt servedControlProofRuntime, runID, flow, field, key string) operatorread.OperatorEntityFull {
 	t.Helper()
-	ctx := servedControlProofAuthorActivityContext(t, rt)
-	var descriptors []bus.ActiveFlowInstanceDescriptor
-	var err error
-	if rt.Backend == "postgres" {
-		descriptors, err = rt.Postgres.ListActiveFlowInstanceDescriptorsForKey(ctx, runID, flow, "entity."+field, key)
-	} else {
-		descriptors, err = rt.SQLite.ListActiveFlowInstanceDescriptorsForKey(ctx, runID, flow, "entity."+field, key)
+	var list operatorread.OperatorEntityListResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 100}, &list)
+	if list.NextCursor != "" {
+		t.Fatalf("small portfolio keyed readback unexpectedly paginated: %+v", list)
 	}
-	if err != nil || len(descriptors) != 1 {
-		t.Fatalf("exact ordinary instance key %s/%s=%s: descriptors=%+v err=%v", flow, field, key, descriptors, err)
+	var matches []operatorread.OperatorEntityFull
+	for _, entity := range list.Entities {
+		if entity.RunID != runID {
+			t.Fatalf("portfolio keyed readback included a foreign run: %+v", entity)
+		}
+		if flowidentity.SemanticScopeFromInstancePath(entity.FlowInstance) == flow {
+			full := requireA2PortfolioEntity(t, rt, runID, entity.FlowInstance)
+			if full.Fields[field] == key {
+				matches = append(matches, full)
+			}
+		}
 	}
-	descriptor := descriptors[0]
-	if descriptor.RunID != runID || descriptor.FlowTemplate != flow || descriptor.AddressFields["entity."+field] != key {
-		t.Fatalf("ordinary routing descriptor lost its exact key: %+v", descriptor)
+	if len(matches) != 1 {
+		t.Fatalf("exact public constructed key %s/%s=%s: matches=%+v list=%+v", flow, field, key, matches, list)
 	}
-	full := requireA2PortfolioEntity(t, rt, runID, descriptor.FlowInstance)
-	if full.Entity.EntityID != descriptor.EntityID || full.Fields[field] != key {
-		t.Fatalf("public keyed entity disagrees with ordinary route: entity=%+v descriptor=%+v", full, descriptor)
-	}
-	return full
+	return matches[0]
 }
 
 func requireA2PortfolioEntity(t *testing.T, rt servedControlProofRuntime, runID, path string) operatorread.OperatorEntityFull {
@@ -328,11 +357,15 @@ func requireA2PortfolioEmission(t *testing.T, rt servedControlProofRuntime, runI
 
 func requireA2PortfolioDelivery(t *testing.T, event operatorread.OperatorEventFull, flow, node string, entity operatorread.OperatorEntityFull, kind string) {
 	t.Helper()
+	requireA2PortfolioDeliveryTarget(t, event, flow, node, operatorread.OperatorDeliveryTarget{Kind: kind, FlowID: flow, FlowInstance: entity.Entity.FlowInstance, EntityID: entity.Entity.EntityID})
+}
+
+func requireA2PortfolioDeliveryTarget(t *testing.T, event operatorread.OperatorEventFull, flow, node string, want operatorread.OperatorDeliveryTarget) {
+	t.Helper()
 	if len(event.Deliveries) != 1 {
 		t.Fatalf("portfolio event deliveries: %+v", event)
 	}
 	delivery := event.Deliveries[0]
-	want := operatorread.OperatorDeliveryTarget{Kind: kind, FlowID: flow, FlowInstance: entity.Entity.FlowInstance, EntityID: entity.Entity.EntityID}
 	if delivery.SubscriberType != "node" || delivery.SubscriberID != identitytest.FlowNode(t, flow, node).Key() || delivery.Status != "delivered" ||
 		!delivery.Terminal || delivery.RetryCount != 0 || delivery.Failure != nil || len(delivery.DeadLetters) != 0 || delivery.Target != want {
 		t.Fatalf("ordinary portfolio route/settlement: %+v, want target=%+v node=%s/%s", delivery, want, flow, node)
@@ -342,9 +375,22 @@ func requireA2PortfolioDelivery(t *testing.T, event operatorread.OperatorEventFu
 func requireA2PortfolioOperatingCreation(t *testing.T, rt servedControlProofRuntime, trigger servedEventPublishRPCResult, payload map[string]any, instanceField string) (operatorread.OperatorEventFull, operatorread.OperatorEntityFull) {
 	t.Helper()
 	input := requireA2PortfolioEvent(t, rt, trigger.EventID, trigger.RunID, "operating.report.triggered", payload)
-	// Stateless ingress has delivery ownership, but no entity-state row.
-	ingress := operatorread.OperatorEntityFull{Entity: operatorread.OperatorEntitySummary{FlowInstance: "ingress"}}
-	requireA2PortfolioDelivery(t, input, "ingress", "ingress-node", ingress, "entityless_receiver")
+	ingress := operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "ingress", FlowInstance: "ingress", EntityID: flowidentity.EntityID("ingress")}
+	if trigger.NewRunCreated {
+		ingress.Kind = "materializing_entity"
+	}
+	requireA2PortfolioDeliveryTarget(t, input, "ingress", "ingress-node", ingress)
+	var entityID, template, mode string
+	var entityType sql.NullString
+	var fieldRows int
+	if err := rt.DB.QueryRow(`SELECT entity_id, entity_type, flow_template, mode,
+		(SELECT COUNT(*) FROM entity_state fields WHERE fields.run_id=header.run_id AND fields.flow_instance=header.instance_path)
+		FROM flow_instances header WHERE run_id=$1 AND instance_path=$2`, trigger.RunID, "ingress").Scan(&entityID, &entityType, &template, &mode, &fieldRows); err != nil {
+		t.Fatalf("read constructed fieldless ingress: %v", err)
+	}
+	if entityID != ingress.EntityID || template != "ingress" || mode != "static" || entityType.Valid || fieldRows != 0 {
+		t.Fatalf("fieldless ingress lost its exact header or acquired fields: entity=%s template=%s mode=%s type=%+v fields=%d", entityID, template, mode, entityType, fieldRows)
+	}
 	requested := requireA2PortfolioEmission(t, rt, trigger.RunID, "ingress/operating.report.requested", trigger.EventID, payload)
 	operating := requireA2PortfolioKeyedEntity(t, rt, trigger.RunID, "operating", instanceField, requested.EventID)
 	requireA2PortfolioDelivery(t, requested, "operating", "operating-node", operating, "materializing_entity")

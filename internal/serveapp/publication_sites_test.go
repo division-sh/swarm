@@ -250,9 +250,11 @@ func requirePublicationSiteReadback(t *testing.T, rt servedControlProofRuntime, 
 		if err := json.Unmarshal([]byte(r.route), &route); err != nil {
 			t.Fatal(err)
 		}
-		flow, path, kind := ".", runID, "static_flow"
+		flow, path, kind := ".", runID, "root"
+		ownerFlow, ownerPath := "", ""
 		if mode != "root" {
 			flow, path, kind = "source", "source", "static_flow"
+			ownerFlow, ownerPath = flow, path
 		}
 		if mode == "template" {
 			kind = "concrete_template_instance"
@@ -267,12 +269,13 @@ func requirePublicationSiteReadback(t *testing.T, rt servedControlProofRuntime, 
 			if fields["case_id"] != payload.CaseID || declaration != flow {
 				t.Fatalf("publication borrowed instance entity: %s %s %s", r.id, declaration, rawFields)
 			}
+			ownerPath = path
 		}
 		local := r.name
 		if mode != "root" {
 			local = strings.TrimPrefix(r.name, path+"/")
 		}
-		if !strings.HasPrefix(local, "result.") || strings.Contains(local, "/") || r.kind != kind || route.FlowID != flow || route.FlowInstance != path {
+		if !strings.HasPrefix(local, "result.") || strings.Contains(local, "/") || r.kind != kind || route.FlowID != ownerFlow || route.FlowInstance != ownerPath || (mode == "root" && route.EntityID != runID) {
 			t.Fatalf("publication not owned by exact source: %+v, want %s %s/%s", r, kind, flow, path)
 		}
 		got[payload.CaseID+"/"+local] = append(got[payload.CaseID+"/"+local], value)

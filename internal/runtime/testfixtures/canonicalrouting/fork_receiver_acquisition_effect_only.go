@@ -6,11 +6,11 @@ import (
 )
 
 // CopyForkReceiverAcquisitionWithoutFinishedEmission preserves the authored
-// creation, stage and field writes; only the later finished emission is removed.
+// constructor-owned receiver, stage and field writes; only the later finished emission is removed.
 func CopyForkReceiverAcquisitionWithoutFinishedEmission(t testing.TB, policy ForkReceiverPolicy) string {
 	t.Helper()
-	if policy != ForkReceiverAutoMaterializing && policy != ForkReceiverExplicitCreate {
-		t.Fatalf("effect-only acquisition requires an authored acquiring receiver: %d", policy)
+	if policy != ForkReceiverConstructorOwned {
+		t.Fatalf("effect-only acquisition requires a constructor-owned receiver: %d", policy)
 	}
 	root := CopyForkReceiverOwnership(t, []ForkReceiver{{Path: "consumer", Policy: policy}}, false)
 	applyClosedReplacement(t, filepath.Join(root, "consumer/nodes.yaml"), `      emit:

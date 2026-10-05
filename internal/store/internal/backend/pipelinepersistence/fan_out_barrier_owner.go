@@ -26,6 +26,7 @@ import (
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 const fanOutFoldJoinedQuery = `
@@ -412,30 +413,31 @@ func loadArmedFanOutBarriers(ctx context.Context, tx *sql.Tx, postgres bool, run
 	return registrations, nil
 }
 
-func fanOutBarrierGenerationCurrent(ctx context.Context, tx *sql.Tx, registration fanoutbarrier.Registration) (bool, error) {
+func fanOutBarrierGenerationCurrent(ctx context.Context, tx *sql.Tx, postgres bool, registration fanoutbarrier.Registration) (bool, error) {
 	ref, _ := registration.Handle.JoinRef()
 	generation := ref.Generation()
 	if !generation.Valid() {
 		return true, nil
 	}
-	var fieldsRaw, stateBucketsRaw any
-	err := tx.QueryRowContext(ctx, `
-		SELECT fields, accumulator
-		FROM entity_state
-		WHERE run_id=$1 AND entity_id=$2
-	`, registration.IntentKey.RunID, registration.EntityID).Scan(&fieldsRaw, &stateBucketsRaw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, fmt.Errorf("fan-out barrier generation owner entity is missing")
-	}
+	header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, registration.IntentKey.RunID, registration.EntityID, registration.Route.InstancePath)
 	if err != nil {
 		return false, err
 	}
-	var fields, stateBuckets map[string]any
-	if err := json.Unmarshal(jsonRawMessageValue(fieldsRaw), &fields); err != nil {
-		return false, fmt.Errorf("decode fan-out barrier generation fields: %w", err)
+	if !found {
+		return false, fmt.Errorf("fan-out barrier generation owner entity is missing")
 	}
-	if err := json.Unmarshal(jsonRawMessageValue(stateBucketsRaw), &stateBuckets); err != nil {
-		return false, fmt.Errorf("decode fan-out barrier generation state: %w", err)
+	if header.FlowTemplate != generation.FlowID || header.FlowTemplate != registration.Route.ScopeKey {
+		return false, fmt.Errorf("fan-out generation disagrees with its constructed flow owner")
+	}
+	fields := map[string]any{}
+	if header.EntityType != "" {
+		if err := json.Unmarshal(jsonRawMessageValue(header.Fields), &fields); err != nil || fields == nil {
+			return false, fmt.Errorf("decode fan-out barrier generation fields: %v", err)
+		}
+	}
+	var stateBuckets map[string]any
+	if err := json.Unmarshal(jsonRawMessageValue(header.Accumulator), &stateBuckets); err != nil || stateBuckets == nil {
+		return false, fmt.Errorf("decode fan-out barrier generation state: %v", err)
 	}
 	return runtimepipeline.WorkflowLoopGenerationCurrent(fields, stateBuckets, generation, "")
 }
@@ -469,7 +471,7 @@ func advanceFanOutDeliveryBarriersTx(
 		foldDB = queries
 	}
 	for _, registration := range registrations {
-		current, err := fanOutBarrierGenerationCurrent(ctx, tx, registration)
+		current, err := fanOutBarrierGenerationCurrent(ctx, tx, postgres, registration)
 		if err != nil {
 			return nil, err
 		}
@@ -588,7 +590,7 @@ func suppressSupersededPendingFanOutBarriersTx(
 	}
 	for _, barrier := range barriers {
 		registration := barrier.Registration
-		current, err := fanOutBarrierGenerationCurrent(ctx, tx, registration)
+		current, err := fanOutBarrierGenerationCurrent(ctx, tx, postgres, registration)
 		if err != nil {
 			return err
 		}

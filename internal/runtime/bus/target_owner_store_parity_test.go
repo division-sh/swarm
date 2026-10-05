@@ -18,22 +18,24 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 type targetOwnerParityStore interface {
-	runtimebus.EventStore
+	componentFlowConstructionStore
 	runtimebus.PreparedPublishEventReader
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 }
 
-func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing.T) {
+func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ParentConnect)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -50,11 +52,24 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 			ctx := testAuthorActivityContextForSource(context.Background(), source)
 			selected := newTargetOwnerParityStore(t, backend, ctx)
 			runID := uuid.NewString()
-			sourceEntityID := uuid.NewString()
+			sourceEntityID := runtimeflowidentity.EntityID(runID)
 			rootOwner := events.RouteIdentity{
 				FlowID: ".", FlowInstance: runID, EntityID: sourceEntityID,
 			}.Normalized()
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
+			at := time.Now().UTC()
+			run := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: testSourceArtifactFact(source), Artifact: bundle.SourceArtifact, StartedAt: at}
+			if backend == "postgres" {
+				runlifecyclefixture.RequirePostgres(t, ctx, storetest.DatabaseForTest(selected), run)
+			} else {
+				runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(selected), run)
+			}
+			for _, instance := range []runtimepipeline.WorkflowInstance{
+				{InstanceID: runID, StorageRef: runID, EntityID: sourceEntityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at},
+				{InstanceID: "consumer", StorageRef: "consumer", EntityID: runtimeflowidentity.EntityID("consumer"), WorkflowName: "consumer", WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at},
+			} {
+				seedComponentFlowConstruction(t, ctx, selected, source, instance)
+			}
 			ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-producer")),
 				Target:    events.MustExistingEntityTarget(rootOwner),
@@ -64,15 +79,15 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 				t.Fatalf("construct root routing source: %v", err)
 			}
 			eventID := uuid.NewString()
-			evt := eventtest.RunCreatingRootIngressWithRoutingSource(
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID, events.EventType("root.ready"), "root-producer", "",
-				json.RawMessage(`{"entity_id":"consumer-one"}`), 0, runID, "",
+				json.RawMessage(`{"entity_id":"consumer-one"}`), 0, runID,
 				events.EventEnvelope{}, routingSource, time.Now().UTC(),
 			)
 			wantRoute := events.RouteIdentity{
 				FlowID: "consumer", FlowInstance: "consumer", EntityID: runtimeflowidentity.EntityID("consumer"),
 			}.Normalized()
-			wantOwner := events.MustMaterializingEntityTarget(wantRoute)
+			wantOwner := events.MustExistingEntityTarget(wantRoute)
 			if rootOwner.EntityID == wantRoute.EntityID {
 				t.Fatal("source and receiver owner fixtures must remain distinguishable")
 			}
@@ -86,7 +101,7 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 				t.Fatalf("preflight first delivery: %v", err)
 			}
 			if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 {
-				t.Fatalf("preflight failure/routes = %q/%#v, want one materializing receiver", plan.TargetFailure, plan.DeliveryRoutes)
+				t.Fatalf("preflight failure/routes = %q/%#v, want one constructed receiver", plan.TargetFailure, plan.DeliveryRoutes)
 			}
 			assertDurableTargetOwnerRoute(t, plan.DeliveryRoutes[0], wantOwner)
 			if err := first.Publish(ctx, evt); err != nil {
@@ -128,9 +143,9 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 			if beforeDuplicate != afterDuplicate {
 				t.Fatalf("public target-owner projection changed across duplicate:\nbefore=%s\nafter=%s", beforeDuplicate, afterDuplicate)
 			}
-			conflicting := eventtest.RunCreatingRootIngressWithRoutingSource(
+			conflicting := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID, events.EventType("root.ready"), "root-producer", "",
-				json.RawMessage(`{"entity_id":"different"}`), 0, runID, "",
+				json.RawMessage(`{"entity_id":"different"}`), 0, runID,
 				events.EventEnvelope{}, routingSource, evt.CreatedAt(),
 			)
 			if _, err := restarted.CheckPublishRecipientPlan(ctx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
@@ -140,9 +155,9 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 			if err != nil {
 				t.Fatalf("construct conflicting source: %v", err)
 			}
-			conflictingSource := eventtest.RunCreatingRootIngressWithRoutingSource(
+			conflictingSource := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID, events.EventType("root.ready"), "root-producer", "",
-				json.RawMessage(`{"entity_id":"consumer-one"}`), 0, runID, "",
+				json.RawMessage(`{"entity_id":"consumer-one"}`), 0, runID,
 				events.EventEnvelope{}, wrongSource, evt.CreatedAt(),
 			)
 			if _, err := restarted.CheckPublishRecipientPlan(ctx, conflictingSource); !errors.Is(err, events.ErrEventIdentityConflict) {

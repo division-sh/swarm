@@ -47,13 +47,14 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			bus := pc.bus.(*recordingPipelineBus)
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(eventID,
-				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
+				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, FlowInstanceEntityID("validation")), time.Now().UTC())
 
 			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
 
 			node := pipelineSourceNode(t, pc.SemanticSource(), "validation", "w-node")
 			route := seedExactOnceEventDelivery(t, pc, ctx, evt, node)
 			ctx = withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, route)
+			seedConstructorUnitInstance(t, pc, runtimecorrelation.WithInboundEvent(ctx, evt), "validation")
 			result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, node, exactOnceCreateEntityHandler(), workflowTriggerContext{
 				Event:           evt,
 				HandlerEventKey: "thing.created",
@@ -98,7 +99,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			assertMetadataNumber(t, instance.Fields, "amount", 250)
 			assertMetadataString(t, instance.Fields, "who", "alice")
 			assertMetadataNumber(t, instance.Fields, "counter", 1)
-			if !instance.Gates["ready"] {
+			if !instance.Gates["validation/ready"] {
 				t.Fatalf("ready gate = false, want true (all=%v)", instance.Gates)
 			}
 
@@ -140,7 +141,9 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			bus := pc.bus.(*recordingPipelineBus)
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(eventID,
-				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
+				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, FlowInstanceEntityID("validation")), time.Now().UTC())
+			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
+			seedConstructorUnitInstance(t, pc, runtimecorrelation.WithInboundEvent(ctx, evt), "validation")
 
 			node := pipelineSourceNode(t, pc.SemanticSource(), "validation", "w-node")
 			route := seedExactOnceEventDelivery(t, pc, ctx, evt, node)
@@ -174,7 +177,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 
 func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceStore) *PipelineCoordinator {
 	t.Helper()
-	root := canonicalrouting.CopyLegacyStaticCreate(t, true)
+	root := canonicalrouting.CopyConstructedStaticHandler(t, true)
 	repoRoot := contractComplianceRepoRoot(t)
 	loadedBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -208,7 +211,6 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceSt
 
 func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 	return runtimecontracts.SystemNodeEventHandler{
-		CreateEntity: true,
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			SourceEvent: "thing.created",
 			Writes: []runtimecontracts.WorkflowDataWrite{

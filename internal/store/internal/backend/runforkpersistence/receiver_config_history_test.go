@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -52,7 +51,7 @@ func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 				`CREATE TEMP TABLE run_fork_revisions (run_id TEXT, revision BIGINT, recorded_at TEXT)`,
 				fmt.Sprintf(`CREATE TEMP TABLE run_fork_fact_revisions (run_id TEXT, revision BIGINT, family TEXT, fact_key TEXT, fact %s, present BOOLEAN)`, jsonType),
 				`CREATE TEMP TABLE entity_state (run_id TEXT, entity_id TEXT, flow_instance TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT)`,
-				fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id TEXT, instance_path TEXT, config %s)`, jsonType),
+				fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, config %s, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, created_at TEXT, updated_at TEXT, terminated_at TEXT)`, jsonType),
 			} {
 				if _, err := tx.Exec(ddl); err != nil {
 					t.Fatal(err)
@@ -68,10 +67,12 @@ func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 			if _, err := tx.Exec(`INSERT INTO entity_state VALUES ($1,$2,$3,'deployment','','','2026-09-21T00:00:00Z')`, runID, entityID, path); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tx.Exec(`INSERT INTO flow_instances VALUES ($1,$2,$3)`, runID, path, config); err != nil {
+			insertHeader := `INSERT INTO flow_instances (run_id,instance_path,entity_id,entity_type,slug,name,config,stage_defined,flow_template,mode,status,current_state,entered_state_at,created_at,updated_at)
+				VALUES ($1,$2,$3,'deployment','','',$4,TRUE,'consumer','template','active',$5,'2026-09-21T00:00:00Z','2026-09-21T00:00:00Z','2026-09-21T00:00:00Z')`
+			if _, err := tx.Exec(insertHeader, runID, path, entityID, config, plan.Entities[0].CurrentState); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tx.Exec(`INSERT INTO flow_instances VALUES ($1,$2,$3)`, "44444444-4444-4444-8444-444444444444", path, `{"config":{"vertical_id":"foreign-run"}}`); err != nil {
+			if _, err := tx.Exec(insertHeader, "44444444-4444-4444-8444-444444444444", path, entityID, `{"config":{"vertical_id":"foreign-run"}}`, plan.Entities[0].CurrentState); err != nil {
 				t.Fatal(err)
 			}
 			var persisted string
@@ -152,12 +153,23 @@ func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 }
 
 func TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions(t *testing.T) {
-	source := workflowOwnershipSource(t, canonicalrouting.CopyForkReceiverNestedOwnership(t, []canonicalrouting.ForkReceiver{{Path: "left", Policy: canonicalrouting.ForkReceiverOptionalExisting}}))
 	for _, flow := range []string{".", "branch", "branch/left"} {
 		t.Run(flow, func(t *testing.T) {
+			dir := canonicalrouting.CopyForkReceiverNestedOwnership(t, []canonicalrouting.ForkReceiver{
+				{Path: "left", Policy: canonicalrouting.ForkReceiverOptionalExisting},
+				{Path: "right", Policy: canonicalrouting.ForkReceiverOptionalExisting},
+			})
+			canonicalrouting.ApplyOverlay(t, dir, filepath.Join(flow, "schema.yaml"), `instance_variables:
+  variables:
+    status: boolean
+    flow_path: json
+    nested: json
+`)
+			source := workflowOwnershipSource(t, dir)
 			plan, planning, _, modes, forkID := workflowOwnershipProjection(t, source, flow)
 			business := map[string]any{"status": false, "flow_path": []any{"business", "path"}, "nested": []any{int64(7), float64(7)}}
-			payload, err := pipeline.WorkflowInstanceConfigPayloadForRoute(flowidentity.RouteForInstancePath(plan.Entities[0].MaterializationMetadata.FlowInstance), source.WorkflowVersion(), business)
+			instance := workflowOwnershipKeylessInstance(t, source, plan.SourceRunID, flow)
+			payload, err := pipeline.WorkflowInstanceConfigPayloadForIdentity(instance, source.WorkflowVersion(), business)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -174,7 +186,14 @@ func TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			encoded, err := selectedContractWorkflowStateConfig(selectedContractWorkflowState{Route: route.InstancePath, WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, Config: state.Config})
+			owner, err := ProjectRunForkEntityOwnership(plan.SourceRunID, forkID, state.EntityID, plan.Entities[0].MaterializationMetadata.FlowInstance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := selectedContractWorkflowStateConfig(selectedContractWorkflowState{
+				SourceRunID: plan.SourceRunID, RunID: forkID, EntityID: owner.Fork.EntityID, WorkflowName: state.FlowID,
+				Route: route.InstancePath, WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, Config: state.Config, History: plan.Entities[0],
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

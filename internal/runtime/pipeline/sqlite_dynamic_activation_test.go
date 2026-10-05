@@ -27,8 +27,8 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 	workflowStore := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
-	parentEntityID := uuid.NewString()
 	parentPath := runtimecorrelation.RunIDFromContext(ctx)
+	parentEntityID := parentPath
 
 	parent := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
@@ -284,7 +284,7 @@ func TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage(t *tes
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
 	runID := runtimecorrelation.RunIDFromContext(ctx)
-	entityID := uuid.NewString()
+	entityID := runID
 	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, EntityType: "parent",
 		WorkflowName: ".", WorkflowVersion: "v-test", CurrentState: "pending", Fields: map[string]any{},

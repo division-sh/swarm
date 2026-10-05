@@ -24,7 +24,7 @@ func TestReceiverCompositionEntitylessRootExportBothStores(t *testing.T) {
 			if err := json.Unmarshal([]byte(rawSource), &source); err != nil {
 				t.Fatal(err)
 			}
-			if source.FlowID != "." || source.EntityID != "" {
+			if source != (events.RouteIdentity{EntityID: published.RunID}) {
 				t.Fatalf("root export borrowed source state: %s", rawSource)
 			}
 			var event operatorread.OperatorEventFull
@@ -39,6 +39,7 @@ func TestReceiverCompositionEntitylessRootExportBothStores(t *testing.T) {
 			if entities != 0 {
 				t.Fatal("root export fabricated receiver state")
 			}
+			requireReceiverConstructedInstance(t, rt, published.RunID, published.RunID, ".", published.RunID, "", "pending", "", "ready", 2, nil)
 			requireReceiverPublicReadback(t, rt, published.RunID)
 		})
 	}

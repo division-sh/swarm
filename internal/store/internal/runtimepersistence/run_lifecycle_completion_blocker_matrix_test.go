@@ -119,6 +119,9 @@ func testCompletionGateBlockers(t *testing.T, fixture runLifecycleCandidateParit
 			a.CardID = ""
 		}},
 		{name: "wrong_bucket_key", key: "wrong", wantBlock: true, malformed: true},
+		{name: "wrong_flow_owner", wantBlock: true, malformed: true, mutate: func(a *runtimegates.Activation) {
+			a.FlowID = "unrelated-flow"
+		}},
 		{name: "malformed_bucket", rawBucket: "not-an-object", wantBlock: true, malformed: true},
 	}
 	for _, test := range tests {
@@ -126,7 +129,7 @@ func testCompletionGateBlockers(t *testing.T, fixture runLifecycleCandidateParit
 		t.Run("gate_"+test.name, func(t *testing.T) {
 			runID := seedCompletionBlockerRun(t, fixture, ctx)
 			activation, err := runtimegates.New(
-				runID, semanticRunFixtureFlow, runID, "matrix", "review", "approve",
+				runID, semanticRunFixtureFlow, runID, semanticRunFixtureFlow, "review", "approve",
 				runLifecycleCandidateParityBundleHash, testGateRoutes(t), uuid.NewString(),
 				time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC),
 			)
@@ -219,10 +222,10 @@ func testCompletionEntityBlockers(t *testing.T, fixture runLifecycleCandidatePar
 	t.Helper()
 	t.Run("entity_malformed_descriptor", func(t *testing.T) {
 		runID := seedCompletionBlockerRun(t, fixture, ctx)
-		update := `UPDATE entity_state SET flow_instance = ? WHERE run_id = ?`
+		update := `UPDATE flow_instances SET flow_template = ?1, instance_path = ?1 WHERE run_id = ?2`
 		args := []any{"unknown/instance", runID}
 		if fixture.postgres {
-			update = `UPDATE entity_state SET flow_instance = $1 WHERE run_id = $2::uuid`
+			update = `UPDATE flow_instances SET flow_template = $1, instance_path = $1 WHERE run_id = $2::uuid`
 		}
 		if _, err := fixture.db.ExecContext(ctx, update, args...); err != nil {
 			t.Fatal(err)
@@ -245,13 +248,6 @@ func seedCompletionBlockerRun(t *testing.T, fixture runLifecycleCandidateParityF
 		t, fixture, ctx, runID,
 		time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC),
 	)
-	query := `INSERT OR IGNORE INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES (?, ?, ?, 'static', '{}', 'active')`
-	if fixture.postgres {
-		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES ($1::uuid, $2, $3, 'static', '{}'::jsonb, 'active') ON CONFLICT (run_id, instance_path) DO NOTHING`
-	}
-	if _, err := fixture.db.ExecContext(ctx, query, runID, semanticRunFixtureFlow, semanticRunFixtureFlow); err != nil {
-		t.Fatalf("seed completion blocker flow instance: %v", err)
-	}
 	if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
 		t.Fatalf("seed completion blocker entity: %v", err)
 	}
@@ -313,10 +309,10 @@ func updateCompletionBlockerAccumulator(
 	if err != nil {
 		t.Fatal(err)
 	}
-	query := `UPDATE entity_state SET accumulator = ? WHERE run_id = ?`
+	query := `UPDATE flow_instances SET accumulator = ? WHERE run_id = ?`
 	args := []any{string(raw), runID}
 	if fixture.postgres {
-		query = `UPDATE entity_state SET accumulator = $1::jsonb WHERE run_id = $2::uuid`
+		query = `UPDATE flow_instances SET accumulator = $1::jsonb WHERE run_id = $2::uuid`
 	}
 	if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("update completion blocker accumulator: %v", err)

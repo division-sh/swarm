@@ -3,19 +3,17 @@ package cataloge2e
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -24,7 +22,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type catalogPersistenceBus struct{}
 
 func TestCatalogCausalOrderPreservesParentsAndIndependentOrder(t *testing.T) {
 	rows := []catalogStoredEvent{
@@ -48,25 +45,6 @@ func TestCatalogCausalOrderPreservesParentsAndIndependentOrder(t *testing.T) {
 	}
 }
 
-func (catalogPersistenceBus) Publish(context.Context, events.Event) error { return nil }
-func (catalogPersistenceBus) PublishDirect(context.Context, events.Event, []string) error {
-	return nil
-}
-func (catalogPersistenceBus) ResolveSubscribedRecipients(string) []string { return nil }
-func (catalogPersistenceBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
-	return nil
-}
-func (catalogPersistenceBus) EngineDispatcher() runtimeengine.PostCommitDispatcher { return nil }
-func (catalogPersistenceBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
-	return runtimedelivery.ExecutionAuthority{}, nil
-}
-func (catalogPersistenceBus) AcquireDeliveryContinuation(string) (worklifetime.DeliveryAcquisition, error) {
-	return worklifetime.DeliveryAcquisition{}, nil
-}
-func (catalogPersistenceBus) ReleaseDeliveryContinuation(string) error { return nil }
-func (catalogPersistenceBus) RetainDeliveryContinuation(runtimedelivery.Snapshot) error {
-	return nil
-}
 
 func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -207,11 +185,10 @@ func TestCatalogRecognizesHandlerOutcome_RejectsTyposAndUnsupportedValues(t *tes
 }
 
 func TestAssertCatalogRuntimeOutcome_IgnoresTopLevelNonSuccessPreviewProof(t *testing.T) {
-	h := newCatalogAssertionHarness(t)
-	entityID := uuid.NewString()
+	h := newCatalogAssertionHarness(t, "pending")
+	entityID := catalogRuntimeRunID
 	eventID := uuid.NewString()
 
-	insertCatalogAssertionEntityState(t, h, entityID, "pending")
 	seedCatalogAssertionPublishedEvent(h, eventID, entityID, runtimepipeline.HandlerOutcomeCompleted)
 
 	expected := catalogExpectedDocument{}
@@ -225,11 +202,10 @@ func TestAssertCatalogRuntimeOutcome_IgnoresTopLevelNonSuccessPreviewProof(t *te
 }
 
 func TestAssertCatalogRuntimeOutcome_IgnoresEntityNonSuccessPreviewProof(t *testing.T) {
-	h := newCatalogAssertionHarness(t)
-	entityID := uuid.NewString()
+	h := newCatalogAssertionHarness(t, "active")
+	entityID := catalogRuntimeRunID
 	eventID := uuid.NewString()
 
-	insertCatalogAssertionEntityState(t, h, entityID, "active")
 	insertCatalogAssertionDeadLetterEvent(t, h, entityID)
 	insertCatalogAssertionDeadLetterRelation(t, h, eventID, entityID)
 	seedCatalogAssertionPublishedEvent(h, eventID, entityID, runtimepipeline.HandlerOutcomeCompleted)
@@ -248,7 +224,7 @@ func TestAssertCatalogRuntimeOutcome_IgnoresEntityNonSuccessPreviewProof(t *test
 }
 
 func TestCatalogDeadLetterRelation_DiagnosticAloneGetsNoCredit(t *testing.T) {
-	h := newCatalogAssertionHarness(t)
+	h := newCatalogAssertionHarness(t, "pending")
 	entityID := uuid.NewString()
 	insertCatalogAssertionDeadLetterEvent(t, h, entityID)
 
@@ -261,13 +237,12 @@ func TestCatalogDeadLetterRelation_DiagnosticAloneGetsNoCredit(t *testing.T) {
 }
 
 func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testing.T) {
-	h := newCatalogAssertionHarness(t)
-	entityID := "11111111-1111-1111-1111-111111111111"
+	h := newCatalogAssertionHarness(t, "dispatched")
+	entityID := catalogRuntimeRunID
 	bundle := loadFixtureBundle(t, filepath.Join(repoRootFromCatalogE2E(t), "tests", "tier11-flow-composition", "test-subject-id-cross-flow-inherit"))
 	h.bundle = bundle
 
-	insertCatalogAssertionEntityState(t, h, entityID, "dispatched")
-	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.ExistingRunRootIngress(
+	storetest.CommitSemanticEvent(t, h.ctx, h.pg, eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		"score.requested",
 		"runtime",
@@ -282,81 +257,42 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 	assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, []string{"score.requested"}, "", semanticview.Wrap(bundle))
 }
 
-func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
+func newCatalogAssertionHarness(t *testing.T, initial string) *runtimeHarness {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	ctx := catalogRuntimeContext()
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
-	registerTestAuthorActivityCatalog(t, pg, "score.requested")
-	bus := catalogPersistenceBus{}
-	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
-		ExecutionPosture:        executionposture.Live,
-		Module:                  &fixtureWorkflowModule{},
-		Persistence:             runtimepipeline.NewWorkflowPersistence(pg),
-		RunLifecycle:            pg,
-		PipelineObligations:     pg.PipelineObligations(),
-		DeliveryStore:           pg,
-		DeadLetters:             pg,
-		DecisionCards:           pg,
-		ProposedEffects:         pg,
-		HumanTasks:              pg,
-		DecisionCardDraftExpiry: pg,
-		HumanTaskExpiry:         pg,
-		DeliveryRuntime:         bus, ReceiverExecution: eventreceiver.NormalExecution(),
+	root := t.TempDir()
+	for name, contents := range map[string]string{
+		"schema.yaml":   "name: catalog-assertion\npins:\n  inputs: [score.requested, assertion.finish]\nstages:\n  " + initial + ": {initial: true}\n  finished: {terminal: true}\n",
+		"entities.yaml": "assertion:\n  note: {type: 'text?', _unused_reason: assertion fixture}\n",
+		"events.yaml":   "score.requested:\n  entity_id: uuid?\nassertion.finish:\n",
+		"nodes.yaml":    "finisher:\n  execution_type: system_node\n  event_handlers:\n    score.requested: {}\n    assertion.finish:\n      advances_to: finished\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newRuntimeHarnessForBackend(t, root, catalogBackendPostgres, false)
+	ctx := runtimeeffects.WithExecutionMode(h.ctx, executionmode.Live)
+	plan, err := h.rt.Manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(h.bundle),
+		Instance:       flowidentity.Stored(semanticview.Wrap(h.bundle), ".", catalogRuntimeRunID, catalogRuntimeRunID, catalogRuntimeRunID, ""),
+		OccurredAt:     h.startedAt,
 	})
-
-	return &runtimeHarness{
-		t:              t,
-		ctx:            ctx,
-		db:             db,
-		pg:             pg,
-		workflow:       workflow,
-		startedAt:      time.Now().UTC(),
-		publishedIDs:   map[string]struct{}{},
-		publishedOrder: []string{},
-		eventEntityIDs: map[string]string{},
-		previews:       map[string]runtimepipeline.HandlerPreview{},
+	if err != nil {
+		t.Fatalf("prepare assertion constructor: %v", err)
 	}
-}
-
-func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID, state string) {
-	t.Helper()
-	if _, err := h.db.ExecContext(h.ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES (
-			$1::uuid, $1::text, 'catalog-assertion', 'static',
-			jsonb_build_object(
-				'config', '{}'::jsonb,
-				'workflow_version', '1',
-				'instance_id', $1::text,
-				'storage_ref', $1::text,
-				'flow_path', $1::text
-			),
-			'active', now()
-		)
-		ON CONFLICT (run_id, instance_path) DO NOTHING
-	`, catalogRuntimeRunID); err != nil {
-		t.Fatalf("insert root flow instance: %v", err)
+	committed, err := h.rt.Bus.CommitFlowInstanceActivation(ctx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("commit assertion constructor: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
 	}
-	if _, err := h.db.ExecContext(h.ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $1, 'default', $3,
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
-		)
-	`, catalogRuntimeRunID, entityID, state); err != nil {
-		t.Fatalf("insert entity_state %s: %v", entityID, err)
+	if err := h.workflow.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
+		t.Fatalf("finalize assertion construction: %v", err)
 	}
+	return h
 }
 
 func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, entityID string) {
 	t.Helper()
-	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.ExistingRunRootIngress(
+	storetest.CommitSemanticEvent(t, h.ctx, h.pg, eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		"platform.dead_letter",
 		"runtime",
@@ -382,13 +318,13 @@ func insertCatalogAssertionDeadLetterRelation(t *testing.T, h *runtimeHarness, e
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().UTC(),
 	)
-	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, event)
+	storetest.CommitSemanticEvent(t, h.ctx, h.pg, event)
 	failure := runtimefailures.FromError(
 		errors.New("catalog assertion dead letter"),
 		"cataloge2e",
 		"assert_dead_letter_relation",
 	).Failure
-	if err := h.pg.RecordDeadLetter(testAuthorActivityContext(context.Background()), runtimedeadletters.Record{
+	if err := h.pg.RecordDeadLetter(h.ctx, runtimedeadletters.Record{
 		OriginalEventID: event.ID(),
 		OriginalEvent:   string(event.Type()),
 		OriginalPayload: event.Payload(),

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -213,32 +212,39 @@ func addRunForkActivationBlocker(result *runfork.RunForkActivation, err error) e
 }
 
 func insertSQLiteRunForkSelectedContractBranchDivergence(ctx context.Context, tx *sql.Tx, divergence runfork.RunForkSelectedContractBranchDivergence) error {
-	if divergence.CreatedAt.IsZero() {
-		divergence.CreatedAt = time.Now().UTC()
+	divergence, err := validateSelectedForkBranchDivergenceTx(ctx, tx, divergence)
+	if err != nil {
+		return err
 	}
 	facts, err := json.Marshal(uniqueNonEmptyStrings(divergence.SourceAdvancedFacts))
 	if err != nil {
 		return fmt.Errorf("encode selected-contract branch divergence facts: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_branch_divergences (
-			fork_run_id, source_run_id, fork_event_id, owner, policy,
+			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, owner, policy,
 			source_run_status_at_activation, source_run_status_after_activation,
 			source_frozen, source_advanced_facts, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (fork_run_id) DO UPDATE SET
-			owner = EXCLUDED.owner, policy = EXCLUDED.policy,
-			source_run_status_at_activation = EXCLUDED.source_run_status_at_activation,
-			source_run_status_after_activation = EXCLUDED.source_run_status_after_activation,
-			source_frozen = EXCLUDED.source_frozen,
-			source_advanced_facts = EXCLUDED.source_advanced_facts,
-			created_at = EXCLUDED.created_at
-	`, divergence.ForkRunID, divergence.SourceRunID, divergence.ForkEventID, divergence.Owner, divergence.Policy,
+			fork_run_id = EXCLUDED.fork_run_id
+		WHERE run_fork_selected_contract_branch_divergences.source_run_id = EXCLUDED.source_run_id
+		  AND run_fork_selected_contract_branch_divergences.fork_point_kind = EXCLUDED.fork_point_kind
+		  AND run_fork_selected_contract_branch_divergences.fork_revision = EXCLUDED.fork_revision
+		  AND run_fork_selected_contract_branch_divergences.fork_event_id IS NOT DISTINCT FROM EXCLUDED.fork_event_id
+		  AND run_fork_selected_contract_branch_divergences.owner = EXCLUDED.owner
+		  AND run_fork_selected_contract_branch_divergences.policy = EXCLUDED.policy
+		  AND run_fork_selected_contract_branch_divergences.source_run_status_at_activation = EXCLUDED.source_run_status_at_activation
+		  AND run_fork_selected_contract_branch_divergences.source_run_status_after_activation = EXCLUDED.source_run_status_after_activation
+		  AND run_fork_selected_contract_branch_divergences.source_frozen = EXCLUDED.source_frozen
+		  AND run_fork_selected_contract_branch_divergences.source_advanced_facts = EXCLUDED.source_advanced_facts
+	`, divergence.ForkRunID, divergence.SourceRunID, divergence.ForkPoint.Kind, divergence.ForkPoint.Revision,
+		nullableForkEventID(divergence.ForkPoint), divergence.Owner, divergence.Policy,
 		divergence.SourceRunStatusAtActivation, divergence.SourceRunStatusAfterActivation, divergence.SourceFrozen, string(facts), divergence.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("record selected-contract branch divergence: %w", err)
 	}
-	return nil
+	return requireSelectedForkBranchDivergenceRecorded(result)
 }
 
 func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {

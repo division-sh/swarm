@@ -238,7 +238,9 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	// #2241 adds the backend/delay isolation proof for the authorized reporter ceiling.
 	// #2376 adds one manifest-reader ledger ratchet without moving existing roots.
 	// #2438 adds the names-only output ledger mutation proof; all prior roots remain.
-	want := []int{164, 14, 5, 1}
+	// #2496 adds the event variant of the existing public permanent-result journey.
+	// Its explicit-empty reporter regression also proves exact no-write settlement.
+	want := []int{166, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -248,6 +250,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		}
 	}
 	const preparedFaultProof = "TestSemanticProofPreparedFaultMatchesRawBothStores"
+	const emptyReporterProof = "TestEmptyReporterSettlesWithoutConstructedHeaderMutationBothStores"
+	if i := sort.SearchStrings(groups[0], emptyReporterProof); i == len(groups[0]) || groups[0][i] != emptyReporterProof {
+		t.Fatalf("#2496 empty reporter proof missing from %s", conformance2394Units[0])
+	}
 	const manifestReaderProof = "Test2376ManifestReaderLedgerIsAdditive"
 	if i := sort.SearchStrings(groups[0], manifestReaderProof); i == len(groups[0]) || groups[0][i] != manifestReaderProof {
 		t.Fatalf("#2376 manifest reader proof missing from %s", conformance2394Units[0])
@@ -304,6 +310,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 			t.Fatalf("general conformance partition omitted reviewed #2281 root %s", name)
 		}
 	}
+	const eventBranchProof = "TestEventSourceChangedPinPublicForkAndLostResponse"
+	if i := sort.SearchStrings(groups[0], eventBranchProof); i == len(groups[0]) || groups[0][i] != eventBranchProof {
+		t.Fatalf("general conformance partition omitted typed event-branch proof %s", eventBranchProof)
+	}
 	for _, name := range eventAuthorityRoots {
 		if i := sort.SearchStrings(groups[0], name); i == len(groups[0]) || groups[0][i] != name {
 			t.Fatalf("general conformance partition omitted reviewed #2304 root %s", name)
@@ -337,7 +347,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[3], reporterProof); i == len(groups[3]) || groups[3][i] != reporterProof {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
-	t.Log("complete disjoint census:185 =162 general +14 core +5 pressure +1 reporter +3 long file-row roots in conformance-1")
+	t.Log("complete disjoint census:187 =164 general +14 core +5 pressure +1 reporter +3 long file-row roots in conformance-1")
 	for _, profile := range []string{ProfileFull} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {

@@ -28,7 +28,7 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 					"event_name": "work.requested", "bundle_hash": bundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index),
 				})
-				cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+				cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
 			}
 			// Negative fault injection only: neither source cards nor authority are fabricated.

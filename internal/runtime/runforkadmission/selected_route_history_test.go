@@ -315,6 +315,7 @@ func TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances(t *test
 	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "review", "review/inst-1")
 	source := testContractFrontierTemplateSource(t)
+	plan = withConstructedHeader(t, plan, source, "review", "inst-1")
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
 		Source:            source,

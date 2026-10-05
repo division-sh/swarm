@@ -209,7 +209,7 @@ func beginObjectInputCard(t *testing.T, h *channelOnboardingE2EHarness, db *sql.
 		"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"detail": strings.Repeat("input-owned detail;", 60)},
 		"idempotency_key": fmt.Sprintf("input-card-%d", index),
 	})
-	card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+	card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 	receipt := waitObjectCardReceipt(t, db, card)
 	for page := 0; page < 2; page++ {
 		more := waitObjectMessageControl(t, p, receipt, "More choices")

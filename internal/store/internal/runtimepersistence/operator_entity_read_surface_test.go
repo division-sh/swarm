@@ -46,13 +46,21 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
 	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		INSERT INTO flow_instances (
+			run_id, instance_path, entity_id, entity_type, flow_template, mode, config,
+			stage_defined, current_state, gates, bookkeeping, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
 		VALUES
-			($1::uuid, 'review/primary', 'review', 'template', '{"workflow_version":"v1"}'::jsonb, 'active', $3),
-			($1::uuid, 'review/secondary', 'review', 'template', '{"workflow_version":"v2"}'::jsonb, 'active', $3),
-			($1::uuid, 'triage', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb, 'active', $3),
-			($2::uuid, 'triage', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb, 'active', $3)
-	`, runA, runB, base); err != nil {
+			($1::uuid, 'review/primary', $4::uuid, 'mvp_spec', 'review', 'template', '{"workflow_version":"v1"}'::jsonb,
+			 TRUE, 'collecting', '{"approved":true}', '{}', '{}', 1, $3, $3, $3),
+			($1::uuid, 'review/secondary', $5::uuid, 'mvp_spec', 'review', 'template', '{"workflow_version":"v2"}'::jsonb,
+			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3),
+			($1::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb,
+			 TRUE, 'collecting', '{}', '{}', '{}', 1, $3, $3, $3),
+			($2::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb,
+			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3)
+	`, runA, runB, base, entityA, entityB, sharedEntity); err != nil {
 		t.Fatalf("seed flow instances: %v", err)
 	}
 
@@ -193,13 +201,21 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
 	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		INSERT INTO flow_instances (
+			run_id, instance_path, entity_id, entity_type, flow_template, mode, config,
+			stage_defined, current_state, gates, bookkeeping, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
 		VALUES
-			(?, 'review/primary', 'review', 'template', '{"workflow_version":"v1"}', 'active', ?),
-			(?, 'review/secondary', 'review', 'template', '{"workflow_version":"v2"}', 'active', ?),
-			(?, 'triage', 'triage', 'static', '{"workflow_version":"v1"}', 'active', ?),
-			(?, 'triage', 'triage', 'static', '{"workflow_version":"v1"}', 'active', ?)
-	`, runA, base, runA, base, runA, base, runB, base); err != nil {
+			(?1, 'review/primary', ?4, 'mvp_spec', 'review', 'template', '{"workflow_version":"v1"}',
+			 TRUE, 'collecting', '{"approved":true}', '{}', '{}', 1, ?3, ?3, ?3),
+			(?1, 'review/secondary', ?5, 'mvp_spec', 'review', 'template', '{"workflow_version":"v2"}',
+			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3),
+			(?1, 'triage', ?6, 'ticket', 'triage', 'static', '{"workflow_version":"v1"}',
+			 TRUE, 'collecting', '{}', '{}', '{}', 1, ?3, ?3, ?3),
+			(?2, 'triage', ?6, 'ticket', 'triage', 'static', '{"workflow_version":"v1"}',
+			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3)
+	`, runA, runB, base, entityA, entityB, sharedEntity); err != nil {
 		t.Fatalf("seed sqlite flow instances: %v", err)
 	}
 

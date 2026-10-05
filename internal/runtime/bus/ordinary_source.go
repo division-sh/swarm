@@ -78,7 +78,7 @@ func (s ordinaryPublicationSource) eventKeys(evt events.Event) []string {
 	if s.root {
 		// Root direct subscriptions use local names; flow-scoped node patterns
 		// use the root flow identity. Both still require the same exact owner.
-		return []string{local, s.route.FlowID + "/" + local}
+		return uniqueStrings([]string{local, s.route.FlowID + "/" + local, s.route.FlowInstance + "/" + local})
 	}
 	return uniqueStrings([]string{s.route.FlowID + "/" + local, s.route.FlowInstance + "/" + local})
 }

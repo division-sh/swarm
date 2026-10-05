@@ -26,12 +26,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Seed entity.
 	entityID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, 'testco', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
-	`, runID); err != nil {
-		t.Fatalf("seed flow instance: %v", err)
-	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "testco", "test", "default", "operating", "{}", time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,

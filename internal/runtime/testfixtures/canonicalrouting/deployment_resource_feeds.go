@@ -31,14 +31,10 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 	writeClosedVariantFile(t, root, "events.yaml", eventsYAML)
 	switch route {
 	case "singleton":
-		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/nodes.yaml"), "    root.ready:\n      create_entity: true\n", "    root.ready: {}\n")
-		if err := os.Remove(filepath.Join(root, "consumer", "entities.yaml")); err != nil {
-			t.Fatal(err)
-		}
 	case "dynamic":
 		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/schema.yaml"), "name: consumer\n", "name: consumer\ninstance: account_id\n")
 		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"), "    to: consumer\n", "    to: consumer\n    resolution: select-or-create\n")
-		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/entities.yaml"), "consumer_state:\n  entity_id: text\n", "consumer_state:\n  entity_id: text\n  account_id: text\n")
+		writeClosedVariantFile(t, root, "consumer/entities.yaml", "consumer_state:\n  account_id: text\n")
 	case "root":
 		if err := os.RemoveAll(filepath.Join(root, "consumer")); err != nil {
 			t.Fatal(err)

@@ -1,0 +1,121 @@
+{
+  "roots": [
+    {
+      "test": "TestMaterializingSenderReachesExistingRequiredReceiverBothStores",
+      "status": "pass",
+      "elapsed_seconds": 21
+    },
+    {
+      "test": "TestProspectiveReceiverUpdatesAndCompanionRepairBothStores",
+      "status": "pass",
+      "elapsed_seconds": 28.91
+    },
+    {
+      "test": "TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores",
+      "status": "pass",
+      "elapsed_seconds": 7.66
+    },
+    {
+      "test": "TestMaterializingSenderReachesExistingRequiredReceiverBothStores",
+      "status": "pass",
+      "elapsed_seconds": 16.22
+    },
+    {
+      "test": "TestProspectiveReceiverUpdatesAndCompanionRepairBothStores",
+      "status": "pass",
+      "elapsed_seconds": 28.53
+    },
+    {
+      "test": "TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores",
+      "status": "pass",
+      "elapsed_seconds": 7.55
+    },
+    {
+      "test": "TestMaterializingSenderReachesExistingRequiredReceiverBothStores",
+      "status": "pass",
+      "elapsed_seconds": 15.43
+    },
+    {
+      "test": "TestProspectiveReceiverUpdatesAndCompanionRepairBothStores",
+      "status": "pass",
+      "elapsed_seconds": 28.68
+    },
+    {
+      "test": "TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores",
+      "status": "pass",
+      "elapsed_seconds": 7.34
+    }
+  ],
+  "cells": [
+    {
+      "test": "TestMaterializingSenderReachesExistingRequiredReceiverBothStores/default_sqlite/entityless_control",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestMaterializingSenderReachesExistingRequiredReceiverBothStores/default_sqlite/existing_required",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestMaterializingSenderReachesExistingRequiredReceiverBothStores/explicit_postgres/entityless_control",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestMaterializingSenderReachesExistingRequiredReceiverBothStores/explicit_postgres/existing_required",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestProspectiveReceiverUpdatesAndCompanionRepairBothStores/default_sqlite/complete",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestProspectiveReceiverUpdatesAndCompanionRepairBothStores/default_sqlite/missing_header_refused",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestProspectiveReceiverUpdatesAndCompanionRepairBothStores/explicit_postgres/complete",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestProspectiveReceiverUpdatesAndCompanionRepairBothStores/explicit_postgres/missing_header_refused",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores/default_sqlite",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores/explicit_postgres",
+      "status": "pass",
+      "repetitions": 3
+    }
+  ],
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "status": "pass",
+      "elapsed_seconds": 162.372
+    }
+  ],
+  "failures": [],
+  "skips": [],
+  "source_head": "dbaefce706a7965cc6c82d36f3a7b2dbe227a7ff",
+  "master_base": "276d7723f9f6c66458d416a0554c107be373772b",
+  "command": "go run ./cmd/swarm-test -- -json -race -count=3 -run '^(TestMaterializingSenderReachesExistingRequiredReceiverBothStores|TestProspectiveReceiverUpdatesAndCompanionRepairBothStores|TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores)$' ./internal/serveapp",
+  "receipt": "/tmp/agent-e-2496-prospective-header-integrity.log",
+  "proof_surface": "In-process retained mock lifecycle with real authenticated HTTP/WS; not public serve/test or real-provider qualification.",
+  "invariants": [
+    "Complete constructed target still accepts two exact updates, idempotent repeat and restart with unchanged committed state/publication/delivery evidence.",
+    "Former state_only repair is invalid under the canonical constructor/header contract. Exact header removal is refused by native foreign-key codes on both stores with byte-exact fields/header/readiness/publication/delivery preservation.",
+    "The historical entityless_control label describes payload-only guard behavior on a constructed node; it does not prove or authorize absent node ownership.",
+    "Terminal target refuses authored-field mutation and publication, preserving the initialized header/field row and requiring exact failure settlement."
+  ]
+}

@@ -53,10 +53,12 @@ func ProjectPublication(d PublicationDeclaration, scope PublicationScope, source
 		}
 		return d.local, nil
 	case PublicationStatic:
-		if d.flow == "." || sourceFlow != d.flow || sourceInstance != d.flow {
+		if d.flow == "." || sourceFlow != d.flow || !canonicalPublicationPath(sourceInstance) {
 			return "", fmt.Errorf("static publication contradicts its declaration or source")
 		}
-		return d.flow + "/" + d.local, nil
+		// Construction admission owns this coordinate, including a keyless
+		// descendant's keyed parent. Rendering cannot re-derive its path.
+		return sourceInstance + "/" + d.local, nil
 	case PublicationTemplate:
 		if d.flow == "." || sourceFlow != d.flow || !canonicalPublicationPath(sourceInstance) || !strings.HasPrefix(sourceInstance, d.flow+"/") {
 			return "", fmt.Errorf("template publication requires an exact instance of its declaration")

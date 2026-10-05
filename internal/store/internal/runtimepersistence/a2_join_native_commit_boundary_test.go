@@ -179,6 +179,17 @@ func seedA2NativeJoinFixture(t *testing.T, ctx context.Context, backend string, 
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, path, "active", 1, at)
 	record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, path, entityID, "active", 1, at)
+	// This physical-COMMIT fixture starts with an explicit native header; the
+	// handler mutation must not acquire construction from the field companion.
+	if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances
+		(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined,
+		 current_state, config, status, gates, bookkeeping, accumulator, revision,
+		 entered_state_at, created_at, updated_at)
+		VALUES ($1, $2, $3, 'review_item', $4, 'template', TRUE, 'active', $5, 'active',
+		 '{}', '{}', '{}', 1, $6, $6, $6)`, runID, path, entityID, flowID, string(record.Config), at); err != nil {
+		t.Fatalf("seed exact native join header: %v", err)
+	}
+	record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	record.CurrentState = "awaiting"
 	effect, err := workflowlifecycle.NewInitialEntry(record.Identity.Route, identity.NormalizeEntityID(entityID), record.CurrentState, executionmode.Live, record.UpdatedAt)
 	if err != nil {

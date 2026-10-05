@@ -1,0 +1,486 @@
+{
+	"source_head": "5a3c464edaaeee8768f95de584173d2ef3a016f4",
+	"master_base": "ee9b091526f89154a425c1f1d1321085aa9b832b",
+	"command": "go run ./cmd/swarm-test -- -json -count=1 -run 111 exact old-CI failed roots ./internal/store/internal/runtimepersistence",
+	"result": "RED146.223s; 74 passing roots, 37 failing roots",
+	"sample_limit": "All failing roots are listed; leaf evidence is capped at 40 examples. Full local receipt: /tmp/agent-e-2496-native-old-ci-revalidation.log",
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "result": "fail",
+      "seconds": 146.223
+    }
+  ],
+  "roots": 111,
+  "passing_roots": 74,
+  "failed_roots": [
+    {
+      "test": "TestInboundEvidencePersistsTypedNoSubscriberByDesign",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestOperatorEventSnapshotInheritedLineageInterleavingBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_HelpersAndDescriptors",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeliveries",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestRepositoryEventBusSourceOperationLedgerIsExhaustive",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhenEntityNotTerminal",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkDeliveryRouteEvidenceBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkFanOutDeferredWorkRefusalBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestOrdinaryForkOfForkFanOutOriginWriterEvaluatorBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStoreParity",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLineage",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkRevisionExactWriterContributions",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkChangedDeclarationStateCorrespondenceBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkOwnershipEvidenceContradictionsBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkReceiverCompanionPresenceBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkProjectionFailurePhasesBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkWorkflowProjectionOmissionBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRuntimeLogs",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryActive",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedCompletionStageReadersBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestStandingServicePostureCensusRejectsEachLiveWorkFamilyBeforeMutation",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestWorkflowEngineHistoricalForkM16BothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipelineTransaction",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    }
+  ],
+  "leaf_failures": [
+    {
+      "test": "TestInboundEvidencePersistsTypedNoSubscriberByDesign/sqlite",
+      "evidence": [
+        "inbound_publication_test.go:155: RunInboundPublicationMutation: transaction-local inbound publication 0 claims commit acknowledgement"
+      ]
+    },
+    {
+      "test": "TestInboundEvidencePersistsTypedNoSubscriberByDesign/postgres",
+      "evidence": [
+        "inbound_publication_test.go:163: RunInboundPublicationMutation: transaction-local inbound publication 0 claims commit acknowledgement"
+      ]
+    },
+    {
+      "test": "TestOperatorEventSnapshotInheritedLineageInterleavingBothStores/postgres_false",
+      "evidence": [
+        "operator_event_snapshot_lineage_test.go:195: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestOperatorEventSnapshotInheritedLineageInterleavingBothStores/postgres_true",
+      "evidence": [
+        "operator_event_snapshot_lineage_test.go:195: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestPostgresStore_HelpersAndDescriptors",
+      "evidence": [
+        "postgres_helpers_test.go:113: seed flow instance: pq: null value in column \"entity_id\" of relation \"flow_instances\" violates not-null constraint (23502)"
+      ]
+    },
+    {
+      "test": "TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns",
+      "evidence": [
+        "postgres_smoke_test.go:33: seed flow instance: pq: null value in column \"entity_id\" of relation \"flow_instances\" violates not-null constraint (23502)"
+      ]
+    },
+    {
+      "test": "TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeliveries",
+      "evidence": [
+        "postgres_store_additional_test.go:216: load run row: sql: Scan error on column index 3, name \"ended_at\": unsupported Scan, storing driver.Value type <nil> into type *time.Time"
+      ]
+    },
+    {
+      "test": "TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun",
+      "evidence": [
+        "postgres_store_additional_test.go:384: load canonical completion time: sql: Scan error on column index 0, name \"ended_at\": unsupported Scan, storing driver.Value type <nil> into type *time.Time"
+      ]
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/sqlite/before_readiness",
+      "evidence": [
+        "receiver_config_readiness_restart_test.go:74: event bus runtime instance conflicts with publication context"
+      ]
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/sqlite/creation_mark_rollback",
+      "evidence": [
+        "receiver_config_readiness_restart_test.go:74: event bus runtime instance conflicts with publication context"
+      ]
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/sqlite/creation_commit_ack_lost",
+      "evidence": [
+        "receiver_config_readiness_restart_test.go:74: event bus runtime instance conflicts with publication context"
+      ]
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/sqlite/numeric_substitution",
+      "evidence": [
+        "receiver_config_readiness_restart_test.go:74: event bus runtime instance conflicts with publication context"
+      ]
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/postgres/before_readiness",
+      "evidence": [
+        "receiver_config_readiness_restart_test.go:74: event bus runtime instance conflicts with publication context"
+      ]
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/postgres/creation_mark_rollback",
+      "evidence": [
+        "receiver_config_readiness_restart_test.go:74: event bus runtime instance conflicts with publication context"
+      ]
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/postgres/creation_commit_ack_lost",
+      "evidence": [
+        "receiver_config_readiness_restart_test.go:74: event bus runtime instance conflicts with publication context"
+      ]
+    },
+    {
+      "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/postgres/numeric_substitution",
+      "evidence": [
+        "receiver_config_readiness_restart_test.go:74: event bus runtime instance conflicts with publication context"
+      ]
+    },
+    {
+      "test": "TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores/sqlite",
+      "evidence": [
+        "2026/10/02 22:30:51 runtime.error component=eventbus detail={\"action\":\"api_event_publication_finalize_failed\",\"error\":\"finalize committed flow activation 0 for 12935b95-4144-461d-8d54-ac823437d977: readiness incomplete inside initial finalizer: {InstancePath:12935b95-4144-461d-8d54-ac823437d977 Plan:{Version:5 Identity:{TemplateID:. ScopeKey:. InstanceID:12935b95-4144-461d-8d54-ac823437d977 InstancePath:12935b95-4144-461d-8d54-ac823437d977 EntityID:12935b95-4144-461d-8d54-ac823437d977 ParentEntityID: ParentRoute:{FlowInstance: EntityID: FlowID:} HasStoredPath:true} RunID:12935b95-4144-461d-8d54-ac823437d977 BundleHash:bundle-v2:sha256:470c7fed39017a21ccd8659ac9f09eb4c8049abd9643492bc2cd39258cb2469d WorkflowVersion:bundle-v2:sha256:470c7fed39017a21ccd8659ac9f09eb4c8049abd9643492bc2cd39258cb2469d ExecutionMode:live Agents:[] CreationEvent:\\u003cnil\\u003e} PlanHash:sha256:5ab6e3a49be2b9d8bb9272ecad7e2d829655ac6e2d34e83f7603fd107246a713 AttemptOrdinal:1 OwningRunSource:{bundleHash:bundle-v2:sha256:470c7fed39017a2",
+        "1ccd8659ac9f09eb4c8049abd9643492bc2cd39258cb2469d} RunStatus:running InstanceStatus:active InstanceTerminatedAt:0001-01-01 00:00:00 +0000 UTC Phase:ready AttemptState:accepted CreationEventEmittedAt:0001-01-01 00:00:00 +0000 UTC} found=true err=\\u003cnil\\u003e\",\"event_id\":\"39b2d008-3516-464a-8cb4-6490ffa1c106\",\"event_type\":\"inbound.telegram.text_message\",\"message\":\"local committed event dispatch failed\"}",
+        "receiver_public_input_finalization_test.go:131: first-pass finalizations=2"
+      ]
+    },
+    {
+      "test": "TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores/postgres",
+      "evidence": [
+        "1ccd8659ac9f09eb4c8049abd9643492bc2cd39258cb2469d} RunStatus:running InstanceStatus:active InstanceTerminatedAt:0001-01-01 00:00:00 +0000 UTC Phase:ready AttemptState:accepted CreationEventEmittedAt:0001-01-01 00:00:00 +0000 UTC} found=true err=\\u003cnil\\u003e\",\"event_id\":\"e0ac4290-119d-4ba9-bbb8-0772ab60b4d3\",\"event_type\":\"inbound.telegram.text_message\",\"message\":\"local committed event dispatch failed\"}",
+        "receiver_public_input_finalization_test.go:131: first-pass finalizations=2",
+        "2026/10/02 22:30:51 runtime.error component=eventbus detail={\"action\":\"async_dispatch_failed\",\"error\":\"settle pipeline publication 0a4e677d-3f3a-54f3-bfc9-c95203a53c1f: context canceled\",\"event_id\":\"0a4e677d-3f3a-54f3-bfc9-c95203a53c1f\",\"event_type\":\"telegram-chat/ti-1531b1e4416a29704d690346/chat.initialized\",\"message\":\"local committed event dispatch failed\"}"
+      ]
+    },
+    {
+      "test": "TestRepositoryEventBusSourceOperationLedgerIsExhaustive",
+      "evidence": [
+        "run_bundle_identity_repository_test.go:434: SetupScenarioEntities is an unclassified exported EventBus operation"
+      ]
+    },
+    {
+      "test": "TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhenEntityNotTerminal",
+      "evidence": [
+        "run_completion_test.go:310: run status = \"running\", want \"completed\""
+      ]
+    },
+    {
+      "test": "TestRunForkDeliveryRouteEvidenceBothStores/sqlite/node_connect_materializing",
+      "evidence": [
+        "run_fork_delivery_route_evidence_test.go:165: exact duplicate writer: validate persisted prepared publication: prepared publication receiver dependencies: constructing receiver omitted canonical construction receipt"
+      ]
+    },
+    {
+      "test": "TestRunForkDeliveryRouteEvidenceBothStores/postgres/node_connect_materializing",
+      "evidence": [
+        "run_fork_delivery_route_evidence_test.go:165: exact duplicate writer: validate persisted prepared publication: prepared publication receiver dependencies: constructing receiver omitted canonical construction receipt"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/engine_route_state/canonical",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:27: actual engine create (canonical): ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/engine_route_state/upper",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:27: actual engine create (upper): ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/engine_route_state/compact",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:27: actual engine create (compact): ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/engine_route_state/canonical",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:27: actual engine create (canonical): ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/engine_route_state/upper",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:27: actual engine create (upper): ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/engine_route_state/compact",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:27: actual engine create (compact): ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/sqlite/entity_and_workflow_mutation_ids",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:220: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/postgres/entity_and_workflow_mutation_ids",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:220: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestSelectedForkFanOutDeferredWorkRefusalBothStores/sqlite/current",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestSelectedForkFanOutDeferredWorkRefusalBothStores/sqlite/historical",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestSelectedForkFanOutDeferredWorkRefusalBothStores/sqlite/no_loop",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestSelectedForkFanOutDeferredWorkRefusalBothStores/postgres/current",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestSelectedForkFanOutDeferredWorkRefusalBothStores/postgres/historical",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestSelectedForkFanOutDeferredWorkRefusalBothStores/postgres/no_loop",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores/sqlite/current",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores/sqlite/historical",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores/sqlite/no_loop",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    },
+    {
+      "test": "TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores/postgres/current",
+      "evidence": [
+        "run_fork_fan_out_generation_test.go:177: unsafe capsule integer was not rejected: ordinary workflow mutation requires a constructed target; construction and companion repair are not execution permissions"
+      ]
+    }
+  ]
+}

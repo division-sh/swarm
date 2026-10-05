@@ -66,6 +66,9 @@ func commitHumanTaskExpirations(
 		return runtimepipeline.CommittedHumanTaskExpiry{}, outcome.Err()
 	}
 	result.Acknowledged = true
+	for index, publication := range result.Publications {
+		result.Publications[index] = publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
+	}
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 

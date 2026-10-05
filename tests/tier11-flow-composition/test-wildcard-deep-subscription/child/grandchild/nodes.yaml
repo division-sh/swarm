@@ -4,7 +4,6 @@ worker:
   produces: [task.done]
   event_handlers:
     task.start:
-      create_entity: true
       advances_to: finished
       emit:
         event: task.done

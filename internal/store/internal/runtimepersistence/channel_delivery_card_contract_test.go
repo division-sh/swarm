@@ -3,6 +3,8 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"github.com/division-sh/swarm/internal/packs"
 	"strings"
 	"testing"
@@ -35,8 +37,12 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			var count func(string) (int, error)
 			var list func() ([]render.Candidate, error)
 			var freeze func(string) (render.PreparedRender, error)
+			var runTx func(func(context.Context, *sql.Tx) error) error
 			switch store := cards.(type) {
 			case *SQLiteRuntimeStore:
+				runTx = func(fn func(context.Context, *sql.Tx) error) error {
+					return store.backend.RunTransaction(ctx, "channel responsibility probe", fn)
+				}
 				settle = func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
 					var out operatorchannel.ClaimSettlement
 					err := store.backend.RunTransaction(ctx, "channel card claim", func(txctx context.Context, tx *sql.Tx) error {
@@ -67,6 +73,9 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 					return store.FreezeAndPersistChannelRender(ctx, id, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64})
 				}
 			case *PostgresStore:
+				runTx = func(fn func(context.Context, *sql.Tx) error) error {
+					return store.backend.RunTransaction(ctx, fn)
+				}
 				settle = func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
 					tx, err := store.backend.BeginTx(ctx, nil)
 					if err != nil {
@@ -255,6 +264,19 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 				terminalRender.Frozen.Hash == firstRender.Frozen.Hash {
 				t.Fatalf("terminal card render = %#v, %v", terminalRender, err)
 			}
+			if _, found, err := delivery.GetCurrentChannelDeliveryPlan(ctx, reboundDeliveryID); err != nil || found {
+				t.Fatalf("superseded unsent card remains executable: found=%t err=%v", found, err)
+			}
+			terminalPlans, err := list()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range terminalPlans {
+				if candidate.DeliveryID == reboundDeliveryID {
+					t.Fatal("superseded unsent card remains in current responsibilities")
+				}
+			}
+			proveChannelCardResponsibility(t, runTx, reboundDeliveryID, backlog.CardID, backend == "postgres", now)
 			if _, err := freeze(firstDeliveryID); err == nil {
 				t.Fatal("historical card destination accepted a new render")
 			}
@@ -321,6 +343,72 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 					recoveredCursor, recoveredCurrent, terminalSequence)
 			}
 		})
+	}
+}
+
+func proveChannelCardResponsibility(t *testing.T, runTx func(func(context.Context, *sql.Tx) error) error,
+	deliveryID, cardID string, postgres bool, now time.Time) {
+	t.Helper()
+	for _, phase := range []string{"planned", "rendered"} {
+		for _, status := range []string{"pending", "deferred", "superseded", "decided", "expired"} {
+			t.Run("responsibility/"+phase+"/"+status, func(t *testing.T) {
+				rollback := errors.New("rollback responsibility probe")
+				err := runTx(func(ctx context.Context, tx *sql.Tx) error {
+					storedStatus := status
+					var deferred, decidedAt, decisionEvent any
+					if status == "deferred" {
+						storedStatus, deferred = "pending", now.Add(time.Hour)
+					}
+					if status == "decided" || status == "expired" {
+						decidedAt = now
+					}
+					if status == "decided" {
+						decisionEvent = uuid.NewString()
+					}
+					query := `UPDATE decision_cards SET status=$1,
+						verdict=CASE WHEN $1='decided' THEN 'accept' ELSE NULL END,
+						decided_at=$2,
+						decision_event_id=$3,
+						superseded_reason=CASE WHEN $1='superseded' THEN 'flow moved on' ELSE NULL END,
+						deferred_until=$4 WHERE card_id=$5`
+					if _, err := tx.ExecContext(ctx, query, storedStatus, decidedAt, decisionEvent, deferred, cardID); err != nil {
+						return err
+					}
+					if _, err := tx.ExecContext(ctx, `UPDATE channel_delivery_plans SET state=$1 WHERE delivery_id=$2`, phase, deliveryID); err != nil {
+						return err
+					}
+					_, found, err := channeldelivery.LoadCurrentPlan(ctx, tx, deliveryID, postgres)
+					want := storedStatus == "pending"
+					if err != nil || found != want {
+						return fmt.Errorf("current get found=%t want=%t: %w", found, want, err)
+					}
+					cursor, listed := "", false
+					for {
+						page, err := channeldelivery.ListCurrentPlans(ctx, tx, cursor, 1, postgres)
+						if err != nil {
+							return err
+						}
+						if len(page) == 0 {
+							break
+						}
+						if page[0].DeliveryID == deliveryID {
+							listed = true
+						}
+						if page[0].DeliveryID <= cursor {
+							return fmt.Errorf("responsibility cursor did not advance")
+						}
+						cursor = page[0].DeliveryID
+					}
+					if listed != want {
+						return fmt.Errorf("paged list found=%t want=%t", listed, want)
+					}
+					return rollback
+				})
+				if !errors.Is(err, rollback) {
+					t.Fatal(err)
+				}
+			})
+		}
 	}
 }
 

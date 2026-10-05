@@ -357,7 +357,7 @@ store_parity:
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
         - {role: risk_split, risk_dimensions: [contention], proof_ids: [fanout-contention-2274]}
       runtime_deps: [EventStore, EventBusDurable, EventPayloadAdmissionBinder, DeliveryStore]
-      nested_roles: {runtime_event_bus: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, PreparedEvents, TargetFailureRecorder, RunOrigins, StandingRestarts]}
+      nested_roles: {runtime_event_bus: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, PreparedEvents, TargetFailureRecorder, RunOrigins, StandingRestarts, ScenarioSetup]}
       platform_tables: [events, event_deliveries, event_delivery_handler_rule_selections, event_delivery_attempts, committed_replay_scopes, run_fork_delivery_event_replays, event_receipts]
       public_methods: [event.publish, event.replay, event.get, event.list, agent.replay]
     - id: author_activity
@@ -463,7 +463,7 @@ store_parity:
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [runs, entities, testSetup]
       runtime_deps: [WorkflowPersistence, PipelineObligations]
-      nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutSummaryOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]}
+      nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutSummaryOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader]}
       platform_tables: [entity_state, workflow_instance_initial_materializations, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, fan_out_obligation_barriers, standing_service_generations, standing_service_journal, standing_services]
       public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.fan_out.list, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
     - id: session_conversation

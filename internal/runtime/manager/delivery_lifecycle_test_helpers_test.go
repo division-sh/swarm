@@ -476,6 +476,18 @@ func (s *managerDeliveryTestStore) RenewClaim(ctx context.Context, claim runtime
 	})
 }
 
+func (s *managerDeliveryTestStore) SettleWorkflowNodeSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.ClaimCommit, error) {
+	if claim.SubscriberClass() != runtimedelivery.SubscriberNode {
+		return runtimedelivery.ClaimCommit{}, errors.New("workflow node success requires a node claim")
+	}
+	return s.mutateClaim(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) (runtimedelivery.Snapshot, error) {
+		if _, err := s.adapter.RenewClaim(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL); err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
+		return s.adapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, selection)
+	})
+}
+
 func (s *managerDeliveryTestStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
 	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
 		snapshot, err = s.adapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, selection)

@@ -64,6 +64,7 @@ func Test2376ForkRejectedEffectHistoricalBoundaryBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				seedWorkflowHeaderProjectionFixture(t, targetCtx, db, childRun, childRun, childRun, effect.FlowID, "default", "operating", "{}", now)
 				if _, err := db.ExecContext(targetCtx, `INSERT INTO entity_state
 				(run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,accumulator,entered_state_at,created_at,updated_at)
 				VALUES ($1,$1,$2,'default','operating','{}','{}','{}',$3,$3,$3)`, childRun, childRun, now); err != nil {

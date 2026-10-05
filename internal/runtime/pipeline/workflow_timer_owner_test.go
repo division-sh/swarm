@@ -280,7 +280,7 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 			bundleHash := sourceFact.BundleHash()
 			readiness := DynamicFlowRuntimeReadinessPlan{
 				Identity: runtimeflowidentity.Instance{
-					TemplateID: "workflow-timer-first-revision", ScopeKey: route.ScopeKey,
+					TemplateID: ".", ScopeKey: route.ScopeKey,
 					InstanceID: route.InstanceID, InstancePath: route.InstancePath,
 					EntityID: entityID, HasStoredPath: true,
 				},
@@ -294,13 +294,28 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 				Persistence: workflowPersistenceForTest(store),
 			})
 			mockCtx := runtimeeffects.WithExecutionMode(liveCtx, executionmode.Mock)
-			result, err := pcA.MaterializeInitialEntry(mockCtx, testRunScopedWorkflowRoute(mockCtx, route), workflowTimerMaterializedInstance(mockCtx, entityID, route.InstancePath, WorkflowInstance{
+			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
+			preparedInstance, preparedLifecycle, err := pcA.PrepareInitialEntryLifecycle(mockCtx, testRunScopedWorkflowRoute(mockCtx, route), workflowTimerMaterializedInstance(mockCtx, entityID, route.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-first-revision", WorkflowVersion: "1.0.0",
 				RuntimeReadiness: &readiness, CurrentState: "waiting", CreatedAt: createdAt,
 				EntityType: "test_entity",
 			}), createdAt)
-			if err != nil || result != WorkflowInitialMaterializationCreated {
-				t.Fatalf("materialize timer-free dynamic instance: result=%v err=%v", result, err)
+			if err != nil {
+				t.Fatalf("prepare fixture lifecycle: %v", err)
+			}
+			if err := store.upsert(mockCtx, preparedInstance); err != nil {
+				t.Fatalf("seed fixture state: %v", err)
+			}
+			var committedLifecycle CommittedWorkflowLifecycleMutation
+			if err := store.runPipelineMutation(mockCtx, func(txctx context.Context) error {
+				var commitErr error
+				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
+				return commitErr
+			}); err != nil {
+				t.Fatalf("seed fixture lifecycle: %v", err)
+			}
+			if err := pcA.FinalizeInitialEntryLifecycle(mockCtx, committedLifecycle); err != nil {
+				t.Fatalf("finalize fixture lifecycle: %v", err)
 			}
 			if err := pcA.ArmInitialEntryTimers(mockCtx, testRunScopedWorkflowRoute(mockCtx, route)); err != nil {
 				t.Fatalf("arm timer-free source: %v", err)
@@ -311,9 +326,16 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 
 			bus := &recordingPipelineBus{}
 			sourceB := semanticview.Wrap(workflowTimerFirstDeclarationRevisionBundle(t, true))
+			owner := pipelineTestWorkOwner(t)
+			scheduler := newWorkflowTimerTestScheduler(t, owner)
+			// Install the real wakeup while retaining this unit's explicit fire boundary.
+			if err := scheduler.PrepareStartup(); err != nil {
+				t.Fatal(err)
+			}
 			pcB := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
 				Module:      &pipelineFixtureWorkflowModule{source: sourceB},
 				Persistence: workflowPersistenceForTest(store),
+				WorkOwner:   owner, TimerScheduler: scheduler,
 			})
 			attempt := pipelineTestFlowActivationAttempt(t, runID, route.InstancePath, bundleHash)
 			if err := pcB.ReconcileInitialEntryTimersForAttempt(liveCtx, testRunScopedWorkflowRoute(liveCtx, route), attempt, readiness); err != nil {
@@ -322,6 +344,9 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 			active := listWorkflowTimerOwnerActivations(t, store, liveCtx, entityID, true)
 			if len(active) != 1 || active[0].ExecutionMode != executionmode.Mock {
 				t.Fatalf("first revised timer = %#v, want one mock activation", active)
+			}
+			if registered, draining := workflowTimerScheduledCounts(scheduler); registered != 1 || draining != 0 {
+				t.Fatalf("first revised timer wakeup active=%d draining=%d, want 1/0", registered, draining)
 			}
 			outcome, err := fireWorkflowTimerTestWakeup(liveCtx, pcB, active[0])
 			if err != nil || outcome != WorkflowTimerFireCommitted {
@@ -350,13 +375,28 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 				WorkOwner:      ownerA,
 				TimerScheduler: schedulerA,
 			})
-			result, err := pcA.MaterializeInitialEntry(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
+			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
+			preparedInstance, preparedLifecycle, err := pcA.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-source-revision", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
 				EntityType: "test_entity",
 			}), createdAt)
-			if err != nil || result != WorkflowInitialMaterializationCreated {
-				t.Fatalf("materialize source A: result=%v err=%v", result, err)
+			if err != nil {
+				t.Fatalf("prepare fixture lifecycle: %v", err)
+			}
+			if err := store.upsert(ctx, preparedInstance); err != nil {
+				t.Fatalf("seed fixture state: %v", err)
+			}
+			var committedLifecycle CommittedWorkflowLifecycleMutation
+			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
+				var commitErr error
+				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
+				return commitErr
+			}); err != nil {
+				t.Fatalf("seed fixture lifecycle: %v", err)
+			}
+			if err := pcA.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
+				t.Fatalf("finalize fixture lifecycle: %v", err)
 			}
 			if err := pcA.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("arm source A: %v", err)
@@ -498,13 +538,28 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 				WorkOwner:      ownerA,
 				TimerScheduler: schedulerA,
 			})
-			result, err := pcA.MaterializeInitialEntry(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
+			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
+			preparedInstance, preparedLifecycle, err := pcA.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-progressed-revision", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
 				EntityType: "test_entity",
 			}), createdAt)
-			if err != nil || result != WorkflowInitialMaterializationCreated {
-				t.Fatalf("materialize source A: result=%v err=%v", result, err)
+			if err != nil {
+				t.Fatalf("prepare fixture lifecycle: %v", err)
+			}
+			if err := store.upsert(ctx, preparedInstance); err != nil {
+				t.Fatalf("seed fixture state: %v", err)
+			}
+			var committedLifecycle CommittedWorkflowLifecycleMutation
+			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
+				var commitErr error
+				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
+				return commitErr
+			}); err != nil {
+				t.Fatalf("seed fixture lifecycle: %v", err)
+			}
+			if err := pcA.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
+				t.Fatalf("finalize fixture lifecycle: %v", err)
 			}
 			if err := pcA.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("arm source A: %v", err)
@@ -612,13 +667,28 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			entityID := uuid.NewString()
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
-			result, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
+			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
+			preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-initial-event", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
 				EntityType: "test_entity",
 			}), createdAt)
-			if err != nil || result != WorkflowInitialMaterializationCreated {
-				t.Fatalf("materialize initial/event timers: result=%v err=%v", result, err)
+			if err != nil {
+				t.Fatalf("prepare fixture lifecycle: %v", err)
+			}
+			if err := store.upsert(ctx, preparedInstance); err != nil {
+				t.Fatalf("seed fixture state: %v", err)
+			}
+			var committedLifecycle CommittedWorkflowLifecycleMutation
+			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
+				var commitErr error
+				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
+				return commitErr
+			}); err != nil {
+				t.Fatalf("seed fixture lifecycle: %v", err)
+			}
+			if err := pc.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
+				t.Fatalf("finalize fixture lifecycle: %v", err)
 			}
 			if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("arm initial timer: %v", err)
@@ -720,15 +790,30 @@ func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *tes
 				if instanceFlow != "timer-flow-scope-root" {
 					instancePath = instanceFlow
 				}
-				route := testWorkflowInstanceRoute(instancePath)
+				route := testRunScopedWorkflowInstanceFromContext(ctx, instancePath).Route
 				createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
-				result, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath), workflowTimerMaterializedInstance(ctx, entityID, instancePath, WorkflowInstance{
+				// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
+				preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath), workflowTimerMaterializedInstance(ctx, entityID, instancePath, WorkflowInstance{
 					WorkflowName: instanceFlow, WorkflowVersion: "1.0.0",
 					CurrentState: "waiting", CreatedAt: createdAt,
 					EntityType: "test_entity",
 				}), createdAt)
-				if err != nil || result != WorkflowInitialMaterializationCreated {
-					t.Fatalf("materialize %s: result=%v err=%v", instanceFlow, result, err)
+				if err != nil {
+					t.Fatalf("prepare fixture lifecycle: %v", err)
+				}
+				if err := store.upsert(ctx, preparedInstance); err != nil {
+					t.Fatalf("seed fixture state: %v", err)
+				}
+				var committedLifecycle CommittedWorkflowLifecycleMutation
+				if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
+					var commitErr error
+					committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
+					return commitErr
+				}); err != nil {
+					t.Fatalf("seed fixture lifecycle: %v", err)
+				}
+				if err := pc.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
+					t.Fatalf("finalize fixture lifecycle: %v", err)
 				}
 				rows := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
 				if len(rows) != 1 {
@@ -2105,16 +2190,28 @@ func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *te
 			entityID := uuid.NewString()
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now().Add(-time.Second))
-			result, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
+			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
+			preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName:    "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting",
 				EntityType: "test_entity",
 			}), createdAt)
 			if err != nil {
-				t.Fatalf("MaterializeInitialEntry: %v", err)
+				t.Fatalf("prepare fixture lifecycle: %v", err)
 			}
-			if result != WorkflowInitialMaterializationCreated {
-				t.Fatalf("materialization result = %d, want created", result)
+			if err := store.upsert(ctx, preparedInstance); err != nil {
+				t.Fatalf("seed fixture state: %v", err)
+			}
+			var committedLifecycle CommittedWorkflowLifecycleMutation
+			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
+				var commitErr error
+				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
+				return commitErr
+			}); err != nil {
+				t.Fatalf("seed fixture lifecycle: %v", err)
+			}
+			if err := pc.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
+				t.Fatalf("finalize fixture lifecycle: %v", err)
 			}
 			active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
 			if len(active) != 1 {
@@ -2483,7 +2580,8 @@ func seedWorkflowTimerOwnerActivationAt(
 }
 
 func workflowTimerRootRoute(ctx context.Context) runtimeflowidentity.Route {
-	return testWorkflowInstanceRoute(runtimecorrelation.RunIDFromContext(ctx))
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	return runtimeflowidentity.StoredRoute(".", runID, runID)
 }
 
 func workflowTimerMaterializedInstance(

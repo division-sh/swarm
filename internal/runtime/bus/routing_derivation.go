@@ -113,7 +113,7 @@ type RouteTable struct {
 	authoredEventPath           map[string]struct{}
 	authoredScopes              map[string]struct{}
 	templates                   map[string]routeFlowTemplate
-	instanceOwners              map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance
+	instanceOwners              map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance
 	publications                map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord
 	fencedPublications          map[flowRoutePublicationFence]struct{}
 	nextPublication             uint64
@@ -281,17 +281,17 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		}
 		flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
 		localEvents := routeFlowLocalEventSetWithInputProducers(scope, inputProducers)
+		subscribers, err := routeSubscriberTemplates(source, scope, agents, localEvents)
+		if err != nil {
+			return nil, err
+		}
+		rt.templates[runtimeflowidentity.ScopeKey(source, scope.ID)] = routeFlowTemplate{
+			FlowID:      scope.ID,
+			InputEvents: append([]string{}, scope.InputEvents...),
+			LocalEvents: cloneStringSet(localEvents),
+			Subscribers: subscribers,
+		}
 		if strings.EqualFold(scope.Mode, "template") || routeFlowStanding(source, scope.ID) {
-			subscribers, err := routeSubscriberTemplates(source, scope, agents, localEvents)
-			if err != nil {
-				return nil, err
-			}
-			rt.templates[flowPath] = routeFlowTemplate{
-				FlowID:      scope.ID,
-				InputEvents: append([]string{}, scope.InputEvents...),
-				LocalEvents: cloneStringSet(localEvents),
-				Subscribers: subscribers,
-			}
 			continue
 		}
 		if flowPath != "" {
@@ -353,6 +353,15 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 		return nil
 	}
 	rt.mu.RLock()
+	for rt.resolutionIndexDirty {
+		rt.mu.RUnlock()
+		rt.mu.Lock()
+		if rt.resolutionIndexDirty {
+			rt.rebuildLocked()
+		}
+		rt.mu.Unlock()
+		rt.mu.RLock()
+	}
 	defer rt.mu.RUnlock()
 	out := cloneSubscribers(rt.routes[routeResolutionKey{runID: runID, eventType: eventType}])
 	if runID != "" {
@@ -364,12 +373,6 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 		return projectSubscriberEvents(out, eventType)
 	}
 	indexes := rt.wildcardPatternIndexes
-	if rt.resolutionIndexDirty {
-		indexes = make([]int, len(rt.patterns))
-		for index := range rt.patterns {
-			indexes[index] = index
-		}
-	}
 	for _, index := range indexes {
 		pattern := rt.patterns[index]
 		if pattern.RunID != "" && pattern.RunID != runID {
@@ -573,7 +576,7 @@ func (rt *RouteTable) rebuildStagedFlowInstanceRoutes() {
 func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) (bool, []string, error) {
 	req = req.Normalized()
 
-	identity, replay, err := rt.admitFlowInstanceRouteIdentityLocked(req.Identity)
+	identity, replay, err := rt.admitFlowInstanceRouteIdentityLocked(req)
 	if err != nil {
 		return false, nil, err
 	}
@@ -595,7 +598,7 @@ func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializ
 		prepared := rt.inputProducers
 		inputProducers = &prepared
 	}
-	rt.instanceOwners[identity] = identity
+	rt.instanceOwners[identity] = req.Instance
 	allEventPaths, newEventPaths := rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
 	rt.instanceEventPath[identity] = allEventPaths
 	rt.materializeTemplateSourceObserversLocked(identity)
@@ -659,10 +662,10 @@ func (rt *RouteTable) HasFlowInstanceRoute(identity runtimeflowidentity.RunScope
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	owner, exists := rt.instanceOwners[identity]
-	return exists && flowInstanceRouteIdentityEqual(owner, identity)
+	return exists && owner.Route() == identity.Route
 }
 
-func (rt *RouteTable) flowInstanceTemplateID(identity runtimeflowidentity.Route) (string, bool) {
+func (rt *RouteTable) FlowInstanceTemplateID(identity runtimeflowidentity.Route) (string, bool) {
 	if rt == nil {
 		return "", false
 	}
@@ -748,7 +751,8 @@ func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.RunSc
 		rt.templateObservers[sourceTemplatePath] = filteredObservers
 	}
 	rt.rebuildEventPathsLocked()
-	rt.rebuildLocked()
+	// Retirement is authoritative now; the derived index is rebuilt by its next consumer.
+	rt.resolutionIndexDirty = true
 	rt.generation++
 	return nil
 }
@@ -866,7 +870,7 @@ func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.
 		authoredEventPath:           make(map[string]struct{}),
 		authoredScopes:              make(map[string]struct{}),
 		templates:                   make(map[string]routeFlowTemplate),
-		instanceOwners:              make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance),
+		instanceOwners:              make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance),
 		publications:                make(map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord),
 		fencedPublications:          make(map[flowRoutePublicationFence]struct{}),
 		instanceEventPath:           make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
@@ -967,16 +971,25 @@ func (rt *RouteTable) rebuildEventPathsLocked() {
 	}
 }
 
-func (rt *RouteTable) admitFlowInstanceRouteIdentityLocked(raw runtimeflowidentity.RunScopedFlowInstance) (runtimeflowidentity.RunScopedFlowInstance, bool, error) {
-	identity, err := normalizeFlowInstanceRouteIdentity(raw)
+func (rt *RouteTable) admitFlowInstanceRouteIdentityLocked(req FlowInstanceRouteMaterializationRequest) (runtimeflowidentity.RunScopedFlowInstance, bool, error) {
+	identity, err := normalizeFlowInstanceRouteIdentity(req.Identity)
 	if err != nil {
 		return runtimeflowidentity.RunScopedFlowInstance{}, false, err
+	}
+	if err := req.Instance.ValidateConstruction(rt.source, identity.RunID); err != nil {
+		return runtimeflowidentity.RunScopedFlowInstance{}, false, err
+	}
+	if req.Instance.Route() != identity.Route {
+		return runtimeflowidentity.RunScopedFlowInstance{}, false, fmt.Errorf("route request differs from its exact construction identity")
 	}
 	_, exists, err := rt.matchFlowInstanceRouteOwnerLocked(identity)
 	if err != nil {
 		return runtimeflowidentity.RunScopedFlowInstance{}, false, err
 	}
 	if exists {
+		if rt.instanceOwners[identity] != req.Instance {
+			return runtimeflowidentity.RunScopedFlowInstance{}, false, fmt.Errorf("route replay changed its construction parent")
+		}
 		return identity, true, nil
 	}
 	if collision := rt.flowInstanceRouteCollisionLocked(identity.Route.ScopeKey, identity.Route.InstancePath); collision != "" {
@@ -996,29 +1009,22 @@ func normalizeFlowInstanceRouteIdentity(raw runtimeflowidentity.RunScopedFlowIns
 func (rt *RouteTable) matchFlowInstanceRouteOwnerLocked(identity runtimeflowidentity.RunScopedFlowInstance) (runtimeflowidentity.RunScopedFlowInstance, bool, error) {
 	owner, exists := rt.instanceOwners[identity]
 	if exists {
-		if !flowInstanceRouteIdentityEqual(owner, identity) {
+		if owner.Route() != identity.Route {
 			return runtimeflowidentity.RunScopedFlowInstance{}, false, fmt.Errorf(
 				"flow-instance path %q is owned by scope %q instance %q, not scope %q instance %q",
 				identity.Route.InstancePath,
-				owner.Route.ScopeKey,
-				owner.Route.InstanceID,
+				owner.ScopeKey,
+				owner.InstanceID,
 				identity.Route.ScopeKey,
 				identity.Route.InstanceID,
 			)
 		}
-		return owner, true, nil
+		return identity, true, nil
 	}
-	expected := runtimeflowidentity.StoredRoute(identity.Route.ScopeKey, identity.Route.InstanceID, "")
-	singleton := identity.Route.InstancePath == identity.Route.ScopeKey &&
-		identity.Route.InstanceID == runtimeflowidentity.LogicalInstanceID(identity.Route.ScopeKey)
-	if !singleton && expected.InstancePath != identity.Route.InstancePath {
-		return runtimeflowidentity.RunScopedFlowInstance{}, false, fmt.Errorf(
-			"flow-instance route identity is inconsistent: scope %q and instance %q derive path %q, not %q",
-			identity.Route.ScopeKey,
-			identity.Route.InstanceID,
-			expected.InstancePath,
-			identity.Route.InstancePath,
-		)
+	for admitted, construction := range rt.instanceOwners {
+		if admitted.RunID == identity.RunID && admitted.Route.InstancePath == identity.Route.InstancePath {
+			return runtimeflowidentity.RunScopedFlowInstance{}, false, fmt.Errorf("flow-instance path %q is owned by scope %q instance %q", identity.Route.InstancePath, construction.ScopeKey, construction.InstanceID)
+		}
 	}
 	return runtimeflowidentity.RunScopedFlowInstance{}, false, nil
 }
@@ -1032,6 +1038,13 @@ func (rt *RouteTable) flowInstanceRouteCollisionLocked(templateScope, instancePa
 	instancePath = eventidentity.Normalize(instancePath)
 	if templateScope == "" || instancePath == "" {
 		return ""
+	}
+	if templateScope == instancePath {
+		if template, found := rt.templates[templateScope]; found {
+			if schema, found := rt.source.FlowSchemaByID(template.FlowID); found && schema.Instance.Empty() {
+				return ""
+			}
+		}
 	}
 	for _, scopePath := range sortedStringKeys(rt.authoredScopes) {
 		scopePath = eventidentity.Normalize(scopePath)

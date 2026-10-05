@@ -5,6 +5,11 @@
   "source_hash": "\u003cadmitted-bundle\u003e",
   "source_authority": "projection_only_existing_contract_owners",
   "root": {
+    "constructors": [
+      {
+        "no_arguments": true
+      }
+    ],
     "source_files": {
       "schema": "schema.yaml"
     },
@@ -15,6 +20,13 @@
   },
   "flows": [
     {
+      "constructors": [
+        {
+          "input": "inbound.telegram.text_message",
+          "no_arguments": false,
+          "key_field": "conversation_reference"
+        }
+      ],
       "id": "telegram-chat",
       "path": "telegram-chat",
       "mode": "template",
@@ -107,6 +119,11 @@
       ]
     },
     {
+      "constructors": [
+        {
+          "no_arguments": true
+        }
+      ],
       "id": "telegram-ingress",
       "path": "telegram-ingress",
       "mode": "static",

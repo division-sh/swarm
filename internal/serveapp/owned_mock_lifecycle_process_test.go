@@ -18,9 +18,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/store/devscratch"
@@ -37,6 +39,8 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 	var request struct {
 		ConfigPath    string
 		Source        string
+		StoredHash    string
+		Live          bool
 		Store         string
 		Dev           bool
 		APIPort       int
@@ -63,17 +67,24 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
 	opts.NoColor, opts.SelfCheck = true, true
 	opts.ShutdownGrace = request.ShutdownGrace
-	t.Log("proof_surface=H internal retained mock lifecycle; not public serve or private test")
-	code, err := runOwnedMockLifecycle(ctx, root, root, opts,
-		apiv1.AuthTokenResolution{Tokens: []string{request.Token}, Explicit: true, Source: "internal-lifecycle-parent"})
+	posture := executionposture.MockOnly
+	if request.Live {
+		posture = executionposture.Live
+	}
+	t.Logf("proof_surface=H internal retained lifecycle posture=%s; not public serve or private test", posture)
+	code, err := runOwnedLifecycle(ctx, root, root, opts,
+		apiv1.AuthTokenResolution{Tokens: []string{request.Token}, Explicit: true, Source: "internal-lifecycle-parent"}, posture, request.StoredHash)
 	if err != nil || code != 0 {
 		t.Fatalf("internal lifecycle exit=%d: %v", code, err)
 	}
 }
 
-// Only test callers can choose this retained MockOnly composition. The compiled
-// child and in-process persistence proofs use the same production constructor.
-func runOwnedMockLifecycle(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution) (int, error) {
+// The test caller owns source selection and explicit execution posture. Retained
+// live-node recovery must not relabel existing work as mock-only execution.
+func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string) (int, error) {
+	if storedHash != "" && (opts.SourceRoot != "" || opts.Dev) {
+		return 1, errors.New("retained artifact proof requires one exact stored hash, no directory or dev scratch")
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	runtimeID := uuid.NewString()
@@ -122,6 +133,40 @@ func runOwnedMockLifecycle(ctx context.Context, root, retainedRoot string, opts 
 		return 1, err
 	}
 	selection := local.StoreSelection
+	var admitted *runtimecontracts.WorkflowContractBundle
+	if storedHash != "" {
+		if err := runtimecontracts.ValidateBundleHash(storedHash); err != nil {
+			return 1, err
+		}
+		reader, err := buildStoresForServe(ctx, selection, cfg)
+		if err != nil {
+			return 1, err
+		}
+		specPath, err := servePreCatalogPlatformSpecPath(paths, opts)
+		if err == nil {
+			_, err = initializeServePlatformStateStores(ctx, reader.Schema(), specPath)
+		}
+		if err != nil {
+			return 1, errors.Join(err, reader.CloseUnactivated())
+		}
+		record, readErr := reader.SourceArtifactStore().GetSourceArtifact(ctx, storedHash)
+		if err := errors.Join(readErr, reader.CloseUnactivated()); err != nil {
+			return 1, err
+		}
+		if record.BundleHash != storedHash {
+			return 1, errors.New("retained artifact proof read a different source")
+		}
+		artifact, err := record.Decode()
+		if err != nil {
+			return 1, err
+		}
+		admitted, err = runtimecontracts.LoadWorkflowContractBundleFromArtifact(root, artifact, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+			PlatformPackBases: bases, AdmitPackInventory: packadmission.AdmitInventory,
+		})
+		if err != nil {
+			return 1, err
+		}
+	}
 	var scratch *devscratch.EpochAuthority
 	if opts.Dev {
 		coordinate, err := cliapp.ResolveDevScratch(local)
@@ -145,8 +190,9 @@ func runOwnedMockLifecycle(ctx context.Context, root, retainedRoot string, opts 
 		defer stopEvidence()
 	}
 	code := buildRuntimeComposition(ctx, runtimeCompositionRequest{
-		Purpose: executionposture.MockOnly, ProviderIngress: true,
-		Repo: root, Options: opts, Config: configResult, ResolvedPaths: paths,
+		Purpose: posture, ProviderIngress: true,
+		AdmittedBundle: admitted,
+		Repo:           root, Options: opts, Config: configResult, ResolvedPaths: paths,
 		LocalState: local, SwarmDir: swarmDir, StoreSelection: selection, MountSources: local.MountSources,
 		PlatformPackBase: base, PlatformPackBases: bases,
 		APIAuth:          auth,

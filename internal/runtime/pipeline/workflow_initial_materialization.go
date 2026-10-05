@@ -1,10 +1,13 @@
 package pipeline
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"strings"
+	"io"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -27,6 +30,43 @@ func validateWorkflowInitialEntry(source semanticview.Source, instance WorkflowI
 	return nil
 }
 
+// ValidateFlowConstructionPublication consumes the immutable constructor
+// receipt. Neither handler settlement nor current attachment progress is proof
+// that this publication constructed its exact receiver.
+func ValidateFlowConstructionPublication(raw []byte, owner runtimeflowidentity.RunScopedFlowInstance, entityID, eventID string) error {
+	if err := owner.Validate(); err != nil {
+		return err
+	}
+	if _, err := canonicaljson.Decode(raw); err != nil {
+		return fmt.Errorf("flow construction receipt: %w", err)
+	}
+	var receipt workflowInitialMaterializationProjection
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	decoder.UseNumber()
+	if err := decoder.Decode(&receipt); err != nil {
+		return fmt.Errorf("flow construction receipt: %w", err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("flow construction receipt requires one object")
+	}
+	if err := receipt.CreatingInput.Validate(); err != nil {
+		return err
+	}
+	if receipt.Version != workflowInitialMaterializationProjectionVersion ||
+		receipt.RunID != owner.RunID || receipt.FlowInstance != owner.Route.InstancePath || receipt.EntityID != entityID ||
+		receipt.WorkflowName != owner.Route.ScopeKey || receipt.WorkflowVersion == "" || receipt.OccurredAt.IsZero() ||
+		receipt.Persisted.Control.StorageRef != owner.Route.InstancePath || receipt.Persisted.Control.EntityID != entityID ||
+		eventID == "" || receipt.CreatingInput.EventID != eventID || receipt.Readiness == nil {
+		return fmt.Errorf("flow construction receipt contradicts exact receiver or creating publication")
+	}
+	readinessOwner, err := receipt.Readiness.FlowIdentity()
+	if err != nil || readinessOwner != owner || receipt.Readiness.Identity.EntityID != entityID {
+		return fmt.Errorf("flow construction receipt readiness identity contradicts receiver")
+	}
+	return nil
+}
+
 // workflowInitialMaterializationProjection is immutable creation identity.
 // Mutable workflow progress is deliberately absent from replay comparison.
 type workflowInitialMaterializationProjection struct {
@@ -39,40 +79,6 @@ type workflowInitialMaterializationProjection struct {
 	InitialState    string                              `json:"initial_state"`
 	OccurredAt      time.Time                           `json:"occurred_at"`
 	Persisted       workflowInstancePersistedProjection `json:"persisted"`
-}
-
-func newWorkflowInitialMaterializationProjection(
-	owner runtimeflowidentity.RunScopedFlowInstance,
-	identity runtimeflowidentity.Persisted,
-	instance WorkflowInstance,
-	occurredAt time.Time,
-) (workflowInitialMaterializationProjection, error) {
-	owner = owner.Normalize()
-	if err := owner.Validate(); err != nil {
-		return workflowInitialMaterializationProjection{}, err
-	}
-	if owner.Route != identity.Instance.Route() {
-		return workflowInitialMaterializationProjection{}, fmt.Errorf("workflow initial materialization owner disagrees with persisted route")
-	}
-	persisted, err := workflowInstancePersistedProjectionFromInstance(instance, identity.StorageRef)
-	if err != nil {
-		return workflowInitialMaterializationProjection{}, err
-	}
-	projection := workflowInitialMaterializationProjection{
-		Version:         workflowInitialMaterializationProjectionVersion,
-		RunID:           owner.RunID,
-		EntityID:        strings.TrimSpace(identity.RowID()),
-		FlowInstance:    strings.Trim(strings.TrimSpace(identity.StorageRef), "/"),
-		WorkflowName:    strings.TrimSpace(instance.WorkflowName),
-		WorkflowVersion: strings.TrimSpace(instance.WorkflowVersion),
-		InitialState:    strings.TrimSpace(instance.CurrentState),
-		OccurredAt:      canonicalWorkflowInstancePersistedTime(occurredAt),
-		Persisted:       persisted,
-	}
-	if projection.RunID == "" || projection.EntityID == "" || projection.FlowInstance == "" ||
-		projection.WorkflowName == "" || projection.WorkflowVersion == "" ||
-		projection.InitialState == "" || projection.OccurredAt.IsZero() {
-		return workflowInitialMaterializationProjection{}, fmt.Errorf("workflow initial materialization projection requires exact identity, workflow, state, and occurrence")
-	}
-	return projection, nil
+	Readiness       *DynamicFlowRuntimeReadinessPlan    `json:"readiness,omitempty"`
+	CreatingInput   FlowConstructionInput               `json:"creating_input"`
 }

@@ -198,7 +198,7 @@ func requireA2MapRecipeResult(t *testing.T, rt servedControlProofRuntime, opened
 		t.Fatal(err)
 	}
 	ref := arm.JoinRef()
-	if err := ref.StageEntry().RequireOwner(opened.RunID, opened.RunID, opened.RunID, opened.RunID, opened.RunID, "collecting"); err != nil {
+	if err := ref.StageEntry().RequireOwner(opened.RunID, ".", opened.RunID, opened.RunID, opened.RunID, "collecting"); err != nil {
 		t.Fatal(err)
 	}
 	if !ref.Declaration().Equal(declaration) || ref.StageEntry().EventID != opened.EventID || !slices.Equal(arm.Members, members) || arm.Expected() != len(members) || arm.Completed() != len(members) ||

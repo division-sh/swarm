@@ -26,6 +26,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -101,6 +102,7 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 			Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a"),
 		},
 		ActivationVariables: map[string]string{"account_id": "account-a"},
+		Instance:            runtimeflowidentity.Derive(source, templatereply.RequesterFlowID, "account-a"),
 	}); err != nil {
 		t.Fatalf("materialize requester route: %v", err)
 	}
@@ -183,6 +185,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 				Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
 			},
 			ActivationVariables: map[string]string{"account_id": accountID},
+			Instance:            runtimeflowidentity.Derive(source, templatereply.RequesterFlowID, accountID),
 		}); err != nil {
 			t.Fatalf("materialize requester route %s: %v", accountID, err)
 		}
@@ -918,6 +921,7 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 			},
 			ActivationVariables: map[string]string{"account_id": accountID},
 		}
+		req.Instance = flowroutefixture.ConstructionIdentity(source, req.Identity)
 		var err error
 		if _, exists := persistedByPath[req.Identity.Key()]; exists {
 			err = flowroutefixture.Publish(eb, req)
@@ -937,73 +941,40 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 	if runID == "" {
 		t.Fatal("reply conformance run identity is required before seeding target owners")
 	}
-	db := replyConformanceDB(t, backend)
-	sourceFact := conformanceSourceArtifactFact(t, source)
-	bundleHash := sourceFact.BundleHash()
-	flowQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
-		VALUES ($1::uuid, $2, $3, 'template', '{}'::jsonb, 'active')
-		ON CONFLICT (run_id, instance_path) DO NOTHING`
-	readinessQuery := `INSERT INTO flow_instance_runtime_readiness
-		(run_id, instance_path, plan, topology_ready_at, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3::jsonb, $4, $4, $4)
-		ON CONFLICT (run_id, instance_path) DO NOTHING`
-	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
-		VALUES ($1::uuid, $2::uuid, $3, 'requester_state', $4)
-		ON CONFLICT (run_id, entity_id) DO NOTHING`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		flowQuery = `INSERT OR IGNORE INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
-			VALUES (?, ?, ?, 'template', '{}', 'active')`
-		readinessQuery = `INSERT OR IGNORE INTO flow_instance_runtime_readiness
-			(run_id, instance_path, plan, topology_ready_at, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)`
-		query = `INSERT OR IGNORE INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
-			VALUES (?, ?, ?, 'requester_state', ?)`
+	rootIdentity := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(".", runID, runID)}
+	if _, found, err := backend.LoadWorkflowInstance(ctx, rootIdentity); err != nil {
+		t.Fatalf("load reply constructor root: %v", err)
+	} else if found {
+		return
+	}
+	selected, ok := backend.(fanInBarrierConformanceStore)
+	if !ok {
+		t.Fatalf("%T lacks the real construction/attachment owners", backend)
+	}
+	fact := conformanceSourceArtifactFact(t, source)
+	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(ctx, fact), runID)
+	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+	runtime := newFanInBarrierRuntimeForSource(t, selected, replyConformanceDB(t, backend), source, fact, 1)
+	if err := runtime.manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, Instance: runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""), OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("construct reply root and fieldless provider: %v", err)
 	}
 	for _, owner := range replyConformanceTargetOwners() {
-		if _, err := db.ExecContext(ctx, flowQuery, runID, owner.FlowInstance, templatereply.RequesterFlowID); err != nil {
-			t.Fatalf("seed reply conformance flow owner %s: %v", owner.FlowInstance, err)
-		}
-		plan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-			Identity: runtimeflowidentity.Instance{
-				TemplateID: templatereply.RequesterFlowID, ScopeKey: templatereply.RequesterFlowID,
-				InstanceID: runtimeflowidentity.LogicalInstanceID(owner.FlowInstance), InstancePath: owner.FlowInstance,
-				EntityID: owner.EntityID, HasStoredPath: true,
-			},
-			RunID: runID, BundleHash: bundleHash,
-			WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
-		}).Normalized()
+		accountID := runtimeflowidentity.LogicalInstanceID(owner.FlowInstance)
+		payload, err := json.Marshal(map[string]any{"account_id": accountID})
 		if err != nil {
-			t.Fatalf("construct reply conformance readiness %s: %v", owner.FlowInstance, err)
+			t.Fatal(err)
 		}
-		planRaw, err := canonicaljson.Bytes(plan)
-		if err != nil {
-			t.Fatalf("encode reply conformance readiness %s: %v", owner.FlowInstance, err)
+		trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "requester.setup", "fixture", "", payload, 0, runID, events.EventEnvelope{}, time.Now().UTC())
+		if err := runtime.manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
+			ContractBundle:   source,
+			Instance:         runtimeflowidentity.Stored(source, templatereply.RequesterFlowID, owner.FlowInstance, accountID, owner.EntityID, ""),
+			ConstructorInput: "requester.setup", ResolvedKey: accountID, TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
+			Config: map[string]any{"account_id": accountID},
+		}); err != nil {
+			t.Fatalf("construct and attach requester %s: %v", owner.FlowInstance, err)
 		}
-		now := time.Now().UTC()
-		readinessArgs := []any{runID, owner.FlowInstance, planRaw, now}
-		if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-			readinessArgs = []any{runID, owner.FlowInstance, planRaw, now, now, now}
-		}
-		if _, err := db.ExecContext(ctx, readinessQuery, readinessArgs...); err != nil {
-			t.Fatalf("seed reply conformance readiness %s: %v", owner.FlowInstance, err)
-		}
-		if _, err := db.ExecContext(ctx, query, runID, owner.EntityID, owner.FlowInstance, "pending"); err != nil {
-			t.Fatalf("seed reply conformance target owner %s: %v", owner.FlowInstance, err)
-		}
-	}
-	providerFlowQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
-		VALUES ($1::uuid, $2, $3, 'static', '{}'::jsonb, 'active')
-		ON CONFLICT (run_id, instance_path) DO NOTHING`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		providerFlowQuery = `INSERT OR IGNORE INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
-			VALUES (?, ?, ?, 'static', '{}', 'active')`
-	}
-	providerEntityID := runtimeflowidentity.EntityID(templatereply.ProviderFlowID)
-	if _, err := db.ExecContext(ctx, providerFlowQuery, runID, templatereply.ProviderFlowID, templatereply.ProviderFlowID); err != nil {
-		t.Fatalf("seed reply conformance provider flow owner: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, query, runID, providerEntityID, templatereply.ProviderFlowID, "pending"); err != nil {
-		t.Fatalf("seed reply conformance provider target owner: %v", err)
 	}
 }
 
@@ -1177,7 +1148,7 @@ func (s *replyConformanceStore) ListActiveFlowInstanceDescriptorsForKey(context.
 }
 
 func (s *replyConformanceStore) ListSelectedRunTargetOwners(context.Context, string) ([]bus.ActiveTargetDescriptor, error) {
-	return replyConformanceTargetOwners(), nil
+	return replyConformanceConstructedOwners(), nil
 }
 
 func (s *replyConformanceStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, instancePaths []string, sourceEntityID string) ([]bus.ActiveTargetDescriptor, error) {
@@ -1186,7 +1157,7 @@ func (s *replyConformanceStore) ListSelectedRunTargetOwnersForScope(_ context.Co
 		selected[path] = struct{}{}
 	}
 	var owners []bus.ActiveTargetDescriptor
-	for _, owner := range replyConformanceTargetOwners() {
+	for _, owner := range replyConformanceConstructedOwners() {
 		_, selectedPath := selected[owner.FlowInstance]
 		if selectedPath || sourceEntityID != "" && owner.EntityID == sourceEntityID {
 			owners = append(owners, owner)
@@ -1206,6 +1177,13 @@ func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
 		})
 	}
 	return out
+}
+
+func replyConformanceConstructedOwners() []bus.ActiveTargetDescriptor {
+	return append(replyConformanceTargetOwners(), bus.ActiveTargetDescriptor{
+		ID: templatereply.ProviderFlowID, FlowInstance: templatereply.ProviderFlowID,
+		EntityID: runtimeflowidentity.EntityID(templatereply.ProviderFlowID),
+	})
 }
 
 func (s *replyConformanceStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []bus.FlowInstanceRouteRecordSet) (bus.FlowInstanceRouteTopologyResult, error) {

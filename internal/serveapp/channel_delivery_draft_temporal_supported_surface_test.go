@@ -27,12 +27,12 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					"event_name": "work.requested", "bundle_hash": hash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "draft-temporal-seed",
 				})
-				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				message := waitChannelAnchorReceipt(t, db, cardID)
 				initial := readChannelHistoricalRender(t, db, cardID)
 				reject, found := telegramCallbackToken(h.provider.Delivery(message-1), "reject")
 				if !found {
-					t.Fatal("actual card has no required-input verdict")
+					t.Fatalf("actual card has no required-input verdict: card=%s message=%d delivery=%v render=%s", cardID, message, h.provider.Delivery(message-1), initial.input)
 				}
 				postUncertainCopyCallback(t, h, message, reject, 902001)
 				waitChannelReceiptText(t, h, message, "Input: reason (text) required", false)

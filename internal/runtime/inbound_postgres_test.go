@@ -33,6 +33,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -46,17 +47,58 @@ import (
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 )
 
-func newBoundedInboundTestEventBus(t *testing.T, selected runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
+func boundedInboundTestSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	bundle := loadRuntimeTempBundle(t, map[string]string{
 		"schema.yaml":                   "name: bounded-standing-connector\n",
 		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nstages:\n  active: {initial: true}\n",
 		"bounded_inbound/entities.yaml": "bounded_entity: {}\n",
 	})
-	opts.ContractBundle = semanticview.Wrap(bundle)
+	return semanticview.Wrap(bundle)
+}
+
+func newBoundedInboundTestEventBus(t *testing.T, selected runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
+	t.Helper()
+	opts.ContractBundle = boundedInboundTestSource(t)
 	return newScopedTestEventBus(t, selected, opts, differentEvents...)
+}
+
+func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interface {
+	CommitFlowInstanceActivation(context.Context, runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error)
+}, runID, entityID, path, slug string, configRaw []byte) {
+	t.Helper()
+	var config map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(configRaw, &config); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), runtimeeffects.ExecutionModeLive)
+	source := boundedInboundTestSource(t)
+	child, err := runtimeflowidentity.KeylessChild(source,
+		runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""), boundedProviderFlowID)
+	if err != nil || child.InstancePath != path {
+		t.Fatalf("prepare bounded component parent: child=%+v path=%s err=%v", child, path, err)
+	}
+	// The bounded gateway control uses a prepared component aggregate, not
+	// public standing construction or process attachment qualification. Its
+	// parent coordinate still comes from the canonical keyless identity owner.
+	command, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID: path, StorageRef: path, EntityID: entityID, EntityType: "bounded_entity",
+		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
+		WorkflowName: boundedProviderFlowID, WorkflowVersion: source.WorkflowVersion(),
+		Slug: slug, Name: "Customer A", CurrentState: "active", StageDefined: true,
+		CreatedAt: now, EnteredStageAt: now, Fields: map[string]any{}, Config: config,
+	}, runtimepipeline.WorkflowLifecycleMutationPlan{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := selected.CommitFlowInstanceActivation(ctx, command)
+	if err != nil || !result.Acknowledged || !result.Created {
+		t.Fatalf("commit inbound fixture aggregate: acknowledged=%t created=%t err=%v", result.Acknowledged, result.Created, err)
+	}
 }
 
 func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
@@ -1150,25 +1192,7 @@ func seedPostgresInboundGatewayRuntime(
 		RunID:  runID,
 	})
 	configBytes := inboundGatewayWorkflowConfig(t, flowInstance, provider, webhookSecret)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, $3, 'static', $4::jsonb, 'active', now())
-		ON CONFLICT (run_id, instance_path) DO UPDATE SET config = EXCLUDED.config, status = EXCLUDED.status
-	`, runID, flowInstance, boundedProviderFlowID, string(configBytes)); err != nil {
-		t.Fatalf("seed flow instance: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, $3, 'bounded_entity', $4, 'Customer A', 'active',
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
-		)
-		ON CONFLICT (run_id, entity_id) DO NOTHING
-	`, runID, entityID, flowInstance, entitySlug); err != nil {
-		t.Fatalf("seed entity state: %v", err)
-	}
+	seedBoundedInboundFlow(t, ctx, pg, runID, entityID, flowInstance, entitySlug, configBytes)
 	if strings.TrimSpace(agentID) != "" {
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
@@ -1294,21 +1318,7 @@ func seedSQLiteInboundGatewayRuntime(
 		StartedAt: now,
 	})
 	configBytes := inboundGatewayWorkflowConfig(t, flowInstance, provider, webhookSecret)
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES (?, ?, ?, 'static', ?, 'active', ?)
-	`, runID, flowInstance, boundedProviderFlowID, string(configBytes), now); err != nil {
-		t.Fatalf("seed sqlite flow instance: %v", err)
-	}
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, 'bounded_entity', ?, 'Customer A', 'active',
-			'{}', '{}', '{}', 1, ?, ?, ?)
-	`, runID, entityID, flowInstance, entitySlug, now, now, now); err != nil {
-		t.Fatalf("seed sqlite entity state: %v", err)
-	}
+	seedBoundedInboundFlow(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, configBytes)
 	if strings.TrimSpace(agentID) != "" {
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{

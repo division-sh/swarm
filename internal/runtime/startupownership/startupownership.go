@@ -409,6 +409,7 @@ type RetainedSession interface {
 	CommitSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error)
 	CommitAgentLifecycleTransition(context.Context, runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error)
+	RebindFlowReadinessSourceSet(context.Context, runtimemanager.FlowReadinessSourceSetRebindRequest, runtimemanager.ProcessExecutionBinding) (runtimemanager.FlowReadinessSourceSetRebindResult, error)
 	Release(context.Context) error
 }
 

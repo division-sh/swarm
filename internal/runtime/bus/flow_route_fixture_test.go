@@ -6,7 +6,51 @@ import (
 	"fmt"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func (rt *RouteTable) ConstructedRouteRequestFixture(req FlowInstanceRouteMaterializationRequest) FlowInstanceRouteMaterializationRequest {
+	if req.Instance != (runtimeflowidentity.Instance{}) {
+		return req
+	}
+	flowID, found := rt.FlowInstanceTemplateID(req.Identity.Route)
+	if found {
+		req.Instance = ConstructedFlowInstanceIdentityFixture(rt.source, flowID, req.Identity.Route.InstanceID, req.Identity.RunID)
+	}
+	return req
+}
+
+func ConstructedFlowInstanceIdentityFixture(source semanticview.Source, flowID, instanceID, runID string) runtimeflowidentity.Instance {
+	if source == nil {
+		return runtimeflowidentity.Instance{}
+	}
+	instance := runtimeflowidentity.Derive(source, flowID, instanceID)
+	schema, found := source.FlowSchemaByID(flowID)
+	if !found || !schema.Instance.Empty() {
+		return instance
+	}
+	if flowID == semanticview.RootExecutionFlowID(source) {
+		return runtimeflowidentity.Stored(source, flowID, runID, runID, runtimeflowidentity.EntityID(runID), "")
+	}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		return runtimeflowidentity.Instance{}
+	}
+	view, found := bundle.FlowViewByID(flowID)
+	if !found || view.Parent == nil {
+		return runtimeflowidentity.Instance{}
+	}
+	parent := ConstructedFlowInstanceIdentityFixture(source, view.Parent.Paths.FlowPath, "", runID)
+	child, err := runtimeflowidentity.KeylessChild(source, parent, flowID)
+	if err != nil {
+		return runtimeflowidentity.Instance{}
+	}
+	return child
+}
+
+func (rt *RouteTable) AddConstructedFlowInstanceRouteFixture(req FlowInstanceRouteMaterializationRequest) error {
+	return rt.AddFlowInstanceRoute(rt.ConstructedRouteRequestFixture(req))
+}
 
 // Fixture methods deliberately bypass activation authority. They construct
 // route-state inputs for routing tests and are absent from production builds.
@@ -25,7 +69,7 @@ func (eb *EventBus) PublishPersistedFlowInstanceRouteFixture(req FlowInstanceRou
 	if table == nil {
 		return errors.New("route table is not initialized")
 	}
-	return table.AddFlowInstanceRoute(req.Normalized())
+	return table.AddConstructedFlowInstanceRouteFixture(req.Normalized())
 }
 
 func (eb *EventBus) RetirePublishedFlowInstanceRouteFixture(identity runtimeflowidentity.RunScopedFlowInstance) error {
@@ -36,6 +80,9 @@ func (eb *EventBus) RetirePublishedFlowInstanceRouteFixture(identity runtimeflow
 }
 
 func (eb *EventBus) AddFlowInstanceRouteContextFixture(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
+	if eb != nil && eb.RouteTable() != nil {
+		req = eb.RouteTable().ConstructedRouteRequestFixture(req)
+	}
 	committed, commitErr := eb.StageFlowInstanceRouteContext(ctx, req)
 	if !committed.Acknowledged {
 		return errors.Join(commitErr, errors.New("flow-instance route topology commit was not acknowledged"))

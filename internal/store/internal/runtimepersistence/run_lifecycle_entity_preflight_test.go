@@ -151,7 +151,7 @@ func seedCompletionEntityPreflight(t *testing.T, fixture runLifecycleCandidatePa
 
 func setCompletionEntityPreflightState(t *testing.T, fixture runLifecycleCandidateParityFixture, ctx context.Context, runID, state string) {
 	t.Helper()
-	result, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET current_state=$1 WHERE run_id=$2 AND entity_id=$2`, state, runID)
+	result, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET current_state=$1 WHERE run_id=$2 AND entity_id=$2`, state, runID)
 	if err != nil {
 		t.Fatal(err)
 	}

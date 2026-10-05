@@ -149,7 +149,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	if err != nil {
 		return nil, err
 	}
-	installCatalogRuntimeStartupGrant(t, ctx, selected, rt)
+	installCatalogRuntimeStartupGrant(t, ctx, selected, rt, false)
 	return rt, nil
 
 }

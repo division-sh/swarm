@@ -53,6 +53,7 @@ type stageLifecycleIdentityActivation struct {
 type stageLifecycleIdentityPublicationStore struct {
 	runtimebus.EventStore
 	runtimepipeline.WorkflowInstancePersistenceReader
+	runtimepipeline.WorkflowTargetPersistenceReader
 	owner runtimebus.CommitPublicationOwner
 	mu    sync.Mutex
 	items map[string]stageLifecycleIdentityPublication
@@ -329,6 +330,7 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 	publications := &stageLifecycleIdentityPublicationStore{
 		EventStore: base.EventStore, owner: selected.(runtimebus.CommitPublicationOwner),
 		WorkflowInstancePersistenceReader: selected.(runtimepipeline.WorkflowInstancePersistenceReader),
+		WorkflowTargetPersistenceReader:   selected.(runtimepipeline.WorkflowTargetPersistenceReader),
 		items:                             make(map[string]stageLifecycleIdentityPublication),
 	}
 	base.EventStore = publications
@@ -445,13 +447,26 @@ func stageLifecycleIdentitySQLiteDeps(deps runtimepkg.RuntimeDeps, selected *sto
 func discoverStageLifecycleIdentityActivation(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, observed stageLifecycleIdentityPublication, runID, batchID string) (stageLifecycleIdentityActivation, runtimepipeline.WorkflowInstance, runtimeflowidentity.RunScopedFlowInstance) {
 	t.Helper()
 	publication := observed.committed
-	if observed.err != nil || len(observed.initial) != 1 {
-		t.Fatalf("committed initial scout = %#v err=%v, want one persisted initial state", observed.initial, observed.err)
+	if observed.err != nil || len(observed.initial) != 2 {
+		t.Fatalf("committed initial tree = %#v err=%v, want eager root and scout", observed.initial, observed.err)
 	}
-	if err := publication.Validate(); err != nil || !publication.Acknowledged || len(publication.Activations) != 1 {
-		t.Fatalf("setup publication = %#v err=%v, want one acknowledged creation", publication, err)
+	if err := publication.Validate(); err != nil || !publication.Acknowledged || len(publication.Activations) != 2 {
+		t.Fatalf("setup publication = %#v err=%v, want acknowledged root and scout creation", publication, err)
 	}
-	construction := publication.Activations[0]
+	var construction runtimepipeline.CommittedFlowInstanceActivation
+	rootCount := 0
+	for _, committed := range publication.Activations {
+		if committed.Plan.Instance.WorkflowName == "scout" {
+			construction = committed
+		} else if committed.Created && committed.Plan.Instance.StorageRef == runID && committed.Plan.Instance.EntityID == runID {
+			rootCount++
+		} else {
+			t.Fatalf("unexpected construction in initial tree: %#v", committed)
+		}
+	}
+	if rootCount != 1 {
+		t.Fatalf("eager root constructions = %d, want 1", rootCount)
+	}
 	if !construction.Created || construction.Plan.Instance.WorkflowName != "scout" {
 		t.Fatalf("setup activation = %#v, want one newly committed scout", construction)
 	}
@@ -473,7 +488,14 @@ func discoverStageLifecycleIdentityActivation(t *testing.T, ctx context.Context,
 		t.Fatalf("keyed entity_id %q is not canonical: %v", activation.EntityID, err)
 	}
 	assertStageLifecyclePersistedRoute(t, ctx, selected, owner)
-	initial := observed.initial[0]
+	var initial runtimepipeline.WorkflowInstance
+	for _, instance := range observed.initial {
+		if instance.WorkflowName == "scout" {
+			initial = instance
+		} else if instance.StorageRef != runID || instance.EntityID != runID {
+			t.Fatalf("unexpected initial root identity: %#v", instance)
+		}
+	}
 	if initial.StorageRef != activation.FlowInstance || initial.InstanceID != activation.InstanceID || initial.EntityID != activation.EntityID || initial.Fields["batch_id"] != batchID {
 		t.Fatalf("committed initial scout disagrees with its activation and key: %#v, want %#v batch %q", initial, activation, batchID)
 	}

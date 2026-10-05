@@ -37,6 +37,7 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			instance := "freeze/instance"
 			entityID := runtimepipeline.FlowInstanceEntityID(instance)
 			seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "source")
+			seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, instance, "freeze", "review_item", "active", "{}", time.Now().UTC())
 			before, err := selected.ListSelectedRunTargetOwners(ctx, runID)
 			if err != nil || len(before) != 1 || before[0].EntityID != entityID || before[0].FlowInstance != instance {
 				t.Fatalf("canonical owners before freeze = %#v, %v", before, err)
@@ -96,16 +97,16 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 		}, false},
 	}
 	cases := []struct {
-		name, node, state, lifecycle, failure              string
-		initialize, duplicateOwner, wrongOwner, appearance bool
+		name, node, state, lifecycle, failure  string
+		duplicateOwner, wrongOwner, appearance bool
 	}{
 		{name: "existing", node: "selector", state: "active"},
 		{name: "missing-with-business-key-sibling", node: "selector", failure: "owner is missing"},
-		{name: "initialize-with-business-key-sibling", node: "upserter", initialize: true},
+		{name: "initialize-with-business-key-sibling", node: "upserter", failure: "owner is missing"},
 		{name: "initializer-reuses-state", node: "upserter", state: "active"},
-		{name: "exact-state-appears-before-commit", node: "upserter", initialize: true, appearance: true},
-		{name: "wrong-canonical-owner", node: "upserter", state: "active", wrongOwner: true, failure: "disagrees with canonical handler identity"},
-		{name: "duplicate-exact-owners", node: "selector", state: "active", duplicateOwner: true, failure: "ambiguous"},
+		{name: "exact-state-appears-before-commit", node: "upserter", appearance: true, failure: "owner is missing"},
+		{name: "wrong-canonical-owner", node: "upserter", state: "active", wrongOwner: true, failure: "disagrees with receiver entity"},
+		{name: "duplicate-exact-owners", node: "selector", state: "active", duplicateOwner: true},
 		{name: "terminal-state", node: "selector", state: "done", failure: "owner is unavailable"},
 		{name: "draining-companion", node: "selector", state: "active", lifecycle: "draining", failure: "owner is unavailable"},
 		{name: "terminated-companion", node: "selector", state: "active", lifecycle: "terminated", failure: "owner is unavailable"},
@@ -144,24 +145,52 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						instance = runID
 						entityID = runID
 					}
+					rootConstruction := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
+					rootConstruction.Instance = runtimeflowidentity.Stored(source, ".", runID, runID, runID, "")
+					rootConstruction.OccurredAt = time.Now().UTC()
+					constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), rootConstruction)
+					if scope.template {
+						construction := sqliteFlowActivationRequest(bundle, scope.flow, "instance", "", instance)
+						construction.ConstructorInput = "test.node_emitted.selector"
+						construction.ResolvedKey = "instance"
+						construction.Config = map[string]any{"instance_key": "instance"}
+						construction.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.selector", "", "", []byte(`{"account_id":"different-business-key","instance_key":"instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+						constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), construction)
+					}
 					otherEntity := uuid.NewString()
 					seedStateOnlyAcquisitionEntity(t, backend, db, runID, otherEntity, scope.other, "active", "same-business-key")
-					if tc.state != "" {
-						id := entityID
-						if tc.wrongOwner {
-							id = uuid.NewString()
+					if tc.state == "" {
+						for _, table := range []string{"flow_instances", "entity_state"} {
+							column := "instance_path"
+							if table == "entity_state" {
+								column = "flow_instance"
+							}
+							if _, err := db.ExecContext(ctx, "DELETE FROM "+table+" WHERE run_id=$1 AND "+column+"=$2", runID, instance); err != nil {
+								t.Fatal(err)
+							}
 						}
-						seedStateOnlyAcquisitionEntity(t, backend, db, runID, id, instance, tc.state, "different-business-key")
+					} else {
+						for _, table := range []string{"flow_instances", "entity_state"} {
+							if _, err := db.ExecContext(ctx, "UPDATE "+table+" SET current_state=$1 WHERE run_id=$2 AND entity_id=$3", tc.state, runID, entityID); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+					if tc.wrongOwner {
+						wrongID := uuid.NewString()
+						seedStateOnlyAcquisitionEntity(t, backend, db, runID, wrongID, instance, "active", "different-business-key")
+						if _, err := db.ExecContext(ctx, `DELETE FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, entityID); err != nil {
+							t.Fatal(err)
+						}
+						seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, wrongID, instance, scope.flow, "review_item", "active", "{}", time.Now().UTC())
 					}
 					if tc.duplicateOwner {
 						seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), instance, "active", "same-business-key")
 					}
-					if tc.lifecycle != "" || scope.template {
-						status := tc.lifecycle
-						if status == "" {
-							status = "active"
+					if tc.lifecycle != "" {
+						if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET status=$1 WHERE run_id=$2 AND instance_path=$3`, tc.lifecycle, runID, instance); err != nil {
+							t.Fatal(err)
 						}
-						seedStateOnlyAcquisitionLifecycleForFlow(t, backend, db, runID, scope.flow, instance, status, scope.template, source)
 					}
 					node, err := runtimeidentity.AdmitExecutableNodeDeclaration(scope.flow, tc.node)
 					if err != nil {
@@ -176,7 +205,11 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						bus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
 							ContractBundle: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
 							RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
-								return []runtimebus.DeliveryRouteBlueprint{{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance}, Handler: handler.ForEvent(eventType)}}, nil
+								target := events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance}
+								if tc.wrongOwner {
+									target.EntityID = entityID
+								}
+								return []runtimebus.DeliveryRouteBlueprint{{Recipient: events.MustNodeDeliveryRecipient(node), Target: target, Handler: handler.ForEvent(eventType)}}, nil
 							},
 						})
 						if err != nil {
@@ -188,7 +221,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 								t.Fatal(err)
 							}
 							if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{
-								Identity: identity, ActivationVariables: map[string]string{"entity.instance_key": "instance"},
+								Identity: identity, Instance: runtimeflowidentity.Derive(source, scope.flow, "instance"), ActivationVariables: map[string]string{"entity.instance_key": "instance"},
 							}); err != nil {
 								t.Fatal(err)
 							}
@@ -197,10 +230,26 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 					}
 					bus := newBus()
 					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(eventType), "", "", []byte(`{"account_id":"same-business-key","instance_key":"instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+					if tc.wrongOwner && scope.flow != "." {
+						evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance, EntityID: entityID})
+					}
 					if tc.failure != "" {
+						failure := tc.failure
+						if scope.flow == "." && tc.state == "" {
+							failure = "canonical activation planner"
+						}
+						if scope.flow == "." && tc.wrongOwner {
+							failure = "root construction identity contradicts"
+						}
 						err := bus.Publish(ctx, evt)
-						if err == nil || !strings.Contains(err.Error(), tc.failure) {
-							t.Fatalf("Publish=%v, want %q", err, tc.failure)
+						if err == nil || !strings.Contains(err.Error(), failure) {
+							t.Fatalf("Publish=%v, want %q", err, failure)
+						}
+						if tc.appearance {
+							seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "different-business-key")
+							if err := bus.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), failure) {
+								t.Fatalf("field-row appearance became construction authority: %v", err)
+							}
 						}
 						assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
 						return
@@ -210,11 +259,8 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						t.Fatalf("plan=%#v err=%v", plan, err)
 					}
 					wantRoute := events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance, EntityID: entityID}.Normalized()
-					if plan.DeliveryRoutes[0].Target.Route() != wantRoute || plan.DeliveryRoutes[0].Target.MaterializingEntity() != tc.initialize {
-						t.Fatalf("wrong owner: %#v want %#v initialize=%t", plan.DeliveryRoutes, wantRoute, tc.initialize)
-					}
-					if tc.appearance {
-						seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "different-business-key")
+					if plan.DeliveryRoutes[0].Target.Route() != wantRoute || plan.DeliveryRoutes[0].Target.MaterializingEntity() {
+						t.Fatalf("wrong constructed owner: %#v want %#v", plan.DeliveryRoutes, wantRoute)
 					}
 					if err := bus.Publish(ctx, evt); err != nil {
 						t.Fatal(err)
@@ -224,7 +270,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						t.Fatalf("load=%t %v %#v", found, err, prepared)
 					}
 					target := prepared.DeliveryRoutes[0].Target
-					if target.Route() != wantRoute || target.MaterializingEntity() != (tc.initialize && !tc.appearance) {
+					if target.Route() != wantRoute || target.MaterializingEntity() {
 						t.Fatalf("persisted target=%#v", target)
 					}
 					// Late rows and a reconstructed publisher cannot re-elect an accepted receiver.
@@ -237,11 +283,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						t.Fatalf("duplicate rewrote receiver: %#v %t %v", again, found, err)
 					}
 					assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-					wantLifecycle := 0
-					if scope.template {
-						wantLifecycle = 1
-					}
-					assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, instance, wantLifecycle)
+					assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, instance, 1)
 					var siblingFields string
 					if err := db.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, otherEntity).Scan(&siblingFields); err != nil {
 						t.Fatal(err)
@@ -398,62 +440,6 @@ func seedStateOnlyAcquisitionEntity(t *testing.T, backend string, db *sql.DB, ru
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("seed state-only acquisition entity: %v", err)
-	}
-}
-
-func seedStateOnlyAcquisitionLifecycle(t *testing.T, backend string, db *sql.DB, runID, instancePath, status string) {
-	seedStateOnlyAcquisitionLifecycleForFlow(t, backend, db, runID, "review", instancePath, status, false, nil)
-}
-
-func seedStateOnlyAcquisitionLifecycleForFlow(t *testing.T, backend string, db *sql.DB, runID, flowTemplate, instancePath, status string, template bool, source semanticview.Source) {
-	t.Helper()
-	mode := runtimecontracts.FlowModeStatic
-	config := "{}"
-	if template {
-		mode = runtimecontracts.FlowModeTemplate
-		config = `{"instance_key":"instance"}`
-	}
-	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	var terminatedAt any
-	if status == "terminated" {
-		terminatedAt = now
-	}
-	args := []any{runID, instancePath, flowTemplate, mode, config, status, terminatedAt, now}
-	if backend == "postgres" {
-		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8)`
-	}
-	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
-		t.Fatalf("seed state-only acquisition lifecycle: %v", err)
-	}
-	if !template {
-		return
-	}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle.SourceArtifact == nil {
-		t.Fatal("template readiness requires the admitted source")
-	}
-	plan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-		Identity: runtimeflowidentity.Instance{
-			TemplateID: flowTemplate, ScopeKey: flowTemplate,
-			InstanceID: runtimeflowidentity.LogicalInstanceID(instancePath), InstancePath: instancePath,
-			EntityID: runtimepipeline.FlowInstanceEntityID(instancePath), HasStoredPath: true,
-		},
-		RunID: runID, BundleHash: bundle.SourceArtifact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: "live",
-	}).Normalized()
-	if err != nil {
-		t.Fatalf("normalize exact template readiness: %v", err)
-	}
-	readiness, err := json.Marshal(plan)
-	if err != nil {
-		t.Fatalf("encode exact template readiness: %v", err)
-	}
-	readinessQuery := `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
-	if backend == "postgres" {
-		readinessQuery = `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES ($1::uuid, $2, $3::jsonb, $4, $5)`
-	}
-	if _, err := db.ExecContext(context.Background(), readinessQuery, runID, instancePath, string(readiness), now, now); err != nil {
-		t.Fatalf("seed exact template readiness: %v", err)
 	}
 }
 

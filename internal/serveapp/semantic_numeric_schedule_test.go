@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -22,14 +21,6 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := semanticNumericIngressFixture(t)
-			nodeFile := filepath.Join(root, "nodes.yaml")
-			nodes, err := os.ReadFile(nodeFile)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(nodeFile, []byte(strings.Replace(string(nodes), "      create_entity: true\n", "", 1)), 0600); err != nil {
-				t.Fatal(err)
-			}
 			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: numeric-schedule\nstages:\n  waiting: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - numeric.requested\n"), 0600); err != nil {
 				t.Fatal(err)
 			}

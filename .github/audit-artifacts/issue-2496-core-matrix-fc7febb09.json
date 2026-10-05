@@ -1,0 +1,16 @@
+{
+  "head": "fc7febb09",
+  "receipt": "/tmp/agent-e-2496-constructor-cleanup-repaired-matrix.log",
+  "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+  "result": "RED; cleanup evidence oracle failed",
+  "elapsed_seconds": 1423.971,
+  "requested_count": 3,
+  "passed_roots": 27,
+  "passed_root_executions": 81,
+  "failed_root": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+  "failed_root_executions": 3,
+  "failed_leaf_executions": 36,
+  "failure_records_including_package": 40,
+  "correction": "bd54b10dd separates the expected retained timer work deadline from joined terminal cleanup evidence. The later corrected cleanup-only matrix was interrupted before execution to include the new synchronous timer acquisition repair and abandonment-response-loss cells.",
+  "scope": "All three old-root constructor fixtures and all other selected roots passed every repetition. This does not reclassify the RED aggregate as GREEN or qualify subsequent production changes. No per-case deadline was increased."
+}

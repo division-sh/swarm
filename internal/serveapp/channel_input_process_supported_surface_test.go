@@ -84,7 +84,7 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 			"interface": old.Operation.Interface.Selector, "expected_revision": old.Binding.Revision, "idempotency_key": "authority-unbind",
 		}, &result)
 	}
-	waitChannelDeliverySendsSettled(t, db)
+	waitChannelDeliverySendsSettled(t, db, h.backend)
 	beforeACK, beforeEdit := objectChannelCallCounts(p)
 	if err := first.kill(); err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 	}
 	second := startChannelOnboardingCrashServeProcess(t, h.opts, objectChannelProviderURL(t, p))
 	h.endpoint = second.endpoint(t)
-	waitChannelDeliverySendsSettled(t, db)
+	waitChannelDeliverySendsSettled(t, db, h.backend)
 	if ack, edit := objectChannelCallCounts(p); ack != beforeACK || edit != beforeEdit {
 		t.Fatalf("authority restart replayed old effects: ACK %d/%d edit %d/%d", beforeACK, ack, beforeEdit, edit)
 	}

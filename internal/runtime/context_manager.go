@@ -112,12 +112,14 @@ type runtimeSourceSetTransitionEntry struct {
 }
 
 type runtimeSourceSetTransitionAdmission struct {
-	mu           sync.RWMutex
-	id           string
-	revision     string
-	predecessors map[string]runtimemanager.ProcessExecutionBinding
-	done         chan struct{}
-	completed    bool
+	mu            sync.RWMutex
+	id            string
+	revision      string
+	predecessors  map[string]runtimemanager.ProcessExecutionBinding
+	done          chan struct{}
+	terminalDrain chan struct{}
+	completed     bool
+	terminating   bool
 }
 
 func newRuntimeSourceSetTransitionAdmission(revision string) (*runtimeSourceSetTransitionAdmission, error) {
@@ -127,7 +129,7 @@ func newRuntimeSourceSetTransitionAdmission(revision string) (*runtimeSourceSetT
 	}
 	return &runtimeSourceSetTransitionAdmission{
 		id: uuid.NewString(), revision: revision,
-		predecessors: make(map[string]runtimemanager.ProcessExecutionBinding), done: make(chan struct{}),
+		predecessors: make(map[string]runtimemanager.ProcessExecutionBinding), done: make(chan struct{}), terminalDrain: make(chan struct{}),
 	}, nil
 }
 
@@ -187,6 +189,21 @@ func (a *runtimeSourceSetTransitionAdmission) Done() <-chan struct{} {
 		return nil
 	}
 	return a.done
+}
+
+func (a *runtimeSourceSetTransitionAdmission) TerminalDrain() <-chan struct{} {
+	return a.terminalDrain
+}
+
+// Only aggregate shutdown, after fencing the complete set, may release drain
+// waiters. The refresh remains incomplete and cannot admit execution or retry.
+func (a *runtimeSourceSetTransitionAdmission) terminate() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.terminating {
+		a.terminating = true
+		close(a.terminalDrain)
+	}
 }
 
 func (a *runtimeSourceSetTransitionAdmission) complete() {
@@ -451,7 +468,7 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if m == nil {
 		return fmt.Errorf("runtime context manager is required")
 	}
-	contextDef, err := validateRuntimeContextDefinition(contextDef)
+	contextDef, err := validateRuntimeContextDefinition(contextDef, activateOccurrences)
 	if err != nil {
 		return err
 	}
@@ -615,7 +632,7 @@ func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklife
 	return out, nil
 }
 
-func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, error) {
+func validateRuntimeContextDefinition(contextDef BundleContext, executable bool) (BundleContext, error) {
 	contextDef = contextDef.normalized()
 	if err := contextDef.SourceArtifactFact.Validate(); err != nil {
 		return BundleContext{}, fmt.Errorf("runtime context bundle source fact: %w", err)
@@ -681,7 +698,7 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 	if runtimeOwner := contextDef.Runtime.WorkOccurrence(); runtimeOwner != nil && runtimeOwner != contextDef.WorkOwner {
 		return BundleContext{}, fmt.Errorf("runtime context %s work owner does not belong to runtime", bundleHash)
 	}
-	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
+	if err := validateRuntimeContextStandingTargets(contextDef, executable); err != nil {
 		return BundleContext{}, err
 	}
 	normalizedSubjects, err := packs.NormalizeSubjects(contextDef.InstalledTriggerSubjects)
@@ -728,7 +745,7 @@ func equalRuntimeContextSlice[T any](left, right []T) bool {
 	return reflect.DeepEqual(left, right)
 }
 
-func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
+func validateRuntimeContextStandingTargets(contextDef BundleContext, executable bool) error {
 	bundleHash := contextDef.BundleHash()
 	seen := map[string]string{}
 	for _, target := range contextDef.StandingTargets {
@@ -736,7 +753,9 @@ func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
 		if target.BundleHash != bundleHash {
 			return fmt.Errorf("runtime context %s standing target %q/%q bundle_hash %q does not match context", bundleHash, target.Alias, target.Provider, target.BundleHash)
 		}
-		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.Generation <= 0 || target.FlowPath == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
+		bound := target.RunID != "" && target.Generation > 0
+		declarationOnly := target.RunID == "" && target.Generation == 0 && target.PublicationSequence == 0
+		if target.Alias == "" || target.Provider == "" || (executable && !bound) || (!bound && !declarationOnly) || target.FlowPath == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
 			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_path, flow_instance, entity_id, and compiled admission plan", bundleHash)
 		}
 		if target.AdmissionPlan.RequiresSecret() != (target.SigningSecret != "") {
@@ -2153,7 +2172,7 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 			changed = true
 		}
 		if changed {
-			if err := validateRuntimeContextStandingTargets(copied); err != nil {
+			if err := validateRuntimeContextStandingTargets(copied, true); err != nil {
 				return err
 			}
 			if existing, incoming, alias, collision := m.duplicateLoadedIngressAliasLocked(copied); collision {
@@ -2316,6 +2335,13 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 			m.sourceSetMu.Unlock()
 		}
 	}()
+	if admission := m.pendingSourceSetTransition; admission != nil {
+		select {
+		case <-admission.TerminalDrain():
+			return nil, errors.New("runtime source-set transition is terminally draining")
+		default:
+		}
+	}
 	wanted := make(map[string]struct{}, len(plan.Sources))
 	for _, source := range plan.Sources {
 		wanted[source.Normalize().Key()] = struct{}{}
@@ -2639,6 +2665,30 @@ func (m *RuntimeContextManager) DeactivateBundleHash(bundleHash, cause string) R
 }
 
 func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, cause string, opts ShutdownOptions) RuntimeContextDeactivationResult {
+	if m == nil {
+		return RuntimeContextDeactivationResult{BundleHash: strings.TrimSpace(bundleHash), State: RuntimeContextStateUnloaded, Cause: normalizeRuntimeContextDeactivationCause(cause)}
+	}
+	m.sourceSetMu.Lock()
+	if admission := m.pendingSourceSetTransition; admission != nil {
+		select {
+		case <-admission.TerminalDrain():
+		default:
+			m.sourceSetMu.Unlock()
+			return RuntimeContextDeactivationResult{BundleHash: strings.TrimSpace(bundleHash), State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseSourceSetTransition,
+				ShutdownErr: errors.New("pending runtime source-set transition requires aggregate shutdown")}
+		}
+	}
+	// Withdrawal and admission fencing serialize with source-set preparation.
+	// Retirement joins below cannot retain that lock.
+	return m.deactivateBundleHashWithOptions(bundleHash, cause, opts, m.sourceSetMu.Unlock)
+}
+
+func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, cause string, opts ShutdownOptions, releasePreparation func()) RuntimeContextDeactivationResult {
+	defer func() {
+		if releasePreparation != nil {
+			releasePreparation()
+		}
+	}()
 	result := RuntimeContextDeactivationResult{
 		BundleHash: strings.TrimSpace(bundleHash),
 		State:      RuntimeContextStateUnloaded,
@@ -2692,6 +2742,10 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 		}
 	}
 	m.mu.Unlock()
+	if releasePreparation != nil {
+		releasePreparation()
+		releasePreparation = nil
+	}
 	for _, occurrence := range standingToRetire {
 		if err := occurrence.RetireAndWait(context.Background()); err != nil {
 			result.ShutdownErr = errors.Join(result.ShutdownErr, fmt.Errorf("retire standing process occurrence: %w", err))
@@ -2730,6 +2784,7 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 	if m == nil {
 		return nil
 	}
+	m.sourceSetMu.Lock()
 	m.mu.Lock()
 	hashes := append([]string(nil), m.order...)
 	updates := make([]runtimeContextVisibilityUpdate, 0, len(hashes))
@@ -2743,6 +2798,7 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 	}
 	if err := m.publishRuntimeContextVisibilityLocked(updates...); err != nil {
 		m.mu.Unlock()
+		m.sourceSetMu.Unlock()
 		return []RuntimeContextDeactivationResult{{ShutdownErr: err}}
 	}
 	// Withdraw the whole selectable set and fence every occurrence before the
@@ -2760,9 +2816,13 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 		}
 	}
 	m.mu.Unlock()
+	if m.pendingSourceSetTransition != nil {
+		m.pendingSourceSetTransition.terminate()
+	}
+	m.sourceSetMu.Unlock()
 	results := make([]RuntimeContextDeactivationResult, 0, len(hashes))
 	for _, bundleHash := range hashes {
-		result := m.DeactivateBundleHashWithOptions(bundleHash, cause, opts)
+		result := m.deactivateBundleHashWithOptions(bundleHash, cause, opts, nil)
 		result.Changed = result.Changed || changed[bundleHash]
 		results = append(results, result)
 	}

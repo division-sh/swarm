@@ -1,0 +1,64 @@
+package pinrouting
+
+import (
+	"testing"
+
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+)
+
+func TestConstructedParentSourceSiblingProbe(t *testing.T) {
+	const owner = "test://orders/child/reader"
+	childFlow := runtimecontracts.FlowContractView{
+		Path: "orders/child", Paths: runtimecontracts.FlowContractPaths{FlowPath: "orders/child"},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "child"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{"reader": {ID: "reader"}},
+		AgentURIs: map[string]string{"reader": owner},
+	}
+	parentFlow := runtimecontracts.FlowContractView{
+		Path: "orders", Paths: runtimecontracts.FlowContractPaths{FlowPath: "orders"},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "orders", Instance: mustTemplateInstanceField(t, "order_id")},
+		Children: []runtimecontracts.FlowContractView{childFlow},
+	}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: runtimecontracts.FlowSchemaDocument{Name: "root"}, Children: []runtimecontracts.FlowContractView{parentFlow}}
+	root.Children[0].Parent = &root
+	root.Children[0].Children[0].Parent = &root.Children[0]
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootSchema: &root.Schema,
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"orders": root.Children[0].Schema, "orders/child": root.Children[0].Children[0].Schema},
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "orders": &root.Children[0], "orders/child": &root.Children[0].Children[0]},
+			ByPath: map[string]*runtimecontracts.FlowContractView{".": &root, "orders": &root.Children[0], "orders/child": &root.Children[0].Children[0]},
+		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{owner: {Kind: "agent", FlowID: "orders/child", LocalID: "reader", Full: owner}}},
+	})
+	parent := flowidentity.Derive(source, "orders", "one")
+	child, err := flowidentity.KeylessChild(source, parent, "orders/child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := models.AgentConfig{ID: "reader", FlowID: "orders/child", FlowPath: child.InstancePath,
+		Identity: agentidentitytest.Declared(t, "reader", owner, child.ScopeKey, child.InstanceID, child.InstancePath)}
+	if err := child.ValidateConstruction(source, actor.Identity.RunID); err != nil {
+		t.Fatalf("probe prerequisite: canonical constructor rejects child: %v", err)
+	}
+	t.Run("flow_control", func(t *testing.T) {
+		route := events.RouteIdentity{FlowID: child.TemplateID, FlowInstance: child.InstancePath, EntityID: child.EntityID}
+		got, err := AdmitFlowExecutionRoutingSource(source, child.TemplateID, route)
+		if err != nil || got.Route() != route {
+			t.Fatalf("constructed flow source: got=%#v err=%v", got.Route(), err)
+		}
+	})
+	t.Run("declared_agent", func(t *testing.T) {
+		got, err := AdmitAgentExecutionRoutingSource(source, actor, "")
+		want := events.RouteIdentity{FlowID: child.TemplateID, FlowInstance: child.InstancePath}
+		if err != nil || got.Route() != want {
+			t.Fatalf("constructed declared-agent source: got=%#v err=%v", got.Route(), err)
+		}
+	})
+}

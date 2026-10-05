@@ -343,9 +343,9 @@ func exactOutcomeEvent(ctx context.Context, q SummaryQueryer, dialect SummaryDia
 }
 
 func summarizeGates(ctx context.Context, q SummaryQueryer, dialect SummaryDialect, runID string) (int, int, error) {
-	query := `SELECT accumulator FROM entity_state WHERE run_id = ? ORDER BY entity_id`
+	query := `SELECT flow_template, accumulator FROM flow_instances WHERE run_id = ? ORDER BY entity_id`
 	if dialect == SummaryDialectPostgres {
-		query = `SELECT accumulator::text FROM entity_state WHERE run_id = $1::uuid ORDER BY entity_id FOR SHARE`
+		query = `SELECT flow_template, accumulator::text FROM flow_instances WHERE run_id = $1::uuid ORDER BY entity_id FOR SHARE`
 	}
 	rows, err := q.QueryContext(ctx, query, runID)
 	if err != nil {
@@ -354,8 +354,9 @@ func summarizeGates(ctx context.Context, q SummaryQueryer, dialect SummaryDialec
 	open, malformed := 0, 0
 	var activations []gateruntime.Activation
 	for rows.Next() {
+		var flowTemplate string
 		var raw any
-		if err := rows.Scan(&raw); err != nil {
+		if err := rows.Scan(&flowTemplate, &raw); err != nil {
 			return 0, 0, fmt.Errorf("scan decision gate state: %w", err)
 		}
 		document, err := jsonBytes(raw)
@@ -381,7 +382,8 @@ func summarizeGates(ctx context.Context, q SummaryQueryer, dialect SummaryDialec
 			var activation gateruntime.Activation
 			decoder := json.NewDecoder(bytes.NewReader(activationRaw))
 			decoder.DisallowUnknownFields()
-			if err := decoder.Decode(&activation); err != nil || decoder.Decode(&struct{}{}) != io.EOF || activation.Validate() != nil || key != activation.Key() {
+			if err := decoder.Decode(&activation); err != nil || decoder.Decode(&struct{}{}) != io.EOF || activation.Validate() != nil || key != activation.Key() ||
+				activation.FlowID != flowTemplate {
 				malformed++
 				continue
 			}

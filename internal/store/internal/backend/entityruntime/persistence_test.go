@@ -146,18 +146,11 @@ func TestEntityWritesRetainSchemaGuardBeforeMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	runID, entityID := uuid.NewString(), uuid.NewString()
-	create := runtimetools.EntityCreateRecord{RunID: runID, EntityID: entityID, FlowInstance: "root", EntityType: "task", CurrentState: "active"}
-	if _, err := owner.CreateEntity(context.Background(), create); !errors.Is(err, refused) {
-		t.Fatalf("create bypassed schema guard: %v", err)
-	}
 	update := runtimetools.EntityFieldUpdate{RunID: runID, EntityID: entityID, FieldPath: "score", Value: int64(7)}
 	if _, err := owner.SaveEntityField(context.Background(), update); !errors.Is(err, refused) {
 		t.Fatalf("field update bypassed schema guard: %v", err)
 	}
 	owner.schemaGuard = nil
-	if _, err := owner.CreateEntity(context.Background(), create); err == nil || !strings.Contains(err.Error(), "entity sqlite owner is required") {
-		t.Fatalf("missing schema guard was not refused: %v", err)
-	}
 	if _, err := owner.SaveEntityField(context.Background(), update); err == nil || !strings.Contains(err.Error(), "entity sqlite owner is required") {
 		t.Fatalf("missing field schema guard was not refused: %v", err)
 	}

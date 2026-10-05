@@ -121,7 +121,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 					"event_name": "work.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash,
 					"payload": map[string]any{"detail": strings.Repeat("object-owned detail;", 60)}, "idempotency_key": "object-card",
 				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				message := waitObjectCardReceipt(t, db, card)
 				objectChannelIngress(t, callback, signing, "native-entry-1", map[string]any{
 					"text": "/" + command, "principal": "operator-a", "room": "queue-a", "scope": scope, "message": map[string]any{"id": "entry-1"},
@@ -212,7 +212,7 @@ func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, db
 	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 		"event_name": "work.requested", "bundle_hash": bundle, "payload": map[string]any{"detail": strings.Repeat("uncertain object detail;", 60)}, "idempotency_key": "object-recovery-card",
 	})
-	card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+	card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 	waitUncertainCopyPlan(t, db, card)
 	p.mu.Lock()
 	callback, signing := p.callback, p.signing

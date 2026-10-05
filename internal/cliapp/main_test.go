@@ -4244,8 +4244,8 @@ func TestExecutionValidation_CreateEntityAccumulatePreemptsDynamicComputeWarning
 	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
 
 	err := validateExecutionFixture(context.Background(), semanticview.Wrap(bundle), executionposture.Live)
-	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
-		t.Fatalf("validateExecutionFixture error = %v, want create_entity/accumulate boot error", err)
+	if err == nil || !strings.Contains(err.Error(), "uses retired create_entity; construction belongs to the canonical flow constructor") {
+		t.Fatalf("validateExecutionFixture error = %v, want retired-constructor error before compute warnings", err)
 	}
 }
 
@@ -4415,11 +4415,12 @@ func TestExecutionValidation_DeadDeclaredEventSchemaReturnsWarningSurface(t *tes
 func TestExecutionValidation_CreateEntityAccumulateReturnsBootError(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	err := validateExecutionFixture(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate"))), executionposture.Live)
-	if err == nil {
-		t.Fatal("validateExecutionFixture error = nil, want create_entity/accumulate boot error")
-	}
-	if !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
-		t.Fatalf("validateExecutionFixture error = %v, want create_entity/accumulate boot error", err)
+	// Retired grammar refuses at the public loader, before execution validation.
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate")}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 2 || !strings.Contains(stderr.String(), `ERROR: handler field "create_entity" is not supported.`) ||
+		!strings.Contains(stderr.String(), `Location: nodes.yaml:$["test-node"]["event_handlers"]["task.started"]["create_entity"]`) ||
+		!strings.Contains(stderr.String(), "Valid options:") {
+		t.Fatalf("public verify code=%d stdout=%s stderr=%s, want current-vocabulary loader refusal", code, &stdout, &stderr)
 	}
 }

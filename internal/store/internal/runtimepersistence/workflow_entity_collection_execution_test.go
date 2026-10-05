@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -46,10 +47,12 @@ func (r selectedEntityCollectionExecutionReader) QueryEntityCollection(ctx conte
 	return rows, nil
 }
 
-type selectedEntityCollectionExecutionState struct{}
+type selectedEntityCollectionExecutionState struct {
+	snapshot runtimeengine.StateSnapshot
+}
 
-func (selectedEntityCollectionExecutionState) LoadState(context.Context, runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
-	return runtimeengine.StateSnapshot{}, false, nil
+func (s selectedEntityCollectionExecutionState) LoadState(_ context.Context, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
+	return s.snapshot, s.snapshot.EntityID == address.EntityID, nil
 }
 
 func (selectedEntityCollectionExecutionState) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {
@@ -59,7 +62,7 @@ func (selectedEntityCollectionExecutionState) SaveState(context.Context, runtime
 type selectedEntityCollectionExecutionMutation struct{}
 
 func (selectedEntityCollectionExecutionMutation) CommitEngineMutation(context.Context, runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
-	return runtimeengine.CommittedEngineMutation{}, nil
+	return runtimeengine.CommittedEngineMutation{Committed: true}, nil
 }
 
 type selectedEntityCollectionExecutionLocker struct{}
@@ -77,10 +80,18 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 				t.Fatalf("%s selected store has no workflow entity collection operation", backend)
 			}
 			source := stateOnlyAcquisitionSourceWithMode(t, "child", runtimecontracts.FlowModeTemplate)
+			// The executor has a constructed component target. The separate
+			// collection remains empty until the non-executable import is added.
+			entityID := runtimeidentity.NormalizeEntityID(runtimepipeline.FlowInstanceEntityID("child/executor"))
+			state := runtimeengine.StateSnapshot{
+				EntityID: entityID, CurrentState: "active", WorkflowName: "child", WorkflowVersion: source.WorkflowVersion(),
+				StateCarrier: runtimeengine.NewStateCarrierWithOwners(map[string]any{}, nil,
+					runtimeengine.StateControl{FlowPath: "child/executor", StorageRef: "child/executor", InstanceID: "executor", EntityType: "review_item"}, nil, nil),
+			}
 			executor, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 				Source:            source,
 				EntityCollections: selectedEntityCollectionExecutionReader{store: store, source: source},
-				StateRepo:         selectedEntityCollectionExecutionState{},
+				StateRepo:         selectedEntityCollectionExecutionState{snapshot: state},
 				MutationOwner:     selectedEntityCollectionExecutionMutation{},
 				Locker:            selectedEntityCollectionExecutionLocker{},
 			}, nil)
@@ -95,11 +106,12 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 					t.Fatal(err)
 				}
 				result, err := executor.Execute(ctx, runtimeengine.ExecutionRequest{
+					EntityID: entityID, Route: runtimeflowidentity.RouteForInstancePath("child/executor"),
 					ExecutionFlowID: runtimeidentity.NormalizeFlowID("child"), Node: node,
 					HandlerEventKey: "test.node_emitted",
 					Event:           eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted", "", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC()),
 					Handler:         runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Entities: "review_item", Count: true}},
-					State:           runtimeengine.StateSnapshot{CurrentState: "active", WorkflowName: "child"},
+					State:           state,
 				})
 				if err != nil {
 					t.Fatalf("execute %s: %v", label, err)

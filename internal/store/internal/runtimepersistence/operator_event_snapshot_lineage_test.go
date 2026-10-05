@@ -37,10 +37,6 @@ import (
 func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixture, postgres bool) (context.Context, events.Event) {
 	t.Helper()
 	f.db.SetMaxOpenConns(8) // The real process/publication owners retain connections.
-	backend := "sqlite"
-	if postgres {
-		backend = "postgres"
-	}
 	repo := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyForkFanOutConsumer(t, false, false)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
@@ -60,10 +56,10 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 	if len(plans) != 1 {
 		t.Fatalf("expected one compiled fan-out plan: %d", len(plans))
 	}
-	seedWorkflowTargetStateForTransition(t, backend, f.db, runID, runID, runID, "pending", 1, at)
-	if _, err := f.db.ExecContext(ctx, `UPDATE entity_state SET entity_type='root' WHERE run_id=$1`, runID); err != nil {
-		t.Fatal(err)
-	}
+	constructed := commitPreparedWorkflowAggregateFixture(t, ctx, f.store.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
+		InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "root", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+		Mode: "static", StageDefined: true, CurrentState: "pending", Fields: map[string]any{}, CreatedAt: at, EnteredStageAt: at,
+	}, at)
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runID})}
 	trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "items.ready", "operator", "", []byte(`{"items":["one"]}`), 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at)
 	selected := f.store.(storeTestDurableEventBusStore)
@@ -82,7 +78,10 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 			HandlerEventKey:  "items.ready", CurrentState: "review", ProducerSource: trigger.RoutingSource(), Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(trigger),
 			Entity: map[string]any{}, StateFields: map[string]any{}},
 	}
-	state := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "pending", 1, at)
+	state := constructed
+	state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+	state.ExpectedState, state.ExpectedRevision = "pending", 1
+	state.UpdatedAt = at.Add(time.Second)
 	state.CurrentState, state.EntityType, state.Mode = "review", "root", "static"
 	if _, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
 		State: state, FanOutIntent: &intent, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},

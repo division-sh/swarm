@@ -3,6 +3,7 @@ package runforkrevision
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -23,7 +24,7 @@ func TestExactRevisionReadBatchesPreserveSelection(t *testing.T) {
 	for _, ddl := range []string{
 		`CREATE TABLE run_fork_fact_revisions (run_id TEXT, family TEXT, fact_key TEXT, revision INTEGER, fact TEXT, present BOOLEAN)`,
 		`CREATE TABLE entity_state (run_id TEXT, entity_id TEXT, flow_instance TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT)`,
-		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, config TEXT)`,
+		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT, config TEXT, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, updated_at TEXT, terminated_at TEXT)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
@@ -101,6 +102,76 @@ func TestExactRevisionReadBatchesPreserveSelection(t *testing.T) {
 	}
 	if _, err := readSelectedLatestFacts(context.Background(), tx, change); err == nil {
 		t.Fatal("duplicate latest fact was hidden by batched reads")
+	}
+}
+
+func TestExactEntityMetadataKeepsConstructionAndImportDistinct(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "metadata.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, ddl := range []string{
+		`CREATE TABLE entity_state (run_id TEXT, entity_id TEXT, flow_instance TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT)`,
+		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT, config TEXT, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, updated_at TEXT, terminated_at TEXT)`,
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runID := uuid.NewString()
+	fieldlessID, fieldedID, importedID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, row := range []struct {
+		id, path   string
+		entityType any
+	}{
+		{fieldlessID, "parent/inert", nil},
+		{fieldedID, "parent/keyed/one", "task"},
+	} {
+		if _, err := db.Exec(`INSERT INTO flow_instances VALUES ($1,$2,$3,$4,'header-slug','header-name','2026-09-19T00:00:00Z','{}',true,'parent','static','active','pending','2026-09-19T00:00:00Z','2026-09-19T00:00:00Z',NULL)`, runID, row.path, row.id, row.entityType); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, row := range []struct{ id, path string }{
+		{fieldedID, "parent/keyed/one"},
+		{importedID, "parent/keyed/import"},
+	} {
+		if _, err := db.Exec(`INSERT INTO entity_state VALUES ($1,$2,$3,'task','state-slug','state-name','2026-09-19T00:00:00Z')`, runID, row.id, row.path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	effects := NewEffects()
+	for _, id := range []string{fieldlessID, fieldedID, importedID} {
+		if err := effects.AddFact(runID, FamilyEntityMetadata, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := loadSelectedCanonicalProjection(context.Background(), tx, runID, FamilyEntityMetadata, effects.normalized()[0].exact[FamilyEntityMetadata])
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("metadata count=%d err=%v", len(rows), err)
+	}
+	for _, row := range rows {
+		var fact map[string]any
+		if err := json.Unmarshal(row.fact, &fact); err != nil {
+			t.Fatal(err)
+		}
+		if fact["entity_id"] == importedID {
+			if fact["construction_kind"] != "imported_state" || fact["flow_config"] != nil || fact["stage_defined"] != false {
+				t.Fatalf("import gained construction authority: %s", row.fact)
+			}
+			continue
+		}
+		if fact["construction_kind"] != "constructed" || fact["slug"] != "header-slug" || fact["name"] != "header-name" || fact["stage_defined"] != true || fact["flow_template"] != "parent" || fact["mode"] != "static" {
+			t.Fatalf("constructed metadata did not consume the header: %s", row.fact)
+		}
+		if fact["entity_id"] == fieldlessID && fact["entity_type"] != nil {
+			t.Fatalf("fieldless header acquired a field contract: %s", row.fact)
+		}
 	}
 }
 

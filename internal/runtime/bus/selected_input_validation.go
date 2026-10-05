@@ -8,6 +8,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -15,12 +17,13 @@ import (
 // SelectedInputValidation is immutable input resolution data. Execution still
 // requires the selected owner, binding and exact recipient-plan guards.
 type SelectedInputValidation struct {
-	original         events.Event
-	source           semanticview.Source
-	bundleHash       string
-	flowID           string
-	recipients       []forkrecipient.Evidence
-	projectedPayload []byte
+	original           events.Event
+	source             semanticview.Source
+	bundleHash         string
+	flowID             string
+	recipients         []forkrecipient.Evidence
+	projectedPayload   []byte
+	agentConstructions map[agentidentity.Plan]flowidentity.Instance
 }
 
 func RevalidateSelectedInput(source semanticview.Source, original events.Event) (SelectedInputValidation, error) {
@@ -76,7 +79,11 @@ func (v SelectedInputValidation) AllowsSubscriber(subscriber Subscriber) bool {
 	// Compare source coordinates before binding root ownership to the child run.
 	flowID := subscriber.handlerNode.FlowPath()
 	if subscriber.Recipient.IsAgent() {
-		scope, err := semanticview.ResolveAgentPlanExecutionSemanticScope(v.source, v.original.RunID(), subscriber.AgentPlan)
+		var construction semanticview.AgentExecutionConstruction
+		if instance, found := v.agentConstructions[subscriber.AgentPlan]; found {
+			construction = instance
+		}
+		scope, err := semanticview.ResolveAgentPlanExecutionSemanticScope(v.source, v.original.RunID(), subscriber.AgentPlan, construction)
 		if err != nil || scope.Identity().AgentID() != subscriber.Recipient.ID() {
 			return false
 		}
@@ -110,12 +117,27 @@ func (v SelectedInputValidation) AllowsSubscriber(subscriber Subscriber) bool {
 
 // SelectRecipients narrows revalidated input resolution to the existing fixed
 // frontier's disposition. In particular, completed recipients stay excluded.
-func (v SelectedInputValidation) SelectRecipients(recipients []forkrecipient.Evidence) (SelectedInputValidation, error) {
+func (v SelectedInputValidation) SelectRecipients(recipients []forkrecipient.Evidence, constructions map[agentidentity.Plan]flowidentity.Instance) (SelectedInputValidation, error) {
 	canonical, err := forkrecipient.CanonicalSet(recipients)
 	if err != nil {
 		return SelectedInputValidation{}, err
 	}
 	v.recipients = append(make([]forkrecipient.Evidence, 0, len(canonical)), canonical...)
+	v.agentConstructions = make(map[agentidentity.Plan]flowidentity.Instance)
+	for _, recipient := range canonical {
+		if !recipient.Recipient.IsAgent() {
+			continue
+		}
+		plan := recipient.AgentPlan
+		var construction semanticview.AgentExecutionConstruction
+		if instance, found := constructions[plan]; found {
+			construction = instance
+			v.agentConstructions[plan] = instance
+		}
+		if _, err := semanticview.ResolveAgentPlanExecutionSemanticScope(v.source, v.original.RunID(), plan, construction); err != nil {
+			return SelectedInputValidation{}, fmt.Errorf("selected input recipient construction: %w", err)
+		}
+	}
 	return v, nil
 }
 

@@ -15,6 +15,44 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 )
 
+func TestProspectiveJoinAdmissionPreservesConstructedParent(t *testing.T) {
+	constructed := flowidentity.Instance{TemplateID: "parents/child", ScopeKey: "parents/child", InstanceID: "child",
+		InstancePath: "parents/one/child", EntityID: flowidentity.EntityID("parents/one/child"), HasStoredPath: true,
+		ParentRoute:    flowidentity.ParentRoute{FlowID: "parents", FlowInstance: "parents/one", EntityID: flowidentity.EntityID("parents/one")},
+		ParentEntityID: flowidentity.EntityID("parents/one")}
+	config, err := WorkflowInstanceConfigPayloadForIdentity(constructed, "v1", map[string]any{"business": "unchanged"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := canonicaljson.Bytes(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	runID := eventtest.UUID("prospective-parent-run")
+	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := WorkflowEngineStateRecord{Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: constructed.Route()},
+		EntityID: constructed.EntityID, WorkflowName: constructed.TemplateID, WorkflowVersion: "v1", Mode: "standard", Status: "active",
+		CurrentState: "ready", ExpectedState: "ready", ExpectedRevision: 3, EnteredStageAt: at, CreatedAt: at, UpdatedAt: at,
+		Fields: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
+		Accumulator: json.RawMessage(`{}`), InitialFields: json.RawMessage(`{}`), Config: raw,
+		Transition: WorkflowEngineStateTransitionUpdateStateAndCompanion}
+	prepared, err := prepareWorkflowPublicationState(record, WorkflowLifecycleMutationPlan{}, constructed.TemplateID, fact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := prepared.JoinAdmissionInstance(prepared.Candidate().Route)
+	if err != nil || item == nil || item.ParentFlowID != constructed.ParentRoute.FlowID ||
+		item.ParentFlowInstance != constructed.ParentRoute.FlowInstance || item.ParentEntityID != constructed.ParentEntityID ||
+		item.InstanceID != constructed.InstanceID || item.StorageRef != constructed.InstancePath || item.Revision != 4 ||
+		item.Status != "active" || item.Config["business"] != "unchanged" || len(item.Fields) != 0 {
+		t.Fatalf("prospective construction metadata changed: item=%#v err=%v", item, err)
+	}
+}
+
 func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T) {
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	runID := eventtest.UUID("prospective-run")
@@ -33,7 +71,7 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, transition := range []WorkflowEngineStateTransition{WorkflowEngineStateTransitionCreateStateAndCompanion, WorkflowEngineStateTransitionUpdateStateAndCompanion, WorkflowEngineStateTransitionUpdateStateCreateCompanion} {
+	for _, transition := range []WorkflowEngineStateTransition{WorkflowEngineStateTransitionCreateStateAndCompanion, WorkflowEngineStateTransitionUpdateStateAndCompanion} {
 		t.Run(string(rune('0'+transition)), func(t *testing.T) {
 			state := record
 			state.Transition = transition

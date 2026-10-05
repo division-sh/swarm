@@ -8,14 +8,13 @@ import (
 func CopyReceiverOptionalChild(t testing.TB, existing bool) string {
 	t.Helper()
 	root := t.TempDir()
-	seedPin, seedSchema, seedHandler, create := "", "", "", "      create_entity: true\n"
+	seedPin, seedSchema, seedHandler := "", "", ""
 	activeStage := ""
 	if existing {
 		activeStage = "  active: {}\n"
 		seedPin = "    - work.seeded\n"
 		seedSchema = "work.seeded:\n  seed: boolean\n"
-		seedHandler = "    work.seeded:\n      create_entity: true\n      advances_to: active\n"
-		create = ""
+		seedHandler = "    work.seeded:\n      advances_to: active\n"
 	}
 	files := map[string]string{
 		"schema.yaml": `name: receiver-composition
@@ -40,7 +39,7 @@ connect:
 			return ""
 		}() + `]
   event_handlers:
-` + seedHandler + "    work.requested:\n" + create + `      advances_to: done
+` + seedHandler + "    work.requested:\n" + `      advances_to: done
       emit:
         event: work.completed
         fields: {result: "emitted"}
@@ -83,7 +82,6 @@ pins:
   subscribes_to: [work.completed]
   event_handlers:
     work.completed:
-      create_entity: true
       data_accumulation:
         writes:
           - target_field: result
@@ -140,7 +138,6 @@ pins:
     - work.requested
   event_handlers:
     work.seeded:
-      create_entity: true
       advances_to: active
     work.requested:
       data_accumulation:
@@ -194,7 +191,6 @@ pins:
   subscribes_to: [child.finished]
   event_handlers:
     child.finished:
-      create_entity: true
       data_accumulation:
         writes:
           - {target_field: result, value: payload.result}
@@ -210,7 +206,6 @@ pins:
 func CopyReceiverAutoMaterializingChild(t testing.TB, existing bool) string {
 	t.Helper()
 	root := CopyReceiverCreatingChild(t, existing)
-	applyClosedReplacement(t, filepath.Join(root, "sink/nodes.yaml"), "      create_entity: true\n", "")
 	return root
 }
 
@@ -240,7 +235,6 @@ local:
   subscribes_to: [child.finished]
   event_handlers:
     child.finished:
-      create_entity: true
       data_accumulation:
         writes:
           - {target_field: result, value: payload.result}
@@ -310,7 +304,6 @@ pins:
   subscribes_to: [child.seeded, work.completed, child.closed]
   event_handlers:
     child.seeded:
-      create_entity: true
       advances_to: active
     work.completed: {}
     child.closed:
@@ -329,7 +322,7 @@ pins:
 	return root
 }
 
-func CopyReceiverEntitylessFork(t testing.TB) string {
+func CopyReceiverFieldlessFork(t testing.TB) string {
 	t.Helper()
 	root := CopyReceiverOptionalChild(t, false)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: receiver-composition
@@ -353,5 +346,6 @@ connect:
         event: work.completed
         fields: {result: "emitted"}
 `)
+	removeClosedVariantFiles(t, root, "entities.yaml", "sink/entities.yaml")
 	return root
 }

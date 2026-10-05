@@ -68,7 +68,7 @@ func TestFlowRouteTopologyAcknowledgedFaultCompletesProcessFollowupBothStores(t 
 				t.Fatal(err)
 			}
 			identity := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.DeriveRoute(notifyallchildren.ChildFlowID, "current")}
-			req := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, ActivationVariables: map[string]string{"account_id": "current"}}
+			req := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, notifyallchildren.ChildFlowID, "current"), ActivationVariables: map[string]string{"account_id": "current"}}
 			if err := flowroutefixture.StageAndPublish(ctx, eventBus, req); !errors.Is(err, fault) || wrapped.calls != 1 {
 				t.Fatalf("acknowledged route add err=%v commits=%d", err, wrapped.calls)
 			}

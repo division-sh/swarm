@@ -1,4 +1,4 @@
-package semanticview
+package semanticview_test
 
 import (
 	"reflect"
@@ -9,6 +9,8 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestResolveAgentExecutionSemanticScopeUsesFilesystemFlowOwnerForEveryMode(t *testing.T) {
@@ -26,7 +28,8 @@ func TestResolveAgentExecutionSemanticScopeUsesFilesystemFlowOwnerForEveryMode(t
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			source, declaration, actor := executionScopeFixture(t, test.flowPath, test.mode, test.instanceID, test.instancePath)
-			scope, err := ResolveAgentExecutionSemanticScope(source, actor)
+			construction := executionScopeConstruction(t, source, actor)
+			scope, err := semanticview.ResolveAgentExecutionSemanticScope(source, actor, construction)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -38,7 +41,7 @@ func TestResolveAgentExecutionSemanticScopeUsesFilesystemFlowOwnerForEveryMode(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			planned, err := ResolveAgentPlanExecutionSemanticScope(source, actor.Identity.RunID, plan)
+			planned, err := semanticview.ResolveAgentPlanExecutionSemanticScope(source, actor.Identity.RunID, plan, construction)
 			if err != nil || !reflect.DeepEqual(planned, scope) {
 				t.Fatalf("plan/actor scope disagreement: %+v %v", planned, err)
 			}
@@ -81,12 +84,12 @@ func TestResolveAgentExecutionSemanticScopeRejectsIdentityAndRouteContradictions
 			actor.FlowID = "telegram/sibling"
 			return actor
 		}},
-		{name: "sibling route", contains: "not a concrete instance", mutate: func(actor models.AgentConfig) models.AgentConfig {
+		{name: "sibling route", contains: "conflicts with its exact constructed flow", mutate: func(actor models.AgentConfig) models.AgentConfig {
 			actor.FlowPath = wrongRoute.InstancePath
 			actor.Identity.Route = wrongRoute
 			return actor
 		}},
-		{name: "template base route", contains: "not a concrete instance", mutate: func(actor models.AgentConfig) models.AgentConfig {
+		{name: "template base route", contains: "conflicts with its exact constructed flow", mutate: func(actor models.AgentConfig) models.AgentConfig {
 			actor.FlowPath = baseRoute.InstancePath
 			actor.Identity.Route = baseRoute
 			return actor
@@ -97,7 +100,8 @@ func TestResolveAgentExecutionSemanticScopeRejectsIdentityAndRouteContradictions
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := ResolveAgentExecutionSemanticScope(source, test.mutate(valid))
+			construction := executionScopeConstruction(t, source, valid)
+			_, err := semanticview.ResolveAgentExecutionSemanticScope(source, test.mutate(valid), construction)
 			if err == nil || !strings.Contains(err.Error(), test.contains) {
 				t.Fatalf("error = %v, want %q", err, test.contains)
 			}
@@ -106,7 +110,7 @@ func TestResolveAgentExecutionSemanticScopeRejectsIdentityAndRouteContradictions
 			if test.name != "wrong flow" {
 				actor := test.mutate(valid)
 				plan := agentidentity.Plan{Name: actor.Identity.Name, Route: actor.Identity.Route}
-				if _, err := ResolveAgentPlanExecutionSemanticScope(source, actor.Identity.RunID, plan); err == nil {
+				if _, err := semanticview.ResolveAgentPlanExecutionSemanticScope(source, actor.Identity.RunID, plan, construction); err == nil {
 					t.Fatal("contradictory agent plan acquired semantic scope")
 				}
 			}
@@ -114,7 +118,7 @@ func TestResolveAgentExecutionSemanticScopeRejectsIdentityAndRouteContradictions
 	}
 }
 
-func executionScopeFixture(t *testing.T, flowPath, mode, instanceID, instancePath string) (Source, AgentDeclaration, models.AgentConfig) {
+func executionScopeFixture(t *testing.T, flowPath, mode, instanceID, instancePath string) (semanticview.Source, semanticview.AgentDeclaration, models.AgentConfig) {
 	t.Helper()
 	ownerURI := "test://agent-execution/" + strings.ReplaceAll(flowPath, "/", "-") + "/worker"
 	entry := runtimecontracts.EffectiveAgentRegistryEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "worker", Role: "worker"})
@@ -134,9 +138,23 @@ func executionScopeFixture(t *testing.T, flowPath, mode, instanceID, instancePat
 	}
 	root := &view
 	if flowPath != "." {
-		root = &runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{view}}
+		root = &runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
+		parent := root
+		parts := strings.Split(flowPath, "/")
+		for i := range parts {
+			path := strings.Join(parts[:i+1], "/")
+			child := runtimecontracts.FlowContractView{Path: path, Paths: runtimecontracts.FlowContractPaths{FlowPath: path}}
+			if path == flowPath {
+				child = view
+			}
+			parent.Children = []runtimecontracts.FlowContractView{child}
+			parent.Children[0].Parent = parent
+			parent = &parent.Children[0]
+		}
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema:  &root.Schema,
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{},
 		FlowTree: runtimecontracts.FlowTree{
 			Root:   root,
 			ByID:   map[string]*runtimecontracts.FlowContractView{flowPath: &view},
@@ -146,13 +164,22 @@ func executionScopeFixture(t *testing.T, flowPath, mode, instanceID, instancePat
 			ownerURI: {Kind: "agent", FlowID: flowPath, LocalID: "worker", Full: ownerURI},
 		}},
 	}
-	source := Wrap(bundle)
-	declarations := AgentDeclarations(source)
+	var index func(*runtimecontracts.FlowContractView)
+	index = func(node *runtimecontracts.FlowContractView) {
+		bundle.FlowSchemas[node.Paths.FlowPath] = node.Schema
+		bundle.FlowTree.ByID[node.Paths.FlowPath], bundle.FlowTree.ByPath[node.Paths.FlowPath] = node, node
+		for i := range node.Children {
+			index(&node.Children[i])
+		}
+	}
+	index(root)
+	source := semanticview.Wrap(bundle)
+	declarations := semanticview.AgentDeclarations(source)
 	if len(declarations) != 1 {
 		t.Fatalf("declarations = %#v", declarations)
 	}
 	declaration := declarations[0]
-	plan, err := ScopedAgentNamePlan(source, declaration)
+	plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,4 +190,23 @@ func executionScopeFixture(t *testing.T, flowPath, mode, instanceID, instancePat
 		actor.Identity = agentidentitytest.Declared(t, plan.AgentID, plan.OwnerURI, flowPath, instanceID, instancePath)
 	}
 	return source, declaration, actor
+}
+
+func executionScopeConstruction(t *testing.T, source semanticview.Source, actor models.AgentConfig) semanticview.AgentExecutionConstruction {
+	t.Helper()
+	if actor.FlowID == "." {
+		return nil
+	}
+	schema, found := source.FlowSchemaByID(actor.FlowID)
+	if !found {
+		t.Fatal("fixture has no construction schema")
+	}
+	if !schema.Instance.Empty() {
+		return flowidentity.Derive(source, actor.FlowID, actor.Identity.Route.InstanceID)
+	}
+	instance, err := flowidentity.StandingForGeneration(source, actor.FlowID, actor.Identity.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return instance
 }

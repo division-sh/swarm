@@ -7,7 +7,16 @@ import (
 	"errors"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func ConstructionIdentity(source semanticview.Source, owner flowidentity.RunScopedFlowInstance) flowidentity.Instance {
+	if owner.Route.ScopeKey == "." {
+		return flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), owner.RunID, owner.RunID, owner.RunID, "")
+	}
+	return flowidentity.Derive(source, owner.Route.ScopeKey, owner.Route.InstanceID)
+}
 
 func Publish(eventBus *runtimebus.EventBus, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
 	if eventBus == nil || eventBus.RouteTable() == nil {

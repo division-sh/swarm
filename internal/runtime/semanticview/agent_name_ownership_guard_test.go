@@ -105,7 +105,7 @@ import (
 )
 
 func hostileSixthAgentSourceProducer(source semanticview.Source, actor models.AgentConfig) {
-	runtimepinrouting.AdmitAgentExecutionRoutingSource(source, actor, "entity")
+	runtimepinrouting.AdmitAgentExecutionRoutingSource(source, actor, "entity", nil)
 }
 `)
 	authoringPath := filepath.Join(root, "internal", "runtime", "authoringview", "agent_name_guard_hostile.go")
@@ -285,10 +285,7 @@ func agentNameGuardIsAgentSourceAdmission(call *ast.CallExpr, info *types.Info) 
 
 func agentNameGuardAgentSourceAdmissionAllowed(path, enclosing string) bool {
 	allowed := map[string]struct{}{
-		"internal/runtime/tools/channel_runtime.go::(*Executor).execChannelOperation": {},
-		"internal/runtime/tools/executor_agents.go::(*Executor).execSchedule":         {},
-		"internal/runtime/tools/executor_emit.go::(*Executor).handleEmitTool":         {},
-		"internal/runtime/tools/executor_human_tasks.go::(*Executor).execAskHuman":    {},
+		"internal/runtime/tools/agent_execution_source.go::(*Executor).agentExecutionRoutingSource": {},
 	}
 	_, ok := allowed[path+"::"+enclosing]
 	return ok

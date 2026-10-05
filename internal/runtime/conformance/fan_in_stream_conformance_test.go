@@ -43,8 +43,8 @@ func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *t
 		t.Run(setup.name, func(t *testing.T) {
 			backend, db := setup.open(t)
 			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t.Context()), runID)
-			seedFanInBarrierRun(t, ctx, backend, db, runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(t.Context(), conformanceSourceArtifactFact(t, source)), runID)
+			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, db, source)
 			load := func(period string) runtimepipeline.WorkflowInstance {
 				instances, err := runtime.pipeline.ListWorkflowInstances(ctx, runID)

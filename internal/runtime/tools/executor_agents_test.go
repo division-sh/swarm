@@ -11,9 +11,11 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -33,7 +35,7 @@ func toolTestAgentIdentity(t testing.TB, agentID, flowID, flowPath string) agent
 	if flowID == "" && flowPath == "" {
 		return toolTestRootAgentIdentity(t, agentID)
 	}
-	return agentidentitytest.DeclaredForRun(t, toolTestRunID, agentID, "swarm-test://"+flowID+"/"+strings.TrimSpace(agentID), flowID, "test-instance", flowPath)
+	return agentidentitytest.DeclaredForRun(t, toolTestRunID, agentID, "swarm-test://"+flowID+"/"+strings.TrimSpace(agentID), flowID, flowidentity.LogicalInstanceID(flowPath), flowPath)
 }
 
 type captureScheduleScheduler struct {
@@ -140,7 +142,11 @@ func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 		EntityID:      "entity-chat",
 	}
 	scheduler := &captureScheduleScheduler{}
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler,
+		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{instancePath: {
+			WorkflowName: flowID, StorageRef: instancePath, InstanceID: "chat-1", EntityID: actor.EntityID,
+		}}},
+	})
 	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), toolTestRunID), runtimeeffects.ExecutionModeLive)
 	if _, err := exec.execSchedule(ctx, actor, map[string]any{
 		"schedule_key": "imported-proof",

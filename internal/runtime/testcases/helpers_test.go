@@ -13,8 +13,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -112,7 +114,17 @@ func previewHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundl
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	preview, err := runtimepipeline.PreviewContractHandlerExecution(context.Background(), bundle, genericExecutableNode(t, bundle, nodeID), eventtest.RunCreatingRootIngress(
+	node := genericExecutableNode(t, bundle, nodeID)
+	source := semanticview.Wrap(bundle)
+	flowID := runtimepipeline.MustDeliveryTargetHandler(node).ExecutionFlowID(source)
+	flow := flowidentity.Stored(source, flowID, flowID, flowID, state.EntityID, "")
+	fields, found := entityruntime.ResolveForFlow(source, flowID)
+	if !found {
+		t.Fatalf("generic preview flow %s has no declared field contract", flowID)
+	}
+	control := state.Control
+	control.FlowPath, control.StorageRef, control.InstanceID, control.EntityType = flow.InstancePath, flow.InstancePath, flow.InstanceID, fields.EntityType
+	preview, err := runtimepipeline.PreviewContractHandlerExecution(context.Background(), bundle, node, eventtest.RunCreatingRootIngress(
 		"evt-"+strings.ReplaceAll(eventType, ".", "-"),
 		events.EventType(eventType),
 		"test-driver",
@@ -127,7 +139,8 @@ func previewHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundl
 
 		runtimeengine.StateSnapshot{
 			EntityID: runtimeidentity.NormalizeEntityID(state.EntityID), CurrentState: string(state.Stage),
-			StateCarrier: runtimeengine.NewStateCarrierWithOwners(state.Metadata, nil, state.Control, nil, nil),
+			WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), EnteredStateAt: time.Now().UTC(),
+			StateCarrier: runtimeengine.NewStateCarrierWithOwners(state.Metadata, nil, control, nil, nil),
 		}, policyOverrides)
 	if err != nil {
 		t.Fatalf("preview handler %s/%s: %v", nodeID, eventType, err)

@@ -38,7 +38,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission routes: %w", err)
 	}
-	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Plan.SourceRunID, req.Source, req.Plan.PendingWork); err != nil {
+	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan); err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
 	connectGraph := runtimepinrouting.CompileConnectGraph(req.Source)
@@ -205,26 +205,40 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSourc
 }
 
 func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) ([]string, error) {
+	instances, err := ConstructedInstances(source, plan)
+	if err != nil {
+		return nil, err
+	}
+	known := make(map[string]struct{}, len(instances))
+	for _, instance := range instances {
+		// Validated keyless construction at its authored coordinate already
+		// belongs to static topology. A keyed ancestor changes that coordinate
+		// and requires the existing occurrence-bound dynamic topology proof.
+		if instance.InstancePath != instance.TemplateID {
+			known[instance.InstancePath] = struct{}{}
+		}
+	}
+	// Attachment census is complete; route proof remains associated with actual
+	// event work. An idle sibling does not invent another frontier occurrence.
 	seen := map[string]struct{}{}
-	add := func(value string) {
-		value = strings.Trim(strings.TrimSpace(value), "/")
-		if value != "" && isContractFrontierTemplateInstancePath(source, value) {
-			seen[value] = struct{}{}
+	add := func(path string) {
+		if _, exists := known[path]; exists {
+			seen[path] = struct{}{}
 		}
 	}
 	add(plan.ForkPoint.RoutingSource.Route().FlowInstance)
 	for _, item := range plan.PendingWork {
-		instances, err := contractFrontierExactFlowInstances(plan.SourceRunID, item)
+		paths, err := contractFrontierExactFlowInstances(plan.SourceRunID, item)
 		if err != nil {
 			return nil, err
 		}
-		for _, instance := range instances {
-			add(instance)
+		for _, path := range paths {
+			add(path)
 		}
 	}
 	for _, event := range frontier.FrontierEvents {
-		for _, flowInstance := range event.SourceFlowInstances {
-			add(flowInstance)
+		for _, path := range event.SourceFlowInstances {
+			add(path)
 		}
 	}
 	return sortedSet(seen), nil

@@ -219,7 +219,6 @@ func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, TemplateInstanceLifecycleDecision{}, err
 	}
-	fields := map[string]any{instanceContract.Field.Path(): config[instanceContract.Field.Path()]}
 	bookkeeping := map[string]any{"last_source_event": strings.TrimSpace(evt.ID())}
 	decision := TemplateInstanceLifecycleDecision{
 		Action:        templateInstanceLifecycleActionCreated,
@@ -231,13 +230,19 @@ func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan
 		SourceEventID: strings.TrimSpace(evt.ID()),
 		receiver:      plan.ReceiverEndpoint(),
 	}
+	projection, err := syntheticDeliveryPayloadProjection(plan, decision)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, TemplateInstanceLifecycleDecision{}, err
+	}
 	return runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: o.source,
-		Instance:       instance,
-		Config:         config,
-		Fields:         fields,
-		Bookkeeping:    bookkeeping,
-		TriggerEvent:   evt,
+		ContractBundle:    o.source,
+		Instance:          instance,
+		Config:            config,
+		ConstructorInput:  string(plan.ReceiverLocalEvent()),
+		ResolvedKey:       config[instanceContract.Field.Path()],
+		PayloadProjection: projection,
+		Bookkeeping:       bookkeeping,
+		TriggerEvent:      evt,
 	}, decision, nil
 }
 

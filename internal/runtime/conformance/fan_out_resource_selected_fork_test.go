@@ -568,6 +568,10 @@ func assertSelectedDeploymentRows(t *testing.T, f *deploymentResourceFixture, se
 }
 
 func assertSelectedDeploymentRowsWithClosedExecutions(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows []byte, wantClosed int) {
+	assertSelectedDeploymentRowSet(t, f, server, runID, route, compiledVersion, [][]byte{rows}, wantClosed)
+}
+
+func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows [][]byte, wantClosed int) {
 	t.Helper()
 	defer func() {
 		if t.Failed() {
@@ -612,7 +616,7 @@ func assertSelectedDeploymentRowsWithClosedExecutions(t *testing.T, f *deploymen
 			}
 		}
 	}
-	if events != 1 || delivered != 1 || committed != 1 || pipelineReceipts != 1 || stampedHandoffs != 1 {
+	if events != len(rows) || delivered != len(rows) || committed != 1 || pipelineReceipts != len(rows) || stampedHandoffs != len(rows) {
 		t.Fatalf("%s selected route did not settle: events=%d delivered=%d committed=%d pipeline_receipts=%d stamped_handoffs=%d", route, events, delivered, committed, pipelineReceipts, stampedHandoffs)
 	}
 	var parentRunID sql.NullString
@@ -628,24 +632,44 @@ func assertSelectedDeploymentRowsWithClosedExecutions(t *testing.T, f *deploymen
 			t.Fatalf("%s selected child has %d closed executions after settled public result, want %d", route, closed, wantClosed)
 		}
 	}
-	var want map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(rows), &want); err != nil {
-		t.Fatal(err)
+	want := make(map[string]map[string]any, len(rows))
+	for _, row := range rows {
+		var payload map[string]any
+		if err := json.Unmarshal(bytes.TrimSpace(row), &payload); err != nil {
+			t.Fatal(err)
+		}
+		key, ok := payload["account_id"].(string)
+		if !ok || key == "" || want[key] != nil {
+			t.Fatalf("invalid or duplicate expected row: %+v", payload)
+		}
+		want[key] = payload
 	}
 	page := selectedDeploymentPublicEvents(t, f.ctx, server, runID)
-	if len(page.Events) != 1 || page.NextCursor != "" || !reflect.DeepEqual(page.Events[0].Payload, want) || len(page.Events[0].Deliveries) != 1 || page.Events[0].Deliveries[0].Status != "delivered" {
+	if len(page.Events) != len(rows) || page.NextCursor != "" {
 		t.Fatalf("%s selected route lost document-shaped public readback: %+v want=%+v", route, page, want)
 	}
 	wantSubscriber := conformanceNode(t, "", "root-collector").Key()
 	if route == "singleton" {
 		wantSubscriber = conformanceNode(t, "consumer", "consumer-node").Key()
 	}
-	if page.Events[0].Deliveries[0].SubscriberID != wantSubscriber {
-		t.Fatalf("%s selected route reached subscriber %q, want %q", route, page.Events[0].Deliveries[0].SubscriberID, wantSubscriber)
+	for _, event := range page.Events {
+		key, _ := event.Payload["account_id"].(string)
+		if want[key] == nil || !reflect.DeepEqual(event.Payload, want[key]) || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "delivered" || event.Deliveries[0].SubscriberID != wantSubscriber {
+			t.Fatalf("%s selected route lost exact row/subscriber readback: %+v want=%+v subscriber=%s", route, event, want[key], wantSubscriber)
+		}
+		delete(want, key)
 	}
 }
 
 func TestDeploymentSourceChangedPinPublicForkAndLostResponse(t *testing.T) {
+	proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointDeploymentRevision)
+}
+
+func TestEventSourceChangedPinPublicForkAndLostResponse(t *testing.T) {
+	proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointEvent)
+}
+
+func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runfork.RunForkPointKind) {
 	for _, route := range []string{"root", "singleton"} {
 		t.Run(route, func(t *testing.T) {
 			for _, backend := range []string{"sqlite", "postgres"} {
@@ -693,6 +717,9 @@ func TestDeploymentSourceChangedPinPublicForkAndLostResponse(t *testing.T) {
 							"version_id":  string(changed.VersionID),
 						}},
 					}
+					if pointKind == runfork.RunForkPointEvent {
+						params["fork_event_id"] = forkEventID
+					}
 					result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
 					if len(rpcErr) != 0 {
 						t.Fatalf("changed-pin run.fork: %s", rpcErr)
@@ -700,7 +727,23 @@ func TestDeploymentSourceChangedPinPublicForkAndLostResponse(t *testing.T) {
 					if result.ForkRunID == "" || result.ForkRunID == sourceRunID || len(result.DataPins) != 1 || result.DataPins[0].VersionID != changed.VersionID {
 						t.Fatalf("changed-pin fork lost exact selected version: %+v", result)
 					}
-					assertSelectedDeploymentRows(t, f, server, result.ForkRunID, route, string(changed.VersionID), changedRows)
+					expectedEventID := ""
+					if pointKind == runfork.RunForkPointEvent {
+						expectedEventID = forkEventID
+					}
+					if result.ForkPointKind != string(pointKind) || result.ForkRevision <= 0 || result.ForkEventID != expectedEventID {
+						t.Fatalf("public result lost its exact typed point: %+v", result)
+					}
+					forkRows := [][]byte{changedRows}
+					if pointKind == runfork.RunForkPointEvent {
+						// The explicit event cut replays its recorded row once; the
+						// selected deployment feed contributes the changed row once.
+						forkRows = append(forkRows, originalRows)
+					}
+					assertForkRows := func() {
+						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
+					}
+					assertForkRows()
 					operationBefore := selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID)
 
 					// Reconstruct the public handler after the successful response is lost.
@@ -774,7 +817,7 @@ func TestDeploymentSourceChangedPinPublicForkAndLostResponse(t *testing.T) {
 					assertServingJoinComplete(t, join, old, nil)
 					f.boot(t)
 					f.runtime.fanOutServing.Wake()
-					assertSelectedDeploymentRows(t, f, server, result.ForkRunID, route, string(changed.VersionID), changedRows)
+					assertForkRows()
 					recoveredOwner, recovery := deploymentForkOwner(t, f)
 					var controlOnly bool
 					for _, entry := range recovery {

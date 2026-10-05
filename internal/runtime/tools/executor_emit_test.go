@@ -110,6 +110,9 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{
 		WorkflowSource: source,
 		EmitRegistry:   NewEmitRegistry(source, nil),
+		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{instancePath: {
+			WorkflowName: flowID, StorageRef: instancePath, InstanceID: "chat-1", EntityID: actor.EntityID,
+		}}},
 	})
 	if _, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_telegram_reply_requested", map[string]any{
 		"chat_id": "42", "text": "hello",
@@ -332,6 +335,7 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 		FlowPath:      "discovery",
 		EmitEvents:    []string{"category.assessed"},
 	}
+	actor = toolTestConstructedActor(t, exec, actor)
 
 	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_category_assessed", map[string]any{
 		"category":  "AP automation",
@@ -545,6 +549,7 @@ func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontra
 		EmitEvents:    []string{"cto.spec_vetoed"},
 		Criteria:      []string{"feasibility_exclusions"},
 	}
+	actor = toolTestConstructedActor(t, exec, actor)
 	return exec, bus, actor
 }
 
@@ -623,13 +628,14 @@ func TestHandleEmitTool_PreservesAdmittedChildFlowOwnerAndExecutionMode(t *testi
 		FlowPath:      "validation/inst-1",
 		EmitEvents:    []string{"research.completed"},
 	}
+	actor = toolTestConstructedActor(t, exec, actor)
 	inbound := toolTestInboundEvent(
 		events.EventType("validation/validation.started"),
 		nil,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "validation/inst-1"),
 		executionmode.Mock,
 	)
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
 		"summary": "research done",
@@ -698,13 +704,14 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 		FlowPath:      "validation",
 		EmitEvents:    []string{"research.completed"},
 	}
+	actor = toolTestConstructedActor(t, exec, actor)
 	inbound := toolTestInboundEvent(
 		events.EventType("scoring/vertical.shortlisted"),
 		nil,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "scoring/inst-1"),
 		executionmode.Live,
 	)
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
 		"summary": "research done",
@@ -768,6 +775,7 @@ func TestHandleEmitTool_RejectsNestedStaticOutputWithOnlyParentAddress(t *testin
 		FlowPath:      "root/discovery",
 		EmitEvents:    []string{"vertical.discovered"},
 	}
+	actor = toolTestConstructedActor(t, exec, actor)
 
 	parentOwner := events.RouteIdentity{
 		FlowID: "root", FlowInstance: "root/run-1", EntityID: "44444444-4444-4444-4444-444444444444",
@@ -833,6 +841,7 @@ func TestHandleEmitTool_RejectsCompleteParentWithoutConsumer(t *testing.T) {
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
 			"analyzer-flow/inst-1": {
+				WorkflowName: "analyzer-flow", StorageRef: "analyzer-flow/inst-1", InstanceID: "inst-1", EntityID: "22222222-2222-2222-2222-222222222222",
 				ParentFlowID:       parentRoute.FlowID,
 				ParentFlowInstance: parentRoute.FlowInstance,
 				ParentEntityID:     parentRoute.EntityID,
@@ -866,7 +875,7 @@ func TestHandleEmitTool_RejectsCompleteParentWithoutConsumer(t *testing.T) {
 		executionmode.Live,
 		eventtest.ConcreteTemplateRoutingSource(wrongInboundParent.FlowID, wrongInboundParent.FlowInstance, wrongInboundParent.EntityID),
 	)
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "target_required_missing") {
@@ -918,6 +927,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
 			"analyzer-flow/inst-1": {
+				WorkflowName: "analyzer-flow", StorageRef: "analyzer-flow/inst-1", InstanceID: "inst-1", EntityID: "22222222-2222-2222-2222-222222222222",
 				ParentFlowID:   "root",
 				ParentEntityID: "11111111-1111-1111-1111-111111111111",
 			},
@@ -933,7 +943,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 		EntityID:      "22222222-2222-2222-2222-222222222222",
 		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), toolTestInboundEvent("analyzer-flow/analysis.requested", nil, events.EventEnvelope{}, executionmode.Live))
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), toolTestInboundEvent("analyzer-flow/analysis.requested", nil, events.EventEnvelope{}, executionmode.Live))
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 	if err == nil {
@@ -962,6 +972,7 @@ func TestHandleEmitTool_StaticChildRejectsCompleteDeliveryWithoutConsumer(t *tes
 		FlowPath:      "root/analyzer-flow",
 		EmitEvents:    []string{"root/analyzer-flow/analysis.done"},
 	}
+	actor = toolTestConstructedActor(t, exec, actor)
 	inboundEntityID := "11111111-1111-1111-1111-111111111111"
 	sourceEntityID := "33333333-3333-3333-3333-333333333333"
 	currentOwner := events.RouteIdentity{
@@ -979,7 +990,7 @@ func TestHandleEmitTool_StaticChildRejectsCompleteDeliveryWithoutConsumer(t *tes
 		eventtest.ConcreteTemplateRoutingSource("wrong-root", "wrong-root", sourceEntityID),
 	)
 
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), inbound)
 	ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
 		Recipient:     events.MustAgentDeliveryRecipient(actor.ID),
 		AgentIdentity: actor.Identity,
@@ -1018,9 +1029,10 @@ func TestHandleEmitTool_StaticChildPinOutputRejectsMissingOrEntitylessDeliveryOw
 				EmitEvents: []string{"root/analyzer-flow/analysis.done"},
 			}
 			exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
+			actor = toolTestConstructedActor(t, exec, actor)
 			inbound := toolTestInboundEvent(events.EventType("root/analyzer-flow/analysis.requested"), nil,
 				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "inbound", FlowInstance: "inbound/one", EntityID: "inbound-owner"}), executionmode.Live)
-			ctx := tc.withRoute(runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound), actor)
+			ctx := tc.withRoute(runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), inbound), actor)
 			_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 			if err == nil || !strings.Contains(err.Error(), "target_required_missing") {
 				t.Fatalf("handleEmitTool error = %v, want target_required_missing", err)
@@ -1109,13 +1121,14 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 		FlowPath:      "analyzer-flow",
 		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
+	actor = toolTestConstructedActor(t, exec, actor)
 	inbound := toolTestInboundEvent(
 		events.EventType("analyzer-flow/analysis.requested"),
 		nil,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111111"),
 		executionmode.Live,
 	)
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 	if err == nil {
@@ -1180,6 +1193,10 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 	}
 	source := toolTestSourceWithDeclaredAgent(t, bundle, "root-agent", ".", "cycle.ping")
 	store := newEmitRoutePlanStore()
+	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
+		ID: toolTestRunID, EntityID: runtimeflowidentity.EntityID(toolTestRunID), FlowInstance: toolTestRunID,
+		Availability: runtimepipeline.NewDeliveryTargetAvailability("", "active", false),
+	}}
 	eventBus := newEmitRoutePlanEventBus(t, store, source)
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "root-agent", Identity: toolTestRootAgentIdentity(t, "root-agent"), FlowID: ".", Role: "root-agent", EntityID: eventtest.UUID("root-agent-cycle-source"), EmitEvents: []string{"cycle.ping"}}
 	exec := NewExecutorWithOptions(eventBus, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
@@ -1192,13 +1209,9 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 	persisted := store.events[eventID]
 	wantRoute := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "test-node")),
-		Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
-			FlowID: ".", FlowInstance: persisted.RunID(), EntityID: runtimeflowidentity.EntityID(persisted.RunID()),
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{
+			FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: persisted.RunID(), EntityID: runtimeflowidentity.EntityID(persisted.RunID()),
 		}),
-	}
-	wantRoute.Initialization, err = events.AdmitNodeReceiverInitialization(persisted, wantRoute.Target, identitytest.RootNode(t, "test-node"))
-	if err != nil {
-		t.Fatal(err)
 	}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want typed root node consumer", store.routes[eventID])
@@ -1228,22 +1241,27 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 	if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: toolTestRunID,
 		Route: route,
-	}}); err != nil {
+	}, Instance: runtimeflowidentity.Derive(source, "review", "instance-1")}); err != nil {
 		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
 	}
 	entityID := runtimeflowidentity.EntityID(route.InstancePath)
+	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
+		ID: route.InstancePath, EntityID: entityID, FlowInstance: route.InstancePath,
+		Availability: runtimepipeline.NewDeliveryTargetAvailability("", "active", false),
+	}}
 	actor := models.AgentConfig{
 		ExecutionMode: "live", ID: "reviewer", Identity: toolTestAgentIdentity(t, "reviewer", "review", route.InstancePath),
 		Role: "reviewer", FlowID: "review", FlowPath: route.InstancePath, EntityID: entityID,
 		EmitEvents: []string{"assessment.reported"},
 	}
 	exec := NewExecutorWithOptions(eventBus, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
+	actor = toolTestConstructedActor(t, exec, actor)
 	inbound := toolTestInboundEvent(
 		events.EventType(route.InstancePath+"/assessment.requested"), nil,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), route.InstancePath),
 		executionmode.Live,
 	)
-	out, err := exec.handleEmitTool(runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound), actor, "emit_assessment_reported", map[string]any{})
+	out, err := exec.handleEmitTool(runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), inbound), actor, "emit_assessment_reported", map[string]any{})
 	if err != nil {
 		t.Fatalf("handleEmitTool: %v", err)
 	}
@@ -1251,7 +1269,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 	routes := store.routes[eventID]
 	want := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "review", "review-finalize")),
-		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: route.InstancePath}),
+		Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: route.InstancePath, EntityID: entityID}),
 	}
 	if !emitDeliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want same-instance template node %#v", routes, want)
@@ -1266,6 +1284,10 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 		Rename: "deploy.completed",
 	})
 	store := newEmitRoutePlanStore()
+	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
+		ID: "consumer", EntityID: runtimeflowidentity.EntityID("consumer"), FlowInstance: "consumer",
+		Availability: runtimepipeline.NewDeliveryTargetAvailability("", "active", false),
+	}}
 	eb := newEmitRoutePlanEventBus(t, store, source)
 	emitRegistry := NewEmitRegistry(source, nil)
 	actor := models.AgentConfig{
@@ -1282,8 +1304,9 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 		t.Fatalf("generated emit tools = %#v, want emit_deploy_done", tools)
 	}
 	exec := NewExecutorWithOptions(eb, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor = toolTestConstructedActor(t, exec, actor)
 
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), eventtest.RunCreatingRootIngress(
 		eventtest.UUID("emit-connected-output-parent"),
 		events.EventType("producer/deploy.requested"),
 		"runtime",
@@ -1303,12 +1326,13 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if got, want := string(persisted.Type()), "producer/deploy.done"; got != want {
 		t.Fatalf("persisted event type = %q, want %q", got, want)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "consumer", "consumer-node")), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
+		EntityID:     runtimeflowidentity.EntityID("consumer"),
 	}),
 	}
-	wantEventTarget := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer"}
+	wantEventTarget := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: runtimeflowidentity.EntityID("consumer")}
 	if got := persisted.TargetRoute().Normalized(); got != wantEventTarget {
 		t.Fatalf("persisted event target route = %#v, want connect address %#v", got, wantEventTarget)
 	}
@@ -1353,11 +1377,12 @@ func TestHandleEmitTool_RootReceiverConnectRemainsTargetlessBeforePreflight(t *t
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
 			"producer/inst-1": {
+				WorkflowName: "producer", StorageRef: "producer/inst-1", InstanceID: "inst-1", EntityID: actor.EntityID,
 				ParentFlowID: parentRoute.FlowID, ParentFlowInstance: parentRoute.FlowInstance, ParentEntityID: parentRoute.EntityID,
 			},
 		}},
 	})
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), eventtest.RunCreatingRootIngress(
 		eventtest.UUID("emit-root-receiver-parent"),
 		events.EventType("producer/deploy.requested"),
 		"runtime",
@@ -1394,16 +1419,18 @@ func TestHandleEmitTool_RootReceiverConnectRequiresSelectedOwnerNotParentMetadat
 	for _, tc := range []struct {
 		name string
 		rows map[string]runtimepipeline.WorkflowInstance
+		want string
 	}{
-		{name: "missing", rows: map[string]runtimepipeline.WorkflowInstance{}},
+		{name: "missing", rows: map[string]runtimepipeline.WorkflowInstance{}, want: "no exact constructed flow header"},
 		{name: "incomplete", rows: map[string]runtimepipeline.WorkflowInstance{
 			"producer/inst-1": {ParentFlowID: ".", ParentFlowInstance: "root/inst-1"},
-		}},
+		}, want: "constructed header contains noncanonical owner facts"},
 		{name: "complete_but_unselected", rows: map[string]runtimepipeline.WorkflowInstance{
 			"producer/inst-1": {
+				WorkflowName: "producer", StorageRef: "producer/inst-1", InstanceID: "inst-1", EntityID: runtimeflowidentity.EntityID("producer-entity"),
 				ParentFlowID: ".", ParentFlowInstance: "root/inst-1", ParentEntityID: eventtest.UUID("unselected-root"),
 			},
-		}},
+		}, want: "route_plan_preflight_failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := emitRoutePlanRootReceiverSource(t)
@@ -1426,8 +1453,8 @@ func TestHandleEmitTool_RootReceiverConnectRequiresSelectedOwnerNotParentMetadat
 			})
 
 			_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_deploy_done", map[string]any{})
-			if err == nil || !strings.Contains(err.Error(), "route_plan_preflight_failed") {
-				t.Fatalf("handleEmitTool error = %v, want exact selected-owner preflight failure", err)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("handleEmitTool error = %v, want %s", err, tc.want)
 			}
 			if len(store.events) != 0 || len(store.routes) != 0 {
 				t.Fatalf("persisted events/routes = %d/%d, want 0/0", len(store.events), len(store.routes))
@@ -1459,8 +1486,9 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 		EmitEvents:    []string{"deploy.done"},
 	}
 	exec := NewExecutorWithOptions(eb, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor = toolTestConstructedActor(t, exec, actor)
 
-	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), actor.Identity.RunID), eventtest.RunCreatingRootIngress(
 		eventtest.UUID("emit-missing-route-parent"),
 		events.EventType("producer/deploy.requested"),
 		"runtime",
@@ -1723,6 +1751,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 		FlowPath:      "review",
 		EmitEvents:    []string{"review/task.requested"},
 	}
+	reviewActor = toolTestConstructedActor(t, exec, reviewActor)
 	_, err := exec.handleEmitTool(toolEventTestContext(reviewActor), reviewActor, "emit_task_requested", map[string]any{
 		"details": map[string]any{
 			"priority": "urgent",
@@ -1745,6 +1774,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 		FlowPath:      "validation",
 		EmitEvents:    []string{"validation/task.requested"},
 	}
+	validationActor = toolTestConstructedActor(t, exec, validationActor)
 	_, err = exec.handleEmitTool(toolEventTestContext(validationActor), validationActor, "emit_task_requested", map[string]any{
 		"details": map[string]any{
 			"priority": "low",

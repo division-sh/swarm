@@ -99,7 +99,7 @@ func TestA2RetainedMapSourceForkOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			capsule, _, err := projectRunForkFanOutCapsule(context.Background(), tx, child, plan, plan.FanOutObligations[0], original)
+			capsule, _, err := projectRunForkFanOutCapsule(context.Background(), tx, false, child, plan, plan.FanOutObligations[0], original)
 			if err != nil {
 				tx.Rollback()
 				t.Fatal(err)

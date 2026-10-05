@@ -1,0 +1,3983 @@
+{
+  "schema": 1,
+  "head": "50107a2ff2f05c77d3201a6439f57fcc3276d324",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "disposition": "Four bounded repairs are implemented locally. Fifty E-owned roots from the previous RED unit pass source-attributed focused reruns; sixteen shared A-owned roots remain pending. No full-default, hosted CI, review readiness or failure-class elimination is claimed.",
+  "original_default": {
+    "artifact": "issue-2496-default-a154729c7-red.json",
+    "raw_receipt_sha256": "d39d11040ec5946d1d1dfdd1ba2a3f9914f3ab880f55088ed0be922aca688f0b",
+    "failed_roots": 66,
+    "failed_named_cells": 230,
+    "unexecuted_units": 13
+  },
+  "matrix": {
+    "source_head": "0a928ff7a",
+    "source_boundary": "Go/test inputs match 0a928ff7a: compilation began before that commit was recorded, but after its source edits. No inputs changed until d7697e36f after both packages completed. This aggregate is RED and is not qualification of the later timer/template fixes.",
+    "command": "go run ./cmd/swarm-test -- -race -count=1 -json ./internal/runtime/pipeline ./internal/runtime/runforkexecution -run '^(TestPreviewProducerConsumesExecutionCoordinate|TestDeliveryTargetApplicationRequiresExactPreviewOwnerAndRejectsConflict|TestAuthoredRuleReceiverPreparationRetryBothStores|TestAuthoredSelectionRetryReloadsCurrentStateBothStores|TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations|TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler|TestEntityLastFieldClearAndColdReloadBothStores|TestSelectedHandlerSparsePresenceWriteAndEmitBothStores|TestSelectedHandlerSparseEqualityMutationsBothStores|TestFanOutCompletedIntentRefillsCoalescedBacklog|TestFanOutCoalescedBacklogAcceleratedControl|TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores|TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores|TestExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmit|TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSucceeds|TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads|TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity|TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue|TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres|TestReceiverPreparationUnsettledAuthorityBothStores|TestReceiverPreparationFailureClaimMatrixBothStores|TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores|TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback|TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries|TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage|TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores|TestPipelineCompiledTransitionGuardDispositionOnBothStores|TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores|TestPipelineCompiledTransitionStageGuardsOnBothStores|TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores|TestFallbackClaimSettlesWithoutBusinessTransitionBothStores|TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores|TestCompiledTransitionPreviewExecutionAgreementOnBothStores|TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores|TestPipelineCompiledLoopOperationEvidenceOnBothStores|TestGuardTerminationVerifiedExecutionAndRestartBothStores|TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey|TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery|TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity|TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler|TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions|TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores|TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores|TestSelectedForkRuntimeConsumersSettleReturnedOutcomes)$'",
+    "repetitions": 1,
+    "receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+    "receipt_sha256": "b5a8ba8cbe43c9cb1edc9a6fe9108c02940d9c43171abb7a637a725209970845",
+    "first_test_event": "2026-10-03T07:19:39.627978489Z",
+    "last_test_event": "2026-10-03T07:22:40.965032655Z",
+    "exit_code": 1,
+    "root_receipt_count": 44,
+    "unique_root_count": 44,
+    "named_subtest_receipt_count": 420,
+    "skip_count": 0,
+    "package_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "action": "fail",
+        "elapsed": 95.711
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "action": "pass",
+        "elapsed": 170.657
+      }
+    ],
+    "root_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPreviewProducerConsumesExecutionCoordinate",
+        "action": "pass",
+        "elapsed": 1.35
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredRuleReceiverPreparationRetryBothStores",
+        "action": "pass",
+        "elapsed": 5.46
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores",
+        "action": "pass",
+        "elapsed": 2.51
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations",
+        "action": "pass",
+        "elapsed": 0.74
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler",
+        "action": "pass",
+        "elapsed": 0.72
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestDeliveryTargetApplicationRequiresExactPreviewOwnerAndRejectsConflict",
+        "action": "pass",
+        "elapsed": 0.06
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestEntityLastFieldClearAndColdReloadBothStores",
+        "action": "pass",
+        "elapsed": 0.65
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparsePresenceWriteAndEmitBothStores",
+        "action": "pass",
+        "elapsed": 0.63
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparseEqualityMutationsBothStores",
+        "action": "pass",
+        "elapsed": 1.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestFanOutCompletedIntentRefillsCoalescedBacklog",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestFanOutCoalescedBacklogAcceleratedControl",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores",
+        "action": "pass",
+        "elapsed": 0.65
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores",
+        "action": "pass",
+        "elapsed": 0.61
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmit",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSucceeds",
+        "action": "pass",
+        "elapsed": 0.35
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres",
+        "action": "pass",
+        "elapsed": 1.06
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores",
+        "action": "pass",
+        "elapsed": 3.57
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationFailureClaimMatrixBothStores",
+        "action": "pass",
+        "elapsed": 2.81
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores",
+        "action": "pass",
+        "elapsed": 0.64
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback",
+        "action": "pass",
+        "elapsed": 0.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage",
+        "action": "pass",
+        "elapsed": 0.45
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores",
+        "action": "pass",
+        "elapsed": 7.12
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores",
+        "action": "pass",
+        "elapsed": 2.25
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores",
+        "action": "pass",
+        "elapsed": 2.07
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores",
+        "action": "pass",
+        "elapsed": 6.24
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores",
+        "action": "pass",
+        "elapsed": 0.62
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestFallbackClaimSettlesWithoutBusinessTransitionBothStores",
+        "action": "pass",
+        "elapsed": 0.58
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores",
+        "action": "pass",
+        "elapsed": 1.11
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores",
+        "action": "pass",
+        "elapsed": 11.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores",
+        "action": "pass",
+        "elapsed": 2.2
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores",
+        "action": "pass",
+        "elapsed": 3.45
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores",
+        "action": "pass",
+        "elapsed": 24.59
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey",
+        "action": "fail",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery",
+        "action": "pass",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity",
+        "action": "pass",
+        "elapsed": 0.77
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions",
+        "action": "pass",
+        "elapsed": 0.43
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores",
+        "action": "pass",
+        "elapsed": 0.83
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores",
+        "action": "fail",
+        "elapsed": 4.83
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes",
+        "action": "pass",
+        "elapsed": 169.59
+      }
+    ],
+    "named_cells": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPreviewProducerConsumesExecutionCoordinate/exact_preview",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPreviewProducerConsumesExecutionCoordinate/missing_instance",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPreviewProducerConsumesExecutionCoordinate/foreign_flow",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPreviewProducerConsumesExecutionCoordinate/foreign_entity",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredRuleReceiverPreparationRetryBothStores/sqlite/no_fault_control",
+        "action": "pass",
+        "elapsed": 0.4
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredRuleReceiverPreparationRetryBothStores/sqlite/fresh_retry",
+        "action": "pass",
+        "elapsed": 0.41
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredRuleReceiverPreparationRetryBothStores/sqlite/recovered_retry",
+        "action": "pass",
+        "elapsed": 0.44
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredRuleReceiverPreparationRetryBothStores/postgres/no_fault_control",
+        "action": "pass",
+        "elapsed": 3.48
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredRuleReceiverPreparationRetryBothStores/postgres/fresh_retry",
+        "action": "pass",
+        "elapsed": 0.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredRuleReceiverPreparationRetryBothStores/postgres/recovered_retry",
+        "action": "pass",
+        "elapsed": 0.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores/sqlite/selected",
+        "action": "pass",
+        "elapsed": 0.45
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores/sqlite/fallback",
+        "action": "pass",
+        "elapsed": 0.43
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores/sqlite/evaluation_failed",
+        "action": "pass",
+        "elapsed": 0.42
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores/postgres/selected",
+        "action": "pass",
+        "elapsed": 0.43
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores/postgres/fallback",
+        "action": "pass",
+        "elapsed": 0.4
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores/postgres/evaluation_failed",
+        "action": "pass",
+        "elapsed": 0.38
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations/sqlite",
+        "action": "pass",
+        "elapsed": 0.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations/postgres",
+        "action": "pass",
+        "elapsed": 0.38
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler/sqlite",
+        "action": "pass",
+        "elapsed": 0.35
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler/postgres",
+        "action": "pass",
+        "elapsed": 0.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestEntityLastFieldClearAndColdReloadBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestEntityLastFieldClearAndColdReloadBothStores/postgres",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparsePresenceWriteAndEmitBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparsePresenceWriteAndEmitBothStores/postgres",
+        "action": "pass",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparseEqualityMutationsBothStores/sqlite/ordered-pair-write",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparseEqualityMutationsBothStores/sqlite/paired-clear",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparseEqualityMutationsBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 0.62
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparseEqualityMutationsBothStores/postgres/ordered-pair-write",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparseEqualityMutationsBothStores/postgres/paired-clear",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestSelectedHandlerSparseEqualityMutationsBothStores/postgres",
+        "action": "pass",
+        "elapsed": 0.67
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores/postgres",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores/postgres",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/healthy",
+        "action": "pass",
+        "elapsed": 6.09
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres/sqlite/accumulator",
+        "action": "pass",
+        "elapsed": 0.14
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres/sqlite/clear",
+        "action": "pass",
+        "elapsed": 0.15
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres/sqlite/guard_kill",
+        "action": "pass",
+        "elapsed": 0.14
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres/sqlite",
+        "action": "pass",
+        "elapsed": 0.6
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres/postgres/accumulator",
+        "action": "pass",
+        "elapsed": 0.07
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres/postgres/clear",
+        "action": "pass",
+        "elapsed": 0.06
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres/postgres/guard_kill",
+        "action": "pass",
+        "elapsed": 0.06
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres/postgres",
+        "action": "pass",
+        "elapsed": 0.46
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/issue_refused",
+        "action": "pass",
+        "elapsed": 1.4
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/sqlite/heartbeat_start",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/sqlite/settlement_renewal",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/sqlite/settlement_rollback",
+        "action": "pass",
+        "elapsed": 0.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/sqlite/cancellation",
+        "action": "pass",
+        "elapsed": 0.35
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/issue_acknowledged_error",
+        "action": "pass",
+        "elapsed": 1.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/sqlite/newer_claim",
+        "action": "pass",
+        "elapsed": 0.4
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/postgres/heartbeat_start",
+        "action": "pass",
+        "elapsed": 0.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/postgres/settlement_renewal",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/issue_discard_error",
+        "action": "pass",
+        "elapsed": 1.38
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/postgres/settlement_rollback",
+        "action": "pass",
+        "elapsed": 0.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/postgres/cancellation",
+        "action": "pass",
+        "elapsed": 0.35
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationUnsettledAuthorityBothStores/postgres/newer_claim",
+        "action": "pass",
+        "elapsed": 0.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationFailureClaimMatrixBothStores/sqlite/fresh/missing_target",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/claim_refused",
+        "action": "pass",
+        "elapsed": 1.38
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationFailureClaimMatrixBothStores/sqlite/fresh/target_read_failure",
+        "action": "pass",
+        "elapsed": 0.38
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationFailureClaimMatrixBothStores/sqlite/recovered/missing_target",
+        "action": "pass",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationFailureClaimMatrixBothStores/sqlite/recovered/target_read_failure",
+        "action": "pass",
+        "elapsed": 0.41
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationFailureClaimMatrixBothStores/postgres/fresh/missing_target",
+        "action": "pass",
+        "elapsed": 0.35
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/claim_acknowledged_error",
+        "action": "pass",
+        "elapsed": 1.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationFailureClaimMatrixBothStores/postgres/fresh/target_read_failure",
+        "action": "pass",
+        "elapsed": 0.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationFailureClaimMatrixBothStores/postgres/recovered/missing_target",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReceiverPreparationFailureClaimMatrixBothStores/postgres/recovered/target_read_failure",
+        "action": "pass",
+        "elapsed": 0.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/claim_acknowledged_cancel",
+        "action": "pass",
+        "elapsed": 1.38
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores/postgres",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/claim_fail_error",
+        "action": "pass",
+        "elapsed": 1.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/ready/direct",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/ready/inherited",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/ready/rule",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/ready/complete",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/working/direct",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/claim_close_error",
+        "action": "pass",
+        "elapsed": 1.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/working/inherited",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/working/rule",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/working/complete",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/shared/direct",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/shared/inherited",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/prepared_events_error",
+        "action": "pass",
+        "elapsed": 1.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/shared/rule",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/sqlite/shared/complete",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/ready/direct",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/ready/inherited",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/ready/rule",
+        "action": "pass",
+        "elapsed": 0.63
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/materialization_acknowledged_cleanup",
+        "action": "pass",
+        "elapsed": 1.76
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/ready/complete",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/working/direct",
+        "action": "pass",
+        "elapsed": 0.34
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/working/inherited",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/working/rule",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/working/complete",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/shared/direct",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/reviewer_materialization_native_cleanup_shape",
+        "action": "pass",
+        "elapsed": 1.63
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/shared/inherited",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/shared/rule",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores/postgres/shared/complete",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores/sqlite/kill",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/materialization_missing_ack",
+        "action": "pass",
+        "elapsed": 1.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores/sqlite/reject",
+        "action": "pass",
+        "elapsed": 0.25
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores/sqlite/discard",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores/sqlite/child_kill",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores/postgres/kill",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores/postgres/reject",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores/postgres/discard",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/source_events_acknowledged_cleanup",
+        "action": "pass",
+        "elapsed": 1.63
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores/postgres/child_kill",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores/sqlite/lower_first",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores/sqlite/upper_first",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores/sqlite/upper_only",
+        "action": "pass",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores/postgres/lower_first",
+        "action": "pass",
+        "elapsed": 0.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/reviewer_source_events_native_cleanup_shape",
+        "action": "pass",
+        "elapsed": 1.62
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores/postgres/upper_first",
+        "action": "pass",
+        "elapsed": 0.35
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores/postgres/upper_only",
+        "action": "pass",
+        "elapsed": 0.38
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/ready",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/Ready",
+        "action": "pass",
+        "elapsed": 0.14
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/shared",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/unknown",
+        "action": "pass",
+        "elapsed": 0.23
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/activation_acknowledged_error",
+        "action": "pass",
+        "elapsed": 1.6
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/foreign_only",
+        "action": "pass",
+        "elapsed": 0.23
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/target/unknown",
+        "action": "pass",
+        "elapsed": 0.14
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/target/foreign_only",
+        "action": "pass",
+        "elapsed": 0.14
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/target/Done",
+        "action": "pass",
+        "elapsed": 0.15
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/no_advance/unknown",
+        "action": "pass",
+        "elapsed": 0.23
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/no_advance/foreign_only",
+        "action": "pass",
+        "elapsed": 0.23
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/terminal_guard/./ready",
+        "action": "pass",
+        "elapsed": 0.12
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/terminal_guard/./Ready",
+        "action": "pass",
+        "elapsed": 0.13
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/terminal_guard/./shared",
+        "action": "pass",
+        "elapsed": 0.12
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/activation_and_close_errors",
+        "action": "pass",
+        "elapsed": 1.57
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/terminal_guard/child/shared",
+        "action": "pass",
+        "elapsed": 0.12
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/sqlite/phase_policy",
+        "action": "pass",
+        "elapsed": 0.12
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/ready",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/Ready",
+        "action": "pass",
+        "elapsed": 0.22
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/shared",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/unknown",
+        "action": "pass",
+        "elapsed": 0.25
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/foreign_only",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/execute/close_acknowledged_error",
+        "action": "pass",
+        "elapsed": 1.62
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/target/unknown",
+        "action": "pass",
+        "elapsed": 0.22
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/target/foreign_only",
+        "action": "pass",
+        "elapsed": 0.23
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/target/Done",
+        "action": "pass",
+        "elapsed": 0.22
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/no_advance/unknown",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/no_advance/foreign_only",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/terminal_guard/./ready",
+        "action": "pass",
+        "elapsed": 0.21
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/terminal_guard/./Ready",
+        "action": "pass",
+        "elapsed": 0.21
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/terminal_guard/./shared",
+        "action": "pass",
+        "elapsed": 0.2
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/terminal_guard/child/shared",
+        "action": "pass",
+        "elapsed": 0.21
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/healthy",
+        "action": "pass",
+        "elapsed": 2
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores/postgres/phase_policy",
+        "action": "pass",
+        "elapsed": 0.22
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 0.25
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores/postgres",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestFallbackClaimSettlesWithoutBusinessTransitionBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 0.25
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestFallbackClaimSettlesWithoutBusinessTransitionBothStores/postgres",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores/sqlite/reject",
+        "action": "pass",
+        "elapsed": 0.25
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/issue_refused",
+        "action": "pass",
+        "elapsed": 1.74
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores/sqlite/discard",
+        "action": "pass",
+        "elapsed": 0.24
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores/postgres/reject",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores/postgres/discard",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/direct",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/inherited",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/rule",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/issue_acknowledged_error",
+        "action": "pass",
+        "elapsed": 1.76
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/complete",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/self",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/fallback",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/write_only",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/emit_only",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/guarded",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/kill",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/issue_discard_error",
+        "action": "pass",
+        "elapsed": 1.76
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/reject",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/discard",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/template_qualified_selection",
+        "action": "pass",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/initial",
+        "action": "pass",
+        "elapsed": 0.37
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/foreign_source",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/foreign_snapshot/flow",
+        "action": "pass",
+        "elapsed": 0.16
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/foreign_snapshot/entity",
+        "action": "pass",
+        "elapsed": 0.14
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/claim_refused",
+        "action": "pass",
+        "elapsed": 1.83
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/foreign_snapshot/route",
+        "action": "pass",
+        "elapsed": 0.15
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/sqlite/loop_escape",
+        "action": "pass",
+        "elapsed": 0.74
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/direct",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/inherited",
+        "action": "pass",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/rule",
+        "action": "pass",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/claim_acknowledged_error",
+        "action": "pass",
+        "elapsed": 1.9
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/complete",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/self",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/fallback",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/write_only",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/emit_only",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/guarded",
+        "action": "pass",
+        "elapsed": 0.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/claim_acknowledged_cancel",
+        "action": "pass",
+        "elapsed": 1.92
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/kill",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/reject",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/discard",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/template_qualified_selection",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/initial",
+        "action": "pass",
+        "elapsed": 0.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/foreign_source",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/claim_fail_error",
+        "action": "pass",
+        "elapsed": 1.76
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/foreign_snapshot/flow",
+        "action": "pass",
+        "elapsed": 0.24
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/foreign_snapshot/entity",
+        "action": "pass",
+        "elapsed": 0.23
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/foreign_snapshot/route",
+        "action": "pass",
+        "elapsed": 0.22
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/postgres/loop_escape",
+        "action": "pass",
+        "elapsed": 0.49
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.rule/hostile_identity",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.rule/hostile_from",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.rule/hostile_to",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.rule/hostile_guards",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.rule/hostile_identity#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.rule/hostile_from#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.rule/hostile_to#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.rule/hostile_guards#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.rule",
+        "action": "pass",
+        "elapsed": 0.6
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/claim_close_error",
+        "action": "pass",
+        "elapsed": 1.77
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.complete/hostile_identity",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.complete/hostile_from",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.complete/hostile_to",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.complete/hostile_guards",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.complete/hostile_identity#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.complete/hostile_from#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.complete/hostile_to#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.complete/hostile_guards#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/sqlite/loop.complete",
+        "action": "pass",
+        "elapsed": 0.61
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.rule/hostile_identity",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.rule/hostile_from",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.rule/hostile_to",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.rule/hostile_guards",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.rule/hostile_identity#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.rule/hostile_from#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.rule/hostile_to#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.rule/hostile_guards#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.rule",
+        "action": "pass",
+        "elapsed": 0.51
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.complete/hostile_identity",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.complete/hostile_from",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.complete/hostile_to",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.complete/hostile_guards",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.complete/hostile_identity#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.complete/hostile_from#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.complete/hostile_to#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.complete/hostile_guards#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores/postgres/loop.complete",
+        "action": "pass",
+        "elapsed": 0.47
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_identity",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_from",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_to",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_guards",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/prepared_events_error",
+        "action": "pass",
+        "elapsed": 1.82
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_identity#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_from#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_to#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_guards#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_identity#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_from#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_to#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_guards#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_identity#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_from#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_to#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_guards#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_identity#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_from#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_to#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close/hostile_guards#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/close",
+        "action": "pass",
+        "elapsed": 1.03
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_identity",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_from",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_to",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_guards",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_identity#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_from#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_to#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_guards#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_identity#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_from#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_to#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_guards#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_identity#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_from#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_to#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_guards#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_identity#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_from#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_to#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape/hostile_guards#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/sqlite/escape",
+        "action": "pass",
+        "elapsed": 1
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_identity",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_from",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_to",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_guards",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_identity#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/source_events_acknowledged_cleanup",
+        "action": "pass",
+        "elapsed": 1.99
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_from#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_to#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_guards#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_identity#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_from#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_to#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_guards#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_identity#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_from#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_to#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_guards#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_identity#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_from#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_to#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close/hostile_guards#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/close",
+        "action": "pass",
+        "elapsed": 0.72
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_identity",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_from",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_to",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_guards",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_identity#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_from#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_to#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_guards#01",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_identity#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_from#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_to#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_guards#02",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_identity#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_from#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_to#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_guards#03",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_identity#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_from#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_to#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape/hostile_guards#04",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores/postgres/escape",
+        "action": "pass",
+        "elapsed": 0.7
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/reviewer_source_events_native_cleanup_shape",
+        "action": "pass",
+        "elapsed": 2.13
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/activation_acknowledged_error",
+        "action": "pass",
+        "elapsed": 2.09
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/activation_and_close_errors",
+        "action": "pass",
+        "elapsed": 2.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/postgres/activation_gate/close_acknowledged_error",
+        "action": "pass",
+        "elapsed": 2.33
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/healthy",
+        "action": "pass",
+        "elapsed": 4.71
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/single/sqlite",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/single/postgres",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/issue_refused",
+        "action": "pass",
+        "elapsed": 2.8
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/first_failure/sqlite",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/first_failure/postgres",
+        "action": "pass",
+        "elapsed": 0.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/second_failure/sqlite",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/second_failure/postgres",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/unnamed_single/sqlite",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/unnamed_single/postgres",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/issue_acknowledged_error",
+        "action": "pass",
+        "elapsed": 3.11
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/unnamed_chain/sqlite",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/unnamed_chain/postgres",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/unnamed_first_failure/sqlite",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/unnamed_first_failure/postgres",
+        "action": "pass",
+        "elapsed": 0.31
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/mixed_chain/sqlite",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/mixed_chain/postgres",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/issue_discard_error",
+        "action": "pass",
+        "elapsed": 2.85
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/padded_named/sqlite",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/padded_named/postgres",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/on_fail_only_no_op/sqlite",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/on_fail_only_no_op/postgres",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/empty_row_no_op/sqlite",
+        "action": "pass",
+        "elapsed": 0.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/empty_row_no_op/postgres",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/claim_refused",
+        "action": "pass",
+        "elapsed": 2.8
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/policy_annotation_no_op/sqlite",
+        "action": "pass",
+        "elapsed": 0.26
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/policy_annotation_no_op/postgres",
+        "action": "pass",
+        "elapsed": 0.28
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity/sqlite",
+        "action": "pass",
+        "elapsed": 0.41
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity/postgres",
+        "action": "pass",
+        "elapsed": 0.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/claim_acknowledged_error",
+        "action": "pass",
+        "elapsed": 2.77
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/flow",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/node",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/handler",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/carrier",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/rule_reference",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/source",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/target",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/loop",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/timer",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/gate",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/selected_context",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/selected_rule",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/evaluated_guards",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/format",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite/missing_evidence",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 0.41
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/flow",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/node",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/handler",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/carrier",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/rule_reference",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/source",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/target",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/loop",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/timer",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/gate",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/selected_context",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/selected_rule",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/evaluated_guards",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/format",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres/missing_evidence",
+        "action": "pass",
+        "elapsed": 0
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/postgres",
+        "action": "pass",
+        "elapsed": 0.35
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/claim_acknowledged_cancel",
+        "action": "pass",
+        "elapsed": 2.77
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/sqlite",
+        "action": "fail",
+        "elapsed": 3.38
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/claim_fail_error",
+        "action": "pass",
+        "elapsed": 2.69
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/postgres",
+        "action": "fail",
+        "elapsed": 1.39
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/claim_close_error",
+        "action": "pass",
+        "elapsed": 2.7
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/prepared_events_error",
+        "action": "pass",
+        "elapsed": 2.97
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/materialization_acknowledged_cleanup",
+        "action": "pass",
+        "elapsed": 3.75
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/reviewer_materialization_native_cleanup_shape",
+        "action": "pass",
+        "elapsed": 3.72
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/materialization_missing_ack",
+        "action": "pass",
+        "elapsed": 2.52
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/source_events_acknowledged_cleanup",
+        "action": "pass",
+        "elapsed": 3.7
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/reviewer_source_events_native_cleanup_shape",
+        "action": "pass",
+        "elapsed": 3.59
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/activation_acknowledged_error",
+        "action": "pass",
+        "elapsed": 3.47
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/activation_and_close_errors",
+        "action": "pass",
+        "elapsed": 3.49
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/execute/close_acknowledged_error",
+        "action": "pass",
+        "elapsed": 3.49
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/healthy",
+        "action": "pass",
+        "elapsed": 3.92
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/issue_refused",
+        "action": "pass",
+        "elapsed": 3.07
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/issue_acknowledged_error",
+        "action": "pass",
+        "elapsed": 3.11
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/issue_discard_error",
+        "action": "pass",
+        "elapsed": 3.06
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/claim_refused",
+        "action": "pass",
+        "elapsed": 3.09
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/claim_acknowledged_error",
+        "action": "pass",
+        "elapsed": 3.13
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/claim_acknowledged_cancel",
+        "action": "pass",
+        "elapsed": 3.1
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/claim_fail_error",
+        "action": "pass",
+        "elapsed": 3.03
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/claim_close_error",
+        "action": "pass",
+        "elapsed": 3.08
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/prepared_events_error",
+        "action": "pass",
+        "elapsed": 3.17
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/source_events_acknowledged_cleanup",
+        "action": "pass",
+        "elapsed": 3.95
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/reviewer_source_events_native_cleanup_shape",
+        "action": "pass",
+        "elapsed": 3.96
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/activation_acknowledged_error",
+        "action": "pass",
+        "elapsed": 3.88
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/activation_and_close_errors",
+        "action": "pass",
+        "elapsed": 3.9
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes/sqlite/activation_gate/close_acknowledged_error",
+        "action": "pass",
+        "elapsed": 3.94
+      }
+    ],
+    "failures": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey",
+        "action": "fail",
+        "elapsed": 0.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/sqlite",
+        "action": "fail",
+        "elapsed": 3.38
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/postgres",
+        "action": "fail",
+        "elapsed": 1.39
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores",
+        "action": "fail",
+        "elapsed": 4.83
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "action": "fail",
+        "elapsed": 95.711
+      }
+    ]
+  },
+  "final_parent_fixtures": {
+    "source_head": "50107a2ff2f05c77d3201a6439f57fcc3276d324",
+    "source_boundary": "Go/test/spec inputs are frozen at d7697e36f; 50107a2ff only refreshes the complexity inventory before test acquisition. All six root receipts and both backend timer cells are actually executed; no full-default or hosted credit.",
+    "command": "go run ./cmd/swarm-test -- -race -count=3 -json ./internal/runtime/pipeline -run '^(TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores|TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey)$'",
+    "repetitions": 3,
+    "receipt": "/tmp/agent-e-2496-final-fixture-parent-race-v3.log",
+    "receipt_sha256": "9d412c2cf3bb8ed6062a573c807fcc2a0a6dadd8b316cea6030d09aa088fa31a",
+    "first_test_event": "2026-10-03T07:32:34.21418691Z",
+    "last_test_event": "2026-10-03T07:32:52.837608125Z",
+    "exit_code": 0,
+    "root_receipt_count": 6,
+    "unique_root_count": 2,
+    "named_subtest_receipt_count": 6,
+    "skip_count": 0,
+    "package_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "action": "pass",
+        "elapsed": 18.623
+      }
+    ],
+    "root_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey",
+        "action": "pass",
+        "elapsed": 4.22
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores",
+        "action": "pass",
+        "elapsed": 5.1
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores",
+        "action": "pass",
+        "elapsed": 3.81
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey",
+        "action": "pass",
+        "elapsed": 0.3
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores",
+        "action": "pass",
+        "elapsed": 3.84
+      }
+    ],
+    "named_cells": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 3.55
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/postgres",
+        "action": "pass",
+        "elapsed": 1.49
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 2.6
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/postgres",
+        "action": "pass",
+        "elapsed": 1.14
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/sqlite",
+        "action": "pass",
+        "elapsed": 2.64
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+        "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores/postgres",
+        "action": "pass",
+        "elapsed": 1.14
+      }
+    ],
+    "failures": []
+  },
+  "focused_projections": {
+    "source_head": "50107a2ff2f05c77d3201a6439f57fcc3276d324",
+    "source_boundary": "Exact committed Go/test/spec inputs at 50107a2ff. Small component/frontier/mock-preview tests run directly, not a broad capacity bypass. These receipts do not substitute for served/default qualification.",
+    "command": "go test ./internal/runtime/manager ./internal/runtime/runforkadmission ./internal/runtime/testcases -count=1 -json -run '^(TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopology|TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes|TestAdmitContractFrontier_UsesExactPendingTargetWhenRoutingSourceIsAbsent|TestAdmitContractFrontier_UsesExactPersistedReceiverOwnersForTemplateRoute|TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances|TestGenericBundle_AccumulationFanoutPatterns|TestGenericBundle_BudgetSuppressionPatterns|TestGenericBundle_ScoringOutcomePatterns)$'",
+    "repetitions": 1,
+    "receipt": "/tmp/agent-e-2496-final-focused-projections-50107a2ff.log",
+    "receipt_sha256": "f7c6e76705a84833463c762bf19d962f06f99008d2d0f0ae5104ecddf88ada19",
+    "first_test_event": "2026-10-03T07:33:15.461681435Z",
+    "last_test_event": "2026-10-03T07:33:15.672374316Z",
+    "exit_code": 0,
+    "root_receipt_count": 8,
+    "unique_root_count": 8,
+    "named_subtest_receipt_count": 2,
+    "skip_count": 0,
+    "package_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/manager",
+        "action": "pass",
+        "elapsed": 0.16
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+        "action": "pass",
+        "elapsed": 0.173
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/testcases",
+        "action": "pass",
+        "elapsed": 0.211
+      }
+    ],
+    "root_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+        "test": "TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes",
+        "action": "pass",
+        "elapsed": 0.11
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+        "test": "TestAdmitContractFrontier_UsesExactPendingTargetWhenRoutingSourceIsAbsent",
+        "action": "pass",
+        "elapsed": 0.02
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/testcases",
+        "test": "TestGenericBundle_AccumulationFanoutPatterns",
+        "action": "pass",
+        "elapsed": 0.13
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+        "test": "TestAdmitContractFrontier_UsesExactPersistedReceiverOwnersForTemplateRoute",
+        "action": "pass",
+        "elapsed": 0.03
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/manager",
+        "test": "TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopology",
+        "action": "pass",
+        "elapsed": 0.15
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+        "test": "TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances",
+        "action": "pass",
+        "elapsed": 0.02
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/testcases",
+        "test": "TestGenericBundle_BudgetSuppressionPatterns",
+        "action": "pass",
+        "elapsed": 0.04
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/testcases",
+        "test": "TestGenericBundle_ScoringOutcomePatterns",
+        "action": "pass",
+        "elapsed": 0.03
+      }
+    ],
+    "named_cells": [
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+        "test": "TestAdmitContractFrontier_UsesExactPersistedReceiverOwnersForTemplateRoute/event_receiver",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+        "test": "TestAdmitContractFrontier_UsesExactPersistedReceiverOwnersForTemplateRoute/delivery_target",
+        "action": "pass",
+        "elapsed": 0.02
+      }
+    ],
+    "failures": []
+  },
+  "static_guards": {
+    "source_head": "50107a2ff2f05c77d3201a6439f57fcc3276d324",
+    "source_boundary": "Exact 50107a2ff source. Static retirement/consumer and both-backend proof partition guards, not supported execution or full-suite evidence.",
+    "command": "go test ./internal/runtime/manager ./internal/testplanning -json -count=1 -run '^(TestDynamicFlowLegacyExecutionAuthorityAPIsAbsent|TestDynamicFlowRuntimeReadinessProductionConsumersStatic|TestFlowConstructorProofPartitionRequiresBothStores)$'",
+    "repetitions": 1,
+    "receipt": "/tmp/agent-e-2496-final-static-50107a2ff.log",
+    "receipt_sha256": "5541694906df72c72975da3e1d3e736ba9e0dc39c12a449848276eae67ddbfcf",
+    "first_test_event": "2026-10-03T07:41:33.337406459Z",
+    "last_test_event": "2026-10-03T07:41:34.658478352Z",
+    "exit_code": 0,
+    "root_receipt_count": 3,
+    "unique_root_count": 3,
+    "named_subtest_receipt_count": 0,
+    "skip_count": 0,
+    "package_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/testplanning",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/manager",
+        "action": "pass",
+        "elapsed": 1.321
+      }
+    ],
+    "root_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/testplanning",
+        "test": "TestFlowConstructorProofPartitionRequiresBothStores",
+        "action": "pass",
+        "elapsed": 0.01
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/manager",
+        "test": "TestDynamicFlowLegacyExecutionAuthorityAPIsAbsent",
+        "action": "pass",
+        "elapsed": 1.29
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/manager",
+        "test": "TestDynamicFlowRuntimeReadinessProductionConsumersStatic",
+        "action": "pass",
+        "elapsed": 0.02
+      }
+    ],
+    "named_cells": [],
+    "failures": []
+  },
+  "composed_receivers": {
+    "source_head": "50107a2ff2f05c77d3201a6439f57fcc3276d324",
+    "source_boundary": "Production/test/spec inputs frozen at 50107a2ff for the full command. Only audit documents and receipts changed while it ran. Five original receiver/template journeys reach their unchanged terminal/source-preservation and restart/refusal assertions on both stores. Compiled internal retained mock-lifecycle with public RPC readback, not paid-provider/public-launcher qualification.",
+    "command": "go run ./cmd/swarm-test -- ./internal/serveapp -json -race -count=1 -failfast -run '^(TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores|TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores|TestSelectedForkOptionalReceiverOwnershipExecutionBothStores|TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores|TestSelectedForkReceiverPolicyPermutationExecutionBothStores)$'",
+    "repetitions": 1,
+    "receipt": "/tmp/agent-e-2496-composed-receiver-50107a2ff.log",
+    "receipt_sha256": "b1ba18dc31c050e13f21df77316061e4010076b5fb1139a5013ed49eac57c947",
+    "first_test_event": "2026-10-03T07:43:47.131907477Z",
+    "last_test_event": "2026-10-03T07:48:25.82556531Z",
+    "exit_code": 0,
+    "root_receipt_count": 5,
+    "unique_root_count": 5,
+    "named_subtest_receipt_count": 28,
+    "skip_count": 0,
+    "package_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "action": "pass",
+        "elapsed": 278.694
+      }
+    ],
+    "root_results": [
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores",
+        "action": "pass",
+        "elapsed": 152.87
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores",
+        "action": "pass",
+        "elapsed": 26.54
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores",
+        "action": "pass",
+        "elapsed": 28.27
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores",
+        "action": "pass",
+        "elapsed": 35.66
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores",
+        "action": "pass",
+        "elapsed": 34.29
+      }
+    ],
+    "named_cells": [
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/012",
+        "action": "pass",
+        "elapsed": 13.49
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/021",
+        "action": "pass",
+        "elapsed": 11.32
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/102",
+        "action": "pass",
+        "elapsed": 11.47
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/120",
+        "action": "pass",
+        "elapsed": 11.41
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/201",
+        "action": "pass",
+        "elapsed": 11.4
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/210",
+        "action": "pass",
+        "elapsed": 11.41
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/materializing_mixed",
+        "action": "pass",
+        "elapsed": 12.58
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/same_owner_two_events_and_duplicate",
+        "action": "pass",
+        "elapsed": 13.66
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/012",
+        "action": "pass",
+        "elapsed": 9.49
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/021",
+        "action": "pass",
+        "elapsed": 6.45
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/102",
+        "action": "pass",
+        "elapsed": 6.43
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/120",
+        "action": "pass",
+        "elapsed": 6.47
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/201",
+        "action": "pass",
+        "elapsed": 6.41
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/210",
+        "action": "pass",
+        "elapsed": 6.41
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/materializing_mixed",
+        "action": "pass",
+        "elapsed": 7.09
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/same_owner_two_events_and_duplicate",
+        "action": "pass",
+        "elapsed": 7.36
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores/default_sqlite/empty_fields",
+        "action": "pass",
+        "elapsed": 8.07
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores/default_sqlite/existing",
+        "action": "pass",
+        "elapsed": 8.77
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores/explicit_postgres/empty_fields",
+        "action": "pass",
+        "elapsed": 4.64
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores/explicit_postgres/existing",
+        "action": "pass",
+        "elapsed": 5.06
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores/default_sqlite/distinct",
+        "action": "pass",
+        "elapsed": 9.02
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores/default_sqlite/entityless_producer",
+        "action": "pass",
+        "elapsed": 8.93
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores/explicit_postgres/distinct",
+        "action": "pass",
+        "elapsed": 5.17
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores/explicit_postgres/entityless_producer",
+        "action": "pass",
+        "elapsed": 5.15
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/default_sqlite",
+        "action": "pass",
+        "elapsed": 22.52
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/explicit_postgres",
+        "action": "pass",
+        "elapsed": 13.15
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores/default_sqlite",
+        "action": "pass",
+        "elapsed": 21.72
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores/explicit_postgres",
+        "action": "pass",
+        "elapsed": 12.57
+      }
+    ],
+    "failures": []
+  },
+  "original_failure_coverage": [
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/manager",
+      "test": "TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopology",
+      "action": "fail",
+      "elapsed": 0.02,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-focused-projections-50107a2ff.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+      "test": "TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes",
+      "action": "fail",
+      "elapsed": 0.02,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-focused-projections-50107a2ff.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+      "test": "TestAdmitContractFrontier_UsesExactPendingTargetWhenRoutingSourceIsAbsent",
+      "action": "fail",
+      "elapsed": 0.03,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-focused-projections-50107a2ff.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+      "test": "TestAdmitContractFrontier_UsesExactPersistedReceiverOwnersForTemplateRoute",
+      "action": "fail",
+      "elapsed": 0.05,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-focused-projections-50107a2ff.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+      "test": "TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances",
+      "action": "fail",
+      "elapsed": 0.02,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-focused-projections-50107a2ff.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestAuthoredRuleReceiverPreparationRetryBothStores",
+      "action": "fail",
+      "elapsed": 0.97,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores",
+      "action": "fail",
+      "elapsed": 0.86,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations",
+      "action": "fail",
+      "elapsed": 0.3,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler",
+      "action": "fail",
+      "elapsed": 0.32,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testcases",
+      "test": "TestGenericBundle_AccumulationFanoutPatterns",
+      "action": "fail",
+      "elapsed": 0.15,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-focused-projections-50107a2ff.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testcases",
+      "test": "TestGenericBundle_BudgetSuppressionPatterns",
+      "action": "fail",
+      "elapsed": 0.03,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-focused-projections-50107a2ff.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testcases",
+      "test": "TestGenericBundle_ScoringOutcomePatterns",
+      "action": "fail",
+      "elapsed": 0.03,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-focused-projections-50107a2ff.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestEntityLastFieldClearAndColdReloadBothStores",
+      "action": "fail",
+      "elapsed": 0.32,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestSelectedHandlerSparsePresenceWriteAndEmitBothStores",
+      "action": "fail",
+      "elapsed": 0.28,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestSelectedHandlerSparseEqualityMutationsBothStores",
+      "action": "fail",
+      "elapsed": 0.65,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestFanOutCompletedIntentRefillsCoalescedBacklog",
+      "action": "fail",
+      "elapsed": 0.04,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestFanOutCoalescedBacklogAcceleratedControl",
+      "action": "fail",
+      "elapsed": 0.04,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores",
+      "action": "fail",
+      "elapsed": 0.36,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores",
+      "action": "fail",
+      "elapsed": 0.38,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmit",
+      "action": "fail",
+      "elapsed": 0.04,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSucceeds",
+      "action": "fail",
+      "elapsed": 0.33,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads",
+      "action": "fail",
+      "elapsed": 0.22,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity",
+      "action": "fail",
+      "elapsed": 0.27,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue",
+      "action": "fail",
+      "elapsed": 0.27,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres",
+      "action": "fail",
+      "elapsed": 1.33,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReceiverPreparationUnsettledAuthorityBothStores",
+      "action": "fail",
+      "elapsed": 1.29,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReceiverPreparationFailureClaimMatrixBothStores",
+      "action": "fail",
+      "elapsed": 1.27,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores",
+      "action": "fail",
+      "elapsed": 0.23,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback",
+      "action": "fail",
+      "elapsed": 0.54,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries",
+      "action": "fail",
+      "elapsed": 0.11,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage",
+      "action": "fail",
+      "elapsed": 0.04,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores",
+      "action": "fail",
+      "elapsed": 4.06,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestPipelineCompiledTransitionGuardDispositionOnBothStores",
+      "action": "fail",
+      "elapsed": 1.52,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores",
+      "action": "fail",
+      "elapsed": 1.29,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestPipelineCompiledTransitionStageGuardsOnBothStores",
+      "action": "fail",
+      "elapsed": 5.8,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores",
+      "action": "fail",
+      "elapsed": 1.04,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestFallbackClaimSettlesWithoutBusinessTransitionBothStores",
+      "action": "fail",
+      "elapsed": 0.38,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores",
+      "action": "fail",
+      "elapsed": 0.88,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores",
+      "action": "fail",
+      "elapsed": 11.36,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores",
+      "action": "fail",
+      "elapsed": 2.85,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestPipelineCompiledLoopOperationEvidenceOnBothStores",
+      "action": "fail",
+      "elapsed": 0.86,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestGuardTerminationVerifiedExecutionAndRestartBothStores",
+      "action": "fail",
+      "elapsed": 17.65,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey",
+      "action": "fail",
+      "elapsed": 1.3,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-fixture-parent-race-v3.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery",
+      "action": "fail",
+      "elapsed": 0.78,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity",
+      "action": "fail",
+      "elapsed": 0.25,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler",
+      "action": "fail",
+      "elapsed": 0.28,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions",
+      "action": "fail",
+      "elapsed": 0.33,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores",
+      "action": "fail",
+      "elapsed": 0.19,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2StageEntryBoundReturnIsolationOnBothStores",
+      "action": "fail",
+      "elapsed": 0.7,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_bound_reply_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2BoundReplyCanonicalJoinOwnerRefusesCorruptedEntryOnBothStores",
+      "action": "fail",
+      "elapsed": 1.96,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_bound_reply_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2BoundReplyDoesNotLendAdmissionToLaterSiblingOnBothStores",
+      "action": "fail",
+      "elapsed": 1.32,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_bound_reply_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2BoundReplyDoesNotExpandToLaterOrdinaryConnectObserverOnBothStores",
+      "action": "fail",
+      "elapsed": 1.51,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_bound_reply_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores",
+      "action": "fail",
+      "elapsed": 20.72,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedForkRuntimeConsumersSettleReturnedOutcomes",
+      "action": "fail",
+      "elapsed": 60.15,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-default-fixture-repairs-race-v2.log",
+      "proof_source": "0a928ff7a"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2KnownTargetUnarmedPublicationRetainsEarlyRefusalAfterArmAndRestartOnBothStores",
+      "action": "fail",
+      "elapsed": 1.55,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_known_target_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothStores",
+      "action": "fail",
+      "elapsed": 0.67,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_known_target_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2MembershipSnapshotValidationOnBothStores",
+      "action": "fail",
+      "elapsed": 3.65,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores",
+      "action": "fail",
+      "elapsed": 0.62,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_multi_until_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2StageEntryPayloadDirectedOutputOnBothStores",
+      "action": "fail",
+      "elapsed": 2.16,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_publication_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2StageEntryMultiRecipientBindingOnBothStores",
+      "action": "fail",
+      "elapsed": 0.53,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_publication_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2StageEntryMissingComputedKeyRefusesWithoutReceiverMutationOnBothStores",
+      "action": "fail",
+      "elapsed": 0.54,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_publication_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2StageEntryFirstPublicationRacesTransitionAndRetriesOnBothStores",
+      "action": "fail",
+      "elapsed": 0.59,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_publication_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2StageEntryFirstPublicationRacesCloseAndRetainsLateRefusalOnBothStores",
+      "action": "fail",
+      "elapsed": 0.54,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/a2_publication_binding_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBothStores",
+      "action": "fail",
+      "elapsed": 1.49,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/workflow_join_supported_surface_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEventBusOnBothStores",
+      "action": "fail",
+      "elapsed": 2.95,
+      "disposition": "pending A/E shared request-input handoff; file untouched",
+      "file": "internal/runtime/pipeline/workflow_join_supported_surface_external_test.go"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores",
+      "action": "fail",
+      "elapsed": 0.65,
+      "disposition": "focused rerun passed; composed default still required",
+      "proof_receipt": "/tmp/agent-e-2496-final-fixture-parent-race-v3.log",
+      "proof_source": "50107a2ff2f05c77d3201a6439f57fcc3276d324"
+    }
+  ],
+  "a_shared_files": [
+    "internal/runtime/pipeline/a2_publication_binding_external_test.go",
+    "internal/runtime/pipeline/a2_multi_until_binding_external_test.go",
+    "internal/runtime/pipeline/a2_bound_reply_binding_external_test.go",
+    "internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go",
+    "internal/runtime/pipeline/a2_known_target_binding_external_test.go",
+    "internal/runtime/pipeline/workflow_join_supported_surface_external_test.go",
+    "internal/runtime/conformance/fan_in_barrier_runtime_conformance_test.go"
+  ],
+  "a_shared_helper_consumer": {
+    "file": "internal/runtime/pipeline/a2_fieldless_reply_preservation_external_test.go",
+    "helper": "commitA2FixtureConstruction",
+    "disposition": "Additional failing root consumes the same A-owned fixture helper; no direct route producer or production change in this file."
+  },
+  "a_fixture_coordination": "https://github.com/division-sh/swarm/issues/2496#issuecomment-5966120157",
+  "a_production_consumer": {
+    "owner": "WorkflowJoinAdmissionOwner",
+    "path": "internal/runtime/pipeline/workflow_join_admission.go",
+    "remaining_interpreter": "workflowInstanceRouteForExecution",
+    "coordination": "https://github.com/division-sh/swarm/issues/2496#issuecomment-5966213736",
+    "disposition": "Same-PR consumption obligation; untouched pending A coordination, not inferred closed from fixture proofs."
+  },
+  "size": {
+    "non_test_go_paths": 212,
+    "additions": 8028,
+    "deletions": 7908,
+    "net": 120,
+    "include_test_support": true,
+    "rename_detection": false,
+    "readiness_core_lines": 387
+  },
+  "complexity": {
+    "command": "go run ./cmd/swarm-complexity -head HEAD -base origin/master -evidence /tmp/agent-e-2496-final-local-complexity",
+    "exit_code": 0,
+    "receipt": "/tmp/agent-e-2496-final-local-complexity.log",
+    "receipt_sha256": "c91f74d051184fcad8d2a3b7cb5858446ee8b4f30ef17261a642f76f3c7f9a68",
+    "base_summary": {
+      "cognit": {
+        "callables": 19634,
+        "at_least_30": 578,
+        "at_least_50": 193,
+        "maximum": 302
+      },
+      "cyclo": {
+        "callables": 19634,
+        "at_least_30": 265,
+        "at_least_50": 53,
+        "maximum": 185
+      }
+    },
+    "head_summary": {
+      "cognit": {
+        "callables": 19633,
+        "at_least_30": 575,
+        "at_least_50": 193,
+        "maximum": 302
+      },
+      "cyclo": {
+        "callables": 19633,
+        "at_least_30": 261,
+        "at_least_50": 55,
+        "maximum": 185
+      }
+    },
+    "thresholds_changed": false
+  },
+  "readiness_load_budget": {
+    "source_head": "50107a2ff2f05c77d3201a6439f57fcc3276d324",
+    "command": "go test ./internal/runtime/manager -run '^TestFlowReadinessPassUsesAtMostTwoPublicLoads$' -race -count=3",
+    "exit_code": 0,
+    "package_elapsed": 6.519,
+    "receipt": "terminal tool session 32381: ok github.com/division-sh/swarm/internal/runtime/manager 6.519s; output was not file-captured"
+  },
+  "push_disposition": "No push; CI-quiet remains in effect until G/#2544 merges."
+}

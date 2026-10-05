@@ -91,7 +91,7 @@ func newCompiledLoopEvidenceHarness(t *testing.T, storeCase workflowJoinStoreCas
 		Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
 	})
 	runID := runtimecorrelation.RunIDFromContext(ctx)
-	entityID := uuid.NewString()
+	entityID := runID
 	now := canonicalWorkflowTimerTime(time.Now().UTC())
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",

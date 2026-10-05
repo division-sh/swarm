@@ -68,6 +68,10 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
+						var agentCount int
+						if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE run_id=$1 AND agent_id=$2`, f.base.RunID, anchor.RequesterAgentID).Scan(&agentCount); err != nil || agentCount != 1 {
+							t.Fatalf("requester has competing constructor/declaration lifecycles: count=%d err=%v", agentCount, err)
+						}
 						route := anchor.Source.Route()
 						agentScope, agentPath := flowID, instance
 						if mode == "root" {

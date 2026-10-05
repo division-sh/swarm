@@ -83,7 +83,7 @@ func TestDeliveryTargetOwnershipRetiredFallbacksStayAbsent(t *testing.T) {
 		}
 	}
 	classifier := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "ClassifyDeliveryTargetOwnership")
-	for _, required := range []string{"CompileDeliveryTargetCompatibilityPolicy", "matchingDeliveryTargetOwnerCandidates"} {
+	for _, required := range []string{"ValidateExecutionHandlerDeclaration", "matchingDeliveryTargetOwnerCandidates"} {
 		if !strings.Contains(classifier, required) {
 			t.Errorf("target classifier stopped consuming canonical owner %q", required)
 		}

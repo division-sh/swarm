@@ -75,13 +75,13 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				run, eventID, entity := uuid.NewString(), uuid.NewString(), uuid.NewString()
+				run, eventID := uuid.NewString(), uuid.NewString()
 				input := eventtest.OperatorInjectedWithRoutingSource(eventID, "item.received", "operator", "", []byte(`{}`), 0, run, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(run), time.Unix(1700002200, 0).UTC())
 				input, err = eventtest.AdmitPayload(input, ".", "item.received")
 				if err != nil {
 					t.Fatal(err)
 				}
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, run, eventID, entity, input)
+				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, run, eventID, input)
 				claimed := false
 				var claimedAuthority effects.Authority
 				if fault == "missing_authority" || fault == "foreign_authority" || fault == "retired_execution" {

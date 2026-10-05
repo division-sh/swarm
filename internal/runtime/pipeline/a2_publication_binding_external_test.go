@@ -171,12 +171,10 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				pc := newGateRecoveryCoordinator(bus, selected, options)
 				bus.SetInterceptors(pc)
 				now := time.Now().UTC()
-				if _, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+				parent := commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 					CurrentState: "active", EntityType: "root_state", Fields: map[string]any{"work_count": int64(0)},
-				}, now); err != nil {
-					t.Fatal(err)
-				}
+				}, now)
 				keys := []string{uuid.NewString(), uuid.NewString()}
 				if multipleRecipients {
 					keys[1] = keys[0]
@@ -208,14 +206,15 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 						Identity: flowidentity.Instance{TemplateID: flows[index], ScopeKey: flows[index], InstanceID: keys[index], InstancePath: path, EntityID: flowidentity.EntityID(path), HasStoredPath: true},
 						RunID:    runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 					}
-					if _, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
+					readiness.Identity.ParentRoute = flowidentity.ParentRoute{FlowID: parent.Identity.TemplateID, FlowInstance: parent.Identity.InstancePath, EntityID: parent.Identity.EntityID}
+					readiness.Identity.ParentEntityID = parent.Identity.EntityID
+					constructed := commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
 						InstanceID: keys[index], StorageRef: path, EntityID: flowidentity.EntityID(path), WorkflowName: flows[index], WorkflowVersion: source.WorkflowVersion(),
+						ParentFlowID: parent.Identity.TemplateID, ParentFlowInstance: parent.Identity.InstancePath, ParentEntityID: parent.Identity.EntityID,
 						Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "order_state", Fields: map[string]any{"order_id": keys[index], "expected": []any{"a", "b"}},
-					}, now); err != nil {
-						t.Fatal(err)
-					}
+					}, now)
 					markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
-					if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, path)}); err != nil {
+					if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, path), Instance: constructed.Identity}); err != nil {
 						t.Fatal(err)
 					}
 				}

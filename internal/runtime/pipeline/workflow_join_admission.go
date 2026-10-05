@@ -189,10 +189,21 @@ func WorkflowJoinAdmissionEvent(source semanticview.Source, route events.Deliver
 }
 
 func WorkflowJoinAdmissionOwner(source semanticview.Source, runID string, target events.RouteIdentity) (flowidentity.RunScopedFlowInstance, error) {
-	route, err := workflowInstanceRouteForExecution(source, target.FlowID, target.FlowInstance)
-	if err != nil {
-		return flowidentity.RunScopedFlowInstance{}, err
+	if source == nil || target != target.Normalized() || target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" {
+		return flowidentity.RunScopedFlowInstance{}, fmt.Errorf("join lookup requires an exact admitted receiver coordinate")
 	}
+	if target.FlowID == semanticview.RootExecutionFlowID(source) {
+		coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, runID)
+		if err != nil || !coordinate.Matches(target.FlowID, target.FlowInstance) || target.EntityID != runID {
+			return flowidentity.RunScopedFlowInstance{}, fmt.Errorf("join root lookup contradicts its exact run coordinate")
+		}
+	} else if _, found := source.FlowSchemaByID(target.FlowID); !found {
+		return flowidentity.RunScopedFlowInstance{}, fmt.Errorf("join lookup has an unknown authored receiver")
+	}
+	// This addresses an already-admitted target. The constructed header below,
+	// not a declaration-prefix projection, validates its execution identity.
+	route := flowidentity.Stored(source, target.FlowID, target.FlowInstance,
+		flowidentity.LogicalInstanceID(target.FlowInstance), target.EntityID, "").Route()
 	return flowidentity.NewRunScopedFlowInstance(runID, route)
 }
 
@@ -222,6 +233,18 @@ func PrepareWorkflowJoinAdmission(source semanticview.Source, runID, event strin
 	owner, err := WorkflowJoinAdmissionOwner(source, runID, target)
 	if err != nil {
 		return nil, nil, err
+	}
+	if instance != nil {
+		constructed, err := requireWorkflowInstanceIdentity(owner.Route, identity.EntityID(target.EntityID), *instance)
+		if err != nil {
+			return nil, nil, err
+		}
+		if constructed.TemplateID != target.FlowID {
+			return nil, nil, fmt.Errorf("join receiver header contradicts its admitted authored owner")
+		}
+		if err := constructed.ValidateConstruction(source, runID); err != nil {
+			return nil, nil, err
+		}
 	}
 	declarations := make([]timeridentity.JoinRef, len(plans))
 	for index, plan := range plans {

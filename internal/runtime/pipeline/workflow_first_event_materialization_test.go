@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -35,7 +34,7 @@ func TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores(
 			}
 			configureWorkflowLifecycleForTest(t, pc)
 
-			entityID := FlowInstanceEntityID(runID)
+			entityID := runID
 			eventID := uuid.NewString()
 			occurredAt := time.Now().UTC()
 			evt := eventtest.RunCreatingRootIngress(
@@ -50,18 +49,11 @@ func TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores(
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 				occurredAt,
 			)
-			dialect := authoractivityfixture.DialectPostgres
-			if store.isSQLite() {
-				dialect = authoractivityfixture.DialectSQLite
-			}
-			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
 			node := pipelineSourceNode(t, pc.SemanticSource(), ".", "acceptor")
-			ctx = withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, events.DeliveryRoute{
-				Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}),
-			})
+			ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, ".", "acceptor", evt)
 			outcome, err := pc.executeNodeContractHandler(ctx, node, runtimecontracts.SystemNodeEventHandler{
 				AdvancesTo: "done",
-			}, workflowTriggerContext{Event: evt, HandlerEventKey: "request.accepted"}, false)
+			}, workflowTriggerContext{Event: evt, State: state, HandlerEventKey: "request.accepted"}, false)
 			if err != nil {
 				t.Fatalf("execute first event transition: %v", err)
 			}

@@ -33,6 +33,7 @@ type flowInstanceDescriptorAuthorityStore interface {
 	runtimebus.FlowInstanceRouteSetPersistence
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.ScopedActiveFlowInstanceDescriptorLister
 }
 
 type dynamicFlowSourceProjectionStore interface {
@@ -80,14 +81,13 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, uuid.NewString(), "account/a", hashA)
 			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, uuid.NewString(), "account/b", hashB)
 			seedStaticFlowInstanceRouteWithoutReadiness(t, db, sqlite, runA, "standing/a")
-			query := `UPDATE flow_instance_runtime_readiness SET topology_ready_at = ? WHERE run_id = ? AND instance_path = ?`
-			args := []any{time.Now().UTC(), runA, "account/a"}
-			if !sqlite {
-				query = `UPDATE flow_instance_runtime_readiness SET topology_ready_at = $1 WHERE run_id = $2::uuid AND instance_path = $3`
+			if _, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceA); err == nil || !strings.Contains(err.Error(), "no dynamic runtime readiness owner") {
+				t.Fatalf("static route without readiness was admitted: %v", err)
 			}
-			if _, err := db.ExecContext(ctx, query, args...); err != nil {
+			if _, err := db.ExecContext(ctx, `UPDATE routing_rules SET status='inactive' WHERE run_id=$1 AND flow_instance=$2`, runA, "standing/a"); err != nil {
 				t.Fatal(err)
 			}
+			setReadinessCoordinate(t, db, sqlite, runA, "account/a", "phase", time.Now().UTC())
 			projection, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceA)
 			if err != nil {
 				t.Fatal(err)
@@ -156,7 +156,7 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 				requireReadinessRun(t, ctx, db, sqlite, row.runID, currentHash)
 				seedExactFlowInstanceDescriptorOwner(t, db, sqlite, row.runID, uuid.NewString(), row.path, row.planHash)
 				if row.complete {
-					setReadinessCoordinate(t, db, sqlite, row.runID, row.path, "topology_ready_at", time.Now().UTC())
+					setReadinessCoordinate(t, db, sqlite, row.runID, row.path, "phase", time.Now().UTC())
 				}
 			}
 			foreignRun := uuid.NewString()
@@ -242,12 +242,19 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 							t.Fatal(marshalErr)
 						}
 						setReadinessPlanRaw(t, db, sqlite, runID, path, string(raw))
+						query := `UPDATE flow_instance_runtime_readiness SET plan_hash = ? WHERE run_id = ? AND instance_path = ?`
+						if !sqlite {
+							query = `UPDATE flow_instance_runtime_readiness SET plan_hash = $1 WHERE run_id = $2::uuid AND instance_path = $3`
+						}
+						if _, err := db.Exec(query, readinessPlanFixtureHash(t, string(raw)), runID, path); err != nil {
+							t.Fatal(err)
+						}
 					case "source":
 						setReadinessRunSource(t, selected, callCtx, runID, otherSource, otherArtifact)
 						desired.BundleHash = otherSource.BundleHash()
 						callCtx = runtimecorrelation.WithSourceArtifactFact(callCtx, otherSource)
 					case "topology":
-						setReadinessCoordinate(t, db, sqlite, runID, path, "topology_ready_at", time.Now().UTC())
+						setReadinessCoordinate(t, db, sqlite, runID, path, "phase", time.Now().UTC())
 					case "creation":
 						setReadinessCoordinate(t, db, sqlite, runID, path, "creation_event_emitted_at", time.Now().UTC())
 					case "run_status":
@@ -306,15 +313,15 @@ func TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores(t *testing.T
 				return item
 			}
 			original := load()
-			if original.PlanRevision != 1 {
-				t.Fatalf("initial revision = %d, want 1", original.PlanRevision)
+			if original.AttemptOrdinal != 1 {
+				t.Fatalf("initial revision = %d, want 1", original.AttemptOrdinal)
 			}
 			advance := func(observed runtimepipeline.DynamicFlowRuntimeReadiness, version string) {
 				t.Helper()
 				expected := observed.Plan
 				expected.WorkflowVersion = version
 				result, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: observed, Expected: expected}}, time.Now().UTC())
-				if err != nil || len(result) != 1 || !result[0].Changed || result[0].PlanRevision != observed.PlanRevision+1 {
+				if err != nil || len(result) != 1 || !result[0].Changed || result[0].AttemptOrdinal != observed.AttemptOrdinal+1 {
 					t.Fatalf("advance to %s: result=%#v err=%v", version, result, err)
 				}
 			}
@@ -327,8 +334,8 @@ func TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores(t *testing.T
 				t.Fatalf("stale A observation after A-B-A: result=%#v err=%v", result, err)
 			}
 			current := load()
-			if current.PlanRevision != 3 || current.Plan.WorkflowVersion != original.Plan.WorkflowVersion {
-				t.Fatalf("stale observation changed current row: revision=%d plan=%#v", current.PlanRevision, current.Plan)
+			if current.AttemptOrdinal != 3 || current.Plan.WorkflowVersion != original.Plan.WorkflowVersion {
+				t.Fatalf("stale observation changed current row: revision=%d plan=%#v", current.AttemptOrdinal, current.Plan)
 			}
 		})
 	}
@@ -404,7 +411,7 @@ func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 			t.Run("last_row_conflict_changes_none", func(t *testing.T) {
 				ctx, requests := seedBatch(t, "conflict")
 				last := requests[1]
-				setReadinessCoordinate(t, db, sqlite, last.Expected.RunID, last.Expected.Identity.InstancePath, "topology_ready_at", time.Now().UTC())
+				setReadinessCoordinate(t, db, sqlite, last.Expected.RunID, last.Expected.Identity.InstancePath, "phase", time.Now().UTC())
 				results, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, time.Now().UTC())
 				if len(results) != 0 || !runtimepipeline.IsDynamicFlowRuntimeReadinessObservationConflict(err) {
 					t.Fatalf("batch conflict results=%#v err=%v", results, err)
@@ -447,7 +454,7 @@ func seedStaticFlowInstanceRouteWithoutReadiness(t *testing.T, db *sql.DB, sqlit
 	now := time.Now().UTC()
 	entityID := uuid.NewString()
 	if sqlite {
-		if _, err := db.Exec(`INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, ?, 'standing', 'static', '{}', 'active', ?)`, runID, instancePath, now); err != nil {
+		if _, err := db.Exec(`INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision) VALUES (?, ?, ?, 'standing', 'standing', 'static', '{}', 'active', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1)`, runID, instancePath, entityID, now, now, now); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := db.Exec(`INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES (?, ?, ?, 'standing', 'active', '{}', ?, ?)`, entityID, runID, instancePath, now, now); err != nil {
@@ -458,7 +465,7 @@ func seedStaticFlowInstanceRouteWithoutReadiness(t *testing.T, db *sql.DB, sqlit
 		}
 		return
 	}
-	if _, err := db.Exec(`INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, $2, 'standing', 'static', '{}'::jsonb, 'active', $3)`, runID, instancePath, now); err != nil {
+	if _, err := db.Exec(`INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision) VALUES ($1::uuid, $2, $4::uuid, 'standing', 'standing', 'static', '{}'::jsonb, 'active', TRUE, 'active', $3, $3, $3, '{}', '{}', '{}', 1)`, runID, instancePath, now, entityID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'standing', 'active', '{}'::jsonb, $4, $4)`, entityID, runID, instancePath, now); err != nil {
@@ -554,11 +561,14 @@ func seedExactFlowInstanceDescriptorOwner(
 	readiness := exactFlowInstanceDescriptorReadinessJSON(
 		t, runID, bundleHash, "1.0.0", "account", instancePath, entityID,
 	)
+	planHash := readinessPlanFixtureHash(t, readiness)
 	if sqlite {
 		if _, err := db.Exec(`
-			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-			VALUES (?, ?, 'account', 'template', '{}', 'active', CURRENT_TIMESTAMP)
-		`, runID, instancePath); err != nil {
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, mode, config, status,
+				stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+			VALUES (?, ?, 'account', ?, 'account', 'template', '{}', 'active',
+				TRUE, 'active', '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, runID, instancePath, entityID); err != nil {
 			t.Fatalf("seed sqlite flow instance %s: %v", instancePath, err)
 		}
 		if _, err := db.Exec(`
@@ -568,17 +578,19 @@ func seedExactFlowInstanceDescriptorOwner(
 			t.Fatalf("seed sqlite entity state %s: %v", instancePath, err)
 		}
 		if _, err := db.Exec(`
-			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-			VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-		`, runID, instancePath, readiness); err != nil {
+			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+			VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, runID, instancePath, readiness, planHash); err != nil {
 			t.Fatalf("seed sqlite readiness %s: %v", instancePath, err)
 		}
 		return
 	}
 	if _, err := db.Exec(`
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, 'account', 'template', '{}'::jsonb, 'active', NOW())
-	`, runID, instancePath); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, mode, config, status,
+			stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+		VALUES ($1::uuid, $2, 'account', $3::uuid, 'account', 'template', '{}'::jsonb, 'active',
+			TRUE, 'active', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, NOW(), NOW(), NOW())
+	`, runID, instancePath, entityID); err != nil {
 		t.Fatalf("seed postgres flow instance %s: %v", instancePath, err)
 	}
 	if _, err := db.Exec(`
@@ -588,9 +600,9 @@ func seedExactFlowInstanceDescriptorOwner(
 		t.Fatalf("seed postgres entity state %s: %v", instancePath, err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3::jsonb, NOW(), NOW())
-	`, runID, instancePath, readiness); err != nil {
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3::jsonb, $4, NOW(), NOW())
+	`, runID, instancePath, readiness, planHash); err != nil {
 		t.Fatalf("seed postgres readiness %s: %v", instancePath, err)
 	}
 }
@@ -645,11 +657,18 @@ func setReadinessCoordinate(t *testing.T, db *sql.DB, sqlite bool, runID, instan
 	t.Helper()
 	var query string
 	switch coordinate {
-	case "topology_ready_at":
-		query = `UPDATE flow_instance_runtime_readiness SET topology_ready_at = ? WHERE run_id = ? AND instance_path = ?`
+	case "phase":
+		// Reader-conflict fixtures represent historical completed attachment,
+		// never an executable generation or a planned attempt skipping steps.
+		grantID := uuid.NewString()
+		query = `UPDATE flow_instance_runtime_readiness SET phase = 'ready', activation_attempt_state='retired', activation_attempt_grant_id=?, updated_at = ? WHERE run_id = ? AND instance_path = ?`
 		if !sqlite {
-			query = `UPDATE flow_instance_runtime_readiness SET topology_ready_at = $1 WHERE run_id = $2::uuid AND instance_path = $3`
+			query = `UPDATE flow_instance_runtime_readiness SET phase = 'ready', activation_attempt_state='retired', activation_attempt_grant_id=$1::uuid, updated_at = $2 WHERE run_id = $3::uuid AND instance_path = $4`
 		}
+		if _, err := db.Exec(query, grantID, value, runID, instancePath); err != nil {
+			t.Fatalf("set %s for %s: %v", coordinate, instancePath, err)
+		}
+		return
 	case "creation_event_emitted_at":
 		query = `UPDATE flow_instance_runtime_readiness SET creation_event_emitted_at = ? WHERE run_id = ? AND instance_path = ?`
 		if !sqlite {
@@ -770,11 +789,13 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 					if err != nil {
 						t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
 					}
-					var testedDescriptor *runtimebus.ActiveFlowInstanceDescriptor
+					var testedDescriptor, stagedDescriptor *runtimebus.ActiveFlowInstanceDescriptor
 					for idx := range descriptors {
 						if descriptors[idx].FlowInstance == "account/existing" {
 							testedDescriptor = &descriptors[idx]
-							break
+						}
+						if descriptors[idx].FlowInstance == "account/current" {
+							stagedDescriptor = &descriptors[idx]
 						}
 					}
 					if testedDescriptor == nil {
@@ -852,8 +873,12 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 							t.Fatalf("%s pin mutated route state: before=%#v after=%#v", resolution.name, before, afterPin)
 						}
 					}
+					if stagedDescriptor == nil {
+						t.Fatal("route staging requires its exact constructed descriptor")
+					}
 					_, err = eventBus.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
 						Identity: flowIdentity,
+						Instance: stagedDescriptor.Identity,
 						ActivationVariables: map[string]string{
 							"account_id": "current",
 						},
@@ -919,18 +944,18 @@ func seedFlowInstanceDescriptorAuthorityCase(
 			RunID: wrongRunID, StartedAt: now, BundleHash: bundleHash,
 		})
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
 			VALUES
-				(?, ?, ?, 'template', ?, 'active', ?),
-				(?, ?, ?, 'template', ?, 'active', ?)
-		`, runID, instancePath, notifyallchildren.ChildFlowID, config, now, runID, stagedInstancePath, notifyallchildren.ChildFlowID, config, now); err != nil {
+				(?, ?, ?, 'template', ?, 'active', ?, 'account', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1),
+				(?, ?, ?, 'template', ?, 'active', ?, 'account', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1)
+		`, runID, instancePath, notifyallchildren.ChildFlowID, config, entityID, now, now, now, runID, stagedInstancePath, notifyallchildren.ChildFlowID, config, stagedEntityID, now, now, now); err != nil {
 			t.Fatalf("seed sqlite flow instance: %v", err)
 		}
 		if readinessOnWrongRun {
 			if _, err := db.ExecContext(ctx, `
-				INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-				VALUES (?, ?, ?, 'template', ?, 'active', ?)
-			`, wrongRunID, instancePath, notifyallchildren.ChildFlowID, config, now); err != nil {
+				INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
+				VALUES (?, ?, ?, 'template', ?, 'active', ?, 'account', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1)
+			`, wrongRunID, instancePath, notifyallchildren.ChildFlowID, config, entityID, now, now, now); err != nil {
 				t.Fatalf("seed sqlite wrong-run flow instance: %v", err)
 			}
 		}
@@ -943,9 +968,9 @@ func seedFlowInstanceDescriptorAuthorityCase(
 			t.Fatalf("seed sqlite entity state: %v", err)
 		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?)
-			`, runID, stagedInstancePath, stagedReadiness, now, now); err != nil {
+			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`, runID, stagedInstancePath, stagedReadiness, readinessPlanFixtureHash(t, stagedReadiness), now, now); err != nil {
 			t.Fatalf("seed sqlite staged-owner readiness: %v", err)
 		}
 		if readiness != "" {
@@ -954,9 +979,9 @@ func seedFlowInstanceDescriptorAuthorityCase(
 				readinessRunID = wrongRunID
 			}
 			if _, err := db.ExecContext(ctx, `
-				INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?)
-			`, readinessRunID, instancePath, readiness, now, now); err != nil {
+				INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`, readinessRunID, instancePath, readiness, readinessPlanFixtureHash(t, readiness), now, now); err != nil {
 				t.Fatalf("seed sqlite readiness: %v", err)
 			}
 		}
@@ -970,18 +995,18 @@ func seedFlowInstanceDescriptorAuthorityCase(
 		RunID: wrongRunID, BundleHash: bundleHash,
 	})
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
 		VALUES
-			($1::uuid, $2, $3, 'template', $4::jsonb, 'active', now()),
-			($1::uuid, $5, $3, 'template', $4::jsonb, 'active', now())
-	`, runID, instancePath, notifyallchildren.ChildFlowID, config, stagedInstancePath); err != nil {
+			($1::uuid, $2, $3, 'template', $4::jsonb, 'active', $6::uuid, 'account', TRUE, 'active', now(), now(), now(), '{}', '{}', '{}', 1),
+			($1::uuid, $5, $3, 'template', $4::jsonb, 'active', $7::uuid, 'account', TRUE, 'active', now(), now(), now(), '{}', '{}', '{}', 1)
+	`, runID, instancePath, notifyallchildren.ChildFlowID, config, stagedInstancePath, entityID, stagedEntityID); err != nil {
 		t.Fatalf("seed postgres flow instance: %v", err)
 	}
 	if readinessOnWrongRun {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-			VALUES ($1::uuid, $2, $3, 'template', $4::jsonb, 'active', now())
-		`, wrongRunID, instancePath, notifyallchildren.ChildFlowID, config); err != nil {
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
+			VALUES ($1::uuid, $2, $3, 'template', $4::jsonb, 'active', $5::uuid, 'account', TRUE, 'active', now(), now(), now(), '{}', '{}', '{}', 1)
+		`, wrongRunID, instancePath, notifyallchildren.ChildFlowID, config, entityID); err != nil {
 			t.Fatalf("seed postgres wrong-run flow instance: %v", err)
 		}
 	}
@@ -994,9 +1019,9 @@ func seedFlowInstanceDescriptorAuthorityCase(
 		t.Fatalf("seed postgres entity state: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-			VALUES ($1::uuid, $2, $3::jsonb, now(), now())
-		`, runID, stagedInstancePath, stagedReadiness); err != nil {
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+			VALUES ($1::uuid, $2, $3::jsonb, $4, now(), now())
+		`, runID, stagedInstancePath, stagedReadiness, readinessPlanFixtureHash(t, stagedReadiness)); err != nil {
 		t.Fatalf("seed postgres staged-owner readiness: %v", err)
 	}
 	if readiness != "" {
@@ -1005,9 +1030,9 @@ func seedFlowInstanceDescriptorAuthorityCase(
 			readinessRunID = wrongRunID
 		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-			VALUES ($1::uuid, $2, $3::jsonb, now(), now())
-		`, readinessRunID, instancePath, readiness); err != nil {
+			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+			VALUES ($1::uuid, $2, $3::jsonb, $4, now(), now())
+		`, readinessRunID, instancePath, readiness, readinessPlanFixtureHash(t, readiness)); err != nil {
 			t.Fatalf("seed postgres readiness: %v", err)
 		}
 	}

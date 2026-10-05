@@ -8,6 +8,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -71,6 +72,7 @@ func newTimerCauseReplayNativeFixture(t *testing.T, backend string, bundle *cont
 	runID := uuid.NewString()
 	storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
 	ctx = withLiveGateExecution(correlation.WithRunID(ctx, runID))
+	admitAttachment, _ := newTimerReplayAttachmentOwner(t, ctx, selected)
 	source := semanticview.Wrap(bundle)
 	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, "platform.stage_timer")
 	if err != nil {
@@ -102,12 +104,20 @@ func newTimerCauseReplayNativeFixture(t *testing.T, backend string, bundle *cont
 			t.Error(err)
 		}
 	})
-	return pipeline.WorkflowTimerCauseReplayFixtureForTest{Context: ctx, Coordinator: pc, Publish: bus.PublishAndWait, Observe: func() pipeline.WorkflowTimerCauseReplayStorageForTest {
-		observed := storetest.ObserveWorkflowTimerReplayStorage(t, ctx, selected, runID, runID)
-		return pipeline.WorkflowTimerCauseReplayStorageForTest(observed)
-	}}
+	return pipeline.WorkflowTimerCauseReplayFixtureForTest{Context: ctx, Coordinator: pc, Publish: bus.PublishAndWait,
+		CommitConstruction: func(ctx context.Context, owner flowidentity.RunScopedFlowInstance, instance pipeline.WorkflowInstance, at time.Time) (pipeline.DynamicFlowRuntimeActivationAttempt, pipeline.DynamicFlowRuntimeReadinessPlan) {
+			plan := commitA2FixtureConstruction(t, pc, selected, ctx, owner, instance, at)
+			return admitAttachment(plan.Readiness), plan.Readiness
+		}, Observe: func() pipeline.WorkflowTimerCauseReplayStorageForTest {
+			observed := storetest.ObserveWorkflowTimerReplayStorage(t, ctx, selected, runID, runID)
+			return pipeline.WorkflowTimerCauseReplayStorageForTest(observed)
+		}}
 }
 
 func TestWorkflowTimerCauseReplayEngineConsumersOnBothStores(t *testing.T) {
 	pipeline.VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t, newTimerCauseReplayNativeFixture)
+}
+
+func TestMutationFreeAcceptedEventTimersBothStores(t *testing.T) {
+	pipeline.VerifyMutationFreeAcceptedEventTimersBothStoresForTest(t, newTimerCauseReplayNativeFixture)
 }

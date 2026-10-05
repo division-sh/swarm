@@ -88,9 +88,6 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if !route.Materialization.Empty() && (route.Materialization.RunID() != fact.RunID || route.Materialization.EventID() != fact.EventID) {
-		return Snapshot{}, fmt.Errorf("historical receiver dependency publication identity mismatch")
-	}
 	if !route.Initialization.Empty() {
 		if err := route.Initialization.ValidatePublication(fact.RunID, fact.EventID); err != nil {
 			return Snapshot{}, err

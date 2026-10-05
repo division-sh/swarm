@@ -81,7 +81,7 @@ func TestRunScopedLiveIdentityStructuralRatchet(t *testing.T) {
 	routing := runScopedIdentityRead(t, root, "internal/runtime/bus/routing_derivation.go")
 	routingFields := strings.Join(strings.Fields(routing), " ")
 	for _, required := range []string{
-		"instanceOwners map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance",
+		"instanceOwners map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance",
 		"instanceEventPath map[runtimeflowidentity.RunScopedFlowInstance][]string",
 	} {
 		if !strings.Contains(routingFields, required) {

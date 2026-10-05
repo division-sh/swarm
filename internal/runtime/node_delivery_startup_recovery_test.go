@@ -22,14 +22,12 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -43,6 +41,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 )
 
 type nodeDeliveryRecoveryStore interface {
@@ -136,11 +135,14 @@ func (d *settlingDeliveryContinuationDispatcher) DispatchDeliveryContinuation(
 
 type startupRecoveryOrderStore interface {
 	nodeDeliveryRecoveryStore
+	runtimebus.FlowInstanceActivationCommitOwner
 	swarmruntime.EventPayloadAdmissionBinder
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
 	runtimemanager.ManagerPersistence
 	runtimemanager.AgentLifecycleCellCensus
+	runtimemanager.AgentLifecycleDiagnosticPersistence
+	swarmruntime.RuntimeLogPersistence
 	storetest.AgentFixtureStore
 	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
 }
@@ -149,20 +151,6 @@ type startupRecoveryOrderLLM struct{ llm.NoopRuntime }
 
 func (startupRecoveryOrderLLM) ProviderContract() llm.ProviderContract {
 	return llm.AnthropicAPIProviderContract()
-}
-
-type startupRecoveryOrderAgent struct {
-	id            string
-	subscriptions []events.EventType
-}
-
-func (a startupRecoveryOrderAgent) ID() string { return a.id }
-func (startupRecoveryOrderAgent) Type() string { return "test" }
-func (a startupRecoveryOrderAgent) Subscriptions() []events.EventType {
-	return append([]events.EventType(nil), a.subscriptions...)
-}
-func (a startupRecoveryOrderAgent) OnEvent(_ context.Context, event events.Event) ([]events.Event, error) {
-	return nil, nil
 }
 
 func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity(t *testing.T) {
@@ -207,13 +195,9 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, runtimeSQLDB, _, selected := backend.setup(t)
+			ctx, _, _, selected := backend.setup(t)
 			activationCleanupErr := errors.New("injected delivery authority postcommit cleanup failure")
 			activationProbe := &startupRecoveryActivationProbe{Store: selected, cleanupErr: activationCleanupErr}
-			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
-			if runtimeSQLDB == nil {
-				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
-			}
 			bundle := loadEntitylessStartupRecoveryBundle(t)
 			const agentID = "startup-order-agent"
 			agentConfig := runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
@@ -226,9 +210,70 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}
 			source := semanticviewtest.WrapRootAgents(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
+			hydrated := atomic.Bool{}
+			newRuntime := func(process *worklifetime.Process, deliveries runtimedelivery.Store) *swarmruntime.Runtime {
+				var runtime *swarmruntime.Runtime
+				var err error
+				runtime, err = swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
+					Config:     &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}, LLM: config.LLMConfig{Backend: "anthropic"}},
+					EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
+					EventPayloadAdmissionBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates: selected, WorkflowPersistence: runtimepipeline.NewWorkflowPersistence(selected),
+					ManagerStore: selected, RuntimeLogStore: selected, ManagerLifecycleDiagnostics: selected,
+					ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: deliveries,
+					PipelineObligations: selected.PipelineObligations(),
+					Options: swarmruntime.RuntimeOptions{
+						SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
+						RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: persistedSource,
+						ProcessWorkOwner: process,
+						TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
+							cfg, err := runtime.Manager.ResolveAgentConfig(templateInstanceDeliveryRunID, agentID, "")
+							if err != nil {
+								return fmt.Errorf("workflow-node recovery started before persisted agent hydration: %w", err)
+							}
+							if cfg.ID != agentID || cfg.ResolvedLLMBackend != "anthropic" {
+								return fmt.Errorf("workflow-node recovery observed an unrelated agent descriptor: %+v", cfg)
+							}
+							hydrated.Store(true)
+							return nil
+						},
+					},
+				}))
+				if err != nil {
+					t.Fatalf("NewRuntime: %v", err)
+				}
+				return runtime
+			}
+			// Persist the complete predecessor through the real constructor and
+			// readiness owner; recovery must not infer construction from agent rows.
+			predecessorProcess := worklifetime.NewProcess()
+			predecessor := newRuntime(predecessorProcess, selected)
+			predecessorCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, predecessor)
+			t.Cleanup(func() {
+				if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
+					t.Errorf("close startup predecessor: %v", err)
+				}
+			})
+			if err := predecessor.Start(ctx); err != nil {
+				t.Fatalf("start constructor predecessor: %v", err)
+			}
+			constructionCtx := testLiveExecutionContext(worklifetime.WithOccurrence(ctx, predecessor.WorkOccurrence()))
+			if err := predecessor.Manager.ActivateFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
+				ContractBundle: source,
+				Instance:       runtimeflowidentity.Stored(source, ".", templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, ""),
+				OccurredAt:     time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("construct startup predecessor tree: %v", err)
+			}
+			if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
+				t.Fatalf("retire startup predecessor: %v", err)
+			}
 
 			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
 			nodeRoute := startupRecoveryNodeRoute(t, "complete-task")
+			nodeRoute.Target = events.MustExistingEntityTarget(events.RouteIdentity{
+				FlowID: ".", FlowInstance: templateInstanceDeliveryRunID, EntityID: templateInstanceDeliveryRunID,
+			})
 			event := eventtest.ExistingRunRootIngress(
 				eventID, "task.requested", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, nodeRoute.Target.Route()), time.Now().UTC(),
@@ -266,64 +311,13 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}
 
 			processOwner := worklifetime.NewProcess()
-			hydrated := atomic.Bool{}
-			runtime, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
-				Config: &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}, LLM: config.LLMConfig{Backend: "anthropic"}},
-
-				EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
-				EventPayloadAdmissionBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-				RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
-				ManagerStore:            selected,
-				ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: activationProbe,
-				PipelineObligations: selected.PipelineObligations(),
-
-				Options: swarmruntime.RuntimeOptions{
-					SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
-					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: persistedSource,
-					ProcessWorkOwner: processOwner,
-					TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
-						if !hydrated.Load() {
-							return errors.New("workflow-node recovery started before persisted agent hydration")
-						}
-						return nil
-					},
-				},
-			}))
-			if err != nil {
-				t.Fatalf("NewRuntime: %v", err)
-			}
-			capability, grant := installExternalRuntimeTestGeneration(t, ctx, selected, runtime)
+			runtime := newRuntime(processOwner, activationProbe)
+			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, runtime)
 			t.Cleanup(func() {
 				if err := closeExternalRuntimeTestGeneration(runtime, processOwner, capability); err != nil {
 					t.Errorf("close startup-order generation: %v", err)
 				}
 			})
-			if err := runtime.Manager.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
-				t.Fatalf("persist startup-order declared agent: %v", err)
-			}
-			if err := runtime.Manager.FinalizeCommittedAgentReadiness(ctx, agentEvent, []events.DeliveryRoute{agentRoute}); err != nil {
-				t.Fatalf("materialize startup-order committed static agent: %v", err)
-			}
-			if err := runtime.Manager.Shutdown(); err != nil {
-				t.Fatalf("retire constructed manager before startup-order replacement: %v", err)
-			}
-			managerRoles := externalRuntimeTestManagerBusRoles(runtime.Bus)
-			managerRoles.LifecycleCensus = selected
-			managerRoles.StandingRestarts = selected
-			runtime.Manager = runtimemanager.NewAgentManagerWithOptions(runtime.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-				hydrated.Store(true)
-				subscriptions := make([]events.EventType, 0, len(cfg.Subscriptions))
-				for _, subscription := range cfg.Subscriptions {
-					subscriptions = append(subscriptions, events.EventType(subscription))
-				}
-				return startupRecoveryOrderAgent{id: cfg.ID, subscriptions: subscriptions}, nil
-			}, runtimemanager.AgentManagerOptions{
-				ExecutionPosture: executionposture.Live,
-				BaseContext:      ctx, LifecycleStore: grant, DeliveryStore: selected, SemanticSource: source,
-				PersistenceRoles:  managerRoles,
-				WorkflowInstances: runtime.Pipeline, WorkOwner: runtime.WorkOccurrence(), ReceiverExecution: eventreceiver.NormalExecution(),
-			}, selected)
-			installExternalManagerTestGeneration(t, ctx, runtime.Manager, grant)
 
 			if err := runtime.Start(ctx); err != nil {
 				t.Fatalf("Start: %v", err)
@@ -334,8 +328,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if got := activationProbe.faults.Load(); got != 1 {
 				t.Fatalf("injected delivery authority cleanup faults = %d, want 1", got)
 			}
-			if !hydrated.Load() {
-				t.Fatal("startup did not hydrate the persisted static agent before delivery recovery")
+			if _, err := runtime.Manager.ResolveAgentConfig(templateInstanceDeliveryRunID, agentID, ""); err != nil {
+				t.Fatalf("startup did not hydrate the persisted static agent: %v", err)
 			}
 			waitForRecoveredNodeDelivery(t, ctx, selected, eventID, nodeRoute, 1)
 			waitForRecoveredNodeDelivery(t, ctx, selected, agentEventID, agentRoute, 1)
@@ -902,8 +896,29 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			})
 
 			instance := artifactActionResultWorkflowInstance()
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
+			{
+				construction886Ctx := testLiveExecutionContext(ctx)
+				construction886At := time.Now().UTC()
+				construction886Instance, construction886Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction886Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, construction886At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction886Command, err := flowactivationfixture.Command(construction886Ctx, construction886Instance, construction886Lifecycle, construction886At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction886Committed, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction886Ctx, construction886Command)
+				if err != nil {
+					t.Fatalf("seed workflow instance: %v", err)
+				}
+				if err == nil && !construction886Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction886Committed.Acknowledged && construction886Committed.Created {
+					if finalizeErr := pc.FinalizeInitialEntryLifecycle(construction886Ctx, construction886Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 
 			eventID := "99999999-9999-4999-8999-999999999981"
@@ -996,8 +1011,29 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			})
 
 			healthyInstance := artifactActionResultWorkflowInstance()
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(healthyInstance.StorageRef)}, healthyInstance, time.Now().UTC()); err != nil {
-				t.Fatalf("seed healthy workflow instance: %v", err)
+			{
+				construction979Ctx := testLiveExecutionContext(ctx)
+				construction979At := time.Now().UTC()
+				construction979Instance, construction979Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction979Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(healthyInstance.StorageRef)}, healthyInstance, construction979At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction979Command, err := flowactivationfixture.Command(construction979Ctx, construction979Instance, construction979Lifecycle, construction979At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction979Committed, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction979Ctx, construction979Command)
+				if err != nil {
+					t.Fatalf("seed healthy workflow instance: %v", err)
+				}
+				if err == nil && !construction979Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction979Committed.Acknowledged && construction979Committed.Created {
+					if finalizeErr := pc.FinalizeInitialEntryLifecycle(construction979Ctx, construction979Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 
 			poisonEntityID := eventtest.UUID("node-recovery-poison-entity")
@@ -1007,8 +1043,29 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			poisonInstance.StorageRef = poisonTarget.FlowInstance
 			poisonInstance.EntityID = poisonEntityID
 			poisonInstance.Fields = map[string]any{}
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(poisonInstance.StorageRef)}, poisonInstance, time.Now().UTC()); err != nil {
-				t.Fatalf("seed poison workflow instance: %v", err)
+			{
+				construction990Ctx := testLiveExecutionContext(ctx)
+				construction990At := time.Now().UTC()
+				construction990Instance, construction990Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction990Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(poisonInstance.StorageRef)}, poisonInstance, construction990At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction990Command, err := flowactivationfixture.Command(construction990Ctx, construction990Instance, construction990Lifecycle, construction990At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction990Committed, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction990Ctx, construction990Command)
+				if err != nil {
+					t.Fatalf("seed poison workflow instance: %v", err)
+				}
+				if err == nil && !construction990Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction990Committed.Acknowledged && construction990Committed.Created {
+					if finalizeErr := pc.FinalizeInitialEntryLifecycle(construction990Ctx, construction990Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 			installNodeRecoveryPoisonMutation(t, ctx, db, backend.name == "postgres", poisonEntityID)
 			poison := eventtest.ExistingRunRootIngressWithRoutingSource(
@@ -1150,8 +1207,29 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			})
 
 			instance := artifactActionResultWorkflowInstance()
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
+			{
+				construction1132Ctx := testLiveExecutionContext(ctx)
+				construction1132At := time.Now().UTC()
+				construction1132Instance, construction1132Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction1132Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, construction1132At)
+				if err != nil {
+					t.Fatalf("prepare fixture initial lifecycle: %v", err)
+				}
+				construction1132Command, err := flowactivationfixture.Command(construction1132Ctx, construction1132Instance, construction1132Lifecycle, construction1132At)
+				if err != nil {
+					t.Fatalf("prepare fixture activation command: %v", err)
+				}
+				construction1132Committed, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction1132Ctx, construction1132Command)
+				if err != nil {
+					t.Fatalf("seed workflow instance: %v", err)
+				}
+				if err == nil && !construction1132Committed.Acknowledged {
+					t.Fatal("fixture activation was not acknowledged")
+				}
+				if construction1132Committed.Acknowledged && construction1132Committed.Created {
+					if finalizeErr := pc.FinalizeInitialEntryLifecycle(construction1132Ctx, construction1132Committed.Lifecycle); finalizeErr != nil {
+						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+					}
+				}
 			}
 
 			eventID := "99999999-9999-4999-8999-999999999982"

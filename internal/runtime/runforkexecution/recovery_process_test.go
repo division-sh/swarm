@@ -257,8 +257,8 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourceRun, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID, entityID)
+	sourceRun, eventID := uuid.NewString(), uuid.NewString()
+	seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
 	checkpoint := func(forkRun string) {
 		pipe := os.NewFile(3, "selected-checkpoint")
 		if err := json.NewEncoder(pipe).Encode(selectedForkCrashCheckpoint{SourceRun: sourceRun, ForkRun: forkRun}); err != nil {

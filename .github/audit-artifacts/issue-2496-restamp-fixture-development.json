@@ -1,0 +1,155 @@
+{
+  "boundary": "Preserved fixture build/development failures, passing byte-identical final fixture matrix and exact-head closed-API control; no default-suite or hosted CI closure",
+  "receipts": [
+    {
+      "artifact": "issue-2496-restamp-history-fixture-repair.jsonl.gz",
+      "source": "Uncommitted fixture-development revision; not qualification",
+      "sha256_uncompressed": "cd9d2f4677bbb94915f8e97f3c8d839b050844298eeefee900dc8ebf7c174bd3",
+      "root_results": [],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "action": "fail",
+          "elapsed": 0
+        }
+      ]
+    },
+    {
+      "artifact": "issue-2496-restamp-history-fixture-repair-working.jsonl.gz",
+      "source": "Uncommitted fixture-development revision; not qualification",
+      "sha256_uncompressed": "aaa428c33814aeeaa3dd9489909a96a778d814b4feaa157c9ebaf8c037ceafa8",
+      "root_results": [
+        {
+          "test": "TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions",
+          "action": "fail",
+          "elapsed": 2.01
+        },
+        {
+          "test": "TestSelectedForkWorkflowOwnerAssociations",
+          "action": "pass",
+          "elapsed": 8.92
+        },
+        {
+          "test": "TestSelectedForkTemplateGenerationAssociations",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "test": "TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions",
+          "action": "fail",
+          "elapsed": 0.3
+        },
+        {
+          "test": "TestSelectedForkWorkflowOwnerAssociations",
+          "action": "pass",
+          "elapsed": 11.57
+        },
+        {
+          "test": "TestSelectedForkTemplateGenerationAssociations",
+          "action": "pass",
+          "elapsed": 0.2
+        },
+        {
+          "test": "TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions",
+          "action": "fail",
+          "elapsed": 0.59
+        },
+        {
+          "test": "TestSelectedForkWorkflowOwnerAssociations",
+          "action": "pass",
+          "elapsed": 15.15
+        },
+        {
+          "test": "TestSelectedForkTemplateGenerationAssociations",
+          "action": "pass",
+          "elapsed": 0.17
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "action": "fail",
+          "elapsed": 39.212
+        }
+      ]
+    },
+    {
+      "artifact": "issue-2496-restamp-history-fixture-repair-working-v2.jsonl.gz",
+      "source": "Working-tree Go files subsequently committed unchanged as 67742d455; not a new exact-head run",
+      "sha256_uncompressed": "24c68d0c9a6fada8aa4cc21c67393008f5f22eae55b4c5f5d77a7caf75752d9a",
+      "root_results": [
+        {
+          "test": "TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions",
+          "action": "pass",
+          "elapsed": 3.1
+        },
+        {
+          "test": "TestSelectedForkWorkflowOwnerAssociations",
+          "action": "pass",
+          "elapsed": 11.43
+        },
+        {
+          "test": "TestSelectedForkTemplateGenerationAssociations",
+          "action": "pass",
+          "elapsed": 0.15
+        },
+        {
+          "test": "TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions",
+          "action": "pass",
+          "elapsed": 1.29
+        },
+        {
+          "test": "TestSelectedForkWorkflowOwnerAssociations",
+          "action": "pass",
+          "elapsed": 10.45
+        },
+        {
+          "test": "TestSelectedForkTemplateGenerationAssociations",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "test": "TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions",
+          "action": "pass",
+          "elapsed": 0.78
+        },
+        {
+          "test": "TestSelectedForkWorkflowOwnerAssociations",
+          "action": "pass",
+          "elapsed": 12.1
+        },
+        {
+          "test": "TestSelectedForkTemplateGenerationAssociations",
+          "action": "pass",
+          "elapsed": 0.14
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "action": "pass",
+          "elapsed": 40.747
+        }
+      ]
+    },
+    {
+      "artifact": "issue-2496-restamp-history-677-fixture-api.jsonl.gz",
+      "source": "67742d4553c2afeae40b58dbd7fe31b1e715dfa0",
+      "sha256_uncompressed": "231ff28154b6644a9d8786f572d9289bbd093532a03a09a99eab185c29e46724",
+      "root_results": [
+        {
+          "test": "TestCanonicalRoutingRepositoryUsesClosedConstructionAPI",
+          "action": "pass",
+          "elapsed": 27.41
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting",
+          "action": "pass",
+          "elapsed": 27.45
+        }
+      ]
+    }
+  ]
+}

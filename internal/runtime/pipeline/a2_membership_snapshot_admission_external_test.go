@@ -206,11 +206,9 @@ func newA2MembershipAdmission(t *testing.T, selected gateRecoveryStoreCase, sour
 		Module: proposedEffectProofModule{source: source, nodes: nodes}, GenericSchedules: schedules, TestLifecycleProbe: f.probe,
 	})
 	f.bus.SetInterceptors(f.pc)
-	if _, err := f.pc.MaterializeInitialEntry(f.ctx, f.owner, initial, time.Now().UTC()); err != nil {
-		t.Fatalf("persist actual membership source: %v", err)
-	}
+	constructed := commitA2FixtureConstruction(t, f.pc, selected.events, f.ctx, f.owner, initial, time.Now().UTC())
 	if initial.StorageRef != runID {
-		if err := flowroutefixture.Publish(f.bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: f.owner}); err != nil {
+		if err := flowroutefixture.Publish(f.bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: f.owner, Instance: constructed.Identity}); err != nil {
 			t.Fatalf("publish admitted existing receiver: %v", err)
 		}
 	}

@@ -40,7 +40,6 @@ type testOperatorCapabilities struct {
 	Mailbox                   MailboxAPIStore
 	DecisionCards             decisioncard.Store
 	DecisionAuthority         DecisionCardAuthority
-	TestSetup                 TestSetupStore
 	Idempotency               APIIdempotencyStore
 	Events                    EventPublisher
 	RunControl                RunControlController
@@ -151,7 +150,7 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorDecisionCardHandlers(c.decisionCards()),
 		OperatorRunStartHandlers(RunStartHandlerOptions{Publication: c.publication()}),
 		OperatorEventPublishHandlers(EventPublishHandlerOptions{Publication: c.publication()}),
-		OperatorTestSetupHandlers(TestSetupHandlerOptions{Now: c.Now, Setup: c.TestSetup, Idempotency: c.Idempotency, RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts, SourceArtifact: c.publication().SourceArtifact, Source: c.Source}),
+		OperatorTestSetupHandlers(TestSetupHandlerOptions{Now: c.Now, Idempotency: c.Idempotency, RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts, SourceArtifact: c.publication().SourceArtifact, Source: c.Source}),
 		testOperatorEventReplayHandlers(c),
 		testOperatorRunForkHandlers(c),
 		OperatorRunControlHandlers(RunControlHandlerOptions{Now: c.Now, Controller: c.RunControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts, SelectedForkControls: c.SelectedForkControls}),

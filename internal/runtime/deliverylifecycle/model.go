@@ -894,6 +894,7 @@ type Store interface {
 	ObserveDeliveryContinuations(context.Context, ExecutionAuthority, []string) ([]ContinuationObservation, error)
 	RenewClaim(context.Context, Claim) (ClaimCommit, error)
 	BindAgentSession(context.Context, Claim, string) (ClaimCommit, error)
+	SettleWorkflowNodeSuccess(context.Context, Claim, []string, time.Duration, HandlerRuleSelectionFact) (ClaimCommit, error)
 	SettleSuccess(context.Context, Claim, []string, time.Duration, HandlerRuleSelectionFact) (Snapshot, error)
 	SettleFailure(context.Context, Claim, Settlement) (Snapshot, error)
 	Snapshot(context.Context, string) (Snapshot, error)

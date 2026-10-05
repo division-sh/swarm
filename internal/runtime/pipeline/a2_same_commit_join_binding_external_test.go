@@ -122,12 +122,10 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 			})
 			bus.SetInterceptors(pc)
 			now := time.Now().UTC()
-			if _, err := pc.MaterializeInitialEntry(ctx, owner, runtimepipeline.WorkflowInstance{
+			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 				CurrentState: "dispatching", EntityType: "join_state", Fields: map[string]any{"expected": []any{"a", "b"}},
-			}, now); err != nil {
-				t.Fatalf("materialize existing unarmed root: %v", err)
-			}
+			}, now)
 			load := func() runtimepipeline.WorkflowInstance {
 				t.Helper()
 				instance, found, err := pc.Load(ctx, owner)

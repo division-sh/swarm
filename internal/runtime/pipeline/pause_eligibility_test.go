@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -30,7 +31,7 @@ func TestPausedHandedNodeParksUntilContinueBothStores(t *testing.T) {
 			s := backend.open(t)
 			runID := uuid.NewString()
 			insertGateRecoveryRun(t, s, runID)
-			ctx := withLiveGateExecution(testAuthorActivityContext(t, context.Background()))
+			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			repo := canonicalrouting.RepoRoot(t)
 			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopySelectionRetry(t), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 			if err != nil {
@@ -45,7 +46,9 @@ func TestPausedHandedNodeParksUntilContinueBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bus.SetInterceptors(newGateRecoveryCoordinator(bus, s, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}}))
+			coordinator := newGateRecoveryCoordinator(bus, s, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}})
+			commitKeylessConstructorComponent(t, ctx, s, coordinator, source)
+			bus.SetInterceptors(coordinator)
 			publish := func(name string) events.Event {
 				t.Helper()
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(name), "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())

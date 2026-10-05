@@ -1,0 +1,278 @@
+{
+  "boundary": "Exact 39 measured, individually named findings from the regenerated AST census. No file-wide allowance or future auto-classifier. Runtime interfaces remain typed; SQL/TX stays in existing private backend/startup composition owners.",
+  "rows": [
+    {
+      "file": "internal/runtime/context_manager.go",
+      "enclosing": "(*github.com/division-sh/swarm/internal/runtime.RuntimeContextManager).deactivateBundleHashWithOptions",
+      "kind": "callback-type",
+      "member": "param:releasePreparation",
+      "disposition": "typed-process-local"
+    },
+    {
+      "file": "internal/store/internal/startupownership/flow_readiness_rebind.go",
+      "enclosing": "rebindFlowReadinessSourceSetTx",
+      "kind": "callback-type",
+      "member": "param:commit",
+      "disposition": "private-runtime-adapter"
+    },
+    {
+      "file": "internal/runtime/manager/flow_readiness_rebind.go",
+      "enclosing": "FlowReadinessSourceSetRebindPersistence",
+      "kind": "interface-method",
+      "member": "method:RebindFlowReadinessSourceSet",
+      "disposition": "typed-capability-port"
+    },
+    {
+      "file": "internal/runtime/manager/types.go",
+      "enclosing": "SourceSetTransitionAdmission",
+      "kind": "interface-method",
+      "member": "method:TerminalDrain",
+      "disposition": "typed-process-local"
+    },
+    {
+      "file": "internal/runtime/semanticview/agent_execution_scope.go",
+      "enclosing": "AgentExecutionConstruction",
+      "kind": "interface-method",
+      "member": "method:ValidateAgentExecution",
+      "disposition": "typed-process-local"
+    },
+    {
+      "file": "internal/runtime/startupownership/startupownership.go",
+      "enclosing": "RetainedSession",
+      "kind": "interface-method",
+      "member": "method:RebindFlowReadinessSourceSet",
+      "disposition": "typed-capability-port"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/flow_readiness_rebind.go",
+      "enclosing": "VerifyFlowReadinessRebindCensusTx",
+      "kind": "local-raw-type",
+      "member": "local:rows#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "local-raw-type",
+      "member": "local:result#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/execution_authority.go",
+      "enclosing": "VerifyFlowActivationAttemptProcessTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Row).Scan#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/execution_authority.go",
+      "enclosing": "VerifyFlowActivationAttemptProcessTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Tx).QueryRowContext#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/execution_authority.go",
+      "enclosing": "VerifyFlowActivationAttemptProcessTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.VerifyFlowActivationRetirementBindingTx#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/flow_readiness_rebind.go",
+      "enclosing": "VerifyFlowReadinessRebindCensusTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Rows).Close#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/flow_readiness_rebind.go",
+      "enclosing": "VerifyFlowReadinessRebindCensusTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Rows).Err#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/flow_readiness_rebind.go",
+      "enclosing": "VerifyFlowReadinessRebindCensusTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Rows).Next#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/flow_readiness_rebind.go",
+      "enclosing": "VerifyFlowReadinessRebindCensusTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Rows).Scan#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/flow_readiness_rebind.go",
+      "enclosing": "VerifyFlowReadinessRebindCensusTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Tx).QueryContext#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/lifecycle.go",
+      "enclosing": "loadPostgresLifecycleCell",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Row).Scan#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/lifecycle.go",
+      "enclosing": "loadSQLiteLifecycleCell",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Row).Scan#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/topology_admission.go",
+      "enclosing": "authorizeFlowReadinessMutation",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.VerifyFlowActivationAttemptProcessTx#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_creation_commit.go",
+      "enclosing": "markDynamicFlowCreationOccurrenceCommitted",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Tx).ExecContext#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_creation_commit.go",
+      "enclosing": "markDynamicFlowCreationOccurrenceCommitted",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Tx).ExecContext#2",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "enclosing": "authorizeCurrentFlowActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.VerifyFlowActivationAttemptProcessTx#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "enclosing": "beginDynamicFlowRuntimeActivation",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.VerifyFlowActivationAttemptProcessTx#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "enclosing": "retireDynamicFlowRuntimeActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.VerifyFlowActivationAttemptProcessTx#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Row).Scan#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Tx).ExecContext#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(*database/sql.Tx).QueryRowContext#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:database/sql.(database/sql.Result).RowsAffected#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.AuthorizeDynamicFlowActivationTx#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.VerifyFlowActivationAttemptProcessTx#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.VerifyFlowActivationRetirementBindingTx#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence.loadDynamicFlowRuntimeReadiness#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_resolution.go",
+      "enclosing": "resolveDynamicFlowRuntimeActivation",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.VerifyFlowActivationAttemptProcessTx#1",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/startupownership/flow_readiness_rebind.go",
+      "enclosing": "rebindFlowReadinessSourceSetTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence.VerifyFlowReadinessRebindCensusTx#1",
+      "disposition": "private-runtime-adapter"
+    },
+    {
+      "file": "internal/store/internal/startupownership/flow_readiness_rebind.go",
+      "enclosing": "rebindFlowReadinessSourceSetTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol.(*github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol.Attempt).WithSQL#1",
+      "disposition": "private-runtime-adapter"
+    },
+    {
+      "file": "internal/store/internal/startupownership/flow_readiness_rebind.go",
+      "enclosing": "rebindFlowReadinessSourceSetTx",
+      "kind": "raw-operation",
+      "member": "call:github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence.RebindFlowActivationAttemptTx#1",
+      "disposition": "private-runtime-adapter"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/execution_authority.go",
+      "enclosing": "VerifyFlowActivationAttemptProcessTx",
+      "kind": "raw-type",
+      "member": "param:tx",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/flow_readiness_rebind.go",
+      "enclosing": "VerifyFlowReadinessRebindCensusTx",
+      "kind": "raw-type",
+      "member": "param:tx",
+      "disposition": "private-backend"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "enclosing": "RebindFlowActivationAttemptTx",
+      "kind": "raw-type",
+      "member": "param:tx",
+      "disposition": "private-backend"
+    }
+  ]
+}

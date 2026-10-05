@@ -109,8 +109,8 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				sourceRun, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID, entityID)
+				sourceRun, eventID := uuid.NewString(), uuid.NewString()
+				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
 				request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}

@@ -66,13 +66,14 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				t.Fatalf("marshal config: %v", err)
 			}
 
-			insert := "INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"
+			// Deliberate adapter-component rows, not public construction proof.
+			insert := "INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'test_entity', 'active', TRUE, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
 			if tc.name == "sqlite" {
 				// SQLite uses the portable statement above.
 			} else {
-				insert = "INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, NOW())"
+				insert = "INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, entity_id, entity_type, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7::uuid, 'test_entity', 'active', TRUE, '{}', '{}', '{}', 1, NOW(), NOW(), NOW())"
 			}
-			if _, err := db.ExecContext(ctx, insert, runID, instancePath, "review", "template", string(configRaw), "active"); err != nil {
+			if _, err := db.ExecContext(ctx, insert, runID, instancePath, "review", "template", string(configRaw), "active", entityID); err != nil {
 				t.Fatalf("seed active flow instance: %v", err)
 			}
 			entityInsert := "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, ?, 'test_entity', 'active')"
@@ -109,10 +110,10 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 
 			historicalRunID := uuid.NewString()
 			ensurePipelineTestRun(t, store, historicalRunID)
-			if _, err := db.ExecContext(ctx, insert, historicalRunID, instancePath, "review", "template", string(configRaw), "active"); err != nil {
+			retiredEntityID := uuid.NewString()
+			if _, err := db.ExecContext(ctx, insert, historicalRunID, instancePath, "review", "template", string(configRaw), "active", retiredEntityID); err != nil {
 				t.Fatalf("seed same path in another run: %v", err)
 			}
-			retiredEntityID := uuid.NewString()
 			if _, err := db.ExecContext(ctx, entityInsert, historicalRunID, retiredEntityID, instancePath); err != nil {
 				t.Fatalf("seed same owner in another run: %v", err)
 			}
@@ -161,7 +162,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				if _, err := db.ExecContext(ctx, deleteEntity, runID, instancePath); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := store.LoadRouteRecoveryProjection(ctx, flowIdentity); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
+				if _, err := store.LoadRouteRecoveryProjection(ctx, flowIdentity); err == nil || !strings.Contains(err.Error(), "exactly one matching declared field row") {
 					t.Fatalf("missing owner error = %v", err)
 				}
 				if _, err := db.ExecContext(ctx, entityInsert, runID, entityID, instancePath); err != nil {
@@ -170,7 +171,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				if _, err := db.ExecContext(ctx, entityInsert, runID, uuid.NewString(), instancePath); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := store.LoadRouteRecoveryProjection(ctx, flowIdentity); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
+				if _, err := store.LoadRouteRecoveryProjection(ctx, flowIdentity); err == nil || !strings.Contains(err.Error(), "exactly one matching declared field row") {
 					t.Fatalf("ambiguous owner error = %v", err)
 				}
 				if _, err := db.ExecContext(ctx, deleteEntity, runID, instancePath); err != nil {
@@ -236,9 +237,9 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjectionRejectsTerminatedTimest
 	flowIdentity := testRunScopedWorkflowRoute(ctx, route)
 	config := `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"review/inst-1","flow_path":"review/inst-1"}`
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-	`, runID, route.InstancePath, "review", "template", config, "active", time.Now().UTC()); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, entity_id, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', TRUE, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, runID, route.InstancePath, "review", "template", config, "active", time.Now().UTC(), uuid.NewString()); err != nil {
 		t.Fatalf("seed terminated flow instance: %v", err)
 	}
 	if _, err := store.LoadRouteRecoveryProjection(ctx, flowIdentity); err == nil || !strings.Contains(err.Error(), "active flow instance not found") {

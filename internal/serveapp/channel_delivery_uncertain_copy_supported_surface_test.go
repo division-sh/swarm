@@ -22,7 +22,7 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 					"event_name": "work.requested", "bundle_hash": bundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed",
 				})
-				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				oldMessage := waitChannelAnchorReceipt(t, db, cardID)
 				oldToken, found := telegramCallbackToken(h.provider.Delivery(oldMessage-1), "reject")
 				if !found {

@@ -186,18 +186,13 @@ func requireActivityPublicationReadback(t *testing.T, rt servedControlProofRunti
 	}
 	wantSource := events.RouteIdentity{FlowID: flow, FlowInstance: path}
 	var entityID string
-	err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, path).Scan(&entityID)
-	if err != nil && err != sql.ErrNoRows {
+	if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`, runID, path, flow).Scan(&entityID); err != nil {
 		t.Fatal(err)
 	}
-	if err == nil {
-		wantSource.EntityID = entityID
-		if mode == "root" {
-			// The root's actual materialized entity uses the existing root source
-			// variant; entityless root execution retains its exact run coordinate.
-			wantKind = "root"
-			wantSource = events.RouteIdentity{EntityID: entityID}
-		}
+	wantSource.EntityID = entityID
+	if mode == "root" {
+		wantKind = "root"
+		wantSource = events.RouteIdentity{EntityID: entityID}
 	}
 	wantName := local
 	if flow != "." {

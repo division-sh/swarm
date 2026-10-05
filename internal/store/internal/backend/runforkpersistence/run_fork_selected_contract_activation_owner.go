@@ -159,13 +159,18 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 				Owner:                          runfork.RunForkSelectedContractBranchDivergenceOwner,
 				ForkRunID:                      lineage.ForkRunID,
 				SourceRunID:                    lineage.SourceRunID,
-				ForkEventID:                    lineage.ForkEventID,
+				ForkPoint:                      lineage.ForkPoint,
+				ForkEventID:                    lineage.ForkPoint.EventID,
 				Policy:                         runfork.RunForkSelectedContractSourceAdvancedBranchPolicy,
 				SourceRunStatusAtActivation:    lineage.SourceRunStatus,
 				SourceRunStatusAfterActivation: lineage.SourceRunStatus,
 				SourceFrozen:                   false,
 				SourceAdvancedFacts:            sourceAdvancedFacts,
 				CreatedAt:                      now,
+			}
+			value, err = normalizeSelectedForkBranchDivergence(value)
+			if err != nil {
+				return err
 			}
 			if err := port.diverge(txctx, tx, value); err != nil {
 				return err
@@ -230,8 +235,8 @@ func selectedDeploymentFeedPresentTx(ctx context.Context, tx *sql.Tx, runID stri
 	return present, err
 }
 
-func requireSelectedForkMaterializedWorkTx(ctx context.Context, tx *sql.Tx, runID string, entityCount int) error {
-	if entityCount > 0 {
+func requireSelectedForkMaterializedWorkTx(ctx context.Context, tx *sql.Tx, runID string, constructedCount int) error {
+	if constructedCount > 0 {
 		return nil
 	}
 	present, err := selectedDeploymentFeedPresentTx(ctx, tx, runID)
@@ -239,7 +244,7 @@ func requireSelectedForkMaterializedWorkTx(ctx context.Context, tx *sql.Tx, runI
 		return fmt.Errorf("check selected fork deployment work: %w", err)
 	}
 	if !present {
-		return fmt.Errorf("selected-contract fork activation requires materialized entity or deployment work")
+		return fmt.Errorf("selected-contract fork activation requires constructed instance or deployment work")
 	}
 	return nil
 }

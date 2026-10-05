@@ -947,13 +947,14 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		nuke: newRecordingRuntimeNukeOwners(),
 	}
 	state.observability.events["evt-1"] = mutatingProbeOriginalEvent(t, "evt-1", []string{"agent-a"}, runtimedelivery.StatusDelivered)
+	state.testSetup = &mutatingProbeTestSetupStore{state: state}
 	state.events = &mutatingProbeEventPublisher{
-		state:              state,
-		sourceArtifactFact: mustAPITestPersistedSourceArtifactFact(runStartTestBundleHash),
+		mutatingProbeTestSetupStore: state.testSetup,
+		state:                       state,
+		sourceArtifactFact:          mustAPITestPersistedSourceArtifactFact(runStartTestBundleHash),
 	}
 	state.runForkOperations = newRecordingRunForkOperations()
 	state.runFork = &mutatingProbeRunForkExecutor{state: state}
-	state.testSetup = &mutatingProbeTestSetupStore{state: state}
 	state.runForkAvailability = &recordingRunForkAvailability{
 		rows: map[string]runbundle.Availability{
 			runID:                  runForkAvailable(runID, runStartTestBundleHash),
@@ -1101,7 +1102,6 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 		StandingServices:    s.standing,
 		RuntimeIngress:      s.runtimeIngress,
 		ResetCoordinator:    s.nuke,
-		TestSetup:           s.testSetup,
 		Source:              source,
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
@@ -1203,6 +1203,7 @@ func (s *mutatingProbeIdempotencyStore) WithAPIIdempotency(
 }
 
 type mutatingProbeEventPublisher struct {
+	*mutatingProbeTestSetupStore
 	state                     *mutatingRuntimeProbeState
 	sourceArtifactFact        runtimecorrelation.SourceArtifactFact
 	runCreationErr            error
@@ -1351,8 +1352,9 @@ func (s *mutatingProbeTestSetupStore) SetupScenarioEntities(_ context.Context, r
 		})
 	}
 	return runtimepipeline.ScenarioSetupResult{
-		RunID:    strings.TrimSpace(req.RunID),
-		Entities: entities,
+		Acknowledged: true,
+		RunID:        strings.TrimSpace(req.RunID),
+		Entities:     entities,
 	}, nil
 }
 

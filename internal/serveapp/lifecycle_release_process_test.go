@@ -69,7 +69,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					return
 				}
 
-				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "waiting")
+				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 						"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,

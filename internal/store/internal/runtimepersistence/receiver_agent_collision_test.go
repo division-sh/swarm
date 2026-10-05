@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -98,20 +99,31 @@ func receiverAgentHistoricalProjection(t *testing.T, f receiverConfigActivationF
 	}
 	project := func() {
 		var metadata struct {
-			EntityID     string          `json:"entity_id"`
-			FlowInstance string          `json:"flow_instance"`
-			EntityType   string          `json:"entity_type"`
-			FlowConfig   json.RawMessage `json:"flow_config"`
+			EntityID         string          `json:"entity_id"`
+			FlowInstance     string          `json:"flow_instance"`
+			EntityType       string          `json:"entity_type"`
+			FlowConfig       json.RawMessage `json:"flow_config"`
+			ConstructionKind string          `json:"construction_kind"`
+			FlowTemplate     string          `json:"flow_template"`
+			Mode             string          `json:"mode"`
+			Status           string          `json:"status"`
+			StageDefined     bool            `json:"stage_defined"`
+			CurrentState     string          `json:"current_state"`
+			EnteredStateAt   time.Time       `json:"entered_state_at"`
+			CreatedAt        time.Time       `json:"created_at"`
+			UpdatedAt        time.Time       `json:"updated_at"`
 		}
 		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
 			t.Fatal(err)
 		}
-		if metadata.EntityID != activation.Identity.EntityID || metadata.FlowInstance != activation.Identity.InstancePath {
+		if metadata.EntityID != activation.Identity.EntityID || metadata.FlowInstance != activation.Identity.InstancePath || metadata.ConstructionKind != "constructed" {
 			t.Fatalf("foreign historical metadata: %s", raw)
 		}
 		eventID := "11111111-1111-4111-8111-111111111111"
-		plan := runfork.RunForkPlan{SourceRunID: activation.Readiness.RunID, ForkPoint: runfork.RunForkPoint{Revision: revision}, Entities: []runfork.RunForkEntityState{{EntityID: metadata.EntityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
-			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState, FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType, FlowConfig: metadata.FlowConfig,
+		plan := runfork.RunForkPlan{SourceRunID: activation.Readiness.RunID, ForkPoint: runfork.RunForkPoint{Revision: revision}, Entities: []runfork.RunForkEntityState{{EntityID: metadata.EntityID, CurrentState: metadata.CurrentState, EnteredStateAt: &metadata.EnteredStateAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType, FlowConfig: metadata.FlowConfig,
+			FlowTemplate: metadata.FlowTemplate, Mode: metadata.Mode, Status: metadata.Status, StageDefined: metadata.StageDefined,
+			EnteredStateAt: metadata.EnteredStateAt, CreatedAt: metadata.CreatedAt, UpdatedAt: metadata.UpdatedAt,
 		}}}}
 		plan = plan.WithHistoricalEvents(revision, []string{eventID})
 		target, err := events.NewExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: metadata.FlowInstance, EntityID: metadata.EntityID})

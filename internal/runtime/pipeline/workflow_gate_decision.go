@@ -585,11 +585,11 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	if err != nil {
 		return false, err
 	}
-	preparedState, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, address, runtimeengine.StateMutation{
+	preparedState, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, runtimeengine.EngineMutation{Address: address, State: runtimeengine.StateMutation{
 		Transition: &cause,
 		NextState:  nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
 		TriggeredAt: evt.CreatedAt(), StateCarrier: carrier,
-	})
+	}})
 	if err != nil {
 		return false, err
 	}

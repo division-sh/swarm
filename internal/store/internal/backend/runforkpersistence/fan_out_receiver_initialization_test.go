@@ -15,14 +15,20 @@ import (
 
 func TestFanOutReceiverInitializationDoesNotBecomeChildPublication(t *testing.T) {
 	for _, flow := range []string{".", "worker", "parent/worker"} {
-		for _, supplier := range []string{"node", "flow"} {
-			if flow == "." && supplier == "flow" {
-				continue // Root has no flow activation supplier.
-			}
+		for _, supplier := range []string{"existing", "construction"} {
 			t.Run(flow+"/"+supplier, func(t *testing.T) {
-				plan, capsule := fanOutOwnershipFixture(t, flow, "materializing")
-				plan.SourceRunID = uuid.NewString()
-				if flow == "." {
+				ownership := "materializing"
+				if supplier == "existing" {
+					ownership = "existing"
+				}
+				plan, capsule := fanOutOwnershipFixture(t, flow, ownership)
+				if supplier == "construction" {
+					plan.SourceRunID = uuid.NewString()
+					capsule.EntityID = uuid.NewString()
+					capsule.Receiver.Target = events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: flow, FlowInstance: capsule.Route.InstancePath, EntityID: capsule.EntityID})
+					capsule.ProducerSource = eventtest.StaticFlowRoutingSource(flow, capsule.Route.InstancePath, capsule.EntityID)
+				}
+				if flow == "." && supplier == "construction" {
 					capsule.EntityID = plan.SourceRunID
 					capsule.Route = flowidentity.StoredRoute(".", plan.SourceRunID, plan.SourceRunID)
 					capsule.ProducerSource = eventtest.RootRoutingSource(plan.SourceRunID)
@@ -32,10 +38,10 @@ func TestFanOutReceiverInitializationDoesNotBecomeChildPublication(t *testing.T)
 				capsule.Lineage = events.LineageFromEvent(event)
 				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(capsule.Receiver.Node), Target: capsule.Receiver.Target}
 				var err error
-				if supplier == "flow" {
+				if supplier == "construction" {
 					route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
 				} else {
-					route.Initialization, err = events.AdmitNodeReceiverInitialization(event, route.Target, capsule.Receiver.Node)
+					route.Target, err = events.NewExistingEntityTarget(route.Target.Route())
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -70,7 +76,7 @@ func TestFanOutReceiverInitializationDoesNotBecomeChildPublication(t *testing.T)
 					t.Fatal("projection changed historical trigger or ownership kind")
 				}
 				after, _ := json.Marshal(route)
-				if !bytes.Equal(before, after) || route.Initialization.ValidateEvent(event) != nil {
+				if !bytes.Equal(before, after) || (!route.Initialization.Empty() && route.Initialization.ValidateEvent(event) != nil) {
 					t.Fatal("execution projection mutated source publication")
 				}
 				// Neither the retired full route nor smuggled initialization fields

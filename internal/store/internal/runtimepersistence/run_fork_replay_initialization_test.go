@@ -31,6 +31,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			source := replayInitializedReceiverSource(t)
+			bundle, _ := semanticview.Bundle(source)
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, runID, source), runID)
 			fact, found := correlation.SourceArtifactFactFromContext(ctx)
@@ -74,6 +75,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if err := insertCanonicalEventRecordFixture(ctx, fixture.store, parent); err != nil {
 				t.Fatal(err)
 			}
+			constructHistoricalSourceFixture(t, ctx, fixture.store.(agentFixtureFlowStore), sqliteFlowActivationRequest(bundle, ".", runID, "", runID))
 			trigger := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "work.ready", eventtest.Producer(events.EventProducerNode, mustPersistenceRootNode("source").Key()), "", []byte(`{}`), 0, events.LineageFromEvent(parent), events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())
 			plans, err := eventBus.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: trigger}})
 			if err != nil || len(plans) != 1 {
@@ -98,13 +100,10 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			trigger = command.Commit.Event.Event()
 			t.Logf("source aggregate flow=%q producer=%+v", trigger.FlowInstance(), trigger.RoutingSource().Route())
 			for _, route := range command.Commit.DeliveryRoutes {
-				if !route.Initialization.NodeDelivery() || route.Initialization.ValidateEvent(trigger) != nil {
-					t.Fatal("publication lost canonical node initialization")
+				if !route.Target.ExistingEntity() || !route.Initialization.Empty() {
+					t.Fatal("handler delivery must consume already-constructed receivers")
 				}
 				if route.Recipient.IsAgent() {
-					if route.Materialization.Empty() {
-						t.Fatal("agent lacks exact source dependency")
-					}
 					continue
 				}
 				delivery, err := events.NewDeliveryEvent(trigger, route)
@@ -141,7 +140,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					pending++
 				}
 			}
-			if len(plan.Entities) != 2 || completed != 2 || pending != 2 {
+			if len(plan.Entities) != 3 || completed != 2 || pending != 2 {
 				t.Fatalf("source proof: entities=%d completed nodes=%d pending agents=%d", len(plan.Entities), completed, pending)
 			}
 			if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady {
@@ -178,7 +177,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			corruptBefore := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-			if _, err := owner.ActivateRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), "reconstructed replay receiver contradicts") {
+			if _, err := owner.ActivateRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), "constructed header projection disagrees with its declared field row") {
 				t.Fatalf("corrupt child ownership must reject before replay: %v", err)
 			}
 			if !reflect.DeepEqual(corruptBefore, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
@@ -186,6 +185,76 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			}
 			if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET flow_instance=$1 WHERE run_id=$2 AND entity_id=$3`, receiver.FlowInstance, child.ForkRunID, receiver.EntityID); err != nil {
 				t.Fatal(err)
+			}
+			for _, corrupt := range []struct{ name, column, value, refusal string }{
+				{"wrong_path", "instance_path", "foreign", "constructed header projection disagrees with its declared field row"},
+				{"foreign_template", "flow_template", "unrelated", "reconstructed replay receiver contradicts fixed-revision ownership"},
+				{"wrong_stage", "current_state", "done", "historical workflow state"},
+				{"malformed_bookkeeping", "bookkeeping", "[]", "requires persisted JSON object"},
+			} {
+				t.Run(corrupt.name, func(t *testing.T) {
+					var original string
+					if err := fixture.db.QueryRowContext(ctx, `SELECT `+corrupt.column+` FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, receiver.EntityID).Scan(&original); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET `+corrupt.column+`=$1 WHERE run_id=$2 AND entity_id=$3`, corrupt.value, child.ForkRunID, receiver.EntityID); err != nil {
+						t.Fatal(err)
+					}
+					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+					if _, err := owner.ActivateRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), corrupt.refusal) {
+						t.Fatalf("corrupt receiver %s must refuse: %v", corrupt.name, err)
+					}
+					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+						t.Fatal("rejected corrupt receiver changed durable execution history")
+					}
+					if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET `+corrupt.column+`=$1 WHERE run_id=$2 AND entity_id=$3`, original, child.ForkRunID, receiver.EntityID); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+			t.Run("wrong_run", func(t *testing.T) {
+				foreignRun := uuid.NewString()
+				seedSelectedActivitySourceRun(t, fixture, foreignRun, source)
+				if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET run_id=$1 WHERE run_id=$2 AND entity_id=$3`, foreignRun, child.ForkRunID, receiver.EntityID); err != nil {
+					t.Fatal(err)
+				}
+				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+				if _, err := owner.ActivateRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), "complete workflow target persistence is required") {
+					t.Fatalf("foreign-run header must refuse: %v", err)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+					t.Fatal("foreign-run header refusal changed durable history")
+				}
+				if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET run_id=$1 WHERE run_id=$2 AND entity_id=$3`, child.ForkRunID, foreignRun, receiver.EntityID); err != nil {
+					t.Fatal(err)
+				}
+			})
+			for _, missing := range []struct{ name, table, refusal string }{
+				{"state_only_receiver", "flow_instances", "complete workflow target persistence is required"},
+				{"missing_declared_fields", "entity_state", "constructed header projection disagrees with its declared field row"},
+			} {
+				t.Run(missing.name, func(t *testing.T) {
+					saved := "saved_replay_receiver"
+					if _, err := fixture.db.ExecContext(ctx, `CREATE TABLE `+saved+` AS SELECT * FROM `+missing.table+` WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, receiver.EntityID); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := fixture.db.ExecContext(ctx, `DELETE FROM `+missing.table+` WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, receiver.EntityID); err != nil {
+						t.Fatal(err)
+					}
+					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+					if _, err := owner.ActivateRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), missing.refusal) {
+						t.Fatalf("incomplete receiver must refuse: %v", err)
+					}
+					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+						t.Fatal("incomplete receiver refusal changed durable execution history")
+					}
+					if _, err := fixture.db.ExecContext(ctx, `INSERT INTO `+missing.table+` SELECT * FROM `+saved); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := fixture.db.ExecContext(ctx, `DROP TABLE `+saved); err != nil {
+						t.Fatal(err)
+					}
+				})
 			}
 			before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 			activation, err := owner.ActivateRunFork(ctx, request)
@@ -219,7 +288,6 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					want.AgentIdentity.RunID = child.ForkRunID
 					want.Target = events.MustExistingEntityTarget(want.Target.Route())
 					want.Initialization = events.ReceiverInitialization{}
-					want.Materialization = events.ReceiverMaterializationPlan{}
 					if !reflect.DeepEqual(want, delivery.Route) {
 						t.Fatalf("child route differs from exact initialized owner:\nwant=%+v\ngot=%+v", want, delivery.Route)
 					}

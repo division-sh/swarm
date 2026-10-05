@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -33,10 +33,10 @@ type Check struct {
 }
 
 type checkerContext struct {
-	ctx               context.Context
-	source            semanticview.Source
-	opts              Options
-	entityAssignments map[string]*runtimeengine.EntityAssignmentAnalysis
+	ctx              context.Context
+	source           semanticview.Source
+	opts             Options
+	flowConstructors map[string][]runtimepipeline.FlowConstructor
 
 	mcpDiscoveryLoaded bool
 	mcpDiscoveredTools map[string]runtimemcp.DiscoveredTool
@@ -208,6 +208,7 @@ var bootCheckRegistry = []Check{
 	{ID: "legacy_qualified_subscription", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkLegacyQualifiedSubscription},
 	{ID: "semantic_drift_dead_event_schema", Mode: CheckSource, Severity: "warning", Run: checkSemanticDriftDeadEventSchema},
 	{ID: "entity_writer_coverage", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkEntityWriterCoverage},
+	{ID: "flow_constructor_validation", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkFlowConstructorValidation},
 	{ID: "payload_field_coverage", Mode: CheckSource, Severity: "error", Run: checkPayloadFieldCoverage},
 	{ID: "entity_write_target_compliance", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkEntityWriteTargetCompliance},
 	{ID: "contained_state_operation_compliance", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkContainedStateOperationCompliance},
@@ -565,11 +566,11 @@ func (c *checkerContext) dialectCompliance() []Finding {
 					Location: nodeID,
 				})
 			}
-			if handlerDeclaresConflictingCreateEntityAccumulation(handler) {
+			if handler.CreateEntity {
 				c.dialectFindings = append(c.dialectFindings, Finding{
 					CheckID:  "dialect_compliance",
 					Severity: "error",
-					Message:  fmt.Sprintf("node %s handler %s declares both create_entity and accumulate", nodeID, eventType),
+					Message:  fmt.Sprintf("node %s handler %s uses retired create_entity; construction belongs to the canonical flow constructor", nodeID, eventType),
 					Location: nodeID,
 				})
 			}
@@ -1424,10 +1425,6 @@ func gateNameLocal(v any) string {
 
 func handlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {
 	return len(handler.Rules) > 0 && handlerHasOnComplete(handler)
-}
-
-func handlerDeclaresConflictingCreateEntityAccumulation(handler runtimecontracts.SystemNodeEventHandler) bool {
-	return handler.CreateEntity && handler.Accumulate != nil
 }
 
 func handlerHasOnComplete(handler runtimecontracts.SystemNodeEventHandler) bool {

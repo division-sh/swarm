@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -393,6 +394,25 @@ func (s *pipelineTestDeliveryOwner) RenewClaim(ctx context.Context, claim runtim
 		return runtimedelivery.ClaimCommit{}, result.Err()
 	}
 	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: result.Acknowledged()}, result.Err()
+}
+
+func (s *pipelineTestDeliveryOwner) SettleWorkflowNodeSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.ClaimCommit, error) {
+	if claim.SubscriberClass() != runtimedelivery.SubscriberNode {
+		return runtimedelivery.ClaimCommit{}, errors.New("workflow node success requires a node claim")
+	}
+	var snapshot runtimedelivery.Snapshot
+	result := s.mutateOutcome(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+		if _, err := s.adapter.RenewClaim(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL); err != nil {
+			return err
+		}
+		var err error
+		snapshot, err = s.adapter.SettleSuccess(ctx, attempt, claim, effects, duration, selection)
+		return err
+	})
+	if !result.Acknowledged() {
+		return runtimedelivery.ClaimCommit{}, result.Err()
+	}
+	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: true}, result.Err()
 }
 
 func (s *pipelineTestDeliveryOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (out runtimedelivery.Snapshot, err error) {

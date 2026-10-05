@@ -342,6 +342,25 @@ func (s *runtimeShutdownDeliveryStore) ScanDeliveryContinuations(
 	return page, nil
 }
 
+func (s *runtimeShutdownDeliveryStore) SettleWorkflowNodeSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.ClaimCommit, error) {
+	if claim.SubscriberClass() != runtimedelivery.SubscriberNode {
+		return runtimedelivery.ClaimCommit{}, errors.New("workflow node success requires a node claim")
+	}
+	var snapshot runtimedelivery.Snapshot
+	result := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+		if _, err := s.adapter.RenewClaim(txctx, attempt, claim, runtimedelivery.DefaultLeaseTTL); err != nil {
+			return err
+		}
+		var err error
+		snapshot, err = s.adapter.SettleSuccess(txctx, attempt, claim, effects, duration, selection)
+		return err
+	})
+	if !result.Acknowledged() {
+		return runtimedelivery.ClaimCommit{}, result.Err()
+	}
+	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: true}, result.Err()
+}
+
 func (s *runtimeShutdownDeliveryStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
 	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
 		snapshot, err = s.adapter.SettleSuccess(txctx, attempt, claim, effects, duration, selection)

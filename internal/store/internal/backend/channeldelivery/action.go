@@ -57,7 +57,7 @@ func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel
 	if !found || !resolved.CurrentRender || resolved != expected {
 		return fmt.Errorf("card action page tap is no longer current")
 	}
-	plan, found, err := LoadCurrentPlan(ctx, tx, resolved.DeliveryID, postgres)
+	plan, found, err := LoadDestinationCurrentPlan(ctx, tx, resolved.DeliveryID, postgres)
 	if err != nil {
 		return err
 	}

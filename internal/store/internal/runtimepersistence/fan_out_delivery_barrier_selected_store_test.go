@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -354,18 +355,19 @@ func TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores(
 				name = "completion_commit_wins"
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
-				ctx := testAuthorActivityContext()
-				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				f := newFanOutConstructorFixture(t, backend)
+				owner, db, postgres := f.store.(selectedFanOutOwner), f.db, backend == "postgres"
 				selected := owner.(storeTestDurableEventBusStore)
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
+				fixture := seedFanOutOwnerFixtureWithArtifact(t, f.ctx, db, owner, postgres, 0, base, f.bundle.SourceArtifact)
+				ctx := correlation.WithRunID(f.ctx, fixture.runID)
 				handle, entityID, activation := seedFanOutDeliveryBarrierForLoop(t, ctx, db, fixture, base)
 				seedFanOutBarrierLoopState(t, ctx, db, fixture.runID, entityID, activation, base)
 				advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, base.Add(time.Second))
 				summary := fanoutbarrier.Summary{Total: 0}
 				activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 
-				route := fanOutBarrierRoute("completion-race")
+				route, state := constructFanOutCompletionReceiver(t, ctx, f, "completion_one", base)
 				occurrenceID := runtimegenericschedule.OccurrenceEventID(activationID, base.Add(time.Second))
 				occurrence := fanOutBarrierChildEventWithID(t, fixture, occurrenceID, 700, base.Add(2*time.Second))
 				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, occurrence, []events.DeliveryRoute{route}); err != nil {
@@ -380,7 +382,7 @@ func TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores(
 					}
 					completion := fanoutbarrier.Completion{Handle: handle, Summary: summary}
 					commitFanOutBarrierCompletionForTest(t, ctx, selected, runtimepipeline.WorkflowEngineMutationCommand{
-						EntitylessTarget: route.Target, EntitylessRunID: fixture.runID, FanOutBarrierCompletion: &completion,
+						State: state, FanOutBarrierCompletion: &completion,
 						DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
 							Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Millisecond,
 							RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
@@ -495,18 +497,20 @@ func TestFanOutDeliveryBarrierConcurrentCandidatesCloseExactlyOnceOnBothStores(t
 func TestFanOutDeliveryBarrierCompletionFiresIdempotentlyOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
-			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			f := newFanOutConstructorFixture(t, backend)
+			owner, db, postgres := f.store.(selectedFanOutOwner), f.db, backend == "postgres"
 			selected := owner.(storeTestDurableEventBusStore)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)
+			fixture := seedFanOutOwnerFixtureWithArtifact(t, f.ctx, db, owner, postgres, 0, base, f.bundle.SourceArtifact)
+			ctx := correlation.WithRunID(f.ctx, fixture.runID)
 			handle := seedFanOutDeliveryBarrier(t, ctx, db, fixture, base)
 			advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, base.Add(time.Second))
 			summary := fanoutbarrier.Summary{Total: 0}
 			completion := fanoutbarrier.Completion{Handle: handle, Summary: summary}
-			route := fanOutBarrierRoute("completion")
 			commands := make([]runtimepipeline.WorkflowEngineMutationCommand, 0, 2)
 			for attempt := range 2 {
+				flow := []string{"completion_one", "completion_two"}[attempt]
+				route, state := constructFanOutCompletionReceiver(t, ctx, f, flow, base)
 				event := fanOutBarrierChildEvent(t, fixture, 100+attempt, base.Add(time.Duration(attempt+2)*time.Second))
 				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 					t.Fatal(err)
@@ -516,8 +520,7 @@ func TestFanOutDeliveryBarrierCompletionFiresIdempotentlyOnBothStores(t *testing
 					t.Fatal(err)
 				}
 				commands = append(commands, runtimepipeline.WorkflowEngineMutationCommand{
-					EntitylessTarget:        route.Target,
-					EntitylessRunID:         fixture.runID,
+					State:                   state,
 					FanOutBarrierCompletion: &completion,
 					DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
 						Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Millisecond,
@@ -803,7 +806,7 @@ func seedFanOutDeliveryBarrier(t *testing.T, ctx context.Context, db *sql.DB, fi
 func seedFanOutDeliveryBarrierForLoop(t *testing.T, ctx context.Context, db *sql.DB, fixture fanOutOwnerFixture, at time.Time) (timeridentity.TimerHandle, string, loopruntime.Activation) {
 	t.Helper()
 	entityID := uuid.NewString()
-	activation, err := loopruntime.New(fixture.runID, entityID, "", "retry", "revision_id", fixture.eventID, "work", 3, at)
+	activation, err := loopruntime.New(fixture.runID, entityID, ".", "retry", "revision_id", fixture.eventID, "work", 3, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -849,7 +852,7 @@ func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.
 			target_flow_path,target_node_id,handler_event,join_id,
 			route_scope_key,route_instance_id,route_instance_path,entity_id,routing_source,
 			execution_mode,timer_handle,status,created_at,updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'root','root','root',$12,$13,$14,$15,'armed',$16,$16)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'.','root','root',$12,$13,$14,$15,'armed',$16,$16)
 	`, fixture.runID, fixture.deliveryID, fixture.flowPath, "fan_out", fixture.semanticPath, fixture.bundleHash, digest,
 		ref.FlowPath(), ref.NodeID(), ref.HandlerEvent(), ref.JoinID(), entityID,
 		string(routingRaw), string(executionmode.Live), string(handleRaw), at)
@@ -875,6 +878,7 @@ func seedFanOutBarrierLoopState(t *testing.T, ctx context.Context, db *sql.DB, r
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(buckets)
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "root", ".", "fan_out_fixture", "work", string(raw), at)
 	if _, err := db.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES ($1,$2,'root','fan_out_fixture','work','{}','{"entity_type":"fan_out_fixture"}','{}',$3,1,$4,$4,$4)`, runID, entityID, string(raw), at); err != nil {
 		t.Fatal(err)
 	}
@@ -887,7 +891,7 @@ func updateFanOutBarrierLoopState(t *testing.T, ctx context.Context, db *sql.DB,
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(buckets)
-	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET accumulator=$1,revision=revision+1,updated_at=$2 WHERE run_id=$3 AND entity_id=$4`, string(raw), at, runID, entityID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET accumulator=$1,revision=revision+1,updated_at=$2 WHERE run_id=$3 AND entity_id=$4`, string(raw), at, runID, entityID); err != nil {
 		t.Fatal(err)
 	}
 }

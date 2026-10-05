@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -157,10 +158,12 @@ func seedSingletonCoordinatorPilotInstance(t *testing.T, store *workflowInstance
 	if err != nil {
 		t.Fatal(err)
 	}
+	constructed := constructorUnitIdentity(t, semanticview.Wrap(bundle), runtimecorrelation.RunIDFromContext(ctx), singletoncoordinatorpilot.FlowID)
 	if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      singletoncoordinatorpilot.FlowInstance,
-		StorageRef:      singletoncoordinatorpilot.FlowInstance,
-		EntityID:        entityID,
+		InstanceID:   singletoncoordinatorpilot.FlowInstance,
+		StorageRef:   singletoncoordinatorpilot.FlowInstance,
+		EntityID:     entityID,
+		ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 		WorkflowName:    singletoncoordinatorpilot.FlowID,
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    initial.ID(),

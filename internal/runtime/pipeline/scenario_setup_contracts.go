@@ -25,8 +25,10 @@ type ScenarioSetupEntityRequest struct {
 }
 
 type ScenarioSetupResult struct {
-	RunID    string
-	Entities []ScenarioSetupEntityResult
+	RunID        string
+	Entities     []ScenarioSetupEntityResult
+	Activations  []CommittedFlowInstanceActivation
+	Acknowledged bool
 }
 
 type ScenarioSetupEntityResult struct {

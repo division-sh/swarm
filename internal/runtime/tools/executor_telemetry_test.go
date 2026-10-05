@@ -55,7 +55,8 @@ func selectedForkToolContext(actor models.AgentConfig) context.Context {
 		runID   = "1ebadcb5-66a3-4536-8c7a-06988d82b402"
 		eventID = "a6a7390c-9eed-42aa-b01a-98465051f686"
 	)
-	ctx := models.WithActor(unmanagedToolTestContext(), actor)
+	actor.Identity.RunID = runID
+	ctx := models.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), runID), actor)
 	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
 		RunID:               runID,
@@ -335,7 +336,7 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 	}
 	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-1", ".", "category.assessed")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
-	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
+	ctx := models.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), toolTestRunID), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-emit-1",
 		Identity:      toolTestRootAgentIdentity(t, "agent-emit-1"),
@@ -574,7 +575,7 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 	}
 	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-3", ".", "category.assessed")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
-	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
+	ctx := models.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), toolTestRunID), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-emit-3",
 		Identity:      toolTestRootAgentIdentity(t, "agent-emit-3"),

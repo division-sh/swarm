@@ -226,9 +226,11 @@ func seedProviderTriggerSmokeRuntime(
 		t.Fatalf("marshal sqlite flow config: %v", err)
 	}
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES (?, ?, 'test', 'static', ?, 'active', ?)
-	`, runID, flowInstance, string(configBytes), now); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, slug, name, flow_template, mode, config, status,
+			stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+		VALUES (?, ?, ?, 'default', ?, 'Customer A', 'test', 'static', ?, 'active',
+			1, 'active', '{}', '{}', '{}', 1, ?, ?, ?)
+	`, runID, flowInstance, entityID, entitySlug, string(configBytes), now, now, now); err != nil {
 		t.Fatalf("seed sqlite flow instance: %v", err)
 	}
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `

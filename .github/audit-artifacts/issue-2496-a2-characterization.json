@@ -1,0 +1,319 @@
+{
+  "base": "a2d84f049a157884f9f61a4707c760d18a57d25a",
+  "production_source": "978ce228f3f9e31e971197b481b8f0d02e2c35f6",
+  "boundary": "Preserved integration/characterization receipts; no full-tier, final-head CI, closure or independent approval claim.",
+  "comparison": {
+    "file": "issue-2496-a2-describe-comparison.json.gz",
+    "sha256_uncompressed": "817ed3ba91a4beb24251d653c7c2457fa30eac0623601969a55e593f8fc96431",
+    "bytes_uncompressed": 9107378
+  },
+  "static_red": {
+    "package": "internal/runtime/cataloge2e",
+    "test": "TestStaticDataInvocationGoldenConsumesAdmittedIdentity",
+    "elapsed": 1.723,
+    "expected": "bundle-v2:sha256:a60c6343c372fad590707dc8a17394abe1025a9e50fb8e0be5bab21b8d3aaa81",
+    "admitted": "bundle-v2:sha256:43851a685669cae8d5724e9693cbbb98cf7356e140c90c7af6814b8a115381d5",
+    "receipt_boundary": "Observed terminal output, not a retained raw JSON log."
+  },
+  "receipts": [
+    {
+      "file": "issue-2496-a2-working-paired-history-race.jsonl.gz",
+      "sha256_uncompressed": "82c83758f12af9e2d5c952c530253c5b160539f49dd881c3b498dd1181b7b38f",
+      "bytes_uncompressed": 75493,
+      "root_outcomes": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 63,
+        "fail": 0,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "Action": "pass",
+          "Elapsed": 1.173
+        }
+      ],
+      "failures": [],
+      "source_boundary": "Working-tree integration precursor; not clean committed-head qualification."
+    },
+    {
+      "file": "issue-2496-a2-working-gate-projection.jsonl.gz",
+      "sha256_uncompressed": "7def2d64a0c88795f87226b2873efb4b01a85027b62e3d603999393d4e634c6b",
+      "bytes_uncompressed": 10354,
+      "root_outcomes": {
+        "pass": 2,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 8,
+        "fail": 0,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "Action": "pass",
+          "Elapsed": 3.071
+        }
+      ],
+      "failures": [],
+      "source_boundary": "Working-tree integration precursor; not clean committed-head qualification."
+    },
+    {
+      "file": "issue-2496-a2-authority-update.jsonl.gz",
+      "sha256_uncompressed": "ad18cd2bff41bf31c053ce46142b7eeddb39fada3985da0760b8c93798d6a107",
+      "bytes_uncompressed": 47077,
+      "root_outcomes": {
+        "pass": 0,
+        "fail": 1,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 0,
+        "fail": 1,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/store",
+          "Action": "fail",
+          "Elapsed": 6.821
+        }
+      ],
+      "failures": [
+        "TestPersistenceAuthorityFindingRegistry"
+      ],
+      "source_boundary": "Working-tree integration precursor; not clean committed-head qualification."
+    },
+    {
+      "file": "issue-2496-a2-authority-verify.jsonl.gz",
+      "sha256_uncompressed": "ecb3e50326b959b8efeee3d7c2a12860160f0ac0edbda02492c49a3c5fa26dc9",
+      "bytes_uncompressed": 1771,
+      "root_outcomes": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/store",
+          "Action": "pass",
+          "Elapsed": 3.225
+        }
+      ],
+      "failures": [],
+      "source_boundary": "Working-tree integration precursor; not clean committed-head qualification."
+    },
+    {
+      "file": "issue-2496-a2-67bb-describe.jsonl.gz",
+      "sha256_uncompressed": "30d5e230024cc93026ccfa93371ca8651d62a510c1a24c23ddd12e7633d147a2",
+      "bytes_uncompressed": 1415,
+      "root_outcomes": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/releasee2e",
+          "Action": "fail",
+          "Elapsed": 0,
+          "FailedBuild": "github.com/division-sh/swarm/internal/releasee2e [github.com/division-sh/swarm/internal/releasee2e.test]"
+        }
+      ],
+      "failures": [],
+      "source_boundary": "67bb9caa3; harness compile failure, zero execution credit."
+    },
+    {
+      "file": "issue-2496-a2-source-describe.jsonl.gz",
+      "sha256_uncompressed": "b0c2406935eafe7b2258cfc9d366495ccc0e6e3267c5094f630014a405dcea04",
+      "bytes_uncompressed": 907,
+      "root_outcomes": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/releasee2e",
+          "Action": "pass",
+          "Elapsed": 0.005
+        }
+      ],
+      "failures": [],
+      "source_boundary": "978ce228f; wrong package, zero tests and zero execution credit."
+    },
+    {
+      "file": "issue-2496-a2-source-cli-describe.jsonl.gz",
+      "sha256_uncompressed": "a43a1195b015ad2918a6027aa443a976ea74aadd7ed9ce7387c2bb4619ca50d1",
+      "bytes_uncompressed": 14434601,
+      "root_outcomes": {
+        "pass": 0,
+        "fail": 1,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 19,
+        "fail": 27,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/cliapp",
+          "Action": "fail",
+          "Elapsed": 107.253
+        }
+      ],
+      "failures": [
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-json",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-text",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-text",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-json",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-json",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-json",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-json",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-json",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-text",
+        "TestReadProofFactoringCompiledDescribe"
+      ],
+      "source_boundary": "978ce228f committed Go/spec; original master snapshot yields26 differences/19 unchanged. Not qualification."
+    },
+    {
+      "file": "issue-2496-a2-master-describe-capture.jsonl.gz",
+      "sha256_uncompressed": "d0a7a179636024355e252fbb435368a88584ef238c9085053850784a4b7993ca",
+      "bytes_uncompressed": 103359,
+      "root_outcomes": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 46,
+        "fail": 0,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/cliapp",
+          "Action": "pass",
+          "Elapsed": 102.096
+        }
+      ],
+      "failures": [],
+      "source_boundary": "Pinned a2d84f049 clean master baseline control."
+    },
+    {
+      "file": "issue-2496-a2-master-describe-exact-before.jsonl.gz",
+      "sha256_uncompressed": "b3cdf1600fa5c7224e5ae5a936ded7683585da988d046e97609cccbe0228bb74",
+      "bytes_uncompressed": 14410402,
+      "root_outcomes": {
+        "pass": 0,
+        "fail": 1,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 19,
+        "fail": 27,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/cliapp",
+          "Action": "fail",
+          "Elapsed": 81.567
+        }
+      ],
+      "failures": [
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-text",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-json",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-json",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-text",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-json",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-json",
+        "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-json",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-text",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-no-color",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-json",
+        "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-json",
+        "TestReadProofFactoringCompiledDescribe"
+      ],
+      "source_boundary": "Pinned a2d84f049 production;26 expected hashes changed only to expose exact original stdout. Intentional characterization RED, not regression or qualification."
+    },
+    {
+      "file": "issue-2496-a2-static-golden-update.jsonl.gz",
+      "sha256_uncompressed": "4d5d6d64e0b40e53cd5f4c1f8d1c6c7cfad3c0886130cf7ca80384ec359eab67",
+      "bytes_uncompressed": 1581,
+      "root_outcomes": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "packages": [
+        {
+          "Package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "Action": "pass",
+          "Elapsed": 10.593
+        }
+      ],
+      "failures": [],
+      "source_boundary": "Native structured golden regeneration, not qualification."
+    }
+  ]
+}

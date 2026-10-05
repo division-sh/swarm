@@ -9,9 +9,12 @@ import (
 // NewTerminalCatalog is only for tests whose subject is not stage admission.
 // Stage identity tests must use the selected compiled topology instead.
 func NewTerminalCatalog(workflow []string, flows map[string][]string) runlifecycle.TerminalCatalog {
-	owner := terminalFixture{workflow: makeSet(workflow), flows: make(map[string]map[string]struct{}, len(flows))}
+	owner := terminalFixture{flows: make(map[string]map[string]struct{}, len(flows))}
 	for flow, states := range flows {
 		owner.flows[flow] = makeSet(states)
+	}
+	if len(workflow) != 0 {
+		owner.flows["."] = makeSet(workflow)
 	}
 	catalog, err := runlifecycle.NewCompiledTerminalCatalog(owner)
 	if err != nil {
@@ -21,8 +24,7 @@ func NewTerminalCatalog(workflow []string, flows map[string][]string) runlifecyc
 }
 
 type terminalFixture struct {
-	workflow map[string]struct{}
-	flows    map[string]map[string]struct{}
+	flows map[string]map[string]struct{}
 }
 
 func (terminalFixture) Valid() bool { return true }
@@ -38,11 +40,7 @@ func (f terminalFixture) Terminal(flowTemplate, flowInstance, state string) (boo
 			return terminal, true
 		}
 	}
-	if flowInstance != "" || len(f.workflow) == 0 {
-		return false, false
-	}
-	_, terminal := f.workflow[state]
-	return terminal, true
+	return false, false
 }
 
 func makeSet(states []string) map[string]struct{} {

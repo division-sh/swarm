@@ -547,6 +547,7 @@ func projectDeliveryCandidates(plans []channeldelivery.Plan) []render.Candidate 
 				DeliveryEpoch: plan.DeliveryEpoch, ExternalAccountRef: plan.ExternalAccountRef,
 				ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope},
 			State: plan.State, CurrentRenderID: plan.CurrentRenderID, CurrentReceiptID: plan.CurrentReceiptID,
+			RecoveryPending: plan.RecoveryPending,
 		})
 	}
 	return candidates

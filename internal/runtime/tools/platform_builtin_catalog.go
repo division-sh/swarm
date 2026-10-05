@@ -244,20 +244,6 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 				"value":         anyValueSchema,
 			}, "entity_id", "field", "value"),
 		},
-		"create_entity": {
-			Category:    "entity_persistence",
-			Description: "Create a new entity_state row from the inferred flow-owned contract.",
-			InputSchema: ObjectSchema(map[string]any{
-				"flow_instance": map[string]any{"type": "string"},
-				"name":          map[string]any{"type": "string"},
-				"initial_state": map[string]any{"type": "string"},
-				"fields": map[string]any{
-					"type":                 "object",
-					"properties":           map[string]any{},
-					"additionalProperties": true,
-				},
-			}, "flow_instance"),
-		},
 		"query_entities": {
 			Category:    "entity_persistence",
 			Description: "Query entity_state rows using validated selectors and optional grouping.",
@@ -315,21 +301,12 @@ func existingEntityFlowInstanceSchema() map[string]any {
 }
 
 func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readContracts []entityruntime.Contract, readTargetSchema map[string]any) map[string]builtinToolDraft {
-	topLevelFields := entityruntime.FieldNames(contract)
 	writablePaths := entityToolWritablePathNames(contract)
 	filterSelectors := entityToolReadLeafSelectorNames(readContracts)
 	selectableSelectors := entityToolReadSelectableFieldNames(readContracts)
 	filterProperties := make(map[string]any, len(filterSelectors))
 	for _, name := range filterSelectors {
 		filterProperties[name] = entityToolReadFilterPropertySchema(readContracts, name)
-	}
-	fieldProperties := make(map[string]any, len(topLevelFields))
-	for _, name := range topLevelFields {
-		decl, err := entityruntime.FieldDecl(contract, name)
-		if err != nil {
-			continue
-		}
-		fieldProperties[name] = entityContractJSONSchemaWithRefinements(contract, decl.Type, decl.Refinements, true, map[string]struct{}{})
 	}
 	selectorEnum := make([]any, 0, len(selectableSelectors))
 	for _, name := range selectableSelectors {
@@ -376,20 +353,6 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 		}
 	}
 	entries := map[string]builtinToolDraft{
-		"create_entity": {
-			Category:    "entity_persistence",
-			Description: "Create a new entity_state row from the inferred flow-owned contract.",
-			InputSchema: ObjectSchema(map[string]any{
-				"flow_instance": map[string]any{"type": "string"},
-				"name":          map[string]any{"type": "string"},
-				"initial_state": map[string]any{"type": "string"},
-				"fields": map[string]any{
-					"type":                 "object",
-					"properties":           fieldProperties,
-					"additionalProperties": false,
-				},
-			}, "flow_instance"),
-		},
 		"get_entity": {
 			Category:    "entity_persistence",
 			Description: "Read a full entity_state row by entity id.",

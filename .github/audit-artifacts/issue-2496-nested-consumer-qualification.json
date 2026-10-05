@@ -1,0 +1,158 @@
+{
+  "schema": 1,
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "receipts": [
+    {
+      "receipt": "/tmp/agent-e-2496-template-header-proof.log",
+      "receipt_sha256": "36883497961cc064b697e059bfebcb81b1dc0d01a82570c930e943301a04e75a",
+      "first_test_event": "2026-10-03T02:42:03.459926329Z",
+      "last_test_event": "2026-10-03T02:48:54.592718781Z",
+      "package_results": [
+        {
+          "action": "fail",
+          "elapsed": 411.133
+        }
+      ],
+      "backend_cells": [
+        {
+          "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/default_sqlite",
+          "action": "fail",
+          "elapsed": 106.6
+        },
+        {
+          "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/explicit_postgres",
+          "action": "fail",
+          "elapsed": 104.02
+        },
+        {
+          "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores/default_sqlite",
+          "action": "fail",
+          "elapsed": 102.08
+        },
+        {
+          "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores/explicit_postgres",
+          "action": "fail",
+          "elapsed": 98.39
+        }
+      ],
+      "source_head": "869ff6e9a",
+      "profile": "managed -race -count=1; no deadline/capacity bypass",
+      "exit_code": 1,
+      "classification": "diagnostic or regression failure, no closure credit"
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-static-sibling-diagnostic.log",
+      "receipt_sha256": "ffc178b47babe5e8c712af72c12de16213f5a7d1f62dac8c4962e0fba5f2b1f1",
+      "first_test_event": "2026-10-03T02:49:44.1721868Z",
+      "last_test_event": "2026-10-03T02:50:05.070208458Z",
+      "package_results": [
+        {
+          "action": "fail",
+          "elapsed": 20.898
+        }
+      ],
+      "backend_cells": [
+        {
+          "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores/default_sqlite",
+          "action": "fail",
+          "elapsed": 11.83
+        },
+        {
+          "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores/explicit_postgres",
+          "action": "fail",
+          "elapsed": 9.03
+        }
+      ],
+      "source_head": "244d94486",
+      "profile": "managed -race -count=1; no deadline/capacity bypass",
+      "exit_code": 1,
+      "classification": "diagnostic or regression failure, no closure credit"
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-static-sibling-preflight-diagnostic.log",
+      "receipt_sha256": "b6ccbeff81119cdb0ffb371f6e9054f77755d5b70fe7d3e1a21715d2b43adc48",
+      "first_test_event": "2026-10-03T03:05:32.132890969Z",
+      "last_test_event": "2026-10-03T03:05:52.98955848Z",
+      "package_results": [
+        {
+          "action": "fail",
+          "elapsed": 20.857
+        }
+      ],
+      "backend_cells": [
+        {
+          "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores/default_sqlite",
+          "action": "fail",
+          "elapsed": 11.73
+        },
+        {
+          "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores/explicit_postgres",
+          "action": "fail",
+          "elapsed": 9.08
+        }
+      ],
+      "source_head": "900eb2fdd",
+      "profile": "managed -race -count=1; no deadline/capacity bypass",
+      "exit_code": 1,
+      "classification": "diagnostic or regression failure, no closure credit"
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-template-causal-diagnostic.log",
+      "receipt_sha256": "b58b6a89d81c6627323fdce2e30fe1d915392ea54d80dec527e95bee52e4eea9",
+      "first_test_event": "2026-10-03T03:06:38.154046486Z",
+      "last_test_event": "2026-10-03T03:10:08.381502761Z",
+      "package_results": [
+        {
+          "action": "fail",
+          "elapsed": 210.227
+        }
+      ],
+      "backend_cells": [
+        {
+          "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/default_sqlite",
+          "action": "fail",
+          "elapsed": 106.39
+        },
+        {
+          "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/explicit_postgres",
+          "action": "fail",
+          "elapsed": 103.79
+        }
+      ],
+      "source_head": "7b894f2a2",
+      "profile": "managed -race -count=1; no deadline/capacity bypass",
+      "exit_code": 1,
+      "classification": "diagnostic or regression failure, no closure credit"
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-static-constructor-proof.log",
+      "receipt_sha256": "2ebd1ef0850827157b7a7bd6b9079f476e34c73a4895dc8b0f066f9ecb8c0ab5",
+      "first_test_event": "2026-10-03T03:10:54.731942889Z",
+      "last_test_event": "2026-10-03T03:11:22.182603582Z",
+      "package_results": [
+        {
+          "action": "pass",
+          "elapsed": 27.451
+        }
+      ],
+      "backend_cells": [
+        {
+          "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores/default_sqlite",
+          "action": "pass",
+          "elapsed": 15.98
+        },
+        {
+          "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores/explicit_postgres",
+          "action": "pass",
+          "elapsed": 10.43
+        }
+      ],
+      "source_head": "ee9ca10ac",
+      "profile": "managed -race -count=1; no deadline/capacity bypass",
+      "exit_code": 0,
+      "classification": "eager initial-tree fixture migration, strengthened positive/refusal proof"
+    }
+  ],
+  "gate_addendum": "https://github.com/division-sh/swarm/issues/2496#issuecomment-5964992264",
+  "local_only_instrumentation": "7b894f2a2 raw-error print removed at6e98e0548; neither instrumentation commit is integrated or pushed"
+}

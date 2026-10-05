@@ -28,19 +28,19 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
 					t.Fatal(err)
 				}
-				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate)
+				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
 				waitChannelAnchorReceipt(t, db, standingCard)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
 					"idempotency_key": "source-lifecycle-seed",
 				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				messageID := waitChannelAnchorReceipt(t, db, card)
 				token, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve")
 				if !ok {
 					t.Fatal("source-lifecycle card lacks frozen control")
 				}
-				waitChannelDeliverySendsSettled(t, db)
+				waitChannelDeliverySendsSettled(t, db, backend)
 				frozen := readChannelSourceHistory(t, db, card)
 				var originalSource []byte
 				if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&originalSource); err != nil {
@@ -111,7 +111,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						},
 					})
 					waitChannelRejectedCallback(t, db, rejectedToken)
-					waitChannelDeliverySendsSettled(t, db)
+					waitChannelDeliverySendsSettled(t, db, backend)
 					for _, table := range []string{"operator_channel_action_intents", "operator_channel_text_intents"} {
 						var count int
 						if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table + ` WHERE state='settled'`).Scan(&count); err != nil || count == 0 {
@@ -175,7 +175,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&successorRun); err != nil {
 							t.Fatal(err)
 						}
-						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate)
+						freshCard := waitChannelAnchorCard(t, db, successorRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
 						if freshCard == standingCard {
 							t.Fatal("retained reset reused predecessor standing card")
 						}
@@ -274,8 +274,42 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					})
 					params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": uuid.NewString()}
 					var fork apiv1.RunForkExecutionResult
-					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.fork", params, &fork)
-					child := waitChannelAnchorCard(t, db, fork.ForkRunID, decisioncard.AnchorKindStageGate)
+					response := requestServedJSONRPC(t, h.rpcEndpoint(), "run.fork", params)
+					if response.Error != nil {
+						var failure sql.NullString
+						readErr := db.QueryRow(`SELECT CAST(failure_json AS TEXT) FROM run_fork_operations WHERE idempotency_key=$1`, params["idempotency_key"]).Scan(&failure)
+						t.Fatalf("public fork failed: %+v failure=%s read=%v\n%s", response.Error, failure.String, readErr, h.process.outputString())
+					}
+					if err := json.Unmarshal(response.Result, &fork); err != nil {
+						t.Fatal(err)
+					}
+					var supersessionCount, exactLineageCount int
+					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_superseded'`, fork.ForkRunID).Scan(&supersessionCount); err != nil {
+						t.Fatal(err)
+					}
+					if err := db.QueryRow(`SELECT COUNT(*) FROM events e
+						JOIN run_fork_selected_contract_executions x ON x.fork_event_id=e.source_event_id AND x.fork_run_id=e.run_id
+						WHERE e.run_id=$1 AND e.event_name='mailbox.card_superseded' AND x.source_event_id=$2`, fork.ForkRunID, frontier.EventID).Scan(&exactLineageCount); err != nil {
+						t.Fatal(err)
+					}
+					if supersessionCount != 1 || exactLineageCount != supersessionCount {
+						t.Fatalf("fork stage exit lost its selected frontier: supersessions=%d exact=%d", supersessionCount, exactLineageCount)
+					}
+					child := waitChannelAnchorCardInState(t, db, fork.ForkRunID, decisioncard.AnchorKindStageGate, "reviews", decisioncard.StatusPending)
+					var retiredEvent []byte
+					if err := db.QueryRow(`SELECT payload FROM events WHERE run_id=$1 AND event_name='mailbox.card_superseded'`, fork.ForkRunID).Scan(&retiredEvent); err != nil {
+						t.Fatal(err)
+					}
+					var retired struct {
+						CardID string `json:"card_id"`
+					}
+					if err := json.Unmarshal(retiredEvent, &retired); err != nil || retired.CardID == "" || retired.CardID == child {
+						t.Fatalf("fork supersession has no exact predecessor: %s err=%v", retiredEvent, err)
+					}
+					var retiredCards int
+					if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE run_id=$1 AND card_id=$2 AND status='superseded'`, fork.ForkRunID, retired.CardID).Scan(&retiredCards); err != nil || retiredCards != 1 {
+						t.Fatalf("fork stage exit lost exact predecessor card retirement: count=%d err=%v", retiredCards, err)
+					}
 					if child == card || fork.ForkRunID == seed.RunID {
 						t.Fatal("fork reused parent card/run identity")
 					}
@@ -332,7 +366,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					ordinary := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 						"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString(),
 					})
-					ordinaryCard := waitChannelAnchorCard(t, db, ordinary.RunID, decisioncard.AnchorKindStageGate)
+					ordinaryCard := waitChannelAnchorCard(t, db, ordinary.RunID, decisioncard.AnchorKindStageGate, "reviews")
 					ordinaryMessage := waitChannelAnchorReceipt(t, db, ordinaryCard)
 					ordinaryToken, ok := telegramCallbackToken(h.provider.Delivery(ordinaryMessage-1), "approve")
 					if !ok {
@@ -340,7 +374,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 					postChannelSourceControl(t, callback, signing, ordinaryCard, ordinaryToken, ordinaryMessage)
 					waitChannelAnchorDecision(t, db, ordinaryCard)
-					waitChannelDeliverySendsSettled(t, db)
+					waitChannelDeliverySendsSettled(t, db, backend)
 					h.stop(t)
 					h.start(t)
 					callback, signing, _ = h.provider.Registration()

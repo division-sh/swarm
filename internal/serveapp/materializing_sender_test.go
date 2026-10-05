@@ -2,11 +2,14 @@ package serveapp
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/lib/pq"
+	"modernc.org/sqlite"
 )
 
 func TestMaterializingSenderReachesExistingRequiredReceiverBothStores(t *testing.T) {
@@ -34,10 +37,10 @@ func TestMaterializingSenderReachesExistingRequiredReceiverBothStores(t *testing
 
 func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
-		for _, stateOnly := range []bool{false, true} {
+		for _, rejectMissingHeader := range []bool{false, true} {
 			name := "complete"
-			if stateOnly {
-				name = "state_only"
+			if rejectMissingHeader {
+				name = "missing_header_refused"
 			}
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
 				rt, _, restart := newRetainedMailboxCompletionRuntime(t, backend, canonicalrouting.CopyMaterializingSenderExistingReceiver(t, true))
@@ -47,14 +50,26 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 				if err := rt.DB.QueryRow(`SELECT entity_id,flow_instance FROM entity_state WHERE run_id=$1`, seed.RunID).Scan(&entityID, &instance); err != nil {
 					t.Fatal(err)
 				}
-				if stateOnly {
-					// State-only ownership is an explicitly supported persistence shape.
-					result, err := rt.DB.Exec(`DELETE FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, seed.RunID, instance)
-					if err != nil {
-						t.Fatal(err)
+				if rejectMissingHeader {
+					before := mailboxCompletionRunEffects(t, rt, seed.RunID)
+					companions := readForkReceiverCompanions(t, rt, seed.RunID, instance)
+					_, err := rt.DB.Exec(`DELETE FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, seed.RunID, instance)
+					if backend == servedparity.BackendExplicitPostgres {
+						var constraint *pq.Error
+						if !errors.As(err, &constraint) || constraint.Code != "23503" {
+							t.Fatalf("missing constructed header did not fail foreign-key integrity: %v", err)
+						}
+					} else {
+						var constraint *sqlite.Error
+						if !errors.As(err, &constraint) || constraint.Code() != 787 {
+							t.Fatalf("missing constructed header did not fail foreign-key integrity: %v", err)
+						}
 					}
-					if n, err := result.RowsAffected(); err != nil || n != 1 {
-						t.Fatalf("remove exact companion: rows=%d err=%v", n, err)
+					if after := mailboxCompletionRunEffects(t, rt, seed.RunID); !reflect.DeepEqual(before, after) {
+						t.Fatal("refused header removal changed state, publications or receiver delivery")
+					}
+					if after := readForkReceiverCompanions(t, rt, seed.RunID, instance); !reflect.DeepEqual(companions, after) {
+						t.Fatal("refused header removal changed construction or attachment evidence")
 					}
 				}
 				params := map[string]any{"event_name": "start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"case_id": "second"}, "idempotency_key": "update"}
@@ -97,7 +112,7 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 	}
 }
 
-func TestProspectiveTerminalReceiverRefusesWithoutStateOrPublicationBothStores(t *testing.T) {
+func TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyProspectiveTerminalSender(t))
@@ -113,10 +128,24 @@ func TestProspectiveTerminalReceiverRefusesWithoutStateOrPublicationBothStores(t
 			if err := rt.DB.QueryRow(`SELECT count(*) FROM event_deliveries WHERE event_id=$1 AND status='dead_letter'`, seed.EventID).Scan(&failed); err != nil {
 				t.Fatal(err)
 			}
-			// The durable failure envelope redacts internal causes. The companion
-			// real-planner test asserts TerminalReceiverError at the exact handoff.
-			if states != 0 || publications != 0 || failed != 1 {
+			// Construction precedes execution. A rejected handler must preserve
+			// its initial header/fields, not erase the successfully constructed tree.
+			if states != 1 || publications != 0 || failed != 1 {
 				t.Fatalf("terminal planning states=%d publications=%d refused=%d; %s", states, publications, failed, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+			}
+			var entityID, stage, fields string
+			var headerRevision, fieldRevision, mutations int
+			if err := rt.DB.QueryRow(`SELECT fi.entity_id,fi.current_state,fi.revision,CAST(es.fields AS TEXT),es.revision
+				FROM flow_instances fi JOIN entity_state es ON es.run_id=fi.run_id AND es.entity_id=fi.entity_id AND es.flow_instance=fi.instance_path
+				WHERE fi.run_id=$1 AND fi.instance_path=$2 AND fi.flow_template='.'`, seed.RunID, seed.RunID).Scan(&entityID, &stage, &headerRevision, &fields, &fieldRevision); err != nil {
+				t.Fatal(err)
+			}
+			var values map[string]any
+			if err := json.Unmarshal([]byte(fields), &values); err != nil || len(values) != 0 || entityID != seed.RunID || stage != "waiting" || headerRevision != 1 || fieldRevision != 1 {
+				t.Fatalf("rejected handler changed construction: entity=%s stage=%s revisions=%d/%d fields=%s err=%v", entityID, stage, headerRevision, fieldRevision, fields, err)
+			}
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND domain='authored_field'`, seed.RunID).Scan(&mutations); err != nil || mutations != 0 {
+				t.Fatalf("rejected handler journaled business mutations=%d err=%v", mutations, err)
 			}
 		})
 	}

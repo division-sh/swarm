@@ -20,7 +20,7 @@ func projectRunForkStageEntry(source timeridentity.StageEntryRef, sourceRunID, f
 	route := flowidentity.StoredRoute(source.FlowScope, source.InstanceID, projection.Source.FlowInstance)
 	root := projection.Source == (runfork.EntityIdentity{EntityID: sourceRunID, FlowInstance: sourceRunID})
 	if root {
-		route = flowidentity.StoredRoute(sourceRunID, sourceRunID, sourceRunID)
+		route = flowidentity.StoredRoute(".", sourceRunID, sourceRunID)
 	}
 	if err := source.RequireOwner(sourceRunID, route.ScopeKey, route.InstanceID, route.InstancePath, projection.Source.EntityID, source.Stage); err != nil {
 		return timeridentity.StageEntryRef{}, err
@@ -29,7 +29,7 @@ func projectRunForkStageEntry(source timeridentity.StageEntryRef, sourceRunID, f
 	child := source
 	child.RunID, child.EntityID = forkRunID, projection.Fork.EntityID
 	if root {
-		child.FlowScope, child.InstanceID, child.InstancePath = forkRunID, forkRunID, forkRunID
+		child.FlowScope, child.InstanceID, child.InstancePath = ".", forkRunID, forkRunID
 	}
 	if child.OriginRunID == "" {
 		child.OriginRunID = source.RunID

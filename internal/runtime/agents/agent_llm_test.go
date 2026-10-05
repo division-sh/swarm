@@ -23,6 +23,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -33,8 +34,10 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -956,6 +959,15 @@ func (b *directiveFactoryPublishBus) PublishDirectRoutes(_ context.Context, evt 
 	return nil
 }
 
+type directiveFactoryConstructionLoader struct {
+	owner    flowidentity.RunScopedFlowInstance
+	instance pipeline.WorkflowInstance
+}
+
+func (l directiveFactoryConstructionLoader) Load(_ context.Context, owner flowidentity.RunScopedFlowInstance) (pipeline.WorkflowInstance, bool, error) {
+	return l.instance, owner == l.owner, nil
+}
+
 func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, bundle *runtimecontracts.WorkflowContractBundle) (*LLMAgent, *directiveFactoryPublishBus) {
 	t.Helper()
 	cfg = withTestResolvedIntent(t, cfg, "You coordinate workflow launch.")
@@ -967,10 +979,28 @@ func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime
 	authority := runtimeauthority.NewSourceProvider(source)
 	emitRegistry := runtimetools.NewEmitRegistry(source, authority)
 	bus := &directiveFactoryPublishBus{}
+	var construction runtimetools.WorkflowInstanceLoader
+	if cfg.Identity.Route.Presence != agentidentity.RouteRoot {
+		// This component fixture supplies exact constructor facts, not live attachment proof.
+		instance := flowidentity.Derive(source, cfg.FlowID, cfg.Identity.Route.InstanceID)
+		instance.EntityID = cfg.EntityID
+		if err := instance.ValidateConstruction(source, cfg.Identity.RunID); err != nil {
+			t.Fatal(err)
+		}
+		owner, err := flowidentity.NewRunScopedFlowInstance(cfg.Identity.RunID, instance.Route())
+		if err != nil {
+			t.Fatal(err)
+		}
+		construction = directiveFactoryConstructionLoader{owner: owner, instance: pipeline.WorkflowInstance{
+			WorkflowName: instance.TemplateID, StorageRef: instance.InstancePath,
+			InstanceID: instance.InstanceID, EntityID: instance.EntityID,
+		}}
+	}
 	exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 		WorkflowSource:    source,
 		AuthorityProvider: authority,
 		EmitRegistry:      emitRegistry,
+		WorkflowInstances: construction,
 	})
 
 	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: modelRuntime}, exec, LLMAgentOptions{})
@@ -1068,6 +1098,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{*flow},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"campaign-flow": flow.Schema},
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"campaign-flow/campaign-coordinator": {Kind: "agent", FlowID: "campaign-flow", LocalID: "campaign-coordinator", Full: owner},
@@ -1091,6 +1122,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 			},
 		},
 	}
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "campaign-flow"))
 	rt := &directiveFactoryRuntime{
 		steps: []*llm.Response{
 			{Message: llm.Message{Role: "assistant", Content: "I will trigger the workflow now."}},

@@ -34,6 +34,29 @@ func proveRootReplyBoundary(t *testing.T, rootRequester bool) {
 			t.Run(name, func(t *testing.T) {
 				root := canonicalrouting.CopyRootReplyBoundary(t, rootRequester, explicit)
 				h := newRuntimeHarnessForBackend(t, root, backend, true)
+				t.Cleanup(func() {
+					if !t.Failed() {
+						return
+					}
+					rows, err := h.db.Query(`SELECT CAST(e.event_id AS TEXT),e.event_name,
+						COALESCE(r.outcome,''),COALESCE(r.reason_code,'')
+						FROM events e LEFT JOIN event_receipts r ON r.event_id=e.event_id
+						AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
+						ORDER BY e.created_at,e.event_id LIMIT 100`)
+					if err != nil {
+						t.Logf("reply publication diagnostic: %v", err)
+						return
+					}
+					defer rows.Close()
+					for rows.Next() {
+						var id, name, outcome, reason string
+						if err := rows.Scan(&id, &name, &outcome, &reason); err != nil {
+							t.Logf("reply publication diagnostic: %v", err)
+							return
+						}
+						t.Logf("reply publication: event=%s name=%s outcome=%s reason=%s", id, name, outcome, reason)
+					}
+				})
 				steps := []catalogTriggerStep{
 					{Event: "request.started", Payload: map[string]any{"account_id": "account-a", "request_id": "request-one"}},
 					{Event: "request.started", Payload: map[string]any{"account_id": "account-a", "request_id": "request-two"}},
@@ -55,6 +78,9 @@ func proveRootReplyBoundary(t *testing.T, rootRequester bool) {
 				h.waitForExpectedEmittedEvents(expected, 20*time.Second)
 				h.waitForCatalogStoreQuiescence(20 * time.Second)
 				assertRootReplyEvidence(t, h, expected, 3)
+				if rootRequester {
+					assertConstructedRootReplyOrigins(t, h)
+				}
 				assertRootReplyRefusals(t, h, explicit)
 				// Discarding the original acknowledgments and replaying the same
 				// requests must consume committed evidence, never resend effects.
@@ -80,6 +106,42 @@ func proveRootReplyBoundary(t *testing.T, rootRequester bool) {
 				assertRootReplyEvidence(t, h, expected, 3)
 				assertRootReplyRefusals(t, h, explicit)
 			})
+		}
+	}
+}
+
+func assertConstructedRootReplyOrigins(t *testing.T, h *runtimeHarness) {
+	t.Helper()
+	var reader bus.PreparedPublishEventReader = h.pg
+	if h.sqlite != nil {
+		reader = h.sqlite
+	}
+	rows, err := h.db.QueryContext(h.ctx, `SELECT CAST(request_event_id AS TEXT)
+		FROM reply_contexts WHERE run_id=$1 ORDER BY request_event_id`, catalogRuntimeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		t.Fatal(err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := events.RouteIdentity{FlowID: ".", FlowInstance: catalogRuntimeRunID, EntityID: catalogRuntimeRunID}
+	for _, id := range ids {
+		request, found, err := reader.LoadPreparedPublishEvent(h.ctx, id)
+		if err != nil || !found || request.Event.Event().RoutingSource().Kind() != events.RoutingSourceStaticFlow || request.Event.Event().SourceRoute() != want {
+			t.Fatalf("root request lost exact construction: id=%s found=%v source=%+v err=%v", id, found, request.Event.Event().SourceRoute(), err)
 		}
 	}
 }

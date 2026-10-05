@@ -24,20 +24,24 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowInstance(ctx context.Con
 		return WorkflowInstance{}, false, &WorkflowInstanceLookupMiss{RequestedKey: strings.TrimSpace(identity.Route.InstancePath)}
 	}
 	route, runID := identity.Route, identity.RunID
-	query := pipelineTestWorkflowInstanceSelectSQLite + ` WHERE es.flow_instance = ? AND es.run_id = ? ORDER BY es.created_at DESC, es.entity_id DESC LIMIT 1`
+	query := `SELECT entity_id FROM flow_instances WHERE instance_path = ? AND run_id = ?`
 	if r.dialect == workflowStoreDialectPostgres {
-		query = pipelineTestWorkflowInstanceSelectPostgres + ` WHERE es.flow_instance = $1 AND es.run_id = $2::uuid ORDER BY es.created_at DESC, es.entity_id DESC LIMIT 1`
+		query = `SELECT entity_id::text FROM flow_instances WHERE instance_path = $1 AND run_id = $2::uuid`
 	}
-	rows, err := r.db.QueryContext(ctx, query, route.InstancePath, runID)
+	var entityID string
+	err := r.db.QueryRowContext(ctx, query, route.InstancePath, runID).Scan(&entityID)
+	if err == sql.ErrNoRows {
+		return WorkflowInstance{}, false, nil
+	}
 	if err != nil {
 		return WorkflowInstance{}, false, err
 	}
-	defer rows.Close()
-	items, err := scanPipelineTestWorkflowInstances(rows, r.dialect)
-	if err != nil || len(items) == 0 {
+	paired, err := r.LoadWorkflowTargetPersistence(ctx, identity, runtimeidentity.NormalizeEntityID(entityID))
+	if err != nil {
 		return WorkflowInstance{}, false, err
 	}
-	return items[0], true, nil
+	instance, err := paired.DecodeComplete(route, runtimeidentity.NormalizeEntityID(entityID))
+	return instance, err == nil, err
 }
 
 func (r pipelineTestWorkflowInstanceReader) LoadWorkflowEntityState(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
@@ -88,47 +92,53 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 	}
 	var companion WorkflowLifecycleCompanionPersistenceRecord
 	var workflowVersion sql.NullString
+	var headerType, headerSlug, headerName sql.NullString
+	var config, terminatedAt, createdAt, enteredAt, updatedAt, gates, bookkeeping, accumulator any
+	headerQuery := `SELECT instance_path, flow_template, json_extract(config, '$.workflow_version'), mode, status, config, terminated_at, created_at,
+		entity_id, entity_type, slug, name, current_state, revision, entered_state_at, updated_at, stage_defined, gates, bookkeeping, accumulator
+		FROM flow_instances WHERE run_id = ? AND instance_path = ?`
 	if r.dialect == workflowStoreDialectPostgres {
-		var terminatedAt sql.NullTime
-		err = tx.QueryRowContext(ctx, `
-				SELECT instance_path, flow_template, COALESCE(config->>'workflow_version', ''), mode, status, config, terminated_at, created_at
-				FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2
-		`, runID, route.InstancePath).Scan(
-			&companion.FlowInstance, &companion.WorkflowName, &workflowVersion, &companion.Mode,
-			&companion.Status, &companion.Config, &terminatedAt, &companion.CreatedAt,
-		)
-		if terminatedAt.Valid {
-			companion.TerminatedAt = terminatedAt.Time.UTC()
-		}
-	} else {
-		var config, terminatedAt, createdAt any
-		err = tx.QueryRowContext(ctx, `
-			SELECT instance_path, flow_template, json_extract(config, '$.workflow_version'), mode, status, config, terminated_at, created_at
-			FROM flow_instances WHERE run_id = ? AND instance_path = ?
-		`, runID, route.InstancePath).Scan(
-			&companion.FlowInstance, &companion.WorkflowName, &workflowVersion, &companion.Mode,
-			&companion.Status, &config, &terminatedAt, &createdAt,
-		)
-		if err == nil {
-			companion.Config = pipelineTestJSONBytes(config)
-			created, present, parseErr := sqliteWorkflowTimeValue(createdAt)
-			if parseErr != nil || !present {
-				if parseErr == nil {
-					parseErr = fmt.Errorf("pipeline test workflow lifecycle creation time is required")
-				}
-				return WorkflowTargetPersistenceRecord{}, parseErr
-			}
-			companion.CreatedAt = created
-			if terminated, present, parseErr := sqliteWorkflowTimeValue(terminatedAt); parseErr != nil {
-				return WorkflowTargetPersistenceRecord{}, parseErr
-			} else if present {
-				companion.TerminatedAt = terminated
-			}
-		}
+		headerQuery = `SELECT instance_path, flow_template, config->>'workflow_version', mode, status, config, terminated_at, created_at,
+			entity_id::text, entity_type, slug, name, current_state, revision, entered_state_at, updated_at, stage_defined, gates, bookkeeping, accumulator
+			FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2`
 	}
+	err = tx.QueryRowContext(ctx, headerQuery, runID, route.InstancePath).Scan(
+		&companion.FlowInstance, &companion.WorkflowName, &workflowVersion, &companion.Mode,
+		&companion.Status, &config, &terminatedAt, &createdAt,
+		&companion.State.EntityID, &headerType, &headerSlug, &headerName,
+		&companion.State.CurrentState, &companion.State.Revision, &enteredAt, &updatedAt, &companion.StageDefined,
+		&gates, &bookkeeping, &accumulator,
+	)
 	companionExists := err == nil
 	if err != nil && err != sql.ErrNoRows {
 		return WorkflowTargetPersistenceRecord{}, err
+	}
+	if companionExists {
+		companion.Config = pipelineTestJSONBytes(config)
+		companion.State.FlowInstance = companion.FlowInstance
+		companion.State.EntityType, companion.State.Slug, companion.State.Name = headerType.String, headerSlug.String, headerName.String
+		companion.State.Gates = pipelineTestJSONBytes(gates)
+		companion.State.Bookkeeping = pipelineTestJSONBytes(bookkeeping)
+		companion.State.Accumulator = pipelineTestJSONBytes(accumulator)
+		for _, item := range []struct {
+			raw    any
+			target *time.Time
+		}{{createdAt, &companion.CreatedAt}, {enteredAt, &companion.State.EnteredStageAt}, {updatedAt, &companion.State.UpdatedAt}} {
+			value, present, parseErr := sqliteWorkflowTimeValue(item.raw)
+			if parseErr != nil || !present {
+				if parseErr == nil {
+					parseErr = fmt.Errorf("pipeline test constructed header timestamp is required")
+				}
+				return WorkflowTargetPersistenceRecord{}, parseErr
+			}
+			*item.target = value
+		}
+		companion.State.CreatedAt = companion.CreatedAt
+		if terminated, present, parseErr := sqliteWorkflowTimeValue(terminatedAt); parseErr != nil {
+			return WorkflowTargetPersistenceRecord{}, parseErr
+		} else if present {
+			companion.TerminatedAt = terminated
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return WorkflowTargetPersistenceRecord{}, err
@@ -140,6 +150,8 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 		record.Presence = WorkflowTargetPersistenceComplete
 	case stateExists:
 		record.Presence = WorkflowTargetPersistenceStateOnly
+	case companionExists && companion.State.EntityType == "":
+		record.Presence = WorkflowTargetPersistenceCompleteFieldless
 	case companionExists:
 		record.Presence = WorkflowTargetPersistenceLifecycleOnly
 	default:
@@ -234,9 +246,9 @@ func (r pipelineTestWorkflowInstanceReader) ListWorkflowInstances(ctx context.Co
 	if runID == "" {
 		return nil, fmt.Errorf("workflow instance list requires exact run_id")
 	}
-	query := pipelineTestWorkflowInstanceSelectSQLite + ` WHERE es.run_id = ? ORDER BY es.created_at ASC`
+	query := pipelineTestWorkflowInstanceSelectSQLite + ` WHERE fi.run_id = ? ORDER BY fi.created_at ASC`
 	if r.dialect == workflowStoreDialectPostgres {
-		query = pipelineTestWorkflowInstanceSelectPostgres + ` WHERE es.run_id = $1::uuid ORDER BY es.created_at ASC`
+		query = pipelineTestWorkflowInstanceSelectPostgres + ` WHERE fi.run_id = $1::uuid ORDER BY fi.created_at ASC`
 	}
 	rows, err := r.db.QueryContext(ctx, query, runID)
 	if err != nil {
@@ -247,48 +259,53 @@ func (r pipelineTestWorkflowInstanceReader) ListWorkflowInstances(ctx context.Co
 }
 
 const pipelineTestWorkflowInstanceSelectPostgres = `
-	SELECT es.entity_id::text, fi.flow_template, fi.config->>'workflow_version', fi.mode, fi.status,
-	       fi.terminated_at, es.current_state, es.revision, es.entered_state_at,
-	       es.gates, es.fields, es.bookkeeping, es.accumulator, fi.config, es.flow_instance,
-	       es.entity_type, es.slug, es.name, es.created_at, es.updated_at
-	FROM entity_state es JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
+	SELECT fi.entity_id::text, fi.flow_template, fi.config->>'workflow_version', fi.mode, fi.status,
+	       fi.terminated_at, fi.current_state, fi.revision, fi.entered_state_at,
+	       fi.gates, es.fields, fi.bookkeeping, fi.accumulator, fi.config, fi.instance_path,
+	       fi.entity_type, fi.slug, fi.name, fi.created_at, fi.updated_at, fi.stage_defined
+	FROM flow_instances fi LEFT JOIN entity_state es
+	  ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path AND es.entity_id = fi.entity_id
 `
 
 const pipelineTestWorkflowInstanceSelectSQLite = `
-	SELECT es.entity_id, fi.flow_template, json_extract(fi.config, '$.workflow_version'), fi.mode, fi.status,
-	       fi.terminated_at, es.current_state, es.revision, es.entered_state_at,
-	       es.gates, es.fields, es.bookkeeping, es.accumulator, fi.config, es.flow_instance,
-	       es.entity_type, es.slug, es.name, es.created_at, es.updated_at
-	FROM entity_state es JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
+	SELECT fi.entity_id, fi.flow_template, json_extract(fi.config, '$.workflow_version'), fi.mode, fi.status,
+	       fi.terminated_at, fi.current_state, fi.revision, fi.entered_state_at,
+	       fi.gates, es.fields, fi.bookkeeping, fi.accumulator, fi.config, fi.instance_path,
+	       fi.entity_type, fi.slug, fi.name, fi.created_at, fi.updated_at, fi.stage_defined
+	FROM flow_instances fi LEFT JOIN entity_state es
+	  ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path AND es.entity_id = fi.entity_id
 `
 
 func scanPipelineTestWorkflowInstances(rows *sql.Rows, dialect workflowStoreDialect) ([]WorkflowInstance, error) {
 	items := make([]WorkflowInstance, 0, 16)
 	for rows.Next() {
 		var record WorkflowInstancePersistenceRecord
-		var workflowVersion, slug, name sql.NullString
+		var workflowVersion, entityType, slug, name sql.NullString
 		var terminatedAt sql.NullTime
 		var terminatedAtRaw, enteredAtRaw, createdAtRaw, updatedAtRaw any
 		var gates, fields, bookkeeping, accumulator, config any
+		var postgresFields []byte
 		destinations := []any{
 			&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Mode, &record.Status,
 			&terminatedAt, &record.CurrentState, &record.Revision, &record.EnteredStageAt,
-			&record.Gates, &record.Fields, &record.Bookkeeping, &record.Accumulator, &record.Config,
-			&record.FlowInstance, &record.EntityType, &slug, &name, &record.CreatedAt, &record.UpdatedAt,
+			&record.Gates, &postgresFields, &record.Bookkeeping, &record.Accumulator, &record.Config,
+			&record.FlowInstance, &entityType, &slug, &name, &record.CreatedAt, &record.UpdatedAt, &record.StageDefined,
 		}
 		if dialect != workflowStoreDialectPostgres {
 			destinations = []any{
 				&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Mode, &record.Status,
 				&terminatedAtRaw, &record.CurrentState, &record.Revision, &enteredAtRaw,
 				&gates, &fields, &bookkeeping, &accumulator, &config,
-				&record.FlowInstance, &record.EntityType, &slug, &name, &createdAtRaw, &updatedAtRaw,
+				&record.FlowInstance, &entityType, &slug, &name, &createdAtRaw, &updatedAtRaw, &record.StageDefined,
 			}
 		}
 		if err := rows.Scan(destinations...); err != nil {
 			return nil, err
 		}
 		record.WorkflowVersion, record.Slug, record.Name = workflowVersion.String, slug.String, name.String
+		record.EntityType = entityType.String
 		if dialect == workflowStoreDialectPostgres {
+			record.Fields = postgresFields
 			if terminatedAt.Valid {
 				record.TerminatedAt = terminatedAt.Time.UTC()
 			}

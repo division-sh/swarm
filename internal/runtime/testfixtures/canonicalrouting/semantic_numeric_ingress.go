@@ -45,7 +45,6 @@ collector:
   subscribes_to: [numeric.completed]
   event_handlers:
     numeric.completed:
-      create_entity: true
       data_accumulation:
         source_event: numeric.completed
         writes:

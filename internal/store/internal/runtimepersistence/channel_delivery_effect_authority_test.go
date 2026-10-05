@@ -40,7 +40,7 @@ type selectedChannelDeliveryTestStore interface {
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mode := range append([]string{"current", "late", "shared_current", "shared_late", "edit_uncertain", "response_matrix", "native_reset_healthy", "native_reset_uncertain"}, channelRecoveryProofModes()...) {
+		for _, mode := range append([]string{"current", "late", "shared_current", "shared_late", "edit_uncertain", "response_matrix", "native_reset_healthy", "native_reset_uncertain", "eligibility_before_authorize", "eligibility_before_launch", "eligibility_after_launch", "eligibility_after_observation", "eligibility_edit", "eligibility_uncertain", "eligibility_recover_authorized", "eligibility_recover_launched", "eligibility_recover_observed"}, channelRecoveryProofModes()...) {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				late := strings.HasSuffix(mode, "late") || mode == "native_reset_uncertain"
 				conversationScope := operatorchannel.ConversationScopeDirect
@@ -437,6 +437,10 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				}
 				if !current(authority) {
 					t.Fatal("succeeded channel activation rejected exact delivery")
+				}
+				if strings.HasPrefix(mode, "eligibility_") {
+					proveChannelFirstSendEligibility(t, mode, selected, runTx, current, authority, postgres)
+					return
 				}
 				if mode == "response_matrix" {
 					proveChannelResponseReceiptMatrix(t, selected, runTx, current, authority, textFact, postgres)

@@ -189,6 +189,12 @@ func convergeTerminalAdmissionRun(
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("seed terminal completion entity: %w", err)
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances
+		(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined, current_state,
+		 gates, bookkeeping, accumulator, config, revision, entered_state_at, created_at, updated_at)
+		VALUES ($1,'terminal-admission',$2,'default','terminal-admission','static',TRUE,'done','{}','{}','{}','{}',1,$3,$3,$3)`, runID, entityID, now); err != nil {
+		return fmt.Errorf("seed terminal completion header: %w", err)
+	}
 	work, err := owner.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
 	if err != nil {
 		return fmt.Errorf("claim terminal completion event: %w", err)

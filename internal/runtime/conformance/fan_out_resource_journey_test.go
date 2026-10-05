@@ -143,6 +143,19 @@ func deploymentResourceVersion(t *testing.T, f *deploymentResourceFixture, input
 	return ref, compiled
 }
 
+type deploymentRunStartDiagnostic struct {
+	*bus.EventBus
+	t *testing.T
+}
+
+func (d deploymentRunStartDiagnostic) StartDeploymentRunAcknowledged(ctx context.Context, command durabledata.RunCreationCommand, request apiidempotency.Request) (durabledata.RunCreationOperationRecord, error) {
+	record, err := d.EventBus.StartDeploymentRunAcknowledged(ctx, command, request)
+	if err != nil {
+		d.t.Logf("deployment run-start owner: %v", err)
+	}
+	return record, err
+}
+
 func (f *deploymentResourceFixture) operatorServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	bundle, ok := semanticview.Bundle(f.source)
@@ -170,7 +183,7 @@ func (f *deploymentResourceFixture) operatorServer(t *testing.T) *httptest.Serve
 		t.Fatalf("selected store %T lacks public event readback", f.selected)
 	}
 	publication := apiv1.EventPublicationOptions{
-		Idempotency: idempotency, Events: f.runtime.bus, Acknowledged: f.runtime.bus,
+		Idempotency: idempotency, Events: f.runtime.bus, Acknowledged: deploymentRunStartDiagnostic{EventBus: f.runtime.bus, t: t},
 		SourceArtifact: f.runtime.bus, RunBundleContext: contextOwner,
 		Source: f.source, Bundle: identity,
 	}

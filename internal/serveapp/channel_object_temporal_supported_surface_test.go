@@ -18,7 +18,7 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "object-temporal-seed",
 				})
-				gate := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+				gate := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				gateReceipt := waitObjectCardReceipt(t, db, gate)
 				deadline := time.Now().UTC().Add(time.Hour)
 				if transition == "expire_restart" {
@@ -28,7 +28,7 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 					"event_name": "observer.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 					"payload": map[string]any{"seed": true, "deadline_at": deadline.Format(time.RFC3339Nano)}, "idempotency_key": "object-temporal-human",
 				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindHumanTask)
+				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindHumanTask, "observers")
 				receipt := waitObjectCardReceipt(t, db, card)
 				approve := objectAnchorChoice(t, p, receipt, "Approve", 0)
 				var snapshot, render, input, frozenHash string

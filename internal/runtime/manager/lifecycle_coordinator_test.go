@@ -1237,7 +1237,8 @@ func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing
 		t.Fatalf("start: %v", err)
 	}
 	probe.mu.Lock()
-	probe.failNext = fmt.Errorf("injected self-release persistence failure")
+	failure := fmt.Errorf("injected self-release persistence failure")
+	probe.failNext = failure
 	probe.mu.Unlock()
 	if err := releaseCoordinatorLoop(coordinator, token, done); err == nil {
 		t.Fatal("self-release succeeded despite persistence failure")
@@ -1247,6 +1248,9 @@ func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing
 	}
 	if _, _, _, err := replaceCoordinatorLoop(coordinator, testAuthorActivityContext(context.Background()), rec, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{}); err == nil {
 		t.Fatal("restart admitted over failed self-release")
+	}
+	if err := coordinator.waitForWork(context.Background()); !errors.Is(err, failure) {
+		t.Fatalf("manager join lost exact settlement failure: %v", err)
 	}
 }
 

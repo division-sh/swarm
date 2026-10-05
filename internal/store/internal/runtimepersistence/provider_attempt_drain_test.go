@@ -240,6 +240,43 @@ func TestProviderAttemptDrainLifecycleSupersessionParity(t *testing.T) {
 	})
 }
 
+func TestProviderAttemptDrainRejectsRunningToRegisteredParity(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, base completionSettlementFixture) {
+		for _, observed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("observed_%t", observed), func(t *testing.T) {
+				fixture := freshProviderDrainFixture(t, base.sqlite)
+				before := providerDrainFixtureState(t, fixture)
+				var handle *runtimeeffects.Handle
+				if observed {
+					ctx := providerDrainContext(t, fixture, "registered-refusal")
+					handle = beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "registered-refusal")
+				}
+				_, err := commitProviderDrainTransition(t, fixture, "reconfigure", runtimemanager.AgentLifecycleRegistered)
+				if err == nil || err.Error() != `lifecycle supersession target "registered" cannot own provider drains` {
+					t.Fatalf("running-to-registered error=%v", err)
+				}
+				after := providerDrainFixtureState(t, fixture)
+				beforeJSON, err := json.Marshal(before)
+				if err != nil {
+					t.Fatal(err)
+				}
+				afterJSON, err := json.Marshal(after)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(beforeJSON) != string(afterJSON) {
+					t.Fatalf("refusal mutated lifecycle: %s -> %s", beforeJSON, afterJSON)
+				}
+				if observed {
+					requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)
+					requireProviderDrainCount(t, fixture, handle.Attempt().AttemptID, 0)
+					requireDeliveryClaimPending(t, fixture, fixture.origin)
+				}
+			})
+		}
+	})
+}
+
 func TestProviderAttemptHeartbeatAuthorityParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, base completionSettlementFixture) {
 		for _, candidate := range []struct {

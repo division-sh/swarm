@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -131,8 +132,8 @@ func TestAdmitNodeExecutionRoutingSourceUsesSelectedRootEntityAuthority(t *testi
 	if err != nil {
 		t.Fatalf("AdmitNodeExecutionRoutingSource: %v", err)
 	}
-	if got.Kind() != events.RoutingSourceRoot || got.Route() != (events.RouteIdentity{EntityID: "entity-one"}) {
-		t.Fatalf("routing source = %s %#v, want selected-root entity authority", got.Kind().StorageCode(), got.Route())
+	if got.Kind() != events.RoutingSourceStaticFlow || got.Route() != route {
+		t.Fatalf("routing source = %s %#v, want exact selected-root execution authority", got.Kind().StorageCode(), got.Route())
 	}
 }
 
@@ -183,6 +184,7 @@ func TestAdmitAgentExecutionRoutingSourceSeparatesFilesystemDeclarationFromRunti
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"telegram-ingress/telegram-chat": flow.Schema},
 		FlowTree: runtimecontracts.FlowTree{
 			Root:   &root,
 			ByID:   map[string]*runtimecontracts.FlowContractView{".": &root, "telegram-ingress/telegram-chat": &root.Children[0]},
@@ -197,8 +199,11 @@ func TestAdmitAgentExecutionRoutingSourceSeparatesFilesystemDeclarationFromRunti
 		FlowID:   "telegram-ingress/telegram-chat",
 		FlowPath: "telegram-ingress/telegram-chat/chat-1",
 		Identity: agentidentitytest.Declared(t, "phrase-bot", owner, "telegram-ingress/telegram-chat", "chat-1", "telegram-ingress/telegram-chat/chat-1"),
+		EntityID: "chat-entity",
 	}
-	got, err := AdmitAgentExecutionRoutingSource(source, actor, "chat-entity")
+	constructed := flowidentity.Derive(source, actor.FlowID, actor.Identity.Route.InstanceID)
+	constructed.EntityID = actor.EntityID
+	got, err := AdmitAgentExecutionRoutingSource(source, actor, "chat-entity", constructed)
 	if err != nil {
 		t.Fatalf("AdmitAgentExecutionRoutingSource: %v", err)
 	}
@@ -209,7 +214,7 @@ func TestAdmitAgentExecutionRoutingSourceSeparatesFilesystemDeclarationFromRunti
 
 	hostile := actor
 	hostile.Identity = agentidentitytest.Runtime(t, "phrase-bot", owner, "telegram-ingress/telegram-chat", "chat-1", actor.FlowPath)
-	if _, err := AdmitAgentExecutionRoutingSource(source, hostile, "chat-entity"); err == nil || !strings.Contains(err.Error(), "declared agent identity") {
+	if _, err := AdmitAgentExecutionRoutingSource(source, hostile, "chat-entity", constructed); err == nil || !strings.Contains(err.Error(), "declared agent identity") {
 		t.Fatalf("runtime-created declaration collision error = %v", err)
 	}
 }
@@ -227,19 +232,20 @@ func TestAdmitAgentExecutionRoutingSourcePreservesSelectedRootRun(t *testing.T) 
 	})
 	for _, runID := range []string{eventtest.UUID("first-run"), eventtest.UUID("second-run")} {
 		actor := models.AgentConfig{ID: "reader", FlowID: ".", Identity: agentidentitytest.RootDeclaredForRun(t, runID, "reader", owner)}
-		got, err := AdmitAgentExecutionRoutingSource(source, actor, "")
+		got, err := AdmitAgentExecutionRoutingSource(source, actor, "", nil)
 		if err != nil {
 			t.Fatalf("entityless root admission: %v", err)
 		}
 		if got.Kind() != events.RoutingSourceStaticFlow || got.Route() != (events.RouteIdentity{FlowID: ".", FlowInstance: runID}) {
 			t.Fatalf("entityless root source = %#v, want exact run %s", got, runID)
 		}
-		owned, err := AdmitAgentExecutionRoutingSource(source, actor, "owned-entity")
-		if err != nil || owned.Kind() != events.RoutingSourceRoot || owned.Route() != (events.RouteIdentity{EntityID: "owned-entity"}) {
+		actor.EntityID = "owned-entity"
+		owned, err := AdmitAgentExecutionRoutingSource(source, actor, "owned-entity", nil)
+		if err != nil || owned.Kind() != events.RoutingSourceStaticFlow || owned.Route() != (events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: "owned-entity"}) {
 			t.Fatalf("entity-owned root source = %#v, error = %v", owned, err)
 		}
 		actor.FlowID = "unrelated"
-		if _, err := AdmitAgentExecutionRoutingSource(source, actor, ""); err == nil {
+		if _, err := AdmitAgentExecutionRoutingSource(source, actor, "", nil); err == nil {
 			t.Fatal("contradictory declaration scope accepted")
 		}
 	}
@@ -275,11 +281,23 @@ func TestAdmitAgentExecutionRoutingSourceUsesFilesystemDeclarationOwningFlow(t *
 				FlowPath: tc.instancePath,
 				Identity: agentidentitytest.Declared(t, "backend", plan.OwnerURI, "support", tc.instanceID, tc.instancePath),
 			}
-			got, err := AdmitAgentExecutionRoutingSource(source, actor, tc.entityID)
+			constructed := flowidentity.Derive(source, actor.FlowID, actor.Identity.Route.InstanceID)
+			if tc.mode == runtimecontracts.FlowModeStatic {
+				constructed, err = flowidentity.StandingForGeneration(source, actor.FlowID, actor.Identity.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if tc.entityID != "" {
+				constructed.EntityID = tc.entityID
+			}
+			if tc.entityID != "" {
+				actor.EntityID = constructed.EntityID
+			}
+			got, err := AdmitAgentExecutionRoutingSource(source, actor, actor.EntityID, constructed)
 			if err != nil {
 				t.Fatalf("AdmitAgentExecutionRoutingSource: %v", err)
 			}
-			wantRoute := events.RouteIdentity{FlowID: "support", FlowInstance: tc.instancePath, EntityID: tc.entityID}
+			wantRoute := events.RouteIdentity{FlowID: "support", FlowInstance: tc.instancePath, EntityID: actor.EntityID}
 			if got.Kind() != tc.wantKind || got.Route() != wantRoute {
 				t.Fatalf("routing source = %s %#v, want %s %#v", got.Kind().StorageCode(), got.Route(), tc.wantKind.StorageCode(), wantRoute)
 			}

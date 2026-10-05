@@ -67,13 +67,22 @@ type runForkRevisionEntityMutation struct {
 
 type runForkRevisionEntityMetadata struct {
 	runForkRevisionedFact
-	FlowConfig   json.RawMessage `json:"flow_config"`
-	EntityID     string          `json:"entity_id"`
-	FlowInstance string          `json:"flow_instance"`
-	EntityType   string          `json:"entity_type"`
-	Slug         string          `json:"slug"`
-	Name         string          `json:"name"`
-	CreatedAt    time.Time       `json:"created_at"`
+	FlowConfig       json.RawMessage `json:"flow_config"`
+	EntityID         string          `json:"entity_id"`
+	FlowInstance     string          `json:"flow_instance"`
+	EntityType       string          `json:"entity_type"`
+	Slug             string          `json:"slug"`
+	Name             string          `json:"name"`
+	CreatedAt        time.Time       `json:"created_at"`
+	ConstructionKind string          `json:"construction_kind"`
+	StageDefined     bool            `json:"stage_defined"`
+	FlowTemplate     string          `json:"flow_template"`
+	Mode             string          `json:"mode"`
+	Status           string          `json:"status"`
+	CurrentState     string          `json:"current_state"`
+	EnteredStateAt   time.Time       `json:"entered_state_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	TerminatedAt     time.Time       `json:"terminated_at"`
 }
 
 type runForkRevisionDelivery struct {
@@ -476,6 +485,17 @@ func appendRunForkHistoricalFact(snapshot *runForkRevisionSnapshot, context runF
 		var fact runForkRevisionEntityMetadata
 		if err := decode(&fact); err != nil {
 			return err
+		}
+		if fact.ConstructionKind == "constructed" {
+			var nullable struct {
+				EntityType json.RawMessage `json:"entity_type"`
+			}
+			if err := decode(&nullable); err != nil {
+				return err
+			}
+			if len(nullable.EntityType) == 0 || (string(nullable.EntityType) != "null" && strings.TrimSpace(fact.EntityType) == "") {
+				return fmt.Errorf("constructed historical header requires a null fieldless entity type or a nonempty declared field type")
+			}
 		}
 		fact.runForkRevisionedFact = stamp
 		snapshot.EntityMetadata = append(snapshot.EntityMetadata, fact)

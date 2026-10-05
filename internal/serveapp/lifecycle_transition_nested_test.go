@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -14,21 +15,54 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleNestedCascade(t))
-			var runID string
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "left.work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "tree-seed"})
+			runID := seed.RunID
+			wantStages := map[string]string{
+				runID: "pending", "outer": "pending",
+				"outer/left": "waiting", "outer/left/sink": "waiting", "outer/left/sink/final": "waiting",
+				"outer/right": "waiting", "outer/right/sink": "waiting", "outer/right/sink/final": "waiting",
+			}
+			rows, err := rt.DB.Query(`SELECT f.instance_path,f.current_state,r.phase FROM flow_instances f
+				JOIN flow_instance_runtime_readiness r ON r.run_id=f.run_id AND r.instance_path=f.instance_path
+				WHERE f.run_id=$1 ORDER BY f.instance_path`, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotStages := map[string]string{}
+			for rows.Next() {
+				var path, stage, phase string
+				if err := rows.Scan(&path, &stage, &phase); err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				if phase != "ready" {
+					rows.Close()
+					t.Fatalf("initial tree %s attachment phase=%s", path, phase)
+				}
+				gotStages[path] = stage
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(gotStages, wantStages) {
+				t.Fatalf("one constructor did not create the complete initial tree: got=%v want=%v", gotStages, wantStages)
+			}
+			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
+			beforeRedundantSeed := repeatedStaticRunSnapshot(t, rt.DB, runID)
+			refusal := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{"event_name": "right.work.requested", "run_id": runID, "payload": map[string]any{"seed": true}, "idempotency_key": "redundant-tree-seed"})
+			details, ok := refusal.Data["details"].(map[string]any)
+			if !ok || refusal.Data["code"] != "EVENT_NOT_DECLARED" || details["reason"] != "declared_event_has_no_selected_run_recipient" {
+				t.Fatalf("handler-free redundant seed refusal=%#v", refusal)
+			}
+			if !reflect.DeepEqual(repeatedStaticRunSnapshot(t, rt.DB, runID), beforeRedundantSeed) {
+				t.Fatal("redundant tree seed changed canonical construction or delivery evidence")
+			}
 			var decisions []map[string]any
 			var gateEntities []string
 			for _, side := range []string{"left", "right"} {
 				prefix := "outer/" + side + "/"
-				seedParams := map[string]any{"event_name": side + ".work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": side + "-seed"}
-				if runID != "" {
-					seedParams["run_id"] = runID
-					delete(seedParams, "bundle_hash")
-				}
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, seedParams)
-				if runID != "" && seed.RunID != runID {
-					t.Fatal("sibling created a separate run")
-				}
-				runID = seed.RunID
 				entityID := requireLifecycleFlowEntity(t, rt, runID, prefix, "waiting")
 				publish := func(event, key string, payload map[string]any) {
 					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": side + "." + event, "run_id": runID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": side + "-" + key})

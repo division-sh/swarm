@@ -49,12 +49,21 @@ func (rt *RouteTable) publishFlowInstanceRouteForAttempt(req FlowInstanceRouteMa
 	if identity.RunID != attempt.RunID() || identity.Route.InstancePath != attempt.InstancePath() {
 		return FlowRoutePublication{}, errors.New("flow route publication differs from activation attempt identity")
 	}
+	if err := req.Instance.ValidateConstruction(rt.source, identity.RunID); err != nil {
+		return FlowRoutePublication{}, err
+	}
+	if req.Instance.Route() != identity.Route {
+		return FlowRoutePublication{}, errors.New("publication differs from its exact construction identity")
+	}
 	rt.generationMu.Lock()
 	defer rt.generationMu.Unlock()
 	rt.mu.RLock()
 	current, published := rt.publications[identity]
 	_, fenced := rt.fencedPublications[flowRoutePublicationFence{identity: identity, attemptID: attempt.ID()}]
 	_, routeExists, ownerErr := rt.matchFlowInstanceRouteOwnerLocked(identity)
+	if routeExists && rt.instanceOwners[identity] != req.Instance {
+		ownerErr = errors.New("publication changed its construction parent")
+	}
 	rt.mu.RUnlock()
 	if fenced {
 		return FlowRoutePublication{}, errors.New("flow route activation attempt is fenced")
@@ -108,16 +117,19 @@ func (rt *RouteTable) retireFlowInstanceRouteForAttempt(identity runtimeflowiden
 	return rt.removeFlowInstanceRoute(identity)
 }
 
-func (eb *EventBus) RetireFlowInstanceRouteForAttempt(attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+func (eb *EventBus) RetireFlowInstanceRouteForAttempt(identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
 	if err := attempt.Validate(); err != nil {
 		return err
 	}
-	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(attempt.RunID(), runtimeflowidentity.RouteForInstancePath(attempt.InstancePath()))
-	if err != nil {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return err
+	}
+	if identity.RunID != attempt.RunID() || identity.Route.InstancePath != attempt.InstancePath() {
+		return errors.New("flow retirement identity differs from activation attempt")
 	}
 	eb.mu.RLock()
 	table := eb.routeTable

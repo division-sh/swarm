@@ -140,8 +140,8 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 		if flowID == "" {
 			return nil, fmt.Errorf("%s standing activation requires non-empty flow id", location)
 		}
-		if _, err := bundle.ResolveFlowSingleton(flowID); err != nil {
-			return nil, fmt.Errorf("%s standing singleton is invalid: %w", location, err)
+		if err := runtimepipeline.RequireStandingConstructionPath(source, flowID); err != nil {
+			return nil, fmt.Errorf("%s standing constructor is invalid: %w", location, err)
 		}
 		decl := StandingTargetDeclaration{
 			SourcePath: location,
@@ -555,8 +555,8 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 	activations := make([]StandingActivation, 0, len(selectedPlans))
 	for i, plan := range selectedPlans {
 		declaration := plan.declaration
-		instance := plan.instance
 		result := results[i]
+		instance := result.Instance
 		reconciliation := result.Reconciliation
 		if !reconciliation.RestartDisposition.Executable() {
 			if reconciliation.RunID == "" {
@@ -578,6 +578,9 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 			EffectiveState: reconciliation.EffectiveState, RestartDisposition: reconciliation.RestartDisposition, Created: result.Created,
 		})
 		for _, target := range plan.targets {
+			target.InstanceID = instance.InstanceID
+			target.FlowInstance = instance.InstancePath
+			target.EntityID = instance.EntityID
 			target.BundleHash = fact.BundleHash()
 			target.RunID = reconciliation.RunID
 			target.Generation = reconciliation.Generation
@@ -621,9 +624,8 @@ func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, act
 	return nil
 }
 
-// PlanStandingTargets resolves all process-visible identities without mutating
-// runtime or durable state. Startup uses it to reject cross-context collisions
-// before any runtime starts.
+// PlanStandingTargets describes declaration coordinates for collision preflight.
+// Only selected-store reconciliation can supply a concrete generation and run.
 func (rt *Runtime) PlanStandingTargets() ([]StandingTarget, error) {
 	plans, err := rt.standingTargetPlans()
 	if err != nil {
@@ -683,12 +685,10 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 				continue
 			}
 			plan.bindingEnabled = true
-			generation := int64(1)
-			runID := runtimeflowidentity.StandingGenerationRunID(serviceID, generation)
 			plan.targets = append(plan.targets, StandingTarget{
 				BundleHash: fact.BundleHash(), ServiceID: serviceID, SourcePath: declaration.SourcePath,
 				FlowPath: declaration.FlowPath, Alias: declaration.Alias,
-				Provider: binding.Provider, RunID: runID, Generation: generation, PublicationSequence: 1,
+				Provider:   binding.Provider,
 				InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath,
 				EntityID: instance.EntityID, SigningSecret: credentials.signingKey, AdmissionPlan: binding.AdmissionPlan,
 			}.normalized())

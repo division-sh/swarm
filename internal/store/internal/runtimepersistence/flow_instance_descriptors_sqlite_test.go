@@ -1,10 +1,13 @@
 package runtimepersistence_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
@@ -25,18 +28,18 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	})
 
 	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined, current_state, gates, bookkeeping, accumulator, config, status, terminated_at, revision, entered_state_at, created_at, updated_at)
 		VALUES
-			(?, 'component-scaffold/active', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP),
-			(?, 'component-scaffold/terminated', 'component-scaffold', 'template', '{}', 'terminated', CURRENT_TIMESTAMP),
-			(?, 'service-owner', 'service-owner', 'static', '{}', 'active', CURRENT_TIMESTAMP)
-	`, runID, runID, runID); err != nil {
+			(?, 'component-scaffold/active', ?, 'component', 'component-scaffold', 'template', TRUE, 'ready', '{}', '{}', '{}', ?, 'active', NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			(?, 'component-scaffold/terminated', '55555555-5555-4555-8555-555555555555', NULL, 'component-scaffold', 'template', TRUE, 'done', '{}', '{}', '{}', ?, 'terminated', CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			(?, 'service-owner', '66666666-6666-4666-8666-666666666666', NULL, 'service-owner', 'static', TRUE, 'ready', '{}', '{}', '{}', ?, 'active', NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, runID, activeEntityID, descriptorHeaderConfigJSON(t, "component-scaffold", "component-scaffold/active"), runID, descriptorHeaderConfigJSON(t, "component-scaffold", "component-scaffold/terminated"), runID, descriptorHeaderConfigJSON(t, "service-owner", "service-owner")); err != nil {
 		t.Fatalf("seed flow_instances: %v", err)
 	}
 	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-		VALUES (?, 'component-scaffold/active', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, runID, activeReadiness); err != nil {
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+		VALUES (?, 'component-scaffold/active', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, runID, activeReadiness, readinessPlanFixtureHash(t, activeReadiness)); err != nil {
 		t.Fatalf("seed flow-instance readiness: %v", err)
 	}
 	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
@@ -108,15 +111,15 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipeli
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES (?, 'component-scaffold/uncommitted', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP)
-	`, runID); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined, current_state, gates, bookkeeping, accumulator, config, status, revision, entered_state_at, created_at, updated_at)
+		VALUES (?, 'component-scaffold/uncommitted', ?, 'component', 'component-scaffold', 'template', TRUE, 'ready', '{}', '{}', '{}', ?, 'active', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, runID, uncommittedEntityID, descriptorHeaderConfigJSON(t, "component-scaffold", "component-scaffold/uncommitted")); err != nil {
 		t.Fatalf("seed flow_instances in tx: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-		VALUES (?, 'component-scaffold/uncommitted', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, runID, uncommittedReadiness); err != nil {
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+		VALUES (?, 'component-scaffold/uncommitted', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, runID, uncommittedReadiness, readinessPlanFixtureHash(t, uncommittedReadiness)); err != nil {
 		t.Fatalf("seed readiness in tx: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -133,4 +136,17 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipeli
 	if len(descriptors) != 0 {
 		t.Fatalf("descriptors = %#v, want ambient uncommitted flow instance hidden", descriptors)
 	}
+}
+
+func descriptorHeaderConfigJSON(t *testing.T, flow, path string) string {
+	t.Helper()
+	payload, err := pipeline.WorkflowInstanceConfigPayloadForRoute(flowidentity.StoredRoute(flow, flowidentity.LogicalInstanceID(path), path), "1.0.0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(wire)
 }

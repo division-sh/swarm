@@ -629,6 +629,7 @@ seam_families:
       - internal/runtime/manager/generic_agent_support.go
       - internal/runtime/manager/lifecycle_owner_test.go
       - internal/runtime/manager/lifecycle_coordinator.go
+      - internal/runtime/manager/flow_attachment_resources.go
       - internal/runtime/manager/native_tool_admission_test.go
       - internal/runtime/manager/receipts.go
       - internal/runtime/manager/receipts_test.go
@@ -843,6 +844,7 @@ seam_families:
       - internal/runtime/bus/eventbus.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/active_target_descriptor_dedup_test.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/bus/eventbus_flow_instance_descriptors_test.go
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/bus/eventbus_routing.go

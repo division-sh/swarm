@@ -73,6 +73,9 @@ func (unexpectedDurableTestRoles) BindAgentSession(context.Context, runtimedeliv
 func (unexpectedDurableTestRoles) SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
 	return runtimedelivery.Snapshot{}, errUnexpectedDurableTestRole
 }
+func (unexpectedDurableTestRoles) SettleWorkflowNodeSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.ClaimCommit, error) {
+	return runtimedelivery.ClaimCommit{}, errUnexpectedDurableTestRole
+}
 func (unexpectedDurableTestRoles) SettleFailure(context.Context, runtimedelivery.Claim, runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
 	return runtimedelivery.Snapshot{}, errUnexpectedDurableTestRole
 }

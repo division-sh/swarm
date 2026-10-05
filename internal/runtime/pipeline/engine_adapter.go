@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -169,13 +170,6 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			if mutation.Address.FlowInstance.Route != application.Route() || mutation.Address.EntityID.String() != application.EntityID() {
 				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("engine mutation address disagrees with admitted delivery target application")
 			}
-			if application.Owner().EntitylessReceiver() {
-				command, publications, err := o.prepareEntitylessEngineMutation(ctx, mutation, application.Owner())
-				if err != nil {
-					return runtimeengine.CommittedEngineMutation{}, err
-				}
-				return o.commitPreparedEngineMutation(ctx, mutation, command, publications, nil)
-			}
 		} else if _, stamped := stampedDeliveryTargetOwnership(ctx); stamped {
 			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("stamped engine mutation requires delivery target application")
 		}
@@ -183,7 +177,7 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		if hasApplication {
 			targetApplications = append(targetApplications, application)
 		}
-		preparedState, err := o.state.prepareMutation(ctx, mutation.Address, mutation.State, targetApplications...)
+		preparedState, err := o.state.prepareMutation(ctx, mutation, targetApplications...)
 		if err != nil {
 			return runtimeengine.CommittedEngineMutation{}, err
 		}
@@ -192,10 +186,30 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			mutation.Address.FlowInstance,
 			&preparedState.instance,
 			mutation.LifecycleEffects,
-			len(mutation.LifecycleEffects) > 0,
+			len(mutation.LifecycleEffects) > 0 && mutation.PreserveConstructedState == nil,
 		)
 		if err != nil {
 			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		if mutation.PreserveConstructedState != nil {
+			if lifecycle.Commit.StageEntry != nil || len(lifecycle.Commit.Schedules) != 0 || len(lifecycle.Commit.GateCards) != 0 || len(lifecycle.Emissions) != 0 {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("accepted-event preservation cannot create stage-entry, schedule, gate or publication effects")
+			}
+			if len(lifecycle.Commit.Timers) == 0 {
+				// The canonical planner proved there is no durable reaction. The
+				// coordinator retains its existing delivery-only settlement owner.
+				return runtimeengine.CommittedEngineMutation{}, nil
+			}
+			state, err := preparedState.record()
+			if err != nil {
+				return runtimeengine.CommittedEngineMutation{}, err
+			}
+			cause := mutation.LifecycleEffects[0]
+			fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+			if !found {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("accepted-event preservation requires admitted source authority")
+			}
+			return o.commitPreparedEngineMutation(ctx, mutation, WorkflowEngineMutationCommand{State: state, AcceptedEvent: &cause, AcceptedEventSource: fact, Lifecycle: lifecycle.Commit}, nil, nil)
 		}
 		state, err := preparedState.record()
 		if err != nil {
@@ -275,6 +289,9 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		}, publications, terminal)
 	}
 	commit := func(txctx context.Context) error {
+		if mutation.PreserveConstructedState != nil {
+			return fmt.Errorf("accepted-event preservation requires selected workflow persistence")
+		}
 		if mutation.FanOutIntent != nil {
 			return fmt.Errorf("durable fan-out intent requires selected workflow persistence")
 		}
@@ -317,57 +334,8 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 	}, nil
 }
 
-func (o pipelineEngineMutationOwner) prepareEntitylessEngineMutation(ctx context.Context, mutation runtimeengine.EngineMutation, target events.DeliveryTargetOwnership) (WorkflowEngineMutationCommand, []runtimeengine.DurablePublicationPlan, error) {
-	if entityID := mutation.Address.EntityID.String(); entityID != "" {
-		return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("entityless engine mutation carries entity identity %q", entityID)
-	}
-	if instancePath := mutation.Address.FlowInstance.Route.InstancePath; instancePath != target.Route().FlowInstance {
-		return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("entityless engine mutation route %q disagrees with stamped receiver route %q", instancePath, target.Route().FlowInstance)
-	}
-	if len(mutation.LifecycleEffects) > 0 || len(mutation.EmitPrerequisites.Fields) > 0 {
-		return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("entityless engine mutation cannot carry state or lifecycle prerequisites")
-	}
-	emissionIntents := append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...)
-	for _, value := range mutation.ActivityIntents {
-		intent := value.Normalized()
-		if intent.ApprovalDecision != "" {
-			return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("entityless engine mutation cannot carry approval-bound activity")
-		}
-	}
-	activityPublications, err := activityRequestEmitIntents(mutation.ActivityIntents)
-	if err != nil {
-		return WorkflowEngineMutationCommand{}, nil, err
-	}
-	emissionIntents = append(emissionIntents, activityPublications...)
-	var publications []runtimeengine.DurablePublicationPlan
-	if len(emissionIntents) > 0 {
-		if o.publication == nil {
-			return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("engine publication planner is required")
-		}
-		publications, err = o.publication.PrepareEnginePublications(ctx, emissionIntents)
-		if err != nil {
-			return WorkflowEngineMutationCommand{}, nil, err
-		}
-	}
-	flowOwner := mutation.Address.FlowInstance.Normalize()
-	if err := flowOwner.Validate(); err != nil {
-		if o.publication != nil {
-			err = errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
-		}
-		return WorkflowEngineMutationCommand{}, nil, err
-	}
-	return WorkflowEngineMutationCommand{
-		EntitylessTarget:        target,
-		EntitylessRunID:         flowOwner.RunID,
-		Publications:            publications,
-		FanOutIntent:            mutation.FanOutIntent,
-		FanOutBarrier:           mutation.FanOutBarrier,
-		FanOutBarrierCompletion: mutation.FanOutBarrierCompletion,
-	}, publications, nil
-}
-
 // commitPreparedEngineMutation is the single durable commit-result and publication
-// handoff path for stateful and entityless handler preparation.
+// handoff path for constructed handler preparation.
 func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	ctx context.Context,
 	mutation runtimeengine.EngineMutation,
@@ -409,6 +377,13 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	}
 	result.Committed = true
 	resultErr = commitErr
+	// Retain the whole declared follow-up before any acknowledged cleanup hook.
+	emissions, requests, publicationErr := committedEnginePublicationIntents(command.Publications, committed.Publications, mutation.ActivityIntents)
+	result.EmitIntents, result.ActivityRequestIntents = emissions, requests
+	if publicationErr == nil {
+		result.ActivityIntents = append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...)
+	}
+	resultErr = errors.Join(resultErr, publicationErr)
 	terminalEvidence = committed.PostCommit.FlowDeactivation != nil
 	// Retain exact committed claim evidence before a post-commit hook may fail.
 	if committed.DeliverySuccess != nil && deliverySuccess != nil && committed.DeliverySuccess.Same(deliverySuccess.Claim) {
@@ -428,29 +403,53 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	if o.publication != nil {
 		resultErr = errors.Join(resultErr, o.finishCommittedEnginePublications(ctx, committed.Publications))
 	}
-	if command.EntitylessTarget.Empty() {
-		resultErr = errors.Join(resultErr, o.finishCommittedWorkflowLifecycle(ctx, committed.Lifecycle))
-	}
-	if len(committed.Publications) < len(mutation.EmitIntents) {
-		return result, errors.Join(resultErr, fmt.Errorf("committed engine publications = %d, want at least %d emitted events", len(committed.Publications), len(mutation.EmitIntents)))
-	}
-	committedIntents := make([]runtimeengine.EmitIntent, 0, len(mutation.EmitIntents))
-	for index, publication := range committed.Publications[:len(mutation.EmitIntents)] {
-		if publication == nil {
-			return result, errors.Join(resultErr, fmt.Errorf("committed engine publication %d is required", index))
-		}
-		intent := publication.CommittedDurablePublicationIntent()
-		if strings.TrimSpace(intent.Event.ID()) != strings.TrimSpace(publication.CommittedDurablePublicationEventID()) {
-			return result, errors.Join(resultErr, fmt.Errorf("committed engine publication %d intent identity is inconsistent", index))
-		}
-		committedIntents = append(committedIntents, intent)
-	}
-	result.ActivityIntents = append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...)
-	result.EmitIntents = committedIntents
-	activityRequests, activityErr := committedActivityRequestIntents(committed.Publications, mutation.ActivityIntents)
-	result.ActivityRequestIntents = activityRequests
-	resultErr = errors.Join(resultErr, activityErr)
+	resultErr = errors.Join(resultErr, o.finishCommittedWorkflowLifecycle(ctx, committed.Lifecycle))
 	return result, resultErr
+}
+
+func committedEnginePublicationIntents(planned []runtimeengine.DurablePublicationPlan, committed []runtimeengine.CommittedDurablePublication, activities []runtimeengine.ActivityIntent) ([]runtimeengine.EmitIntent, []runtimeengine.EmitIntent, error) {
+	if len(planned) != len(committed) {
+		return nil, nil, fmt.Errorf("committed engine publications = %d, want exactly %d declared publications", len(committed), len(planned))
+	}
+	intents := make([]runtimeengine.EmitIntent, 0, len(planned))
+	seen := make(map[string]struct{}, len(planned))
+	for index, plan := range planned {
+		publication := committed[index]
+		if plan == nil || publication == nil {
+			return nil, nil, fmt.Errorf("engine publication %d requires declared and committed evidence", index)
+		}
+		if err := plan.ValidateDurablePublicationPlan(); err != nil {
+			return nil, nil, fmt.Errorf("declared engine publication %d: %w", index, err)
+		}
+		if err := publication.ValidateCommittedDurablePublication(); err != nil {
+			return nil, nil, fmt.Errorf("committed engine publication %d: %w", index, err)
+		}
+		id := plan.DurablePublicationEventID()
+		intent := publication.CommittedDurablePublicationIntent()
+		if id != publication.CommittedDurablePublicationEventID() || id != intent.Event.ID() {
+			return nil, nil, fmt.Errorf("committed engine publication %d differs from its declared event identity", index)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return nil, nil, fmt.Errorf("declared engine publication %s occurs more than once", id)
+		}
+		seen[id] = struct{}{}
+		intents = append(intents, intent)
+	}
+	requests, err := committedActivityRequestIntents(committed, activities)
+	if err != nil {
+		return nil, nil, err
+	}
+	requestIDs := make(map[string]struct{}, len(requests))
+	for _, request := range requests {
+		requestIDs[request.Event.ID()] = struct{}{}
+	}
+	emissions := make([]runtimeengine.EmitIntent, 0, len(intents)-len(requests))
+	for _, intent := range intents {
+		if _, activity := requestIDs[intent.Event.ID()]; !activity {
+			emissions = append(emissions, intent)
+		}
+	}
+	return emissions, requests, nil
 }
 
 func committedActivityRequestIntents(publications []runtimeengine.CommittedDurablePublication, activities []runtimeengine.ActivityIntent) ([]runtimeengine.EmitIntent, error) {
@@ -676,18 +675,22 @@ type preparedWorkflowEngineState struct {
 	expectedRevision int64
 	transition       WorkflowEngineStateTransition
 	updatedAt        time.Time
+	preservedRecord  *WorkflowEngineStateRecord
 }
 
 func (p preparedWorkflowEngineState) record() (WorkflowEngineStateRecord, error) {
+	if p.preservedRecord != nil {
+		return *p.preservedRecord, p.preservedRecord.Validate()
+	}
 	return workflowEngineStateRecord(p.owner, p.instance, p.expectedState, p.expectedRevision, p.transition, p.updatedAt)
 }
 
 func (r pipelineEngineStateRepo) prepareMutation(
 	ctx context.Context,
-	address runtimeengine.StateAddress,
-	mutation runtimeengine.StateMutation,
+	engineMutation runtimeengine.EngineMutation,
 	targetApplications ...DeliveryTargetApplication,
 ) (preparedWorkflowEngineState, error) {
+	address, mutation := engineMutation.Address, engineMutation.State
 	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
 		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires selected workflow persistence")
 	}
@@ -744,11 +747,12 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		}
 		presence = target.Presence
 		switch presence {
-		case WorkflowTargetPersistenceComplete:
+		case WorkflowTargetPersistenceComplete, WorkflowTargetPersistenceCompleteFieldless:
 			current, err = target.DecodeComplete(flowOwner.Route, entityID)
 		case WorkflowTargetPersistenceStateOnly:
-			current, err = decodeDeliveryTargetWorkflowEntityState(r.coordinator.SemanticSource(), flowID, runID, target.State)
+			return preparedWorkflowEngineState{}, fmt.Errorf("%w: imported state cannot authorize ordinary execution", runtimeengine.ErrUnconstructedWorkflowTarget)
 		case WorkflowTargetPersistenceAbsent:
+			return preparedWorkflowEngineState{}, runtimeengine.ErrUnconstructedWorkflowTarget
 		case WorkflowTargetPersistenceLifecycleOnly:
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation rejects lifecycle companion without state")
 		default:
@@ -762,63 +766,47 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	if err != nil {
 		return preparedWorkflowEngineState{}, err
 	}
-	if presence.HasState() {
+	if presence.Constructed() {
 		if err := validateWorkflowEntityType(semanticSource, flowID, current.EntityType); err != nil {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine persisted entity contract: %w", err)
 		}
 	}
-	expectedState := ""
-	expectedRevision := int64(0)
-	if transition.CreatesState() {
-		if mutation.TriggeredAt.IsZero() {
-			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization requires exact accepted event time")
-		}
-		source := r.coordinator.SemanticSource()
-		workflowName := flowID
-		workflowVersion := ""
-		if source != nil {
-			workflowName = firstNonEmptyString(workflowName, semanticview.RootExecutionFlowID(source))
-			workflowVersion = source.WorkflowVersion()
-		}
-		initialState, err := workflowInitialStateForFlow(source, flowID)
-		if err != nil {
-			return preparedWorkflowEngineState{}, err
-		}
-		mode := workflowPersistedFlowMode(source, flowID)
-		if mode == "" {
-			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization rejects unsupported persistence mode for flow %s", flowID)
-		}
-		entityType, err := requireWorkflowEntityType(source, flowID)
-		if err != nil {
-			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization entity contract: %w", err)
-		}
-		if carried := strings.TrimSpace(mutation.StateCarrier.Control.EntityType); carried != entityType {
-			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization carried entity_type %q disagrees with canonical contract %q", carried, entityType)
-		}
-		fields, err := workflowNormalizeEntityFields(source, flowID, mutation.StateCarrier.PersistedFields())
-		if err != nil {
-			return preparedWorkflowEngineState{}, err
-		}
-		current = WorkflowInstance{
-			InstanceID: flowOwner.Route.InstanceID, StorageRef: flowOwner.Route.InstancePath, EntityID: entityID.String(),
-			WorkflowName: workflowName, WorkflowVersion: workflowVersion, Mode: mode, Status: "active", CurrentState: initialState,
-			EntityType:   entityType,
-			InstanceKind: mutation.StateCarrier.Control.InstanceKind, TemplateVersion: mutation.StateCarrier.Control.TemplateVersion,
-			ParentFlowID: mutation.StateCarrier.Control.ParentFlowID, ParentFlowInstance: mutation.StateCarrier.Control.ParentFlowInstance,
-			ParentEntityID: mutation.StateCarrier.Control.ParentEntityID,
-			Fields:         fields,
-			Bookkeeping:    mutation.StateCarrier.PersistedBookkeeping(), Gates: cloneWorkflowGates(mutation.StateCarrier.Gates),
-			StateBuckets: mutation.StateCarrier.PersistedStateBuckets(), InitialFieldValues: cloneStringAnyMap(mutation.InitialFieldValues),
-			EnteredStageAt: mutation.TriggeredAt.UTC(), CreatedAt: mutation.TriggeredAt.UTC(), UpdatedAt: mutation.TriggeredAt.UTC(),
-		}
-	} else {
-		current = cloneWorkflowInstanceForEngineMutation(current)
-		expectedState = strings.TrimSpace(current.CurrentState)
-		expectedRevision = current.Revision
-		if expectedRevision <= 0 {
-			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires persisted revision")
-		}
+	expectedState := strings.TrimSpace(current.CurrentState)
+	expectedRevision := current.Revision
+	if expectedRevision <= 0 {
+		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires persisted revision")
 	}
+	if preserved := engineMutation.PreserveConstructedState; preserved != nil {
+		snapshot, _, err := workflowInstanceEngineStateSnapshot(semanticSource, flowID, entityID, current)
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
+		if !reflect.DeepEqual(snapshot, *preserved) || !reflect.DeepEqual(snapshot.StateCarrier, mutation.StateCarrier) {
+			return preparedWorkflowEngineState{}, fmt.Errorf("preserved constructed state disagrees with the admitted snapshot")
+		}
+		target, err := r.coordinator.workflowStore.LoadTargetPersistence(ctx, flowOwner, entityID)
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
+		exact, err := target.DecodeComplete(flowOwner.Route, entityID)
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
+		if !reflect.DeepEqual(exact, current) {
+			return preparedWorkflowEngineState{}, fmt.Errorf("preserved constructed state changed during preparation")
+		}
+		record, err := workflowEngineStateRecord(flowOwner, current, expectedState, expectedRevision, WorkflowEngineStateTransitionPreserveStateAndCompanion, current.UpdatedAt)
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
+		// Preserve the stored envelope, including controls not represented by the
+		// execution snapshot. Decoding and re-encoding is not rewrite authority.
+		record.Config = append(json.RawMessage(nil), target.Lifecycle.Config...)
+		return preparedWorkflowEngineState{owner: flowOwner, instance: current,
+			expectedState: expectedState, expectedRevision: expectedRevision,
+			transition: WorkflowEngineStateTransitionPreserveStateAndCompanion, updatedAt: current.UpdatedAt, preservedRecord: &record}, nil
+	}
+	current = cloneWorkflowInstanceForEngineMutation(current)
 
 	fromState := strings.TrimSpace(current.CurrentState)
 	if err := applyEngineStateMutation(&current, mutation, r.coordinator.SemanticSource(), flowID); err != nil {
@@ -880,9 +868,6 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 		if err := application.Validate(); err != nil {
 			return runtimeengine.StateSnapshot{}, false, err
 		}
-		if application.Owner().EntitylessReceiver() {
-			return runtimeengine.StateSnapshot{}, false, nil
-		}
 		if address.FlowInstance.Route != application.Route() || entityID.String() != application.EntityID() {
 			return runtimeengine.StateSnapshot{}, false, fmt.Errorf("engine state lookup disagrees with admitted delivery target application")
 		}
@@ -893,7 +878,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 		if err != nil {
 			return runtimeengine.StateSnapshot{}, false, err
 		}
-		if !presence.HasState() {
+		if !presence.Constructed() {
 			return runtimeengine.StateSnapshot{}, false, nil
 		}
 		return workflowInstanceEngineStateSnapshot(r.coordinator.SemanticSource(), flowID, entityID, instance)
@@ -915,27 +900,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 		}
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	state, err := r.coordinator.currentWorkflowState(ctx, address.FlowInstance, entityID)
-	if err != nil {
-		return runtimeengine.StateSnapshot{}, false, err
-	}
-	if strings.TrimSpace(string(state.Stage)) == "" && len(state.Metadata) == 0 {
-		return runtimeengine.StateSnapshot{}, false, nil
-	}
-	fields, err := workflowNormalizeEntityFields(r.coordinator.SemanticSource(), flowID, state.Metadata)
-	if err != nil {
-		return runtimeengine.StateSnapshot{}, false, err
-	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(fields, nil, nil, nil)
-	if err != nil {
-		return runtimeengine.StateSnapshot{}, false, err
-	}
-	carrier.Control = state.Control
-	return runtimeengine.StateSnapshot{
-		EntityID:     entityID,
-		CurrentState: strings.TrimSpace(string(state.Stage)),
-		StateCarrier: carrier,
-	}, true, nil
+	return runtimeengine.StateSnapshot{}, false, fmt.Errorf("engine state requires the selected constructed-header owner")
 }
 
 func workflowInstanceEngineStateSnapshot(
@@ -956,6 +921,7 @@ func workflowInstanceEngineStateSnapshot(
 	carrier.Gates = workflowStateGatesForScope(source, flowID, carrier.Gates)
 	return runtimeengine.StateSnapshot{
 		EntityID:        entityID,
+		Revision:        instance.Revision,
 		WorkflowName:    strings.TrimSpace(instance.WorkflowName),
 		WorkflowVersion: strings.TrimSpace(instance.WorkflowVersion),
 		CurrentState:    strings.TrimSpace(instance.CurrentState),
@@ -1477,16 +1443,15 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 		return err == nil && strings.TrimSpace(instance.WorkflowName) == coordinate.FlowID() &&
 			coordinate.Matches(flowID, strings.TrimSpace(instance.StorageRef))
 	}
-	ownerScope := runtimeflowidentity.ScopeKey(source, flowID)
-	targetRoute, err := workflowInstanceRouteForPersisted(source, instance)
+	if strings.TrimSpace(instance.WorkflowName) != flowID {
+		return false
+	}
+	targetRoute := runtimeflowidentity.StoredRoute(runtimeflowidentity.ScopeKey(source, flowID), instance.InstanceID, instance.StorageRef)
+	constructed, err := requireWorkflowInstanceIdentity(targetRoute, identity.NormalizeEntityID(instance.EntityID), instance)
 	if err != nil {
 		return false
 	}
-	targetScope := targetRoute.ScopeKey
-	if ownerScope == "" || targetScope == "" {
-		return false
-	}
-	return ownerScope == targetScope
+	return constructed.ValidateConstruction(source, runID) == nil
 }
 
 func workflowStateGatesForScope(source semanticview.Source, flowID string, persisted map[string]bool) map[string]bool {

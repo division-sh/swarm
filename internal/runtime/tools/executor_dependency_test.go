@@ -56,9 +56,6 @@ func (*entityPersistenceStub) QueryEntityStates(context.Context, EntityStateQuer
 func (*entityPersistenceStub) SaveEntityField(context.Context, EntityFieldUpdate) (EntityFieldWriteResult, error) {
 	return EntityFieldWriteResult{Revision: 1, Acknowledged: true}, nil
 }
-func (*entityPersistenceStub) CreateEntity(_ context.Context, rec EntityCreateRecord) (EntityCreateResult, error) {
-	return EntityCreateResult{EntityID: rec.EntityID, Acknowledged: true}, nil
-}
 
 type humanTaskPersistenceStub struct{}
 

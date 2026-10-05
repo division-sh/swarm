@@ -23,6 +23,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
@@ -318,7 +319,7 @@ func sourceMutationFact(t testing.TB, marker string) runtimecorrelation.SourceAr
 	return fact
 }
 
-func sourceMutationRouteSource() semanticview.Source {
+func sourceMutationRouteSource(t testing.TB) semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
 		Path:  "work",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "work"},
@@ -342,8 +343,9 @@ func sourceMutationRouteSource() semanticview.Source {
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"work": &root.Children[0]},
 		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"work": {}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"work": flow.Schema},
 	}
+	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "work"))
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
 	}
@@ -518,7 +520,7 @@ func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testin
 	foreign := sourceMutationFact(t, "d")
 	owner := newSourceMutationProbeOwner()
 	store := &sourceBoundaryProbeStore{}
-	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner, sourceMutationRouteSource())
+	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner, sourceMutationRouteSource(t))
 	foreignCtx := runtimecorrelation.WithSourceArtifactFact(context.Background(), foreign)
 	req := FlowInstanceRouteMaterializationRequest{
 		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("work", "instance-a")),

@@ -1,0 +1,522 @@
+{
+	"source_head": "4b68a14af",
+	"master_base": "ee9b091526f89154a425c1f1d1321085aa9b832b",
+	"command": "go run ./cmd/swarm-test -- -json -count=1 -run nine named public construction/recovery roots ./internal/releasee2e ./internal/serveapp",
+	"qualification_boundary": "Standing/progressive public verify/serve/restart/reset; compiled internal mock-lifecycle processes with public RPC readback for sequential/scatter/selected cases; not paid-provider or public publication qualification",
+  "receipt": "/tmp/agent-e-2496-public-construction-ee9-final.log",
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "result": "pass",
+      "seconds": 111.048
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/releasee2e",
+      "result": "pass",
+      "seconds": 182.383
+    }
+  ],
+  "roots": [
+    {
+      "test": "TestReceiverCompositionFailureSettlementBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestEntityProgressivePresencePublicServeRestartSQLitePostgres",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestGoldenAgentWorkloadSequentialRunsBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestGoldenNumericDataScatterParkRestartBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestStandingRootTreePublicRestartAndResetBothStores",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    }
+  ],
+  "cells": [
+    {
+      "test": "TestEntityProgressivePresencePublicServeRestartSQLitePostgres/progressive/sqlite",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverCompositionFailureSettlementBothStores/default_sqlite/unavailable_after_publish",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReceiverCompositionFailureSettlementBothStores/explicit_postgres/unavailable_after_publish",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestEntityProgressivePresencePublicServeRestartSQLitePostgres/progressive/postgres",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestEntityProgressivePresencePublicServeRestartSQLitePostgres/last-field/sqlite",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestEntityProgressivePresencePublicServeRestartSQLitePostgres/last-field/postgres",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/connected_typed_creation/zero_false",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/connected_typed_creation/defaults",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/connected_typed_creation/optional_null_normalized",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/connected_typed_creation/missing_required",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/connected_typed_creation/missing_active",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/connected_typed_creation/wrong_integer_at_ingress",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/connected_typed_creation",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestGoldenAgentWorkloadSequentialRunsBothStores/sqlite",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/direct_provider_schema/private_child",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/direct_provider_schema/wrong_provider_integer",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite/direct_provider_schema",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/default_sqlite",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestGoldenAgentWorkloadSequentialRunsBothStores/postgres",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/connected_typed_creation/zero_false",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/connected_typed_creation/defaults",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/connected_typed_creation/optional_null_normalized",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/connected_typed_creation/missing_required",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/connected_typed_creation/missing_active",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/connected_typed_creation/wrong_integer_at_ingress",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/connected_typed_creation",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/direct_provider_schema/private_child",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/direct_provider_schema/wrong_provider_integer",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres/direct_provider_schema",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestReleaseReceiverInitializationBothStores/explicit_postgres",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores/default_sqlite",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores/explicit_postgres",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/unchanged",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/compatible",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/incompatible",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/missing_input",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/ambiguous_artifact",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/explicit_child",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/ordinary_child",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/ordinary_root",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/reference",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/default_sqlite/pause_resume",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/unchanged",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/compatible",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/incompatible",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/missing_input",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/ambiguous_artifact",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/explicit_child",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/ordinary_child",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/ordinary_root",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/reference",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPendingInputBothStores/explicit_postgres/pause_resume",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/default_sqlite/run.pause",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/default_sqlite/run.continue",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/default_sqlite/agent.restart",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/default_sqlite/agent.send_directive",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/default_sqlite/event.publish",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/default_sqlite/event.replay",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/default_sqlite/agent.replay",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/default_sqlite/terminal_public_readback",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/default_sqlite",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/explicit_postgres/run.pause",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/explicit_postgres/run.continue",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/explicit_postgres/agent.restart",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/explicit_postgres/agent.send_directive",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/explicit_postgres/event.publish",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/explicit_postgres/event.replay",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/explicit_postgres/agent.replay",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/explicit_postgres/terminal_public_readback",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedForkPublicChangedTargetExecutionBothStores/explicit_postgres",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestGoldenNumericDataScatterParkRestartBothStores/sqlite",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestGoldenNumericDataScatterParkRestartBothStores/postgres",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestStandingRootTreePublicRestartAndResetBothStores/sqlite",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "test": "TestStandingRootTreePublicRestartAndResetBothStores/postgres",
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    }
+  ],
+  "failures": []
+}

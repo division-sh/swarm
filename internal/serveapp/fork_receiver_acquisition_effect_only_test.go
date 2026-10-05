@@ -33,8 +33,8 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 	}
 	route := matched[0].route
 	handler, local, ok := route.ConnectClaim.NodeHandlerOwner()
-	if !ok || handler.FlowPath() != "consumer" || handler.NodeID() != "collector" || local != "work.ready" || route.Target.Code() != "materializing_entity" || route.Target.Route() != wantTarget {
-		t.Fatalf("acquisition lost exact authored handler/future target: %+v", route)
+	if !ok || handler.FlowPath() != "consumer" || handler.NodeID() != "collector" || local != "work.ready" || route.Target.Code() != "existing_entity" || route.Target.Route() != wantTarget {
+		t.Fatalf("mutation lost exact authored handler/constructed target: %+v", route)
 	}
 	var status, outcome, failure string
 	var claim, outcomeClaim, outcomes int
@@ -49,7 +49,7 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 	}
 	var publicEvent operatorread.OperatorEventFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &publicEvent)
-	if publicEvent.RunID != runID || len(publicEvent.Deliveries) != 1 || publicEvent.Deliveries[0].DeliveryID != deliveryID || publicEvent.Deliveries[0].Status != "delivered" || publicEvent.Deliveries[0].Target != (operatorread.OperatorDeliveryTarget{Kind: "materializing_entity", FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}) {
+	if publicEvent.RunID != runID || len(publicEvent.Deliveries) != 1 || publicEvent.Deliveries[0].DeliveryID != deliveryID || publicEvent.Deliveries[0].Status != "delivered" || publicEvent.Deliveries[0].Target != (operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}) {
 		t.Fatalf("public acquisition target/settlement: %+v", publicEvent)
 	}
 	row := readForkReceiverRows(t, rt, runID)["consumer"]
@@ -65,8 +65,8 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 		Old, New                   any
 		WriterType, WriterID, Step string
 	}
-	wantMutations := []markerMutation{{nil, "consumer-created", "platform", "workflow_engine", "create"}}
-	if policy != canonicalrouting.ForkReceiverExplicitCreate && policy != canonicalrouting.ForkReceiverAutoMaterializing {
+	wantMutations := []markerMutation{{nil, "consumer-created", "platform", "workflow_engine", "mutate"}}
+	if policy != canonicalrouting.ForkReceiverConstructorOwned {
 		t.Fatalf("unsupported supplemental test policy %d", policy)
 	}
 	rows, err := rt.DB.Query(`SELECT COALESCE(CAST(old_value AS TEXT),'null'),CAST(new_value AS TEXT),writer_type,writer_id,handler_step FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND domain='authored_field' AND path='marker'`, runID, entityID, eventID)
@@ -120,15 +120,20 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 		for _, tc := range []struct {
 			name   string
 			policy canonicalrouting.ForkReceiverPolicy
-		}{{"auto_materializing", canonicalrouting.ForkReceiverAutoMaterializing}, {"explicit_create", canonicalrouting.ForkReceiverExplicitCreate}} {
+		}{{"constructor_owned", canonicalrouting.ForkReceiverConstructorOwned}} {
 			t.Run(string(backend)+"/"+tc.name, func(t *testing.T) {
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverAcquisitionWithoutFinishedEmission(t, tc.policy))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				seedRows := readForkReceiverRows(t, rt, seed.RunID)
-				if _, exists := seedRows["consumer"]; exists || len(seedRows) != 1 {
-					t.Fatalf("seed invented an unexecuted acquiring receiver: %+v", seedRows)
+				wantSeedRows := map[string]forkReceiverRow{
+					seed.RunID: {ID: seed.RunID, Flow: seed.RunID, Type: "root", State: "active", Fields: map[string]any{"marker": "root-owned"}},
+					"producer": {ID: flowidentity.EntityID("producer"), Flow: "producer", Type: "work", State: "waiting", Fields: map[string]any{}},
+					"consumer": {ID: flowidentity.EntityID("consumer"), Flow: "consumer", Type: "receipt", State: "waiting", Fields: map[string]any{}},
+				}
+				if !reflect.DeepEqual(seedRows, wantSeedRows) {
+					t.Fatalf("seed did not construct the exact inert child tree: got=%+v want=%+v", seedRows, wantSeedRows)
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-request"})
 				if started.RunID != seed.RunID {

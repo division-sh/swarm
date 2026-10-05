@@ -85,7 +85,7 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 				if foreign.sourceTransition && index == 1 {
 					planSource = facts[0]
 				}
-				seedServeDynamicTopologyReadiness(t, db, backend, fact, planSource, artifacts[index], runIDs[index], paths[index], index == 0)
+				seedServeDynamicTopologyReadiness(t, db, backend, fact, planSource, artifacts[index], runIDs[index], paths[index])
 			}
 			if foreign.malformed {
 				query := `UPDATE flow_instance_runtime_readiness SET plan = '{}'::jsonb WHERE run_id = $1::uuid AND instance_path = $2`
@@ -146,8 +146,23 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 			if err := installServeSourceSet(context.Background(), capability, plan); err != nil {
 				t.Fatal(err)
 			}
-			for _, rt := range runtimes {
-				installSelectedStoreTestGeneration(t, capability, rt, plan, 1)
+			for index, rt := range runtimes {
+				grant := installSelectedStoreTestGeneration(t, capability, rt, plan, 1)
+				if index == 0 {
+					evidence, err := grant.Evidence()
+					if err != nil {
+						t.Fatal(err)
+					}
+					// Physical completed-row projection, not attachment execution proof.
+					// It still binds the real installed generation, never a fake grant.
+					query := `UPDATE flow_instance_runtime_readiness SET activation_attempt_grant_id=$1::uuid, activation_attempt_state='accepted', phase='ready' WHERE run_id=$2::uuid AND instance_path=$3`
+					if backend == "sqlite" {
+						query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_grant_id=$1, activation_attempt_state='accepted', phase='ready' WHERE run_id=$2 AND instance_path=$3`
+					}
+					if _, err := db.Exec(query, evidence.GrantID, runIDs[index], paths[index]); err != nil {
+						t.Fatalf("seed exact completed preflight projection: %v", err)
+					}
+				}
 			}
 			t.Cleanup(func() {
 				for _, rt := range runtimes {
@@ -215,7 +230,6 @@ func seedServeDynamicTopologyReadiness(
 	artifact *sourceartifact.AdmittedSourceArtifact,
 	runID string,
 	instancePath string,
-	complete bool,
 ) {
 	t.Helper()
 	runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
@@ -252,9 +266,13 @@ func seedServeDynamicTopologyReadiness(
 	if err != nil {
 		t.Fatalf("marshal readiness plan: %v", err)
 	}
+	planHash, err := plan.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
 	flowInsert := `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, $3, 'template', '{}'::jsonb, 'active', NOW())
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3, $4::uuid, 'worker', 'idle', 'template', '{}'::jsonb, 'active', TRUE, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, NOW(), NOW(), NOW())
 	`
 	entityInsert := `
 		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
@@ -262,13 +280,13 @@ func seedServeDynamicTopologyReadiness(
 	`
 	readinessInsert := `
 		INSERT INTO flow_instance_runtime_readiness (
-			run_id, instance_path, plan, topology_ready_at, created_at, updated_at
-		) VALUES ($1::uuid, $2, $3::jsonb, $4, NOW(), NOW())
+			run_id, instance_path, plan, plan_hash, phase, created_at, updated_at
+		) VALUES ($1::uuid, $2, $3::jsonb, $4, $5, NOW(), NOW())
 	`
 	if backend == "sqlite" {
 		flowInsert = `
-			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-			VALUES ($1, $2, $3, 'template', '{}', 'active', CURRENT_TIMESTAMP)
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, 'worker', 'idle', 'template', '{}', 'active', 1, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		`
 		entityInsert = `
 			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
@@ -276,33 +294,26 @@ func seedServeDynamicTopologyReadiness(
 		`
 		readinessInsert = `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_path, plan, topology_ready_at, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+				run_id, instance_path, plan, plan_hash, phase, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		`
 	}
-	if _, err := db.Exec(flowInsert, runID, instancePath, parts[0]); err != nil {
+	if _, err := db.Exec(flowInsert, runID, instancePath, parts[0], entityID); err != nil {
 		t.Fatalf("seed flow instance %s: %v", instancePath, err)
 	}
 	if _, err := db.Exec(entityInsert, entityID, runID, instancePath); err != nil {
 		t.Fatalf("seed entity state %s: %v", instancePath, err)
 	}
-	if _, err := db.Exec(readinessInsert, runID, instancePath, raw, nullableServeReadinessTime(complete)); err != nil {
+	if _, err := db.Exec(readinessInsert, runID, instancePath, raw, planHash, runtimepipeline.FlowAttachmentPlanned); err != nil {
 		t.Fatalf("seed readiness %s: %v", instancePath, err)
 	}
-}
-
-func nullableServeReadinessTime(complete bool) any {
-	if !complete {
-		return nil
-	}
-	return time.Now().UTC()
 }
 
 func snapshotServeDynamicTopologyReadiness(t *testing.T, db *sql.DB) []string {
 	t.Helper()
 	rows, err := db.Query(`
 		SELECT CAST(readiness.run_id AS TEXT), readiness.instance_path, CAST(readiness.plan AS TEXT),
-		       COALESCE(CAST(readiness.topology_ready_at AS TEXT), ''), CAST(readiness.updated_at AS TEXT),
+		       readiness.phase, CAST(readiness.updated_at AS TEXT),
 		       run.bundle_hash, run.status
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN runs AS run ON run.run_id = readiness.run_id
