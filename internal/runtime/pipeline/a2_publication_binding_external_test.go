@@ -17,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -64,12 +63,15 @@ func (p *a2HeldWorkerProbe) resume() { p.once.Do(func() { close(p.release) }) }
 // performs the actual lifecycle-entry fence and rollback; no synthetic CAS error.
 type a2HeldPublicationCommit struct {
 	runtimepipeline.WorkflowPersistenceOwner
-	nodeID   string
-	prepared chan runtimepipeline.WorkflowEngineMutationCommand
-	result   chan error
-	release  chan struct{}
-	holdOnce sync.Once
-	endOnce  sync.Once
+	nodeID              string
+	prepared            chan runtimepipeline.WorkflowEngineMutationCommand
+	result              chan error
+	release             chan struct{}
+	holdOnce            sync.Once
+	endOnce             sync.Once
+	retried             chan runtimepipeline.WorkflowEngineMutationCommand
+	retryRelease        chan struct{}
+	retryOnce, retryEnd sync.Once
 }
 
 func (p *a2HeldPublicationCommit) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
@@ -83,6 +85,15 @@ func (p *a2HeldPublicationCommit) CommitWorkflowEngineMutation(ctx context.Conte
 			case <-ctx.Done():
 			}
 		})
+		if !held {
+			p.retryOnce.Do(func() {
+				p.retried <- command
+				select {
+				case <-p.retryRelease:
+				case <-ctx.Done():
+				}
+			})
+		}
 	}
 	result, err := p.WorkflowPersistenceOwner.CommitWorkflowEngineMutation(ctx, command)
 	if held {
@@ -91,7 +102,8 @@ func (p *a2HeldPublicationCommit) CommitWorkflowEngineMutation(ctx context.Conte
 	return result, err
 }
 
-func (p *a2HeldPublicationCommit) resume() { p.endOnce.Do(func() { close(p.release) }) }
+func (p *a2HeldPublicationCommit) resume()      { p.endOnce.Do(func() { close(p.release) }) }
+func (p *a2HeldPublicationCommit) resumeRetry() { p.retryEnd.Do(func() { close(p.retryRelease) }) }
 
 func TestA2StageEntryPayloadDirectedOutputOnBothStores(t *testing.T) {
 	testA2StageEntryPublicationBinding(t, []int{0, 1, 2, 3})
@@ -144,8 +156,10 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				var commit *a2HeldPublicationCommit
 				if scenario >= 6 {
 					commit = &a2HeldPublicationCommit{WorkflowPersistenceOwner: selected.events.(runtimepipeline.WorkflowPersistenceOwner), nodeID: worker.Key(),
-						prepared: make(chan runtimepipeline.WorkflowEngineMutationCommand, 1), result: make(chan error, 1), release: make(chan struct{})}
+						prepared: make(chan runtimepipeline.WorkflowEngineMutationCommand, 1), result: make(chan error, 1), release: make(chan struct{}),
+						retried: make(chan runtimepipeline.WorkflowEngineMutationCommand, 1), retryRelease: make(chan struct{})}
 					t.Cleanup(commit.resume)
+					t.Cleanup(commit.resumeRetry)
 					selected.persistence = runtimepipeline.NewWorkflowPersistence(commit)
 				}
 				probe := &a2HeldWorkerProbe{Probe: lifecycleprobe.New(), eventID: triggerID, release: make(chan struct{})}
@@ -310,13 +324,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				if commit != nil {
 					commit.resume()
 				}
-				waitCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
-				completed, completedCursor, err := probe.WaitAfter(waitCtx, lifecycleprobe.Cursor{}, lifecycleprobe.Signal{Kind: lifecycleprobe.HandlerCompleted, EventID: triggerID, SubscriberType: "node", SubscriberID: worker.Key()})
-				cancel()
 				if commit != nil {
-					if err != nil || completed.Status != "failed" {
-						t.Fatalf("stale prepared E1 was committed: status=%s err=%v", completed.Status, err)
-					}
 					waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					select {
 					case commitErr := <-commit.result:
@@ -327,11 +335,21 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					case <-waitCtx.Done():
 						t.Fatal(waitCtx.Err())
 					}
-					if err := bus.WaitForQuiescence(waitCtx); err != nil {
-						t.Fatal(err)
+					select {
+					case command := <-commit.retried:
+						if len(command.Publications) != 1 {
+							t.Fatal("fresh evaluation lost the single publication")
+						}
+						publication := command.Publications[0].(runtimebus.EnginePublicationPlan).PublicationCommand()
+						if len(publication.Commit.DeliveryRoutes) != 1 || len(publication.Commit.DeliveryRoutes[0].Context.Joins) != 1 ||
+							publication.Commit.DeliveryRoutes[0].Context.Joins[0].Ref.StageEntry() != wantEntries[0] {
+							t.Fatalf("fresh publication did not retain the actual current entry: %#v", publication.Commit)
+						}
+					case <-waitCtx.Done():
+						t.Fatal("contention did not re-evaluate within the same delivery attempt")
 					}
 					cancel()
-					assertExactJoinDeliveryStatus(t, selected, ctx, triggerID, worker.Key(), "failed")
+					assertExactJoinDeliveryStatus(t, selected, ctx, triggerID, worker.Key(), "in_progress")
 					var publications int
 					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE source_event_id=$1", triggerID).Scan(&publications); err != nil || publications != 0 {
 						t.Fatalf("rejected first publication leaked: count=%d err=%v", publications, err)
@@ -349,32 +367,16 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					if err != nil || !found || len(retained.DeliveryRoutes) != 1 {
 						t.Fatalf("failed worker lost its exact durable input: found=%v err=%v", found, err)
 					}
-					var deliveryID string
-					if err := selected.db.QueryRowContext(ctx, "SELECT delivery_id FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", triggerID, worker.Key()).Scan(&deliveryID); err != nil {
-						t.Fatal(err)
+					commit.resumeRetry()
+				}
+				waitCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+				completed, completedCursor, err := probe.WaitAfter(waitCtx, lifecycleprobe.Cursor{}, lifecycleprobe.Signal{Kind: lifecycleprobe.HandlerCompleted, EventID: triggerID, SubscriberType: "node", SubscriberID: worker.Key()})
+				cancel()
+				if commit != nil {
+					var retries, attempts int
+					if err := selected.db.QueryRowContext(ctx, `SELECT d.retry_count,(SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id) FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_id=$2`, triggerID, worker.Key()).Scan(&retries, &attempts); err != nil || retries != 0 || attempts != 1 {
+						t.Fatalf("contention consumed delivery attempts: retries=%d attempts=%d err=%v", retries, attempts, err)
 					}
-					// Advance only retry eligibility; admission and claims remain real.
-					if _, err := selected.db.ExecContext(ctx, "UPDATE event_deliveries SET next_eligible_at=$1 WHERE delivery_id=$2", time.Now().UTC().Add(-time.Second), deliveryID); err != nil {
-						t.Fatal(err)
-					}
-					pc = newGateRecoveryCoordinator(bus, selected, options)
-					bus.SetInterceptors(pc)
-					if err := bus.ReleaseDeliveryContinuation(deliveryID); err != nil {
-						t.Fatal(err)
-					}
-					proof, err := selected.events.ProveHandoff(ctx, triggerID, retained.DeliveryRoutes[0])
-					if err != nil {
-						t.Fatal(err)
-					}
-					if err := bus.AcceptCommittedDeliveryHandoffs([]deliverylifecycle.DurableHandoffProof{proof}); err != nil {
-						t.Fatal(err)
-					}
-					if result := bus.DispatchDeliveryContinuation(ctx, retained.Event.Event(), retained.DeliveryRoutes[0]); result.Failure() != nil {
-						t.Fatal(result.Failure())
-					}
-					waitCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
-					completed, completedCursor, err = probe.WaitAfter(waitCtx, completedCursor, lifecycleprobe.Signal{Kind: lifecycleprobe.HandlerCompleted, EventID: triggerID, SubscriberType: "node", SubscriberID: worker.Key()})
-					cancel()
 				}
 				if scenario == 5 {
 					quietCtx, quietCancel := context.WithTimeout(ctx, 5*time.Second)
