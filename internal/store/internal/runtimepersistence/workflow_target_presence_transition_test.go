@@ -414,8 +414,8 @@ func stateOnlyWorkflowEngineMutationRecord(t *testing.T, runID, flowID, instance
 		Gates: json.RawMessage(`{}`), Accumulator: json.RawMessage(`{}`), Config: config, InitialFields: json.RawMessage(`{}`),
 		EnteredStageAt: createdAt.Add(time.Minute), CreatedAt: createdAt, UpdatedAt: createdAt.Add(time.Minute),
 		ExpectedState: expectedState, ExpectedRevision: expectedRevision,
-		// The deleted companion-repair variant has no replacement authority.
-		Transition: runtimepipeline.WorkflowEngineStateTransition(3),
+		// Creation-shaped ordinary mutations cannot acquire construction.
+		Transition: runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion,
 	}
 }
 
