@@ -66,7 +66,7 @@ func ValidatePayloadAgainstSchema(schema map[string]any, payload map[string]any)
 	if schema == nil {
 		return nil
 	}
-	return validateSchemaObject("$", CanonicalAcceptanceSchema(schema), payload)
+	return validateValue("$", CanonicalAcceptanceSchema(schema), payload)
 }
 
 // NormalizeOptionalFieldNulls applies the event wire-boundary null rule.
@@ -249,6 +249,22 @@ func CanonicalAcceptanceSchema(schema map[string]any) map[string]any {
 	if items, ok := schema["items"].(map[string]any); ok {
 		out["items"] = CanonicalAcceptanceSchema(items)
 	}
+	if raw, declared := schema["oneOf"]; declared {
+		branches, ok := asArray(raw)
+		if !ok {
+			out["oneOf"] = raw
+		} else {
+			projected := make([]any, len(branches))
+			for index, branch := range branches {
+				if child, ok := branch.(map[string]any); ok && child != nil {
+					projected[index] = CanonicalAcceptanceSchema(child)
+				} else {
+					projected[index] = branch
+				}
+			}
+			out["oneOf"] = projected
+		}
+	}
 	if names, ok := schema["propertyNames"].(map[string]any); ok {
 		out["propertyNames"] = CanonicalAcceptanceSchema(names)
 	}
@@ -387,6 +403,25 @@ func semanticValuesEqual(left, right any) bool {
 }
 
 func validateValue(path string, schema map[string]any, value any) error {
+	if raw, declared := schema["oneOf"]; declared {
+		branches, ok := asArray(raw)
+		if !ok || len(branches) == 0 {
+			return violation(path, "oneOf", "non-empty schema array", "invalid oneOf", "%s.oneOf must be a non-empty schema array", path)
+		}
+		matched := 0
+		for _, branch := range branches {
+			child, ok := branch.(map[string]any)
+			if !ok || child == nil {
+				return violation(path, "oneOf", "schema object", "invalid branch", "%s.oneOf must contain schemas", path)
+			}
+			if validateValue(path, child, value) == nil {
+				matched++
+			}
+		}
+		if matched != 1 {
+			return violation(path, "oneOf", "exactly one matching branch", fmt.Sprint(matched), "%s must match exactly one oneOf branch (matched %d)", path, matched)
+		}
+	}
 	if value == nil && schemaAllowsNull(schema) {
 		return nil
 	}

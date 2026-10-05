@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
@@ -304,7 +305,7 @@ func (l *decisionCardRequestLease) Release(ctx context.Context) error {
 	return nil
 }
 
-func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.DecisionCardMutationCommand) (pipeline.CommittedDecisionCardMutation, error) {
+func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.DecisionCardMutationCommand) (result pipeline.CommittedDecisionCardMutation, resultErr error) {
 	if l == nil || l.closed || l.used {
 		return pipeline.CommittedDecisionCardMutation{}, fmt.Errorf("card request lease is not current")
 	}
@@ -322,6 +323,13 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 		return pipeline.CommittedDecisionCardMutation{}, fmt.Errorf("card request source changed before commit")
 	}
 	l.used = true
+	defer func() {
+		// A proven rolled-back CAS loss can reevaluate the same acquired request.
+		// Acknowledged or uncertain outcomes never permit another mutation.
+		if !result.Acknowledged && failures.IsStateContention(resultErr) {
+			l.used = false
+		}
+	}()
 	if s := l.postgres; s != nil {
 		return commitDecisionCardOperation(ctx, s, s.DecisionPostgresOwner, true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (pipeline.CommittedDecisionCardMutation, error)) mutationprotocol.Result[pipeline.CommittedDecisionCardMutation] {
 			if err := s.requireCurrentSchema(); err != nil {

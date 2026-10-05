@@ -15,6 +15,17 @@ import (
 const MaxToolInputSchemaDepth = 64
 
 func validateToolSchemaValue(path string, schema ToolInputSchema, value semanticvalue.Value, checkEnum bool) error {
+	if branches, declared := schema.OneOfSchemas(); declared {
+		matched := 0
+		for _, branch := range branches {
+			if validateToolSchemaValue(path, branch, value, true) == nil {
+				matched++
+			}
+		}
+		if matched != 1 {
+			return fmt.Errorf("%s must match exactly one oneOf branch (matched %d)", path, matched)
+		}
+	}
 	if enum, declared := schema.EnumValues(); checkEnum && declared {
 		matched := false
 		for _, candidate := range enum {
@@ -103,6 +114,15 @@ func validateToolSchemaValue(path string, schema ToolInputSchema, value semantic
 			}
 		}
 		for name, member := range members {
+			if names, constrained := schema.PropertyNamesSchema(); constrained {
+				key, err := semanticvalue.String(name)
+				if err != nil {
+					return err
+				}
+				if err := validateToolSchemaValue(path+"[key="+name+"]", names, key, true); err != nil {
+					return err
+				}
+			}
 			property, known := schema.Property(name)
 			if known {
 				if err := validateToolSchemaValue(path+"."+name, property, member, true); err != nil {

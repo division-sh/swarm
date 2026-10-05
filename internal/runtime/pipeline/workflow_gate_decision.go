@@ -529,6 +529,21 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 }
 
 func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, route gateruntime.Route, emitted *events.Event) (bool, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		committed, err := pc.routeWorkflowGateDecisionAttempt(ctx, card, evt, route, emitted)
+		if committed || !runtimefailures.IsStateContention(err) {
+			return committed, err
+		}
+	}
+}
+
+func (pc *PipelineCoordinator) routeWorkflowGateDecisionAttempt(ctx context.Context, card decisioncard.Card, evt events.Event, route gateruntime.Route, emitted *events.Event) (bool, error) {
+	if evt.RunID() != card.RunID {
+		return false, fmt.Errorf("gate decision event disagrees with its exact card run")
+	}
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
 		return false, err
@@ -541,13 +556,26 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	if err != nil {
 		return false, err
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
+	unlock := pc.lockWorkflowEntity(anchor.EntityID)
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
+	address := runtimeengine.StateAddress{FlowID: identity.NormalizeFlowID(anchor.FlowID), FlowInstance: flowIdentity, EntityID: identity.NormalizeEntityID(anchor.EntityID)}
+	repo := pipelineEngineStateRepo{coordinator: pc}
+	snapshot, found, err := repo.LoadState(ctx, address)
 	if err != nil {
 		return false, err
 	}
 	if !found {
 		return false, fmt.Errorf("decision card workflow instance is missing")
 	}
+	evaluated, err := evaluatedWorkflowInstance(pc.SemanticSource(), address, snapshot)
+	if err != nil {
+		return false, err
+	}
+	instance := evaluated.instance
 	currentStage := strings.TrimSpace(instance.CurrentState)
 	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
@@ -576,16 +604,11 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		return false, err
 	}
-	address := runtimeengine.StateAddress{
-		FlowID:       identity.NormalizeFlowID(anchor.FlowID),
-		FlowInstance: runtimeflowidentity.RunScopedFlowInstance{RunID: evt.RunID(), Route: instanceRoute}.Normalize(),
-		EntityID:     identity.NormalizeEntityID(anchor.EntityID),
-	}
 	cause, err := runtimeworkflowlifecycle.NewCompiledTransition(route.Transition, handlerselection.NotApplicable(), nil)
 	if err != nil {
 		return false, err
 	}
-	preparedState, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, runtimeengine.EngineMutation{Address: address, State: runtimeengine.StateMutation{
+	preparedState, err := repo.prepareMutation(ctx, runtimeengine.EngineMutation{Address: address, EvaluatedState: snapshot, State: runtimeengine.StateMutation{
 		Transition: &cause,
 		NextState:  nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
 		TriggeredAt: evt.CreatedAt(), StateCarrier: carrier,
@@ -631,12 +654,16 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		Lifecycle: lifecycle.Commit, Publications: publications,
 	})
 	if !committed.Committed {
-		err = errors.Join(err, fmt.Errorf("workflow gate mutation has no acknowledged result"))
+		if err == nil {
+			err = fmt.Errorf("workflow gate mutation has no acknowledged result")
+		}
 		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
 			err = errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
 		}
 		return false, err
 	}
+	unlock()
+	unlock = nil
 	if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
 		err = errors.Join(err, planner.FinalizeEnginePublications(ctx, committed.Publications))
 	}

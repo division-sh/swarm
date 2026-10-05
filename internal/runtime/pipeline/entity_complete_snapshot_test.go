@@ -78,9 +78,10 @@ func TestEntityLastFieldClearAndColdReloadBothStores(t *testing.T) {
 				t.Fatal("missing cleared entity before hostile candidate")
 			}
 			owner := pipelineEngineMutationOwner{store: store, state: repo}
+			evaluated := loadEngineEvaluationForTest(t, ctx, repo, address)
 			_, err = owner.CommitEngineMutation(ctx, runtimeengine.EngineMutation{
-				Address: address,
-				State:   testEngineStateMutation(map[string]any{"undeclared": "poison"}, nil, nil),
+				Address: address, EvaluatedState: evaluated,
+				State: testEngineStateMutation(map[string]any{"undeclared": "poison"}, nil, nil),
 			})
 			if err == nil || !strings.Contains(err.Error(), "undeclared") {
 				t.Fatalf("unvalidated commit candidate accepted: %v", err)

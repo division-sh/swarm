@@ -16,19 +16,19 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type forkedDomainConsumerSurface interface {
 	SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
-	SaveEntityField(context.Context, runtimetools.EntityFieldUpdate) (runtimetools.EntityFieldWriteResult, error)
 	RecordSpend(context.Context, budgetspend.SpendRecord) error
 	ListBudgetProjectionTargets(context.Context) ([]budgetspend.ProjectionTarget, error)
 	UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error
@@ -88,6 +88,10 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				t.Fatal(err)
 			}
 			seedForkedFlowInstance(t, fixture, entity.FlowInstance)
+			selected := surface.(workflowTestSelectedStore)
+			opts := completeWorkflowTestCoordinatorOptions(pipeline.NewWorkflowPersistence(selected), selected)
+			opts.Module = runForkGateWorkflowModule{source: source}
+			writer := pipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, opts)
 			route := runtimebus.FlowInstanceRouteRecord{
 				Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.sourceRun, Route: runtimeflowidentity.DeriveRoute("freeze", "domain")}, EventPattern: "freeze/domain/input",
 				SubscriberType: "node", SubscriberID: "freeze-node", SourceFlow: "freeze",
@@ -106,9 +110,10 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				RunID: fixture.sourceRun, CreatedAt: fixture.forkedAt, Entities: []pipeline.ScenarioSetupEntityRequest{lateEntity},
 			})
 			requireForkedSourceRefusal(t, "scenario import", err)
-			_, err = surface.SaveEntityField(ctx, runtimetools.EntityFieldUpdate{
-				Source: source, RunID: fixture.sourceRun, EntityID: entityID, FieldPath: "account_id", Value: "changed",
-				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
+			_, err = writer.ApplyEntityFieldMutation(ctx, pipeline.EntityFieldMutation{
+				Source: source, RunID: fixture.sourceRun, EntityID: entityID, FlowID: "freeze", Owner: runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.sourceRun, Route: runtimeflowidentity.DeriveRoute("freeze", "domain")},
+				Mutation: entityruntime.Mutation{Target: "entity.account_id", Value: "changed"},
+				Writer:   mutationlog.Writer{Type: "agent", ID: "source-freeze", HandlerStep: "save_entity_field"},
 			})
 			requireForkedSourceRefusal(t, "save entity field and mutation log", err)
 			requireForkedSourceRefusal(t, "record spend", surface.RecordSpend(ctx, budgetspend.SpendRecord{
@@ -185,14 +190,30 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 func seedForkedFlowInstance(t *testing.T, fixture *forkedConsumerTestBackend, instancePath string) {
 	t.Helper()
+	var entityID string
+	entityQuery := `SELECT entity_id FROM entity_state WHERE run_id = ? AND flow_instance = ?`
+	if fixture.postgres != nil {
+		entityQuery = `SELECT entity_id::text FROM entity_state WHERE run_id = $1::uuid AND flow_instance = $2`
+	}
+	if err := fixture.db.QueryRowContext(context.Background(), entityQuery, fixture.sourceRun, instancePath).Scan(&entityID); err != nil {
+		t.Fatal(err)
+	}
+	config, err := pipeline.WorkflowInstanceConfigPayloadForIdentity(runtimeflowidentity.Instance{TemplateID: "freeze", ScopeKey: "freeze", InstanceID: "domain", InstancePath: instancePath, EntityID: entityID, HasStoredPath: true}, "1", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
 	query := `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
-		SELECT run_id, flow_instance, entity_id, entity_type, 'freeze', 'template', '{}', 'active', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1 FROM entity_state WHERE run_id = ? AND flow_instance = ?`
+		SELECT run_id, flow_instance, entity_id, entity_type, 'freeze', 'template', ?, 'active', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1 FROM entity_state WHERE run_id = ? AND flow_instance = ?`
 	if fixture.postgres != nil {
 		query = `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
-			SELECT run_id, flow_instance, entity_id, entity_type, 'freeze', 'template', '{}'::jsonb, 'active', TRUE, 'active', $1, $2, $3, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1 FROM entity_state WHERE run_id = $4::uuid AND flow_instance = $5`
+			SELECT run_id, flow_instance, entity_id, entity_type, 'freeze', 'template', $1::jsonb, 'active', TRUE, 'active', $2, $3, $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1 FROM entity_state WHERE run_id = $5::uuid AND flow_instance = $6`
 	}
 	at := fixture.forkedAt.Add(-time.Minute)
-	result, err := fixture.db.ExecContext(context.Background(), query, at, at, at, fixture.sourceRun, instancePath)
+	result, err := fixture.db.ExecContext(context.Background(), query, string(configJSON), at, at, at, fixture.sourceRun, instancePath)
 	if err != nil {
 		t.Fatal(err)
 	}

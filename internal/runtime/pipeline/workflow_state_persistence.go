@@ -52,6 +52,9 @@ func (pc *PipelineCoordinator) lockWorkflowEntity(entityID string) func() {
 		return func() {}
 	}
 	pc.entityLockMu.Lock()
+	if pc.entityLocks == nil {
+		pc.entityLocks = make(map[string]*sync.Mutex)
+	}
 	lock, ok := pc.entityLocks[entityID]
 	if !ok {
 		lock = &sync.Mutex{}

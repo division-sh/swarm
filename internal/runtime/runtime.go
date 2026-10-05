@@ -1357,6 +1357,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		MailboxStore:       runtimeDeps.MailboxStore,
 		NoticePresentation: opts.NoticePresentation,
 		EntityStore:        runtimeDeps.ToolEntityStore,
+		EntityWriter:       rt.Pipeline,
 		HumanTaskStore:     runtimeDeps.HumanTaskStore,
 		WorkflowInstances:  rt.Pipeline,
 		WorkflowSource:     source,

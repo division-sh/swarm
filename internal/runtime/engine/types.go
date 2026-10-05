@@ -188,7 +188,14 @@ type StateSnapshot struct {
 	WorkflowVersion string
 	CurrentState    string
 	EnteredStateAt  time.Time
+	Persisted       EvaluatedStateProjection
 	StateCarrier
+}
+
+// EvaluatedStateProjection retains the persistence owner's complete R1
+// envelope; execution carries it unchanged, never refreshing its revision.
+type EvaluatedStateProjection interface {
+	EvaluationRevision() int64
 }
 
 func (s StateSnapshot) FieldsBucket() values.Bucket {

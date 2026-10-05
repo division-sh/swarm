@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -149,7 +150,7 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 				return err
 			}
 			if instance.Revision != command.State.ExpectedRevision || instance.CurrentState != command.State.ExpectedState {
-				return fmt.Errorf("pipeline test preserved state revision changed")
+				return failures.New(failures.ClassLifecycleConflict, "workflow_engine_state_revision_conflict", "pipeline-test", "preserve", nil)
 			}
 		} else if err := commitPipelineTestWorkflowState(txctx, store, command.State); err != nil {
 			return err
@@ -662,7 +663,7 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 			if err != nil {
 				return err
 			}
-			return fmt.Errorf("pipeline test workflow state changed before commit")
+			return failures.New(failures.ClassLifecycleConflict, "workflow_engine_state_revision_conflict", "pipeline-test", "commit", nil)
 		}
 	}
 	flowArgs := []any{string(record.Config), record.Status, record.CurrentState, string(record.Gates), string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt, record.UpdatedAt, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.Slug, record.Name, record.Identity.RunID, record.Identity.Route.InstancePath, record.EntityID, record.ExpectedRevision, record.ExpectedState}
@@ -675,7 +676,7 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		return err
 	}
 	if rows != 1 {
-		return fmt.Errorf("pipeline test workflow flow instance is missing")
+		return failures.New(failures.ClassLifecycleConflict, "workflow_engine_state_revision_conflict", "pipeline-test", "commit", nil)
 	}
 	if err := commitPipelineTestWorkflowMutationLog(ctx, tx, store, record, before); err != nil {
 		return fmt.Errorf("commit pipeline test workflow mutation log: %w", err)
