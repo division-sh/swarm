@@ -417,6 +417,12 @@ type releaseRPCClient struct {
 }
 
 func (c *releaseRPCClient) call(ctx context.Context, method string, params map[string]any, result any) (err error) {
+	started := time.Now()
+	contextAtEntry := ctx.Err()
+	budgetAtEntry := "none"
+	if deadline, bounded := ctx.Deadline(); bounded {
+		budgetAtEntry = time.Until(deadline).String()
+	}
 	defer func() {
 		if err != nil && c.onFailure != nil {
 			c.onFailure(method, params)
@@ -439,7 +445,7 @@ func (c *releaseRPCClient) call(ctx context.Context, method string, params map[s
 	request.Header.Set("Content-Type", "application/json")
 	response, err := c.client.Do(request)
 	if err != nil {
-		return fmt.Errorf("call %s: %w", method, err)
+		return fmt.Errorf("call %s: %w; rpc_context_at_entry=%v rpc_context_after=%v rpc_budget_at_entry=%s rpc_elapsed=%s", method, err, contextAtEntry, ctx.Err(), budgetAtEntry, time.Since(started))
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
