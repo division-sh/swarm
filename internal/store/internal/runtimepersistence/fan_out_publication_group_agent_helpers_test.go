@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agents"
 	"github.com/division-sh/swarm/internal/runtime/authority"
 	"github.com/division-sh/swarm/internal/runtime/bus"
@@ -26,11 +28,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -65,12 +71,54 @@ func publicationGroupRealAgentFactory(t *testing.T, selected any, eventBus *bus.
 	t.Helper()
 	cfg := &config.Config{}
 	cfg.LLM.Backend, cfg.LLM.Session.LockTTL = llmselection.BackendAnthropic, time.Minute
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		t.Fatal("agent crash workspace requires its admitted source")
+	}
+	projection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := projection.Release(); err != nil {
+			t.Error(err)
+		}
+	})
+	workspaces := workspace.NewHostManager()
+	workspaceConfig := workspace.DefaultHostConfig()
+	workspaceConfig.WorkspaceRoot = t.TempDir()
+	workspaces.SetConfig(workspaceConfig)
+	workspaces.SetSemanticSource(source)
+	if err := workspaces.BindSourceProjection(projection); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := workspaces.ReleaseSourceProjection(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	turns := mcp.NewTurnContextRegistry(actors.ActorFromContext)
+	gateway := httptest.NewUnstartedServer(nil)
+	t.Cleanup(gateway.Close)
+	hostURL, containerURL, err := toolgateway.ListenerEndpoints(gateway.Listener.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := toolgateway.GenerateAuthToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := toolgateway.NewRuntimeOwnedBinding(toolgateway.TransportHTTP, hostURL, containerURL, token, toolgateway.LifecycleOwnerServeBoot, toolgateway.SourceBoundMCPListener)
+	if err != nil {
+		t.Fatal(err)
+	}
 	profile, err := llmselection.ResolveLiveBackend(cfg.LLM.Backend)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{
 		Cfg: cfg, Sessions: sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL), Conversations: selected.(llm.ConversationPersistence), Events: eventBus,
+		Workspaces: workspaces, MCPTurns: turns, ToolGateway: binding,
 		LockOwner:            "publication-group-agent-crash",
 		CompletionController: effects.NewCompletionController(selected.(effects.Store), selected.(effects.CompletionStore), selected.(effects.CompletionHeartbeatStore), publicationGroupSpendProjection{}).WithExecutionPosture(executionposture.MockOnly),
 	}, nil)
@@ -79,6 +127,8 @@ func publicationGroupRealAgentFactory(t *testing.T, selected any, eventBus *bus.
 	}
 	provider := authority.NewSourceProvider(source)
 	executor := runtimetools.NewExecutorWithOptions(eventBus, runtimetools.ExecutorOptions{Config: cfg, WorkflowSource: source, ModelRuntimes: runtimes, AuthorityProvider: provider, EmitRegistry: runtimetools.NewEmitRegistry(source, provider)})
+	gateway.Config.Handler = mcp.NewGateway(executor, token, runtimepkg.RuntimeMCPGatewayHooks(nil, nil, nil, nil, turns)).Handler()
+	gateway.Start()
 	factory := agents.NewLLMAgentFactory(runtimes, executor, agents.LLMAgentOptions{})
 	return func(cfg actors.AgentConfig) (manager.Agent, error) {
 		agent, err := factory(cfg)
