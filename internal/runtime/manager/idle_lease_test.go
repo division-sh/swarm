@@ -41,17 +41,21 @@ func TestIssue2269SettlingLeasePreservesOtherAcquisitions(t *testing.T) {
 	am.lifecycle.mu.Lock()
 	execution := am.lifecycle.cells[identity].execution
 	drained := execution.leaseDrained
-	count := execution.leases
+	count := len(execution.leases)
+	_, ownsSettling := execution.leases[settling]
+	_, ownsOther := execution.leases[other]
 	am.lifecycle.mu.Unlock()
-	if count != 2 || drained == nil {
+	if count != 2 || drained == nil || !ownsSettling || !ownsOther {
 		t.Fatalf("two exact acquisitions: count=%d drained=%v", count, drained)
 	}
 	settling.Release()
 	settling.Release()
 	am.lifecycle.mu.Lock()
-	count = execution.leases
+	count = len(execution.leases)
+	_, ownsSettling = execution.leases[settling]
+	_, ownsOther = execution.leases[other]
 	am.lifecycle.mu.Unlock()
-	if count != 1 {
+	if count != 1 || ownsSettling || !ownsOther {
 		t.Fatalf("settling carrier released another acquisition: %d", count)
 	}
 	select {

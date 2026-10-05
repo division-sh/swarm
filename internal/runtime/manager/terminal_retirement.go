@@ -474,7 +474,7 @@ func retainAgentRetirement(cell *agentLifecycleCell, execution *agentExecutionPr
 		cell: cell, execution: execution, token: execution.routeToken,
 		done: execution.loopDone, settled: execution.loopSettled,
 	}
-	if execution.leases > 0 {
+	if len(execution.leases) > 0 {
 		retirement.leases = execution.leaseDrained
 	}
 	cell.retirement = retirement

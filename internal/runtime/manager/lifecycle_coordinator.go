@@ -90,7 +90,7 @@ type agentExecutionProjection struct {
 	route             <-chan *worklifetime.EventDelivery
 	routeToken        runtimeeffects.LifecycleToken
 	fenced            bool
-	leases            int
+	leases            map[*agentExecutionLease]struct{}
 	leaseDrained      chan struct{}
 	deferredTerminal  *deferredAgentTermination
 	settlementErr     error
@@ -1412,7 +1412,7 @@ func (c *agentLifecycleCoordinator) cancelShutdownWork() (context.Context, []<-c
 		if execution.loopSettled != nil {
 			done = append(done, execution.loopSettled)
 		}
-		if execution.leases > 0 && execution.leaseDrained != nil {
+		if len(execution.leases) > 0 && execution.leaseDrained != nil {
 			done = append(done, execution.leaseDrained)
 		}
 	}
@@ -1676,11 +1676,15 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(
 		c.mu.Unlock()
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_generation_not_running", "agent-lifecycle", purpose, map[string]any{"agent": strings.TrimSpace(target)})
 	}
-	if execution.leases == 0 {
+	if len(execution.leases) == 0 {
 		execution.leaseDrained = make(chan struct{})
 	}
-	execution.leases++
 	snapshot := snapshotExecution(execution)
+	lease := &agentExecutionLease{agentExecutionSnapshot: snapshot}
+	if execution.leases == nil {
+		execution.leases = make(map[*agentExecutionLease]struct{})
+	}
+	execution.leases[lease] = struct{}{}
 	generationCtx := execution.generationCtx
 	runCtx := c.runCtx
 	c.mu.Unlock()
@@ -1697,14 +1701,14 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(
 	if c.effectsStore != nil {
 		leaseCtx = runtimeeffects.WithController(leaseCtx, runtimeeffects.NewController(c.effectsStore).WithExecutionPosture(c.executionPosture))
 	}
-	lease := &agentExecutionLease{agentExecutionSnapshot: snapshot, Context: leaseCtx}
+	lease.Context = leaseCtx
 	lease.release = sync.OnceFunc(func() {
 		stopGenerationCancel()
 		cancel()
 		c.mu.Lock()
-		if execution.leases > 0 {
-			execution.leases--
-			if execution.leases == 0 && execution.leaseDrained != nil {
+		if _, owned := execution.leases[lease]; owned {
+			delete(execution.leases, lease)
+			if len(execution.leases) == 0 && execution.leaseDrained != nil {
 				close(execution.leaseDrained)
 				execution.leaseDrained = nil
 			}
@@ -1979,7 +1983,7 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 		execution.cancelGeneration()
 	}
 	var leasesDone <-chan struct{}
-	if execution.leases > 0 {
+	if len(execution.leases) > 0 {
 		leasesDone = execution.leaseDrained
 	}
 	c.mu.Unlock()
