@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -175,10 +176,13 @@ func TestScalar2556LoadedPredicatesRefuseBeforeExecution(t *testing.T) {
 
 func TestScalar2556ReaderCensusExcludesOnlyInternalDefaults(t *testing.T) {
 	for _, expression := range []string{"else", "ELSE", "eLsE"} {
-		var readers []expressionReference
-		appendExecutableReader(&readers, "activity.input.value.cel", expression, pipeline.WorkflowEntityFieldLifecycleRule)
-		appendConditionExecutableReader(&readers, "guard.check", expression, pipeline.WorkflowEntityFieldLifecycleGuard, pipeline.WorkflowConditionContextGuard)
-		appendConditionExecutableReader(&readers, "rules[0].condition", expression, pipeline.WorkflowEntityFieldLifecycleRule, pipeline.WorkflowConditionContextRule)
+		readers := pipeline.WorkflowHandlerExecutableReaders(nil, runtimeidentity.ExecutableNode{}, "proof.requested", contracts.SystemNodeEventHandler{
+			Activity: contracts.ActivitySpec{Input: map[string]contracts.ExpressionValue{
+				"value": {Kind: contracts.ExpressionKindCEL, CEL: expression},
+			}},
+			Guard: &contracts.GuardSpec{Check: expression},
+			Rules: []contracts.HandlerRuleEntry{{Condition: expression}},
+		})
 		if len(readers) != 2 || readers[0].Expression != expression || readers[1].ConditionContext != pipeline.WorkflowConditionContextGuard {
 			t.Fatalf("non-default expression hidden from validation: %#v", readers)
 		}
