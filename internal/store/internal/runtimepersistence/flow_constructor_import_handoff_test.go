@@ -65,7 +65,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 			record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", ".", entityID, "pending", 1, at)
 			record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
-			if _, err := owner.CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err == nil || !strings.Contains(err.Error(), "constructed target") {
+			if _, err := owner.CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err == nil || err.Error() != "workflow engine state route is missing: ." {
 				t.Fatalf("ordinary mutation granted construction to an import: %v", err)
 			}
 			prepared, err := prepareSelectedStoreForkForTest(t, f.ctx, f.store, runID, marker.ID(), runfork.RunForkContractSelection{Mode: "selected_contracts"})
