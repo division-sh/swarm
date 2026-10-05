@@ -1069,5 +1069,41 @@ partition admits only Receiver/Required. Rename this new proof to `Docker`
 so the existing selected-rest partition owns it exactly once. No plan, tier,
 timeout or budget changes; the original d201f640e race receipt retains its
 historical name, and new-name focused qualification follows this correction.
-The new root is consumed by the existing mandatory release-rest partition;
-no planner, timeout, tier, runtime or production assertion changes are made.
+The compiled static-doctor root is consumed by the existing release-rest
+partition; the selected Docker root is consumed by selected-rest. No new
+partition, timeout or tier is introduced for these roots.
+
+## Post-#2525/#2565 integration amendment
+
+Rebased onto `origin/master@52b954ec2` after both prerequisites merged.
+Master's route publication wrapper and read-only host admission owner are
+preserved; source fixtures consume the current exact flow-construction owner,
+not deleted SQL entity seeds. No `start_failed` operation was copied here:
+the merged compensation remains `self_release` with trigger `start_failed`.
+
+Only one branch-added executable YAML slot needed the new value grammar:
+`workspace_mcp/nodes.yaml`'s marker is CEL, not interpolated text. Apply the
+committed `scripts/rewrite-value-slots-2556` tool with `2555-intent.json`;
+the exact before/after hashes and line disposition are recorded, and a second
+`-check` reports zero changed files. The branch-added Go fixture sweep finds
+no remaining wrapped/literal executable slot. Schema and scenario data are
+not rewritten as expressions.
+
+L01/L02/L04 are crossed with the merged owner through
+`TestMockNormalRealDockerEmissionBothStores`: complete a real native turn,
+disconnect only its exact container at public restart admission, retain the
+typed gateway refusal, prove one succeeded self_release/start_failed journal
+entry at the refused token's exact unchanged generation, registered/stopped
+durable disposition, no published admission and no native worker after return.
+Reconnect the same container and use a new request key: exactly one new probe,
+the next generation becomes running, and the committed turn/output is not
+replayed. Both stores pass together with the selected Docker loss controls,
+race x1 at `437efebde` (147.792s). This is actual Docker retained H plus public
+RPC; it is not implicit-default hosted Q01 acceptance or paid Claude proof.
+
+The provider-alias native fixture correction survives rebase alongside
+master's independent standing-root assertions. Focused admission, API-spec,
+rewriter and planner checks pass. Full-tier local/CI remains required; the
+qualification sequence is focused, core, then one final server2 full.
+Q06's cumulative-unit partition proposal is still unimplemented until its
+recorded disposition. No deadline relaxation, proof omission or tier reduction.
