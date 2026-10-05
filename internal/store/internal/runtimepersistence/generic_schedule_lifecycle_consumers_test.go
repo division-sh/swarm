@@ -263,11 +263,8 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 			enteredAt := time.Now().UTC()
 			plan, err := f.manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
-				Instance: runtimeflowidentity.Instance{
-					TemplateID: ".", ScopeKey: ".", InstanceID: runID, InstancePath: runID,
-					EntityID: entityID, HasStoredPath: true,
-				},
-				OccurredAt: enteredAt,
+				Instance:       runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""),
+				OccurredAt:     enteredAt,
 			})
 			if err != nil {
 				t.Fatal(err)

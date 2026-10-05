@@ -549,7 +549,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 			t.Error(err)
 		}
 	})
-	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
+	req := sqliteKeyedFlowActivationRequest(t, ctx, bundle, "inst-1")
 	if err := manager.ActivateFlowInstance(ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance through closed SQLite owner: %v", err)
 	}
@@ -643,7 +643,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		go func() {
 			defer wg.Done()
 			<-start
-			req := sqliteFlowActivationRequest(bundle, "review", instanceID, "parent-ent", "review/"+instanceID)
+			req := sqliteKeyedFlowActivationRequest(t, ctx, bundle, instanceID)
 			errs <- manager.ActivateFlowInstance(ctx, req)
 		}()
 	}
@@ -1061,9 +1061,9 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
 		"schema.yaml":          "name: flow-activation-proof\n",
-		"review/schema.yaml":   "name: review\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    - task.started\n",
-		"review/entities.yaml": "review_item: {}\n",
-		"review/events.yaml":   "task.started:\n",
+		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    - task.started\n",
+		"review/entities.yaml": "review_item:\n  request_id: text\n",
+		"review/events.yaml":   "task.started:\n  request_id: text\n",
 	})
 	// The actor authority fixture supplies its admitted test intent separately
 	// from the compiled flow declaration.
@@ -1088,6 +1088,18 @@ func sqliteFlowActivationRequest(bundle *runtimecontracts.WorkflowContractBundle
 		Instance:       instance,
 		OccurredAt:     time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	}
+}
+
+func sqliteKeyedFlowActivationRequest(t *testing.T, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, instanceID string) runtimepipeline.FlowInstanceActivationRequest {
+	t.Helper()
+	req := sqliteFlowActivationRequest(bundle, "review", instanceID, "", "review/"+instanceID)
+	req.ConstructorInput, req.ResolvedKey = "task.started", instanceID
+	payload, err := json.Marshal(map[string]string{"request_id": instanceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "task.started", "constructor-fixture", "", payload, 0, runtimecorrelation.RunIDFromContext(ctx), events.EventEnvelope{}, req.OccurredAt)
+	return req
 }
 
 func assertSQLiteActivatedAgentRoutes(t *testing.T, agents []runtimemanager.PersistedAgent, wantRoutes ...string) {

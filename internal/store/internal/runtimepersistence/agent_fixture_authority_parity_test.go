@@ -116,9 +116,7 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			}, selected))
 
 			activate := func(instanceID string) error {
-				return manager.ActivateFlowInstance(ctx, sqliteFlowActivationRequest(
-					bundle, "review", instanceID, "parent-ent", "review/"+instanceID,
-				))
+				return manager.ActivateFlowInstance(ctx, sqliteKeyedFlowActivationRequest(t, ctx, bundle, instanceID))
 			}
 			if err := activate("sequential-a"); err != nil {
 				t.Fatalf("activate first sequential flow: %v", err)
