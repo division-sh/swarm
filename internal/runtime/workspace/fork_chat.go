@@ -117,7 +117,7 @@ func (m *HostManager) ResolveForkChatWorkspace(ctx context.Context, actor actors
 		return nil, err
 	}
 	defer m.projectionOps.Done()
-	if err := m.ensurePrereqs(); err != nil {
+	if err := m.ensurePrereqs(ctx); err != nil {
 		return nil, err
 	}
 	root, err := m.hostRoot()
