@@ -1,7 +1,6 @@
 package canonicalrouting
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -84,6 +83,6 @@ func CopyFlowConstructorNestedPresence(t testing.TB, member, read string) string
 	writeClosedVariantFile(t, root, "producer/types.yaml", catalog)
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n  vertical_id: text\n  brief: Brief\n")
 	writeClosedVariantFile(t, root, "consumer/entities.yaml", "deployment:\n  vertical_id: text\n  brief: Brief\n")
-	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done:\n      guard: {check: '"+strings.ReplaceAll(read, "'", "''")+"'}\n")
+	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done:\n      guard:\n        check: >-\n          "+read+"\n")
 	return root
 }

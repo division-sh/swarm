@@ -80,9 +80,9 @@ func TestFlowConstructorEligibilityUsesAssignmentChecker(t *testing.T) {
 		{"supplied initial read", "  brief: text\n", "      guard: {check: entity.brief != ''}\n", true},
 		{"optional is not guaranteed", "  brief: text?\n", "      guard: {check: entity.brief != ''}\n", false},
 		{"missing initial read", "", "      guard: {check: entity.brief != ''}\n", false},
-		{"guard cannot borrow later write", "", "      guard: {check: entity.brief != ''}\n      data_accumulation:\n        writes: [{target_field: brief, value: supplied}]\n", false},
-		{"read after definite write", "", "      data_accumulation:\n        writes: [{target_field: brief, value: supplied}, {target_field: copy, value: '${entity.brief}'}]\n", true},
-		{"explicit optional presence", "  brief: text?\n", "      guard: {check: '!has(entity.brief) || entity.brief != \"\"'}\n", true},
+		{"guard cannot borrow later write", "", "      guard: {check: entity.brief != ''}\n      data_accumulation:\n        writes: [{target_field: brief, value: 'supplied'}]\n", false},
+		{"read after definite write", "", "      data_accumulation:\n        writes: [{target_field: brief, value: 'supplied'}, {target_field: copy, value: entity.brief}]\n", true},
+		{"explicit optional presence", "  brief: text?\n", "      guard:\n        check: >-\n          !has(entity.brief) || entity.brief != \"\"\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := constructorReaderFixture(t, "  brief: text\n  copy: text\n", tc.payload, tc.handler)
