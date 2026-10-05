@@ -39,10 +39,46 @@ func SelectedStoreDependentAdmissionChecks() []SelectedStoreAdmissionCheck {
 	}
 }
 
-func absentStoreRequiredAdmissionChecks() []SelectedStoreAdmissionCheck {
+// SelectedStoreAbsentAdmissionChecks is the complete evidence tail required for
+// each absence root, even though none of these inspections can run yet.
+func SelectedStoreAbsentAdmissionChecks() []SelectedStoreAdmissionCheck {
 	return append(SelectedStoreDependentAdmissionChecks(),
 		SelectedStoreAdmissionCheck{"selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect"},
 		SelectedStoreAdmissionCheck{"startup_process_possession", "internal/store/selected.AdmissionInspection.ProbePossession"})
+}
+
+func (r Report) absentStoreEvidence() (map[string]map[string]bool, bool) {
+	stores := map[string]map[string]bool{}
+	valid := true
+	for _, observation := range r.Observations {
+		if observation.NotRunCause == nil {
+			continue
+		}
+		if !observation.validAbsentStore(r.Purpose) {
+			valid = false
+			continue
+		}
+		stores[observation.Subject] = make(map[string]bool)
+	}
+	for _, observation := range r.Observations {
+		observed, absent := stores[observation.Subject]
+		if !absent || observation.NotRunCause != nil {
+			continue
+		}
+		if !observation.validAbsentStoreDependent() {
+			valid = false
+			continue
+		}
+		observed[observation.CheckID] = true
+	}
+	for _, observed := range stores {
+		for _, required := range SelectedStoreAbsentAdmissionChecks() {
+			if !observed[required.ID] {
+				valid = false
+			}
+		}
+	}
+	return stores, valid
 }
 
 func (o AdmissionObservation) validAbsentStore(purpose ValidationPurpose) bool {
@@ -61,7 +97,7 @@ func (o AdmissionObservation) validAbsentStoreDependent() bool {
 		len(o.Dependencies) != 1 || o.Dependencies[0] != "selected_store_access" {
 		return false
 	}
-	for _, check := range absentStoreRequiredAdmissionChecks() {
+	for _, check := range SelectedStoreAbsentAdmissionChecks() {
 		if o.CheckID == check.ID {
 			return o.Owner == check.Owner
 		}
