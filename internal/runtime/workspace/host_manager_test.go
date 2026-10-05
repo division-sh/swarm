@@ -115,7 +115,7 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	}
 }
 
-func TestHostManagerCapabilityAdmissionCreatesOnlyWorkspaceRoot(t *testing.T) {
+func TestHostManagerCapabilityAdmissionDoesNotCreateWorkspaceRoot(t *testing.T) {
 	sourceProjection, _ := testRuntimeSourceProjection(t)
 	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
@@ -139,13 +139,11 @@ func TestHostManagerCapabilityAdmissionCreatesOnlyWorkspaceRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(target.Workdir)
-	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
-		t.Fatalf("admitted workspace root: info=%v error=%v", info, err)
+	if target.Workdir != root || len(target.Mounts) == 0 {
+		t.Fatalf("read-only admission lost its exact target/mounts: %+v", target)
 	}
-	children, err := os.ReadDir(root)
-	if err != nil || len(children) != 0 {
-		t.Fatalf("admission created execution/data children: %v, %v", children, err)
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("read-only admission created workspace state: %v", err)
 	}
 }
 
