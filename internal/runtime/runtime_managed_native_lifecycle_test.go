@@ -24,6 +24,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -420,8 +421,11 @@ func managedNativeLifecycleOptions(t *testing.T, agentID string, modelRuntime ll
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     modelRuntime,
-		WorkspaceLifecycle: claudeStartupWorkspaceStub{
-			target: &workspace.Target{Container: "swarm-agent-" + agentID, Workdir: "/workspace"},
+		WorkspaceLifecycle: managedNativeLifecycleWorkspace{
+			claudeStartupWorkspaceStub: claudeStartupWorkspaceStub{
+				target: &workspace.Target{Container: "swarm-agent-" + agentID, Workdir: "/workspace"},
+			},
+			gatewayTarget: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
 		},
 		EnableToolGateway: true,
 		ProviderCredentials: testProviderCredentialStore(
@@ -430,6 +434,21 @@ func managedNativeLifecycleOptions(t *testing.T, agentID string, modelRuntime ll
 			"oauth-token",
 		),
 	}
+}
+
+// These tests inject the Claude provider inventory, but the activation gateway
+// observation still runs through a real host child and HTTP, not a fake container.
+// They do not earn Docker or live-Claude execution credit.
+type managedNativeLifecycleWorkspace struct {
+	claudeStartupWorkspaceStub
+	gatewayTarget *workspace.Target
+}
+
+func (s managedNativeLifecycleWorkspace) ResolveWorkspaceForCapabilityAdmission(ctx context.Context, actor runtimeactors.AgentConfig) (*workspace.Target, error) {
+	if _, activation := effects.LifecycleTokenFromContext(ctx); activation {
+		return s.gatewayTarget, nil
+	}
+	return s.claudeStartupWorkspaceStub.ResolveWorkspaceForCapabilityAdmission(ctx, actor)
 }
 
 type managedNativeLifecycleGateway struct {
