@@ -190,10 +190,6 @@ func requireActivityPublicationReadback(t *testing.T, rt servedControlProofRunti
 		t.Fatal(err)
 	}
 	wantSource.EntityID = entityID
-	if mode == "root" {
-		wantKind = "root"
-		wantSource = events.RouteIdentity{EntityID: entityID}
-	}
 	wantName := local
 	if flow != "." {
 		wantName = path + "/" + local

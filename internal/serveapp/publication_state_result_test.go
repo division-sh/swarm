@@ -98,11 +98,16 @@ func TestServedStateResultPublicationBothStores(t *testing.T) {
 						if err := json.Unmarshal([]byte(rawSource), &route); err != nil {
 							t.Fatal(err)
 						}
-						validSource := sourceKind == "static_flow" && route.FlowID == flow && route.FlowInstance == flow
+						instance := flow
 						if flow == "." {
-							validSource = sourceKind == "root" && route.FlowID == "" && route.FlowInstance == ""
+							instance = seed.RunID
 						}
-						if !validSource || sourceEvent != seed.EventID {
+						var entityID string
+						if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`, seed.RunID, instance, flow).Scan(&entityID); err != nil {
+							t.Fatal(err)
+						}
+						wantSource := events.RouteIdentity{FlowID: flow, FlowInstance: instance, EntityID: entityID}
+						if sourceKind != "static_flow" || route != wantSource || sourceEvent != seed.EventID {
 							t.Fatalf("state-result source=%s %+v", sourceKind, route)
 						}
 						if route.EntityID == "" {
