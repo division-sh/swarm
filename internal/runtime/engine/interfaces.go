@@ -84,6 +84,7 @@ type EmitPersistenceVerifier interface {
 type EngineMutation struct {
 	Address StateAddress
 	State   StateMutation
+	EvaluatedState StateSnapshot
 	// PreserveConstructedState admits accepted-event reactions, not state writes.
 	PreserveConstructedState *StateSnapshot
 	HandlerRuleSelection     handlerselection.HandlerRuleSelectionFact

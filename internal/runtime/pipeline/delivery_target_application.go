@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -214,24 +215,24 @@ func (a *DeliveryTargetApplication) applyPersistedInstance(instance WorkflowInst
 func (pc *PipelineCoordinator) loadCurrentDeliveryTargetState(
 	ctx context.Context,
 	application DeliveryTargetApplication,
-) (WorkflowInstance, WorkflowTargetPersistencePresence, error) {
+) (WorkflowInstance, WorkflowTargetPersistencePresence, json.RawMessage, error) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
-		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, fmt.Errorf("delivery target state requires workflow persistence")
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, nil, fmt.Errorf("delivery target state requires workflow persistence")
 	}
 	if err := application.Validate(); err != nil {
-		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, err
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, nil, err
 	}
 	entityID := identity.NormalizeEntityID(application.EntityID())
 	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(application.Event().RunID(), application.Route())
 	if err != nil {
-		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, err
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, nil, err
 	}
 	target, err := pc.workflowStore.LoadTargetPersistence(ctx, flowIdentity, entityID)
 	if err != nil {
-		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, fmt.Errorf("reload exact admitted delivery target persistence: %w", err)
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, nil, fmt.Errorf("reload exact admitted delivery target persistence: %w", err)
 	}
 	if err := target.Validate(application.Route(), entityID); err != nil {
-		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, fmt.Errorf("validate reloaded admitted delivery target persistence: %w", err)
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, nil, fmt.Errorf("validate reloaded admitted delivery target persistence: %w", err)
 	}
 
 	var current WorkflowInstance
@@ -239,29 +240,29 @@ func (pc *PipelineCoordinator) loadCurrentDeliveryTargetState(
 	case WorkflowTargetPersistenceComplete, WorkflowTargetPersistenceCompleteFieldless:
 		current, err = target.DecodeComplete(application.Route(), entityID)
 	case WorkflowTargetPersistenceStateOnly, WorkflowTargetPersistenceLifecycleOnly, WorkflowTargetPersistenceAbsent:
-		return WorkflowInstance{}, target.Presence, fmt.Errorf("target %q is not constructed: %w", application.Route().InstancePath, runtimeengine.ErrUnconstructedWorkflowTarget)
+		return WorkflowInstance{}, target.Presence, nil, fmt.Errorf("target %q is not constructed: %w", application.Route().InstancePath, runtimeengine.ErrUnconstructedWorkflowTarget)
 	default:
-		return WorkflowInstance{}, target.Presence, fmt.Errorf("exact admitted delivery target has unknown persistence presence")
+		return WorkflowInstance{}, target.Presence, nil, fmt.Errorf("exact admitted delivery target has unknown persistence presence")
 	}
 	if err != nil {
-		return WorkflowInstance{}, target.Presence, fmt.Errorf("decode reloaded admitted delivery target: %w", err)
+		return WorkflowInstance{}, target.Presence, nil, fmt.Errorf("decode reloaded admitted delivery target: %w", err)
 	}
 	if _, err := requireWorkflowInstanceIdentity(application.Route(), entityID, current); err != nil {
-		return WorkflowInstance{}, target.Presence, fmt.Errorf("validate reloaded admitted delivery target identity: %w", err)
+		return WorkflowInstance{}, target.Presence, nil, fmt.Errorf("validate reloaded admitted delivery target identity: %w", err)
 	}
 	if err := validateWorkflowEntityType(pc.SemanticSource(), application.FlowID(), current.EntityType); err != nil {
-		return WorkflowInstance{}, target.Presence, fmt.Errorf("validate reloaded admitted delivery target entity contract: %w", err)
+		return WorkflowInstance{}, target.Presence, nil, fmt.Errorf("validate reloaded admitted delivery target entity contract: %w", err)
 	}
 	if !workflowInstanceOwnedByFlow(pc.SemanticSource(), current, application.FlowID(), application.Event().RunID()) {
-		return WorkflowInstance{}, target.Presence, fmt.Errorf(
+		return WorkflowInstance{}, target.Presence, nil, fmt.Errorf(
 			"reloaded admitted delivery target conflicts with compiled receiver: flow=%q workflow=%q route=%q status=%q",
 			application.FlowID(), current.WorkflowName, current.StorageRef, current.Status,
 		)
 	}
 	if err := validateAdmittedReceiverAvailability(ctx, pc.SemanticSource(), application.FlowID(), application.Event(), current); err != nil {
-		return WorkflowInstance{}, target.Presence, err
+		return WorkflowInstance{}, target.Presence, nil, err
 	}
-	return current, target.Presence, nil
+	return current, target.Presence, append(json.RawMessage(nil), target.Lifecycle.Config...), nil
 }
 
 func workflowStateForDeliveryTargetInstance(instance WorkflowInstance) WorkflowState {

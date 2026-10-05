@@ -4,21 +4,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func TestIssue2564AgentWriteMustAdvanceCanonicalRevisionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f, record := constructWorkflowMutationFixture(t, backend, "review", time.Now().UTC())
-			store, ok := f.store.(runtimetools.EntityPersistence)
-			if !ok {
-				t.Fatal("fixture lacks the existing tool entity writer")
-			}
-			result, err := store.SaveEntityField(f.ctx, runtimetools.EntityFieldUpdate{
-				RunID: record.Identity.RunID, EntityID: record.EntityID, FieldPath: "account_id", Value: "agent-committed",
-				Source: semanticview.Wrap(f.bundle), Writer: runtimetools.EntityMutationWriter{Type: "agent", ID: "probe", HandlerStep: "save_entity_field"},
+			selected := f.store.(workflowTestSelectedStore)
+			opts := completeWorkflowTestCoordinatorOptions(pipeline.NewWorkflowPersistence(selected), selected)
+			opts.Module = runForkGateWorkflowModule{source: semanticview.Wrap(f.bundle)}
+			writer := pipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, opts)
+			result, err := writer.ApplyEntityFieldMutation(f.ctx, pipeline.EntityFieldMutation{
+				RunID: record.Identity.RunID, EntityID: record.EntityID, Owner: record.Identity, FlowID: "review",
+				Mutation: entityruntime.Mutation{Target: "entity.account_id", Value: "agent-committed"},
+				Source:   semanticview.Wrap(f.bundle), Writer: mutationlog.Writer{Type: "agent", ID: "probe", HandlerStep: "save_entity_field"},
 			})
 			if err != nil || !result.Acknowledged {
 				t.Fatalf("agent save: %+v %v", result, err)

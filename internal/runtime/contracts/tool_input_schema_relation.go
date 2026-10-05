@@ -18,6 +18,16 @@ func (source ToolInputSchema) ValidateAssignableTo(subject string, target ToolIn
 }
 
 func validateToolSchemaSubset(subject string, source, target ToolInputSchema) error {
+	_, sourceBranches := source.OneOfSchemas()
+	_, targetBranches := target.OneOfSchemas()
+	if sourceBranches || targetBranches {
+		// General exclusive-union implication is outside this finite proof owner.
+		_, targetEnum := target.EnumValues()
+		if source.Equal(target) || (target.Kind() == ToolSchemaAny && !targetBranches && !targetEnum && target.EqualTo() == "") {
+			return nil
+		}
+		return fmt.Errorf("%s oneOf schemas are not provably assignable unless identical", subject)
+	}
 	sourceType := string(source.Kind())
 	targetType := string(target.Kind())
 	if target.EqualTo() != "" && source.EqualTo() != target.EqualTo() {
@@ -161,6 +171,22 @@ func validateToolSchemaFloatBoundsSubset(subject string, sourceMin, sourceMax, t
 }
 
 func validateToolSchemaObjectSubset(subject string, source, target ToolInputSchema) error {
+	if targetNames, constrained := target.PropertyNamesSchema(); constrained {
+		if sourceNames, sourceConstrained := source.PropertyNamesSchema(); sourceConstrained {
+			if err := validateToolSchemaSubset(subject+" propertyNames", sourceNames, targetNames); err != nil {
+				return err
+			}
+		} else {
+			if admittedToolSchemaAdditionalProperties(source).allowed {
+				return fmt.Errorf("%s source admits unconstrained property names while target constrains them", subject)
+			}
+			for _, name := range source.PropertyNames() {
+				if err := targetNames.Validate(name); err != nil {
+					return fmt.Errorf("%s source property name %q is outside target propertyNames: %w", subject, name, err)
+				}
+			}
+		}
+	}
 	sourceRequired := toolSchemaStringSet(source.RequiredProperties())
 	for _, name := range target.RequiredProperties() {
 		if _, ok := sourceRequired[name]; !ok {

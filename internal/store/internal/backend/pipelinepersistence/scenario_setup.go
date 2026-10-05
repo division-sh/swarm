@@ -14,9 +14,7 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -474,8 +472,8 @@ func scenarioSetupResult(req runtimepipeline.ScenarioSetupRequest) runtimepipeli
 }
 
 func scenarioSetupMutationWriter() runtimemutationlog.Writer {
-	return storeentity.MutationWriter(runtimetools.EntityMutationWriter{
+	return runtimemutationlog.Writer{
 		Type: "platform",
 		ID:   "test.setup_entities",
-	})
+	}
 }

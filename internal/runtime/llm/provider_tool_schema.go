@@ -74,6 +74,28 @@ func validateProviderSchemaNode(schema any, path string) error {
 			return err
 		}
 	}
+	if rawNames, ok := obj["propertyNames"]; ok {
+		if rawNames == nil {
+			return fmt.Errorf("%s.propertyNames must be a JSON object schema", path)
+		}
+		if err := validateProviderSchemaNode(rawNames, path+".propertyNames"); err != nil {
+			return err
+		}
+	}
+	if raw, declared := obj["oneOf"]; declared {
+		branches, ok := raw.([]any)
+		if !ok || len(branches) == 0 {
+			return fmt.Errorf("%s.oneOf must be a non-empty schema array", path)
+		}
+		for index, branch := range branches {
+			if branch == nil {
+				return fmt.Errorf("%s.oneOf[%d] must be a JSON object schema", path, index)
+			}
+			if err := validateProviderSchemaNode(branch, fmt.Sprintf("%s.oneOf[%d]", path, index)); err != nil {
+				return err
+			}
+		}
+	}
 	if rawAdditional, ok := obj["additionalProperties"]; ok {
 		switch additional := rawAdditional.(type) {
 		case bool:

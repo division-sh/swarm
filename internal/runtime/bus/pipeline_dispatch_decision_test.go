@@ -1,10 +1,13 @@
 package bus
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
@@ -69,5 +72,33 @@ func TestPipelineDispatchDecisionMatrix(t *testing.T) {
 				t.Fatalf("disposition = %s/%s, want %s/%s", got.disposition.Kind(), got.disposition.ReasonCode(), tc.kind, tc.reason)
 			}
 		})
+	}
+}
+
+func TestPipelineDispatchInterruptionRetainsOnlyUncommittedUnclassifiedWork(t *testing.T) {
+	for _, phase := range []pipelineDispatchPhase{pipelineDispatchPublishInterceptors, pipelineDispatchPublishRoutes, pipelineDispatchPublishDeferred, pipelineDispatchPublishFinal, pipelineDispatchOutboxFinal, pipelineDispatchRecoveryFinal} {
+		for _, cause := range []error{context.Canceled, context.DeadlineExceeded, fmt.Errorf("receiver check: %w", context.DeadlineExceeded), errors.Join(context.Canceled, context.DeadlineExceeded)} {
+			for _, purpose := range []runtimepipelineobligation.Purpose{runtimepipelineobligation.PurposePublication, runtimepipelineobligation.PurposeRecovery, runtimepipelineobligation.PurposeDecisionRoute} {
+				got := classifyPipelineDispatch(runtimepipelineobligation.Continue(), cause, false, purpose, phase)
+				if got.action != pipelineDispatchPending || got.failedBeforeSettle {
+					t.Fatalf("phase=%v purpose=%v cause=%v: %+v", phase, purpose, cause, got)
+				}
+				got = classifyPipelineDispatch(runtimepipelineobligation.ExecutionOutcome{Committed: true}, cause, false, purpose, phase)
+				if got.action == pipelineDispatchPending || got.failedBeforeSettle {
+					t.Fatalf("acknowledged work became pending: %+v", got)
+				}
+				for _, refused := range []error{errors.Join(cause, errors.New("wrong owner")), runtimefailures.Wrap(runtimefailures.ClassAuthorizationDenied, "receiver_revoked", "bus", "admit", map[string]any{"action": "delivery"}, cause)} {
+					got = classifyPipelineDispatch(runtimepipelineobligation.Continue(), refused, false, purpose, phase)
+					if got.action != pipelineDispatchSettle || (got.disposition.Kind() != runtimepipelineobligation.DispositionTerminal && got.disposition.Kind() != runtimepipelineobligation.DispositionQuarantined) {
+						t.Fatalf("refusal became retryable: %+v", got)
+					}
+				}
+				outcome := runtimepipelineobligation.DeadLetterExecution("handler_rejected", nil)
+				got = classifyPipelineDispatch(outcome, cause, false, purpose, phase)
+				if got.action != pipelineDispatchSettle || got.disposition.Kind() != runtimepipelineobligation.DispositionDeadLetter {
+					t.Fatalf("explicit disposition erased: %+v", got)
+				}
+			}
+		}
 	}
 }

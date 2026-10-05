@@ -29,8 +29,10 @@ type CatalogTypeReference struct {
 }
 
 type ResolvedCatalogType struct {
-	Kind    CatalogTypeKind
-	Name    string
+	Kind CatalogTypeKind
+	Name string
+	// Format preserves primitive string validation through scalar alias resolution.
+	Format  string
 	Element *ResolvedCatalogType
 	Key     *ResolvedCatalogType
 	Value   *ResolvedCatalogType
@@ -340,15 +342,21 @@ func resolveCatalogTypeReference(typeRef string, catalog TypeCatalogDocument, re
 		normalized = typeRef
 	}
 	switch strings.ToLower(strings.TrimSpace(normalized)) {
-	case "text", "string", "uuid", "timestamp", "timestamptz":
+	case "text", "string":
 		return ResolvedCatalogType{Kind: CatalogTypeText}, nil
+	case "uuid":
+		return ResolvedCatalogType{Kind: CatalogTypeText, Format: "uuid"}, nil
+	case "timestamp", "timestamptz":
+		return ResolvedCatalogType{Kind: CatalogTypeText, Format: "date-time"}, nil
 	case "integer", "int", "bigint":
 		return ResolvedCatalogType{Kind: CatalogTypeInteger}, nil
 	case "numeric", "number", "float", "double", "real":
 		return ResolvedCatalogType{Kind: CatalogTypeNumber}, nil
 	case "boolean", "bool":
 		return ResolvedCatalogType{Kind: CatalogTypeBoolean}, nil
-	case "object", "json", "jsonb", "array":
+	case "array":
+		return ResolvedCatalogType{Kind: CatalogTypeDynamic, Name: strings.ToLower(strings.TrimSpace(normalized))}, nil
+	case "object", "json", "jsonb":
 		return ResolvedCatalogType{Kind: CatalogTypeDynamic}, nil
 	default:
 		return ResolvedCatalogType{}, fmt.Errorf("unknown catalog type %q", typeRef)

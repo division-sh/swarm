@@ -107,7 +107,8 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadback(t *testi
 				item.CurrentState = "changed"
 				return nil
 			}))
-			requireForkedPipelineRefusal(t, "terminate workflow", fixture.store.MarkTerminated(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef), identity.NormalizeEntityID(entityID), fixture.frozenAt))
+			coordinator := &PipelineCoordinator{workflowStore: fixture.store}
+			requireForkedPipelineRefusal(t, "terminate workflow", coordinator.MarkTerminated(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef), identity.NormalizeEntityID(entityID), fixture.frozenAt))
 
 			preserved, ok, err := fixture.store.Load(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef))
 			if err != nil || !ok || preserved.CurrentState != "active" {

@@ -39,14 +39,18 @@ type toolInputSchemaValue struct {
 	kind        ToolSchemaKind
 	description string
 
-	properties map[string]ToolInputSchema
-	required   []string
+	properties       map[string]ToolInputSchema
+	required         []string
+	propertyNames    ToolInputSchema
+	hasPropertyNames bool
 
 	items    ToolInputSchema
 	hasItems bool
 
-	enum         []semanticvalue.Value
-	enumDeclared bool
+	enum          []semanticvalue.Value
+	enumDeclared  bool
+	oneOf         []ToolInputSchema
+	oneOfDeclared bool
 
 	additionalAllowed         bool
 	additionalAllowedDeclared bool
@@ -175,6 +179,14 @@ func ToolSchemaRequired(names ...string) ToolInputSchemaOption {
 	})
 }
 
+func ToolSchemaPropertyNames(schema ToolInputSchema) ToolInputSchemaOption {
+	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
+		draft.value.propertyNames = schema
+		draft.value.hasPropertyNames = true
+		return nil
+	})
+}
+
 func ToolSchemaItems(items ToolInputSchema) ToolInputSchemaOption {
 	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
 		draft.value.items = items
@@ -194,6 +206,14 @@ func ToolSchemaEnum(values ...any) ToolInputSchemaOption {
 			}
 			draft.value.enum = append(draft.value.enum, value)
 		}
+		return nil
+	})
+}
+
+func ToolSchemaOneOf(branches ...ToolInputSchema) ToolInputSchemaOption {
+	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
+		draft.value.oneOf = append([]ToolInputSchema(nil), branches...)
+		draft.value.oneOfDeclared = true
 		return nil
 	})
 }
@@ -339,8 +359,16 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 	if !value.kind.Valid() {
 		return fmt.Errorf("%s requires an explicit supported JSON type, got %q", path, value.kind)
 	}
+	if value.oneOfDeclared && len(value.oneOf) == 0 {
+		return fmt.Errorf("%s oneOf must contain at least one schema", path)
+	}
+	for index, branch := range value.oneOf {
+		if err := validateAdmittedToolInputSchemaActive(fmt.Sprintf("%s.oneOf[%d]", path, index), branch, depth+1, false, active); err != nil {
+			return err
+		}
+	}
 
-	if value.kind != ToolSchemaObject && (len(value.properties) > 0 || len(value.required) > 0 || value.additionalAllowedDeclared || value.hasAdditionalSchema) {
+	if value.kind != ToolSchemaObject && (len(value.properties) > 0 || len(value.required) > 0 || value.hasPropertyNames || value.additionalAllowedDeclared || value.hasAdditionalSchema) {
 		return fmt.Errorf("%s type %s cannot declare object constraints", path, value.kind)
 	}
 	if value.kind != ToolSchemaArray && (value.hasItems || value.hasMinItems || value.hasMaxItems) {
@@ -399,6 +427,11 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 		}
 	}
 	if value.kind == ToolSchemaObject {
+		if value.hasPropertyNames {
+			if err := validateAdmittedToolInputSchemaActive(path+".propertyNames", value.propertyNames, depth+1, false, active); err != nil {
+				return err
+			}
+		}
 		if value.additionalAllowedDeclared && value.hasAdditionalSchema {
 			return fmt.Errorf("%s additionalProperties must declare a boolean or schema, not both", path)
 		}
@@ -528,6 +561,13 @@ func (s ToolInputSchema) RequiredProperties() []string {
 	return append([]string(nil), s.value.required...)
 }
 
+func (s ToolInputSchema) PropertyNamesSchema() (ToolInputSchema, bool) {
+	if s.value == nil || !s.value.hasPropertyNames {
+		return ToolInputSchema{}, false
+	}
+	return s.value.propertyNames, true
+}
+
 func (s ToolInputSchema) IsRequired(name string) bool {
 	if s.value == nil {
 		return false
@@ -552,6 +592,13 @@ func (s ToolInputSchema) EnumValues() ([]semanticvalue.Value, bool) {
 		return nil, false
 	}
 	return append([]semanticvalue.Value(nil), s.value.enum...), true
+}
+
+func (s ToolInputSchema) OneOfSchemas() ([]ToolInputSchema, bool) {
+	if s.value == nil || !s.value.oneOfDeclared {
+		return nil, false
+	}
+	return append([]ToolInputSchema(nil), s.value.oneOf...), true
 }
 
 func (s ToolInputSchema) AdditionalPropertiesAllowed() (bool, bool) {
@@ -851,12 +898,22 @@ func projectAdmittedToolInputSchema(schema ToolInputSchema) map[string]any {
 	if value.hasItems {
 		out["items"] = projectAdmittedToolInputSchema(value.items)
 	}
+	if value.hasPropertyNames {
+		out["propertyNames"] = projectAdmittedToolInputSchema(value.propertyNames)
+	}
 	if value.enumDeclared {
 		enum := make([]any, 0, len(value.enum))
 		for _, item := range value.enum {
 			enum = append(enum, item.Interface())
 		}
 		out["enum"] = enum
+	}
+	if value.oneOfDeclared {
+		branches := make([]any, len(value.oneOf))
+		for index, branch := range value.oneOf {
+			branches[index] = projectAdmittedToolInputSchema(branch)
+		}
+		out["oneOf"] = branches
 	}
 	if value.additionalAllowedDeclared {
 		out["additionalProperties"] = value.additionalAllowed
@@ -933,7 +990,9 @@ func (s ToolInputSchema) MarshalYAML() (any, error) {
 		Properties           map[string]ToolInputSchema `yaml:"properties,omitempty"`
 		Required             []string                   `yaml:"required,omitempty"`
 		Items                *ToolInputSchema           `yaml:"items,omitempty"`
+		PropertyNames        *ToolInputSchema           `yaml:"propertyNames,omitempty"`
 		Enum                 []any                      `yaml:"enum,omitempty"`
+		OneOf                []ToolInputSchema          `yaml:"oneOf,omitempty"`
 		AdditionalProperties any                        `yaml:"additionalProperties,omitempty"`
 		Minimum              *float64                   `yaml:"minimum,omitempty"`
 		Maximum              *float64                   `yaml:"maximum,omitempty"`
@@ -954,9 +1013,13 @@ func (s ToolInputSchema) MarshalYAML() (any, error) {
 		Pattern:     value.pattern,
 		Format:      value.format.String(),
 		EqualTo:     value.equalTo,
+		OneOf:       append([]ToolInputSchema(nil), value.oneOf...),
 	}
 	if items, ok := s.ItemsSchema(); ok {
 		out.Items = &items
+	}
+	if names, ok := s.PropertyNamesSchema(); ok {
+		out.PropertyNames = &names
 	}
 	if enum, declared := s.EnumValues(); declared {
 		out.Enum = make([]any, 0, len(enum))

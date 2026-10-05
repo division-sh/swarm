@@ -2635,8 +2635,10 @@ contract_formats:
         non_lossy_invariant: 'Generated typed reads return the complete typed value or fail closed with an explicit typed-read
           error. They MUST NOT silently return preview, truncated, omitted, or follow-up-file placeholder shapes as the value.'
       generated_writes:
-        save_field: 'save_{entity_type}_{field}({value}) writes exactly one top-level declared field authorized by agents.yaml
-          entity_writes.<entity_type>.save or entity_writes.<flow_id>.<entity_type>.save.'
+        save_field: 'save_{entity_type}_{field}({value, op?, index?, key?}) operates on exactly one top-level declared field
+          authorized by agents.yaml entity_writes.<entity_type>.save or entity_writes.<flow_id>.<entity_type>.save.
+          Default/explicit set, list append, integer-index update and map-key set share runtime_enforcement.save_entity_field;
+          each generated branch carries the exact value/key/index types and excludes unrelated operands.'
         update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
           named-object field. The value schema is the exact declared subpath type. Runtime lowering consumes the same
           declared typed mutation plan as handlers. A missing named parent rejects; the tool never synthesizes it.'
@@ -2651,7 +2653,9 @@ contract_formats:
         create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
           expose a generic agent-facing create_entity replacement for current-entity tools.'
       generated_schema_closure: 'Generated entity-tool input and output schemas are closed recursively: additionalProperties
-        is false for object schemas, required fields are explicit, and enum values come from the shared type system.
+        is false for named-record and argument object schemas; declared maps retain their typed additionalProperties
+        value schema and exact key constraints. Exclusive operation branches use oneOf through the canonical tool-schema
+        owner and require exactly one matching branch. Required fields are explicit, and enum values come from the shared type system.
         Closure does not require every declared property: whole-entity read fields preserve progressive root omission,
         while assigned named records preserve exactly their declared required members. Provider-visible
         schemas, runtime validation, and bootverify schema-closure checks must agree. Provider schema enforcement is a first
@@ -3659,12 +3663,24 @@ runtime_enforcement:
       save_entity_field targets only declared non-envelope top-level fields
       or declared dotted subpaths on the inferred entity contract. Dotted
       paths must resolve from a declared top-level field through declared
-      named types; the operation is whole-value replacement at the resolved
-      field path, not keyed or indexed contained-state mutation. Bracket,
-      index, and dynamic path writes are rejected. Immutable fields reject
+      named types. An omitted op or explicit set replaces the resolved scalar
+      or whole value. Append adds a typed list element, retaining equal-value
+      multiplicity. Update takes an explicit zero-based, non-negative integer
+      index and replaces an existing position; out-of-range indices reject
+      atomically. Set with an explicit typed map key replaces that map entry.
+      Bracket, index, and dynamic path spellings are rejected; index and key
+      are operation operands, never inferred business identities. No keyed-list
+      matching or upsert exists. Immutable fields reject
       post-create value changes. Materialized/runtime-owned fields are rejected.
       Values and the final candidate must satisfy the shared entity contract,
       including sparse equality; no tool-local mutation interpretation exists.
+      Contention retries retain the original operation, value, key and index
+      and apply them to fresh state. An index denotes its current position,
+      not the item occupying that position in an earlier snapshot. A2 keyed
+      arrival deduplication and conflicting-payload rejection are unchanged.
+      Agent writes use the ordinary pipeline's entity lock and header revision
+      CAS; a fields-only persistence writer is not an alternative authority.
+      History retains agent identity and save_entity_field attribution.
   get_entity:
     rule: |
       get_entity returns the complete stored entity object plus its envelope.
@@ -4073,6 +4089,13 @@ handler_specification:
               With `key`, appends `value` to a list stored as the map value or
               under a declared nested list field of the map value type. The list
               item is type-checked against the declared list element type.
+          map_key_normalization: >
+            Whole-map assignment and contained operations consume the same
+            declared key normalizer. Nonempty text keys retain their exact
+            spelling; enum and UUID keys retain their typed canonical form.
+            If distinct supplied properties normalize to the same map key,
+            reject the entire assignment, even for equal values. Map iteration
+            order must never select a replacement winner.
           list_operations:
             append: >
               Without `key`, `target` must resolve to a declared list field on
@@ -6179,6 +6202,30 @@ engine:
         Y. The platform can process thousands of entities simultaneously.
       entity_lock: 'The platform acquires an entity-level lock before handler execution. Lock scope: one entity, one handler.
         Released after commit or rollback. Lock mechanism is implementation-specific (DB row lock, in-memory mutex, etc.).'
+      live_writer_contract: >-
+        Ordinary handlers, agent field operations, accepted stage-timer transitions, gate/card mutations and explicit
+        instance termination share the existing per-entity lock from their first mutable-state read through guarded
+        commit. Evaluation carries its complete R1 header, fields, lifecycle/config and fieldless projection unchanged
+        into preparation. Commit compares the canonical flow_instances revision with that R1 revision; no second read
+        may substitute a newer revision for an older draft. Header and fields counters need not be globally equal.
+        Recognized precommit state contention reevaluates inside the same claimed attempt, without charging delivery
+        retry_count or producing a dead letter. Source, run, claim, generation and ownership refusals remain strict.
+        The lock is released before recursive dispatch, joins or provider waits. Run-level control freezing remains
+        a run-before-instance SQL-locked operation with header CAS, not a stale business-field replacement.
+      stage_deadline_write_ordering: >-
+        A stage deadline advances the stage but does not by itself cancel accepted agent work. A late agent field
+        operation is evaluated against current state and kept; its starting stage is not write authorization.
+        Explicit authored cancellation is a separate lifecycle contract. Timer publication and a persisted fired row
+        are not acknowledgement of a stage transition: the exact accepted occurrence remains reachable through live
+        retry and restart until transition handling is acknowledged. No replacement timer event or reset of fired
+        history grants new occurrence authority.
+      interrupted_pipeline_admission: >-
+        Before an acknowledged effect or explicit disposition, a pipeline check interrupted only by context
+        cancellation/deadline retains its exact claimed obligation for recovery, even when the caller's outer
+        context remains live. Interception must not convert that interruption into an internal terminal failure.
+        This grants no domain authority: recovery reruns ordinary admission. Typed refusals, independent joined
+        failures and explicit dispositions retain their own semantics; acknowledged work never replays because
+        cleanup was interrupted.
       agent_concurrency: Agent deliveries are asynchronous. Live dispatch and standing recovery enter one per-agent
         claimed-attempt executor before claiming work. That executor processes admitted obligations sequentially from exact
         claim through handler execution, deterministic emitted-output publication, required diagnostics, and settlement;
@@ -10167,6 +10214,9 @@ tool_model:
           field: string — required declared top-level field name or declared dotted subpath. Must resolve on the inferred
             entity contract and must not be an envelope field.
           value: any — required, the value to write
+          op: string — optional set (default), append, or update; generated plain/MCP schemas use the same typed branches
+          index: integer — required only for list update; zero-based existing position in fresh current state
+          key: any — optional only for set on a map; explicit key must satisfy the declared map key type
         output:
           entity_id: string
           field: string
@@ -10230,8 +10280,11 @@ tool_model:
     usage_hints: Provider-facing tool definitions for platform-owned delivered tools and generated emit tools MUST include
       the shared platform usage guidance. Generated emit tool usage guidance MUST describe concrete JSON payload arguments,
       not CEL or workflow expression arguments. Boot verification reports this through platform_tool_usage_hints.
-    generated_schema_closure: Generated platform-owned emit/entity tool schemas MUST be recursively closed, require every
-      declared property, reject undeclared required properties, and declare non-empty enums. Boot verification and workflow
+    generated_schema_closure: Generated platform-owned emit/entity tool schemas MUST be recursively closed, explicitly
+      declare required properties, reject undeclared required properties, and declare non-empty enums. Named records and
+      argument objects reject unknown properties; declared maps preserve typed value and key constraints. Generated entity
+      operation schemas use exclusive oneOf branches with only their applicable value/key/index operands. Required-member
+      semantics come from the shared type owner, not a blanket requirement for every declared property. Boot verification and workflow
       validation report this through generated_tool_schema_closure and consume the shared runtime tool-schema owner.
       Every declared emit is checked through the same exact actor/schema admission used by runtime generation. A missing
       schema or unresolved type is a validation error even when generation omits the unavailable tool; another flow's

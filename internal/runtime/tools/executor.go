@@ -38,6 +38,7 @@ type Executor struct {
 	mailboxStore                   MailboxPersistence
 	noticePresentation             InformationalNoticePresentationSink
 	entityStore                    EntityPersistence
+	entityWriter                   runtimepipeline.EntityFieldMutationWriter
 	humanTaskStore                 HumanTaskCardStore
 	workflowInstances              WorkflowInstanceLoader
 	cfg                            *config.Config
@@ -79,6 +80,7 @@ func NewExecutorWithOptions(bus EventPublisher, opts ExecutorOptions) *Executor 
 		mailboxStore:                   opts.MailboxStore,
 		noticePresentation:             opts.NoticePresentation,
 		entityStore:                    opts.EntityStore,
+		entityWriter:                   opts.EntityWriter,
 		humanTaskStore:                 opts.HumanTaskStore,
 		workflowInstances:              opts.WorkflowInstances,
 		cfg:                            opts.Config,

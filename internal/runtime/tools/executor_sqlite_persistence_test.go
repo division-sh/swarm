@@ -63,9 +63,13 @@ accounts:
   priority: integer
 `)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
-	ctx := runtimetools.WithActor(seedEntityToolSourceRun(t, sqliteStore, bundle), actor)
+	sourceCtx := seedEntityToolSourceRun(t, sqliteStore, bundle)
+	fixture := sourceCtx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	actor = entityToolFixtureActor(t, fixture.source, actor, entityToolTestRunID, "review", "review/inst-1")
+	ctx := runtimetools.WithActor(sourceCtx, actor)
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    sqliteStore,
+		EntityWriter:                   fixture.pipeline,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
 	})
@@ -239,6 +243,8 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	actor = entityToolFixtureActor(t, fixture.source, actor, entityToolTestRunID, "validation", "validation/inst-1")
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/inst-1",
 		"fields":        map[string]any{"status": "open", "business_brief": map[string]any{"summary": "before", "confidence": int64(1)}},
@@ -252,6 +258,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:       sqliteStore,
+		EntityWriter:      fixture.pipeline,
 		WorkflowSource:    semanticview.Wrap(bundle),
 		AuthorityProvider: allowHumanTaskAuthority{},
 	})

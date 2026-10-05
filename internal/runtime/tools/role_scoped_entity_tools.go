@@ -107,16 +107,56 @@ func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleS
 				refinements = field.Refinements
 			}
 		}
-		entry.InputSchema = ObjectSchema(map[string]any{
-			"value": entityContractJSONSchemaWithRefinements(contract, typeRef, refinements, false, map[string]struct{}{}),
-		}, "value")
+		path := spec.Field
+		if spec.Subpath != "" {
+			path += "." + spec.Subpath
+		}
+		entry.InputSchema = roleScopedEntityMutationInputSchema(contract, path, typeRef, refinements)
 		entry.OutputSchema = ObjectSchema(map[string]any{
-			"entity_id": map[string]any{"type": "string"},
-			"field":     map[string]any{"type": "string"},
-			"revision":  map[string]any{"type": "integer"},
+			"entity_id":              map[string]any{"type": "string"},
+			"field":                  map[string]any{"type": "string"},
+			"revision":               map[string]any{"type": "integer"},
+			"status":                 map[string]any{"type": "string", "enum": []any{"committed_with_post_commit_error"}},
+			"write_committed":        map[string]any{"type": "boolean", "enum": []any{true}},
+			"retry_write":            map[string]any{"type": "boolean", "enum": []any{false}},
+			"post_commit_error_code": map[string]any{"type": "string", "enum": []any{entityFieldPostCommitErrorCode}},
 		}, "entity_id", "field", "revision")
 	}
 	return entry
+}
+
+func roleScopedEntityMutationInputSchema(contract entityruntime.Contract, path, typeRef string, refinements runtimecontracts.SchemaRefinements) map[string]any {
+	wholeValue := entityContractJSONSchema(contract, typeRef, map[string]struct{}{})
+	applyEntitySchemaRefinements(wholeValue, refinements, false)
+	setOp := map[string]any{"type": "string", "enum": []any{entityruntime.ContainedOperationSet}}
+	whole := ObjectSchema(map[string]any{"op": setOp, "value": wholeValue}, "value")
+	props := map[string]any{"op": setOp, "value": map[string]any{}}
+	branches := []any{whole}
+	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "entity."+path, entityruntime.ContainedOperationAppend, false, false); err == nil {
+		item := entityContractJSONSchema(contract, target.ListItemType, map[string]struct{}{})
+		index := map[string]any{"type": "integer", "minimum": 0}
+		props["op"] = map[string]any{"type": "string", "enum": []any{entityruntime.ContainedOperationSet, entityruntime.ContainedOperationAppend, entityruntime.ContainedOperationUpdate}}
+		props["index"] = index
+		branches = append(branches,
+			ObjectSchema(map[string]any{"op": map[string]any{"type": "string", "enum": []any{entityruntime.ContainedOperationAppend}}, "value": item}, "op", "value"),
+			ObjectSchema(map[string]any{"op": map[string]any{"type": "string", "enum": []any{entityruntime.ContainedOperationUpdate}}, "index": index, "value": item}, "op", "index", "value"),
+		)
+	}
+	if target, err := entityruntime.ResolveContainedOperationTarget(contract, "entity."+path, entityruntime.ContainedOperationSet, true, false); err == nil {
+		key := entityContractJSONSchema(contract, target.MapKeyType, map[string]struct{}{})
+		key["minLength"] = 1
+		props["key"] = key
+		branches = append(branches, ObjectSchema(map[string]any{
+			"op": setOp, "key": key,
+			"value": entityContractJSONSchema(contract, target.TargetType, map[string]struct{}{}),
+		}, "op", "key", "value"))
+	}
+	if len(branches) == 1 {
+		return whole
+	}
+	schema := ObjectSchema(props, "value")
+	schema["oneOf"] = branches
+	return schema
 }
 
 func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[string]any {
@@ -144,7 +184,7 @@ func roleScopedEntityToolDescription(spec roleScopedEntityToolSpec) string {
 	case roleScopedEntityToolReadField:
 		return fmt.Sprintf("Read %s from the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
 	case roleScopedEntityToolSaveField:
-		return fmt.Sprintf("Save %s on the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
+		return fmt.Sprintf("Save %s on the current turn %s entity. Omitted op or set replaces the whole value; append preserves duplicate list elements; update replaces an existing zero-based list index in fresh current state; set with key replaces a typed map entry. Only schema-declared operations are accepted. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.EntityType)
 	case roleScopedEntityToolUpdatePath:
 		return fmt.Sprintf("Update %s.%s on the current turn %s entity. The target entity is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.Subpath, spec.EntityType)
 	default:
@@ -398,6 +438,9 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 	if !ok {
 		return nil, failures.New(failures.ClassAuthorizationDenied, "role_scoped_tool_forbidden", "tool-executor", "role_scoped_entity_tool.resolve", map[string]any{"action": "tool_execute", "actor_id": strings.TrimSpace(actor.ID), "tool": strings.TrimSpace(name)})
 	}
+	if err := ValidatePayloadAgainstSchema(roleScopedEntityToolSchemaEntry(contract, spec).InputSchema, payload); err != nil {
+		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.input", map[string]any{"tool": strings.TrimSpace(name)}, err)
+	}
 	entityID := roleScopedCurrentEntityID(ctx)
 	if entityID == "" {
 		return nil, failures.New(failures.ClassInternalFailure, "current_entity_context_missing", "tool-executor", "role_scoped_entity_tool.current_entity", map[string]any{"tool": strings.TrimSpace(name)})
@@ -437,21 +480,33 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 		if !ok {
 			return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.value", map[string]any{"field": "value"})
 		}
-		return e.execSaveEntityField(ctx, actor, map[string]any{
+		write := map[string]any{
 			"entity_id": entityID,
 			"field":     spec.Field,
 			"value":     value,
-		})
+		}
+		for _, selector := range []string{"op", "key", "index"} {
+			if literal, present := payload[selector]; present {
+				write[selector] = literal
+			}
+		}
+		return e.execSaveEntityField(ctx, actor, write)
 	case roleScopedEntityToolUpdatePath:
 		value, ok := payload["value"]
 		if !ok {
 			return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.value", map[string]any{"field": "value"})
 		}
-		return e.execSaveEntityField(ctx, actor, map[string]any{
+		write := map[string]any{
 			"entity_id": entityID,
 			"field":     spec.Field + "." + spec.Subpath,
 			"value":     value,
-		})
+		}
+		for _, selector := range []string{"op", "key", "index"} {
+			if literal, present := payload[selector]; present {
+				write[selector] = literal
+			}
+		}
+		return e.execSaveEntityField(ctx, actor, write)
 	default:
 		return nil, failures.New(failures.ClassInternalFailure, "role_scoped_tool_kind_invalid", "tool-executor", "role_scoped_entity_tool.kind", map[string]any{"tool": strings.TrimSpace(name)})
 	}
