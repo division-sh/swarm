@@ -40,14 +40,14 @@ func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 			file:      "schema.yaml",
 			canonical: baseSchema + "pins:\n  inputs: [work.requested]\n",
 			retired:   baseSchema + "pins:\n  inputs:\n    - name: work_requested\n      event: work.requested\n",
-			want:      `event pin field "name" is not supported`,
+			want:      `must be a scalar text`,
 		},
 		{
 			name:      "input pin carries are derived",
 			file:      "schema.yaml",
 			canonical: baseSchema + "pins:\n  inputs: [work.requested]\n",
 			retired:   baseSchema + "pins:\n  inputs:\n    - event: work.requested\n      carries: [work_id]\n",
-			want:      `event pin field "carries" is not supported`,
+			want:      `must be a scalar text`,
 		},
 		{
 			name:      "output pin key is derived",
@@ -92,6 +92,14 @@ func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 			writeFixtureFile(t, filepath.Join(root, tc.file), tc.retired)
 			if _, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec); err == nil || !contractErrorContains(err, tc.want) {
 				t.Fatalf("retired bundle admission error = %v, want %q", err, tc.want)
+			} else if tc.file == "schema.yaml" {
+				path := `["pins"]["inputs"][0]`
+				if tc.output {
+					path = `["pins"]["outputs"][0]`
+				}
+				if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "schema.yaml:4:") {
+					t.Fatalf("pin shape refusal lost its exact source: %v", err)
+				}
 			}
 		})
 	}
