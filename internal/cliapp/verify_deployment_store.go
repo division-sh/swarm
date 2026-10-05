@@ -27,6 +27,14 @@ import (
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
+func verifyAbsentSQLiteStoreCause(err error) *bootverify.AdmissionNotRunCause {
+	var absent *storeselected.AbsentSQLiteStore
+	if !errors.As(err, &absent) {
+		return nil
+	}
+	return &bootverify.AdmissionNotRunCause{Kind: bootverify.AdmissionAbsentSQLiteStore, Path: absent.Path}
+}
+
 func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
 	subject := "project:" + repo
 	var selected *storeselected.AdmissionInspection
