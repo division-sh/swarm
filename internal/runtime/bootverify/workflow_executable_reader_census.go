@@ -97,8 +97,12 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableReaderCollector{
 	"ID":          noHandlerRuleExecutableReaders,
 	"Description": noHandlerRuleExecutableReaders,
-	"Condition": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
+	"Condition": func(out *[]expressionReference, ctx executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
+		before := len(*out)
 		appendConditionExecutableReader(out, prefix+".condition", rule.Condition, runtimepipeline.WorkflowEntityFieldLifecycleRule, runtimepipeline.WorkflowConditionContextRule)
+		if len(*out) > before && ctx.ruleCollection == "rules" {
+			(*out)[before].SourceSlot = prefix + ".when"
+		}
 	},
 	"PolicyRow":  noHandlerRuleExecutableReaders,
 	"AdvancesTo": noHandlerRuleExecutableReaders,
@@ -323,9 +327,6 @@ func appendRulesExecutableReaders(out *[]expressionReference, ctx executableRead
 			ruleCtx.ruleIndex = i
 			handlerRuleEntryExecutableReaderCensus[field](out, ruleCtx, prefix, rule)
 			for index := fieldBefore; index < len(*out); index++ {
-				if kind == "rules" && field == "Condition" {
-					(*out)[index].SourceSlot = prefix + ".when"
-				}
 				(*out)[index].Kind = label + strings.TrimPrefix((*out)[index].Kind, prefix)
 				(*out)[index].RuleCollection = kind
 				(*out)[index].RuleField = field
