@@ -298,7 +298,7 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 	setEffectHarnessAgent(t, harness, "agent-1", "test/stateless")
 	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
 	runtime.apiURL = server.URL
-	runtime.apiKey = "test-key"
+	runtime.credentialCache = providerCredentialCache{value: "test-key"}
 
 	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-admission-no-redispatch"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: llmselection.ModelAliasRegular, FlowPath: "test/stateless"})
 	ctx = withTestStatelessMemory(t, ctx, "agent-1", "test/stateless")
@@ -341,7 +341,7 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 	runtime := NewOpenAICompatibleRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	harness := effecttest.New()
 	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
-	runtime.apiKey = "test-key"
+	runtime.credentialCache = providerCredentialCache{value: "test-key"}
 	profile := mustAdmissionProfile(t, llmselection.BackendOpenAICompatible)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
@@ -391,7 +391,7 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 	runtime := NewOpenAIResponsesRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	harness := effecttest.New()
 	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
-	runtime.apiKey = "test-key"
+	runtime.credentialCache = providerCredentialCache{value: "test-key"}
 	profile := mustAdmissionProfile(t, llmselection.BackendOpenAIResponses)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
