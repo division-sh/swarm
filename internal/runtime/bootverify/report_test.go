@@ -3909,7 +3909,7 @@ func TestLoadRejectsExternalInputSourceEvenInConsumingScope(t *testing.T) {
 	root := writeInputPinExternalScopeFixture(t)
 	repo := repoRootForBootverifyTest(t)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err == nil || !strings.Contains(err.Error(), "field \"source\" is not supported") {
+	if err == nil || !strings.Contains(err.Error(), "must be a scalar text") {
 		t.Fatalf("private input marker admission = %v, want retired spelling error", err)
 	}
 }

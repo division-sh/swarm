@@ -1167,7 +1167,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::ValidateAgentBuildConfiguration",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "9bc8dac3106cfc66a311f79574a5b6098dbeb40e125b2791c2dd47ec5fc9a3d7"
+    "body_sha256": "c0b23571bc434551cf9b5f9f1677e4c587455f4c08a168baf113885b0d79101f"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::ValidatePersistedAgentExecution",
