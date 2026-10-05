@@ -7,10 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -18,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
@@ -110,19 +109,47 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	assertGoldenProcessHasNoExternalExecutables(t, env)
 
 	// Fresh-store creation belongs to startup, never a read-only verifier.
-	refused := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
+	absent := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
 		"verify", contracts, "--config", configPath, "--json")
 	var incomplete struct {
-		OK                bool   `json:"ok"`
-		ValidationScope   string `json:"validation_scope"`
-		AdmissionComplete bool   `json:"admission_complete"`
-		LiveReadiness     string `json:"live_readiness"`
+		OK                bool                              `json:"ok"`
+		ValidationScope   string                            `json:"validation_scope"`
+		AdmissionComplete bool                              `json:"admission_complete"`
+		LiveReadiness     string                            `json:"live_readiness"`
+		Observations      []bootverify.AdmissionObservation `json:"observations"`
 	}
-	var exit *exec.ExitError
-	if err := json.Unmarshal([]byte(refused.output), &incomplete); !errors.As(refused.err, &exit) || exit.ExitCode() != 3 || err != nil || incomplete.OK ||
-		incomplete.ValidationScope != "deployment" || incomplete.AdmissionComplete || incomplete.LiveReadiness != "not_evaluated" ||
-		!strings.Contains(refused.output, "selected_store_access") {
-		t.Fatalf("fresh-store default admission: command=%v decode=%v\n%s", refused.err, err, refused.output)
+	if err := json.Unmarshal([]byte(absent.output), &incomplete); absent.err != nil || err != nil || !incomplete.OK ||
+		incomplete.ValidationScope != "deployment" || incomplete.AdmissionComplete || incomplete.LiveReadiness != "not_evaluated" {
+		t.Fatalf("fresh-store default admission: command=%v decode=%v\n%s", absent.err, err, absent.output)
+	}
+	expected := map[string]bool{
+		"selected_store_access": false, "selected_store_schema": false, "startup_process_possession": false,
+		"pinned_source_admission": false, "retained_source_integrity": false, "startup_recovery_admission": false,
+		"startup_authority_lineage": false, "pending_reset_admission": false, "retained_route_admission": false,
+		"retained_channel_admission": false, "selected_fork_recovery_admission": false, "retained_actor_admission": false,
+		"selected_fork_source_dependencies": false, "retained_actor_provider_dependencies": false,
+	}
+	for _, observation := range incomplete.Observations {
+		if observation.Subject != "store:"+store.inspectionSQLitePath {
+			continue
+		}
+		seen, known := expected[observation.CheckID]
+		if !known || seen || observation.Class != bootverify.AdmissionDeploymentObservation || observation.Status != bootverify.AdmissionNotRun || observation.Reason == "" || observation.FailureClass != "" {
+			t.Fatalf("invalid fresh-store observation: %+v", observation)
+		}
+		expected[observation.CheckID] = true
+		if observation.CheckID == "selected_store_access" {
+			if observation.NotRunCause == nil || observation.NotRunCause.Kind != bootverify.AdmissionAbsentSQLiteStore || observation.NotRunCause.Path != store.inspectionSQLitePath {
+				t.Fatalf("fresh-store absence root: %+v", observation)
+			}
+		} else if observation.NotRunCause != nil || !reflect.DeepEqual(observation.Dependencies, []string{"selected_store_access"}) {
+			t.Fatalf("fresh-store dependent: %+v", observation)
+		}
+	}
+	for id, seen := range expected {
+		if !seen {
+			t.Fatalf("missing fresh-store observation %s", id)
+		}
 	}
 	for _, path := range []string{store.inspectionSQLitePath, store.inspectionSQLitePath + ".possession"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
