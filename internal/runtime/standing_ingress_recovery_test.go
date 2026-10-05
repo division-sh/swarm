@@ -244,6 +244,7 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 					}
 					contextDef := testBundleContext(t, runtimeContextTestHashA, "inbound.telegram")
 					contextDef.Source, contextDef.ProviderTriggerCatalog, contextDef.StandingTargets = source, catalog, targets
+					contextDef.StandingTargets = bindStandingContextFixtureTargets(t, source, targets, uuid.NewString())
 					contextDef.Runtime.Options.SourceArtifactFact = contextDef.SourceArtifactFact
 					contextDef.Runtime.standingCredentialAdmission = rt.standingCredentialAdmission
 					applyRuntimeAdmissionCatalog(t, &contextDef, catalog)

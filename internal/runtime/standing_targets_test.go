@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -460,6 +461,29 @@ func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPi
 
 func standingTelegramDeclarationSource(t testing.TB, inputEvent string) (semanticview.Source, *providertriggers.CatalogSnapshot) {
 	return standingProviderDeclarationSource(t, "telegram", inputEvent)
+}
+
+// Pure context-publication fixture; durable standing construction is proved
+// separately through the native and served selected-store owners.
+func bindStandingContextFixtureTargets(t testing.TB, source semanticview.Source, declarations []StandingTarget, runID string) []StandingTarget {
+	t.Helper()
+	root := flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
+	bound := append([]StandingTarget(nil), declarations...)
+	for i, target := range bound {
+		if target.RunID != "" || target.Generation != 0 || target.PublicationSequence != 0 || target.ServiceID != bound[0].ServiceID {
+			t.Fatal("context fixture requires unbound declarations of one service")
+		}
+		instance, err := flowidentity.KeylessChild(source, root, target.FlowPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := instance.ValidateConstruction(source, runID); err != nil {
+			t.Fatal(err)
+		}
+		bound[i].RunID, bound[i].Generation, bound[i].PublicationSequence = runID, 1, 1
+		bound[i].InstanceID, bound[i].FlowInstance, bound[i].EntityID = instance.InstanceID, instance.InstancePath, instance.EntityID
+	}
+	return bound
 }
 
 func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string) (semanticview.Source, *providertriggers.CatalogSnapshot) {

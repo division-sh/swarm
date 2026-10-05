@@ -303,5 +303,26 @@
     "slots": [
       "query.filter is unquoted CEL; preserve the existing optional-state presence predicate, grouping and count"
     ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/selected_input_agent.go",
+    "before_hash": "eb298427d49aaef8ad8af98e70a2117089ca2d9c5f1a89a6404be1175897634a",
+    "after_hash": "ed9cdf3d6ecc7730a42661f84ba904b0f9a2da317aecab02459154603019590c",
+    "edits": [
+      {
+        "start": 66,
+        "remove": ["\t\t\"templ/nodes.yaml\":    \"bootstrap:\\n  execution_type: system_node\\n  subscribes_to: [task.assigned]\\n  produces: [construction.started]\\n  event_handlers:\\n    task.assigned:\\n      emit:\\n        event: construction.started\\n        fields:\\n          work_id: ${payload.work_id}\\nfinish:\\n  execution_type: system_node\\n  subscribes_to: [construction.started]\\n  event_handlers:\\n    construction.started:\\n      advances_to: done\\n\","],
+        "add": ["\t\t\"templ/nodes.yaml\":    \"bootstrap:\\n  execution_type: system_node\\n  subscribes_to: [task.assigned]\\n  produces: [construction.started]\\n  event_handlers:\\n    task.assigned:\\n      emit:\\n        event: construction.started\\n        fields:\\n          work_id: payload.work_id\\nfinish:\\n  execution_type: system_node\\n  subscribes_to: [construction.started]\\n  event_handlers:\\n    construction.started:\\n      advances_to: done\\n\","
+        ]
+      },
+      {
+        "start": 74,
+        "remove": ["\t\t\t\t\"nodes.yaml\":  \"publish:\\n  execution_type: system_node\\n  subscribes_to: [task.assigned]\\n  produces: [work.ready]\\n  event_handlers:\\n    task.assigned:\\n      emit:\\n        event: work.ready\\n        fields:\\n          work_id: ${payload.work_id}\\nfinish:\\n  execution_type: system_node\\n  subscribes_to: [work.finish]\\n  event_handlers:\\n    work.finish:\\n      advances_to: done\\n\","
+        ],
+        "add": ["\t\t\t\t\"nodes.yaml\":  \"publish:\\n  execution_type: system_node\\n  subscribes_to: [task.assigned]\\n  produces: [work.ready]\\n  event_handlers:\\n    task.assigned:\\n      emit:\\n        event: work.ready\\n        fields:\\n          work_id: payload.work_id\\nfinish:\\n  execution_type: system_node\\n  subscribes_to: [work.finish]\\n  event_handlers:\\n    work.finish:\\n      advances_to: done\\n\","
+        ]
+      }
+    ],
+    "slots": ["positive constructed-actor emit.fields.work_id is CEL payload.work_id, not a retired wrapper; root and every generated child migrate together"]
   }
 ]

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 type refusingStandingPromotionStore struct {
@@ -61,6 +62,7 @@ func TestStandingChannelAdmissionRefusesBeforeDurableMutation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			active.StandingTargets = bindStandingContextFixtureTargets(t, source, active.StandingTargets, uuid.NewString())
 			applyRuntimeAdmissionCatalog(t, &active, catalog)
 			incoming := testBundleContext(t, runtimeContextTestHashB, "inbound.telegram")
 			incoming.Source, incoming.ProviderTriggerCatalog = source, catalog
