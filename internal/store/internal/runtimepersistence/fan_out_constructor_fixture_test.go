@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func newFanOutConstructorFixture(t *testing.T, backend string) receiverConfigActivationFixture {
@@ -28,6 +29,13 @@ func newFanOutConstructorFixture(t *testing.T, backend string) receiverConfigAct
 func constructFanOutCompletionReceiver(t *testing.T, ctx context.Context, f receiverConfigActivationFixture, flow string, at time.Time) (events.DeliveryRoute, pipeline.WorkflowEngineStateRecord) {
 	t.Helper()
 	req := sqliteFlowActivationRequest(f.bundle, flow, flow, "", flow)
+	runID := correlation.RunIDFromContext(ctx)
+	rootIdentity := flowidentity.Stored(semanticview.Wrap(f.bundle), ".", runID, runID, runID, "")
+	childIdentity, err := flowidentity.KeylessChild(semanticview.Wrap(f.bundle), rootIdentity, flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Instance = childIdentity
 	req.OccurredAt = at
 	plan, err := f.manager.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil {
