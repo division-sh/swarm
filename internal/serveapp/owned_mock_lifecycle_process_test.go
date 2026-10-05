@@ -201,7 +201,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 		Credentials:      credentials, ProviderCredentials: providerCredentials, ManagedCredentials: managedCredentials,
 		Presenter: presenter, NoticePresentation: newServeNoticePresentationSink(presenter), Cancel: cancel,
 		BootStartedAt: time.Now().UTC(), RuntimeInstanceID: runtimeID,
-		DataProjectionRoot: filepath.Join(retainedRoot, ".lifecycle-data-projections"),
+		DataProjectionRoot: filepath.Join(swarmDir.Path, "lifecycle-data-projections"),
 	})
 	return code, nil
 }
