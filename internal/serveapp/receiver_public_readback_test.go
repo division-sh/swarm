@@ -31,6 +31,9 @@ func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRunti
 	if gotEntity != entityID || gotTemplate != template || gotState != state || gotType.String != entityType || gotType.Valid != (entityType != "") || revision != wantRevision || createdAt == "" || updatedAt == "" || !orderedClocks {
 		t.Fatalf("constructed receiver mismatch: run=%s instance=%s entity=%s template=%s type=%+v state=%s revision=%d", runID, instance, gotEntity, gotTemplate, gotType, gotState, revision)
 	}
+	if wantRevision == 1 && updatedAt != createdAt {
+		t.Fatal("delivery-only settlement changed the construction header clock")
+	}
 	var phase, planHash, rawPlan string
 	err := rt.DB.QueryRow(`SELECT phase,plan_hash,CAST(plan AS TEXT) FROM flow_instance_runtime_readiness WHERE run_id=$1 AND instance_path=$2`, runID, instance).Scan(&phase, &planHash, &rawPlan)
 	if wantPhase == "" {

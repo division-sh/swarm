@@ -24,8 +24,8 @@ func TestReceiverCompositionEntitylessRootExportBothStores(t *testing.T) {
 			if err := json.Unmarshal([]byte(rawSource), &source); err != nil {
 				t.Fatal(err)
 			}
-			if source != (events.RouteIdentity{EntityID: published.RunID}) {
-				t.Fatalf("root export borrowed source state: %s", rawSource)
+			if source != (events.RouteIdentity{EntityID: published.RunID, FlowInstance: published.RunID, FlowID: "."}) {
+				t.Fatalf("root export lost its exact constructed source: %s", rawSource)
 			}
 			var event operatorread.OperatorEventFull
 			requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &event)

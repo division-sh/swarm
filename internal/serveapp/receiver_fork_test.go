@@ -218,7 +218,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					rootRevision = 1
 				}
 				requireReceiverConstructedInstance(t, rt, forkRunID, forkRunID, ".", forkRunID, rootType, rootState, "", rootPhase, rootRevision, rootFields)
-				requireReceiverConstructedInstance(t, rt, forkRunID, "sink", "sink", flowidentity.EntityID("sink"), childType, "pending", forkRunID, "ready", 2, childFields)
+				requireReceiverConstructedInstance(t, rt, forkRunID, "sink", "sink", flowidentity.EntityID("sink"), childType, "pending", forkRunID, "ready", 1, childFields)
 				var headers, companions int
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, forkRunID).Scan(&headers); err != nil || headers != 2 {
 					t.Fatalf("fork construction census: got=%d want=2 err=%v", headers, err)
