@@ -37,7 +37,7 @@ func (s credentialCacheActorEffects) IsExternalEffectAuthorityCurrent(ctx contex
 func (s credentialCacheActorEffects) AuthorizeExternalAttempt(ctx context.Context, a runtimeeffects.Authority, r runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
 	return s.actor(a.Normal.AgentID).AuthorizeExternalAttempt(ctx, a, r)
 }
-func (s credentialCacheActorEffects) MarkExternalAttemptLaunched(ctx context.Context, a runtimeeffects.Attempt, at time.Time) error {
+func (s credentialCacheActorEffects) MarkExternalAttemptLaunched(ctx context.Context, a runtimeeffects.Attempt, at time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
 	return s.actor(a.Token.AgentID).MarkExternalAttemptLaunched(ctx, a, at)
 }
 func (s credentialCacheActorEffects) MarkExternalAttemptResponseObserved(ctx context.Context, a runtimeeffects.Attempt, evidence map[string]any, at time.Time) error {
