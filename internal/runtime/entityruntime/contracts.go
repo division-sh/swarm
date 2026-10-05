@@ -574,11 +574,12 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 		}
 		out := make(map[string]any, len(object))
 		for key, raw := range object {
-			if !isTextType(typeName(contract, keyType)) {
-				key = strings.TrimSpace(key)
+			key, err := NormalizeContainedOperationKey(contract, keyType, key)
+			if err != nil {
+				return nil, fieldTypeError(fieldName, err.Error())
 			}
-			if key == "" {
-				return nil, fieldTypeError(fieldName, "map key cannot be empty")
+			if _, duplicate := out[key]; duplicate {
+				return nil, fieldTypeError(fieldName, fmt.Sprintf("duplicate normalized map key %q", key))
 			}
 			normalized, err := normalizeValueForType(contract, joinFieldName(fieldName, key), valueType, raw)
 			if err != nil {
@@ -602,7 +603,7 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 			out = append(out, normalized)
 		}
 		return out, nil
-	case isTextType(typeRef):
+	case isTextType(typeName(contract, typeRef)):
 		text, ok := value.(string)
 		if !ok {
 			return nil, fieldTypeError(fieldName, "must be string")

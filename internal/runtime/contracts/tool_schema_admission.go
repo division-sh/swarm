@@ -18,6 +18,7 @@ var toolSchemaFields = map[string]struct{}{
 	"type": {}, "description": {}, "properties": {}, "required": {}, "items": {}, "enum": {},
 	"additionalProperties": {}, "minimum": {}, "maximum": {}, "pattern": {}, "format": {},
 	"x-swarm-equalTo": {}, "minLength": {}, "maxLength": {}, "minItems": {}, "maxItems": {},
+	"oneOf": {}, "propertyNames": {},
 }
 
 // Authored and programmatic declarations terminate at the same semantic
@@ -67,7 +68,7 @@ func projectToolSchemaValue(value yamlsource.Value, path string, depth int, loca
 		switch field.Name {
 		case "properties":
 			raw, err = projectToolSchemaPropertiesValue(field.Value, fieldPath, depth, locations)
-		case "items", "additionalProperties":
+		case "items", "additionalProperties", "propertyNames":
 			if field.Value.Presence() == yamlsource.PresenceMapping || field.Value.Presence() == yamlsource.PresenceEmptyMapping {
 				raw, err = projectToolSchemaValue(field.Value, fieldPath, depth+1, locations)
 			} else {
@@ -75,6 +76,19 @@ func projectToolSchemaValue(value yamlsource.Value, path string, depth int, loca
 			}
 		case "enum":
 			raw, err = projectToolSchemaEnumValue(field.Value)
+		case "oneOf":
+			var items []yamlsource.Value
+			items, err = field.Value.Sequence()
+			if err == nil {
+				branches := make([]any, len(items))
+				for index, item := range items {
+					branches[index], err = projectToolSchemaValue(item, fmt.Sprintf("%s[%d]", fieldPath, index), depth+1, locations)
+					if err != nil {
+						break
+					}
+				}
+				raw = branches
+			}
 		default:
 			err = field.Value.Project(&raw)
 		}
@@ -256,10 +270,29 @@ func admitToolSchemaOptions(name string, value any, path string, depth int, prop
 		return admitToolSchemaTextOption(name, value, path, property)
 	case "properties":
 		return admitToolSchemaPropertyOptions(value, path, depth)
+	case "oneOf":
+		sequence := reflect.ValueOf(value)
+		if !sequence.IsValid() || (sequence.Kind() != reflect.Slice && sequence.Kind() != reflect.Array) || sequence.Len() == 0 {
+			return nil, toolSchemaFieldError("%s must be a non-empty sequence of schemas", path)
+		}
+		branches := make([]ToolInputSchema, sequence.Len())
+		for index := range branches {
+			childPath := fmt.Sprintf("%s[%d]", path, index)
+			child, ok := sequence.Index(index).Interface().(map[string]any)
+			if !ok || child == nil {
+				return nil, toolSchemaFieldError("%s must be a mapping", childPath)
+			}
+			branch, err := admitToolSchemaMap(child, childPath, depth+1, false)
+			if err != nil {
+				return nil, err
+			}
+			branches[index] = branch
+		}
+		return []ToolInputSchemaOption{ToolSchemaOneOf(branches...)}, nil
 	case "required", "enum":
 		option, err := admitToolSchemaSequenceOption(name, value, path)
 		return []ToolInputSchemaOption{option}, err
-	case "items", "additionalProperties":
+	case "items", "additionalProperties", "propertyNames":
 		option, err := admitToolSchemaNestedOption(name, value, path, depth)
 		return []ToolInputSchemaOption{option}, err
 	case "minimum", "maximum":
@@ -357,6 +390,9 @@ func admitToolSchemaNestedOption(name string, value any, path string, depth int)
 	}
 	if name == "items" {
 		return ToolSchemaItems(admitted), nil
+	}
+	if name == "propertyNames" {
+		return ToolSchemaPropertyNames(admitted), nil
 	}
 	return ToolSchemaAdditionalPropertiesSchema(admitted), nil
 }

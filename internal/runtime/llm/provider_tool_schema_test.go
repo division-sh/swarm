@@ -5,6 +5,28 @@ import (
 	"testing"
 )
 
+func TestValidateProviderToolSchemaChecksPropertyNames(t *testing.T) {
+	for _, names := range []any{nil, true, "text", map[string]any{"type": "unsupported"}} {
+		if err := ValidateProviderToolSchema("save_labels", map[string]any{"type": "object", "propertyNames": names}); err == nil {
+			t.Fatalf("malformed propertyNames accepted: %#v", names)
+		}
+	}
+	if err := ValidateProviderToolSchema("save_labels", map[string]any{"type": "object", "propertyNames": map[string]any{"type": "string", "format": "uuid"}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateProviderToolSchemaChecksOneOfBranches(t *testing.T) {
+	for _, raw := range []any{nil, []any{}, []any{nil}, []any{map[string]any{"type": "numeric(5,2)"}}, []any{map[string]any{"type": "object", "properties": map[string]any{"bad": map[string]any{"type": "unsupported"}}}}} {
+		if err := ValidateProviderToolSchema("save_items", map[string]any{"type": "object", "oneOf": raw}); err == nil {
+			t.Fatalf("malformed nested oneOf accepted: %#v", raw)
+		}
+	}
+	if err := ValidateProviderToolSchema("save_items", map[string]any{"type": "object", "oneOf": []any{map[string]any{"type": "object", "additionalProperties": false}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateProviderToolSchemaRejectsUnsupportedNestedType(t *testing.T) {
 	schema := map[string]any{
 		"type": "object",

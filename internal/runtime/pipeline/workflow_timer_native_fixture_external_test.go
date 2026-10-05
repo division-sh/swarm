@@ -121,3 +121,7 @@ func TestWorkflowTimerCauseReplayEngineConsumersOnBothStores(t *testing.T) {
 func TestMutationFreeAcceptedEventTimersBothStores(t *testing.T) {
 	pipeline.VerifyMutationFreeAcceptedEventTimersBothStoresForTest(t, newTimerCauseReplayNativeFixture)
 }
+
+func TestWorkflowTimerTransitionEntityFenceOnBothStores(t *testing.T) {
+	pipeline.VerifyWorkflowTimerTransitionEntityFenceForTest(t, newTimerCauseReplayNativeFixture)
+}

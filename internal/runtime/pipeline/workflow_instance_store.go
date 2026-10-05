@@ -1039,50 +1039,6 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	return instance, identity, true, nil
 }
 
-func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID, terminatedAt time.Time) error {
-	if s == nil || !s.enabled() {
-		return nil
-	}
-	flowIdentity = flowIdentity.Normalize()
-	route := flowIdentity.Route
-	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
-	if err := flowIdentity.Validate(); err != nil || entityID.IsZero() || terminatedAt.IsZero() {
-		return fmt.Errorf("workflow instance termination requires exact route, entity, and occurrence time")
-	}
-	if s.engineMutations == nil {
-		return fmt.Errorf("workflow instance termination requires the selected workflow engine mutation owner")
-	}
-	if s.decisionCards != nil {
-		return fmt.Errorf("gated workflow termination requires the pipeline lifecycle coordinator")
-	}
-	instance, found, err := s.Load(ctx, flowIdentity)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
-	}
-	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
-		return fmt.Errorf("validate workflow instance termination owner: %w", err)
-	}
-	if strings.TrimSpace(instance.Status) == "terminated" {
-		if instance.TerminatedAt.IsZero() {
-			return fmt.Errorf("terminal workflow instance %s has no termination time", route.InstancePath)
-		}
-		return nil
-	}
-	expectedState := strings.TrimSpace(instance.CurrentState)
-	expectedRevision := instance.Revision
-	instance.Status = "terminated"
-	instance.TerminatedAt = terminatedAt.UTC()
-	record, err := workflowEngineStateRecord(flowIdentity, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, terminatedAt.UTC())
-	if err != nil {
-		return err
-	}
-	_, err = s.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{State: record})
-	return err
-}
-
 func (s *workflowInstanceStore) QueryEntityCount(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
 	if s == nil || s.entityQuery == nil {
 		return 0, fmt.Errorf("workflow entity query reader is required")

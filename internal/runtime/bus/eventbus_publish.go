@@ -1962,9 +1962,13 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 	for _, it := range interceptors {
 		pass, out, outcome, err := it.Intercept(ctx, evt)
 		if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
-			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
-				"event_id": evt.ID(), "event_type": string(evt.Type()),
-			}, err))
+			interceptorErr := fmt.Errorf("event interceptor failed for %s (%s): %w", evt.ID(), evt.Type(), err)
+			if _, typed := runtimefailures.As(err); !typed && !runtimefailures.IsContextInterruption(err) {
+				interceptorErr = runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
+					"event_id": evt.ID(), "event_type": string(evt.Type()),
+				}, err)
+			}
+			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, interceptorErr)
 		}
 		postCommitErr = errors.Join(postCommitErr, err)
 		result.Committed = result.Committed || outcome.Committed

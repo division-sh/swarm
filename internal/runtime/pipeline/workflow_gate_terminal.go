@@ -10,6 +10,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 )
 
@@ -89,6 +90,24 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	entityID identity.EntityID,
 	terminatedAt time.Time,
 	retireRoute bool,
+) (WorkflowInstance, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return WorkflowInstance{}, err
+		}
+		instance, err := pc.commitWorkflowTerminationAttempt(ctx, flowIdentity, entityID, terminatedAt, retireRoute)
+		if instance.Status == "terminated" || !failures.IsStateContention(err) {
+			return instance, err
+		}
+	}
+}
+
+func (pc *PipelineCoordinator) commitWorkflowTerminationAttempt(
+	ctx context.Context,
+	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
+	entityID identity.EntityID,
+	terminatedAt time.Time,
+	retireRoute bool,
 ) (result WorkflowInstance, resultErr error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -104,6 +123,12 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	if err := flowIdentity.Validate(); err != nil || entityID.IsZero() || terminatedAt.IsZero() {
 		return WorkflowInstance{}, fmt.Errorf("workflow termination requires exact route, entity, and occurrence time")
 	}
+	unlock := pc.lockWorkflowEntity(entityID.String())
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
 	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
 		return WorkflowInstance{}, err
@@ -169,6 +194,8 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	// to the Manager which owns whole-set fencing and retirement.
 	result = instance
 	resultErr = err
+	unlock()
+	unlock = nil
 	pendingRoute := committed.RouteRetirement
 	retireCommittedRoute := func() (retireErr error) {
 		if pendingRoute == nil {

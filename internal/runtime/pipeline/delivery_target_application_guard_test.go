@@ -40,8 +40,8 @@ func TestDurableHandlerConsumersStayOnDeliveryTargetApplication(t *testing.T) {
 		},
 		{
 			file: filepath.Join(dir, "engine_adapter.go"), function: "prepareMutation",
-			required:  []string{"loadCurrentDeliveryTargetState", "application.Route()", "application.EntityID()"},
-			forbidden: []string{"persistedInstance", "resolveHandlerEntityIDForFlow", "ensureHandlerEntityID"},
+			required:  []string{"evaluatedWorkflowInstance", "engineMutation.EvaluatedState", "cloneWorkflowInstanceForEngineMutation(evaluated.instance)", "application.Validate()", "application.Route()", "application.EntityID()", "application.previewOnly()"},
+			forbidden: []string{"loadCurrentDeliveryTargetState", "LoadTargetPersistence", "LoadState(", "workflowStore.Load(", "persistedInstance", "resolveHandlerEntityIDForFlow", "ensureHandlerEntityID"},
 		},
 		{
 			file: filepath.Join(dir, "engine_adapter.go"), function: "LoadState",

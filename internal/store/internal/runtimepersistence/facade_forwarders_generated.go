@@ -1174,10 +1174,6 @@ func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runI
 	return s.eventPostgresOwner.RuntimeLogLineageParentEventID(ctx, runID, explicitParentEventID, subjectEventID)
 }
 
-func (s *PostgresStore) SaveEntityField(ctx context.Context, update tools.EntityFieldUpdate) (tools.EntityFieldWriteResult, error) {
-	return s.entityPostgresOwner.SaveEntityField(ctx, update)
-}
-
 func (s *PostgresStore) SaveManagedCapabilitySurface(ctx context.Context, surface managedcapabilities.Surface) error {
 	return s.managedCapabilityPostgresOwner.SaveManagedCapabilitySurface(ctx, surface)
 }
@@ -2392,10 +2388,6 @@ func (s *SQLiteRuntimeStore) RunDispatchParked(ctx context.Context, runID string
 
 func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context, runID string, explicitParentEventID string, subjectEventID string) (string, error) {
 	return s.eventSQLiteOwner.RuntimeLogLineageParentEventID(ctx, runID, explicitParentEventID, subjectEventID)
-}
-
-func (s *SQLiteRuntimeStore) SaveEntityField(ctx context.Context, update tools.EntityFieldUpdate) (tools.EntityFieldWriteResult, error) {
-	return s.entitySQLiteOwner.SaveEntityField(ctx, update)
 }
 
 func (s *SQLiteRuntimeStore) SaveManagedCapabilitySurface(ctx context.Context, surface managedcapabilities.Surface) error {

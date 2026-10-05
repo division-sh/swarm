@@ -2,6 +2,7 @@ package failures
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -123,6 +124,28 @@ func OnlyBranches(err error, allowed func(error) bool) bool {
 		}
 	}
 	return allowed(err)
+}
+
+// State contention invalidates an uncommitted evaluation, not the delivery.
+// Joined cleanup failures must not be hidden by a retryable contention branch.
+func IsStateContention(err error) bool {
+	return OnlyBranches(err, func(branch error) bool {
+		failure, ok := branch.(*Error)
+		return ok && failure.Failure.Class == ClassLifecycleConflict &&
+			(failure.Failure.Detail.Code == "workflow_engine_state_revision_conflict" ||
+				failure.Failure.Detail.Code == "join_publication_entry_changed")
+	})
+}
+
+// An interrupted check is not a completed refusal. Explicit typed failures or
+// independent joined causes retain their own disposition.
+func IsContextInterruption(err error) bool {
+	if _, typed := As(err); typed {
+		return false
+	}
+	return OnlyBranches(err, func(branch error) bool {
+		return branch == context.Canceled || branch == context.DeadlineExceeded
+	})
 }
 
 var detailCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
