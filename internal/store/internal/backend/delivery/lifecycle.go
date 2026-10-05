@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
@@ -496,6 +497,38 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginSuccessTx(
 ) error {
 	_, err := sqliteDeliveryAdapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
 	return err
+}
+
+// RequireWorkflowAcceptedEventTx binds a preserved-state timer reaction to its
+// exact inbound delivery; claim renewal and settlement still occur together.
+func (s *DeliveryPostgresOwner) RequireWorkflowAcceptedEventTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, cause workflowlifecycle.Effect) error {
+	return requireWorkflowAcceptedEventTx(ctx, tx, true, claim, cause)
+}
+
+func (s *DeliverySQLiteOwner) RequireWorkflowAcceptedEventTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, cause workflowlifecycle.Effect) error {
+	return requireWorkflowAcceptedEventTx(ctx, tx, false, claim, cause)
+}
+
+func requireWorkflowAcceptedEventTx(ctx context.Context, tx *sql.Tx, postgres bool, claim runtimedelivery.Claim, cause workflowlifecycle.Effect) error {
+	query := `SELECT e.event_name, e.created_at FROM events e JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
+		WHERE e.run_id=? AND e.event_id=? AND d.delivery_id=?`
+	if postgres {
+		query = `SELECT e.event_name, e.created_at FROM events e JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
+			WHERE e.run_id=$1::uuid AND e.event_id=$2::uuid AND d.delivery_id=$3::uuid`
+	}
+	var eventType string
+	var occurredAt any
+	if err := tx.QueryRowContext(ctx, query, claim.RunID(), cause.EventID(), claim.DeliveryID()).Scan(&eventType, &occurredAt); err != nil {
+		return fmt.Errorf("read preserved workflow accepted-event delivery: %w", err)
+	}
+	at, found, err := parseNullableTime(occurredAt)
+	if err != nil {
+		return fmt.Errorf("decode preserved workflow accepted-event occurrence: %w", err)
+	}
+	if !found || eventType != cause.EventType() || !at.Equal(cause.OccurredAt()) {
+		return fmt.Errorf("preserved workflow accepted-event identity or canonical occurrence disagrees with delivery")
+	}
+	return nil
 }
 
 // SettleWorkflowNodeSuccessTx terminally settles the exact inbound node claim

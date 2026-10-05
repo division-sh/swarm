@@ -403,7 +403,7 @@ func commitWorkflowEngineMutation(
 		err = attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if !command.State.Transition.PreservesState() {
 				transactiontest.Mark(txctx, transactiontest.WorkflowMutation)
-			} else if err := requirePreservedWorkflowAcceptedEvent(txctx, tx, store, postgres, command); err != nil {
+			} else if err := requirePreservedWorkflowAcceptedEvent(txctx, tx, store, command); err != nil {
 				return err
 			}
 			if runID := strings.TrimSpace(command.GateRouteAdmissionRunID); runID != "" {
@@ -540,7 +540,7 @@ func commitWorkflowEngineMutation(
 
 // This bounded cross-domain projection binds the lifecycle cause to its exact
 // inbound delivery. Fencing, expiry and renewal remain the delivery owner's work.
-func requirePreservedWorkflowAcceptedEvent(ctx context.Context, tx *sql.Tx, store eventCommitTxStore, postgres bool, command runtimepipeline.WorkflowEngineMutationCommand) error {
+func requirePreservedWorkflowAcceptedEvent(ctx context.Context, tx *sql.Tx, store eventCommitTxStore, command runtimepipeline.WorkflowEngineMutationCommand) error {
 	current, err := store.RequireActiveSourceTx(ctx, tx, command.State.Identity.RunID)
 	if err != nil {
 		return err
@@ -548,26 +548,7 @@ func requirePreservedWorkflowAcceptedEvent(ctx context.Context, tx *sql.Tx, stor
 	if !current.Matches(command.AcceptedEventSource) {
 		return fmt.Errorf("preserved workflow accepted-event source disagrees with current run authority")
 	}
-	cause := command.AcceptedEvent
-	query := `SELECT e.event_name, e.created_at FROM events e JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
-		WHERE e.run_id=? AND e.event_id=? AND d.delivery_id=?`
-	if postgres {
-		query = `SELECT e.event_name, e.created_at FROM events e JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
-			WHERE e.run_id=$1::uuid AND e.event_id=$2::uuid AND d.delivery_id=$3::uuid`
-	}
-	var eventType string
-	var occurredAt any
-	if err := tx.QueryRowContext(ctx, query, command.State.Identity.RunID, cause.EventID(), command.DeliverySuccess.Claim.DeliveryID()).Scan(&eventType, &occurredAt); err != nil {
-		return fmt.Errorf("read preserved workflow accepted-event delivery: %w", err)
-	}
-	at, found, err := sqliteTimeValue(occurredAt)
-	if err != nil {
-		return fmt.Errorf("decode preserved workflow accepted-event occurrence: %w", err)
-	}
-	if !found || eventType != cause.EventType() || !at.Equal(cause.OccurredAt()) {
-		return fmt.Errorf("preserved workflow accepted-event identity or canonical occurrence disagrees with delivery")
-	}
-	return nil
+	return store.RequireWorkflowAcceptedEventTx(ctx, tx, command.DeliverySuccess.Claim, *command.AcceptedEvent)
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {

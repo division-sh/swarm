@@ -276,6 +276,12 @@ func TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores(t *tes
 					return receipts
 				})
 				req := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
+				rootIdentity := flowidentity.Stored(semanticview.Wrap(f.bundle), ".", correlation.RunIDFromContext(f.ctx), correlation.RunIDFromContext(f.ctx), correlation.RunIDFromContext(f.ctx), "")
+				childIdentity, err := flowidentity.KeylessChild(semanticview.Wrap(f.bundle), rootIdentity, "review")
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Instance = childIdentity
 				if err := f.manager.ActivateFlowInstance(f.ctx, req); err != nil {
 					t.Fatalf("fieldless canonical constructor: %v", err)
 				}
