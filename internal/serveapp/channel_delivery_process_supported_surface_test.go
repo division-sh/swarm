@@ -332,11 +332,3 @@ func waitChannelDeliverySendsSettled(t *testing.T, db *sql.DB, backend servedpar
 		time.Sleep(20 * time.Millisecond)
 	}
 }
-
-func channelDeliveryProviderMessageCount(provider *channelOnboardingTelegramProvider) int {
-	for index := 0; ; index++ {
-		if provider.Delivery(index) == nil {
-			return index
-		}
-	}
-}

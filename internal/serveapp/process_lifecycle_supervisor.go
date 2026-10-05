@@ -194,33 +194,6 @@ func (s *processLifecycleSupervisor) retireSelectedContextsLocked(ctx context.Co
 	return s.selected.RetireSelectedContexts(ctx)
 }
 
-func (s *processLifecycleSupervisor) attachPrimaryRuntime(ctx context.Context, manager *runtime.RuntimeContextManager) error {
-	primary, ok := manager.Primary()
-	if !ok || primary == nil {
-		return errors.New("completed topology has no loaded primary runtime context")
-	}
-	use, lookup, err := manager.AcquireBundleHash(ctx, primary.BundleHash())
-	if err != nil {
-		return err
-	}
-	if use == nil || !lookup.Loaded() || use.Runtime() == nil {
-		return errors.New("completed topology primary runtime context is not executable")
-	}
-	rt := use.Runtime()
-	fact := use.Context.SourceArtifactFact
-	if err := use.Done(); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	s.currentRT = rt
-	s.currentSourceArtifactFact = fact
-	if s.ready != nil {
-		s.ready.Store(true)
-	}
-	s.mu.Unlock()
-	return nil
-}
-
 func (s *processLifecycleSupervisor) stopRuntime(ctx context.Context, rt *runtime.Runtime, opts runtime.ShutdownOptions) error {
 	if s == nil || rt == nil {
 		return nil
