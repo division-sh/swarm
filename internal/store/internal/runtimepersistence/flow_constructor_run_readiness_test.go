@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -42,7 +43,14 @@ func TestFlowConstructorReadinessKeepsExactRunOwnershipBothStores(t *testing.T) 
 			nextID := uuid.NewString()
 			nextCtx := correlation.WithRunID(f.ctx, nextID)
 			requireRunFixtureForTest(t, nextCtx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: nextID, Artifact: f.bundle.SourceArtifact, BundleHash: fact.BundleHash()})
-			nextPlan, err := f.manager.PrepareFlowInstanceActivation(nextCtx, sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review"))
+			root := flowidentity.Stored(semanticview.Wrap(f.bundle), ".", nextID, nextID, nextID, "")
+			child, err := flowidentity.KeylessChild(semanticview.Wrap(f.bundle), root, "review")
+			if err != nil {
+				t.Fatal(err)
+			}
+			nextRequest := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
+			nextRequest.Instance = child
+			nextPlan, err := f.manager.PrepareFlowInstanceActivation(nextCtx, nextRequest)
 			if err != nil {
 				t.Fatal(err)
 			}

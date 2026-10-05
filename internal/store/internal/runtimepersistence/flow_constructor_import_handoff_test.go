@@ -64,6 +64,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			fixture.capabilitiesMu.Unlock()
 			before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 			record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", ".", entityID, "pending", 1, at)
+			record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 			if _, err := owner.CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err == nil || !strings.Contains(err.Error(), "constructed target") {
 				t.Fatalf("ordinary mutation granted construction to an import: %v", err)
 			}

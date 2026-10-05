@@ -119,6 +119,7 @@ func TestFlowConstructorReplayAndRefusalBothStores(t *testing.T) {
 					state.Bookkeeping = json.RawMessage(`{"completed":1}`)
 					state.Accumulator = json.RawMessage(`{"totals":{"accepted":4}}`)
 					state.EnteredStageAt, state.UpdatedAt = state.CreatedAt.Add(time.Minute), state.CreatedAt.Add(time.Minute)
+					state = workflowTargetMutationEntry(t, f, state, "finish.requested")
 					if _, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: state}); err != nil {
 						t.Fatalf("legitimate workflow progress: %v", err)
 					}

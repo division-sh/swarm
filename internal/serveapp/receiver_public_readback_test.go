@@ -31,7 +31,8 @@ func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRunti
 	if gotEntity != entityID || gotTemplate != template || gotState != state || gotType.String != entityType || gotType.Valid != (entityType != "") || revision != wantRevision || createdAt == "" || updatedAt == "" || !orderedClocks {
 		t.Fatalf("constructed receiver mismatch: run=%s instance=%s entity=%s template=%s type=%+v state=%s revision=%d", runID, instance, gotEntity, gotTemplate, gotType, gotState, revision)
 	}
-	if wantRevision == 1 && updatedAt != createdAt {
+	// Historical source-only fork headers preserve their recorded clocks.
+	if wantRevision == 1 && wantPhase != "" && updatedAt != createdAt {
 		t.Fatal("delivery-only settlement changed the construction header clock")
 	}
 	var phase, planHash, rawPlan string

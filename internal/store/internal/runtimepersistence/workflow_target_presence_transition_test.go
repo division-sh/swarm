@@ -172,7 +172,15 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
       advances_to: settled
 `,
 	}, nil)
+	f.ctx = runtimecorrelation.WithSourceArtifactFact(f.ctx, sourceartifactfixture.FactFor(f.bundle.SourceArtifact))
+	runID := runtimecorrelation.RunIDFromContext(f.ctx)
+	root := runtimeflowidentity.Stored(semanticview.Wrap(f.bundle), ".", runID, runID, runID, "")
+	child, err := runtimeflowidentity.KeylessChild(semanticview.Wrap(f.bundle), root, "review")
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
+	req.Instance = child
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 	if err != nil {
 		t.Fatal(err)
@@ -449,7 +457,6 @@ func assertWorkflowTargetTransitionRows(t *testing.T, backend string, db *sql.DB
 		t.Fatalf("workflow target companion = %d/%q, want %d/%q", companions, workflow, wantCompanions, wantWorkflow)
 	}
 }
-
 
 func assertNoWorkflowEngineHistory(t *testing.T, backend string, db *sql.DB, runID, entityID string) {
 	t.Helper()
