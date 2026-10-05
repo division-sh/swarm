@@ -471,7 +471,7 @@
     "owner": "internal/cliapp/verify_runtime.go::renderVerifyCommandResult",
     "audit_rows": "A01,A28,A29,A30",
     "proof_families": "P01,P02,P23,P24,P27,P29",
-    "body_sha256": "b52e5bd08f56a9b54f018e364fe1ac450e3ba8e4bee08ab32df9a59a27cb854e"
+    "body_sha256": "16a3bf9636bdce0e9f379d355b6fab0c8ea5dc4853775679742a11ff6411f5bf"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::runVerifyCommandWithOutput",
@@ -495,7 +495,7 @@
     "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextLines",
     "audit_rows": "A01,A28,A29,A30",
     "proof_families": "P01,P02,P23,P24,P27,P29",
-    "body_sha256": "9a81bac53f2a70cc28832dac51622bad9e920bb4ecda0fa08d17b7acf2a247ae"
+    "body_sha256": "eb67a9c6383e3c3fe83dc285e0a65fc79c751b6427daf61a09ce08f9e22dab51"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextSubject",
@@ -669,7 +669,7 @@
     "owner": "internal/runtime/bootverify/admission_report.go::Report.AdmissionDecision",
     "audit_rows": "A28,A29,A30",
     "proof_families": "P23,P24",
-    "body_sha256": "6f5db6a906048295605b92b173bae33ecbd6daf103d1b62355c84960df8a7377"
+    "body_sha256": "e6f6ac1ac578f8e55b552429352ecb4dc38e3b1a2c582235dce00097af7a2c1c"
   },
   {
     "owner": "internal/runtime/bootverify/admission_report.go::Report.admissionBlockingFindings",
