@@ -426,11 +426,11 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 		t.Fatal(err)
 	}
 	control, err := card.Anchor.ControlRoutingSource()
-	if err != nil || control.Kind() != events.RoutingSourcePlatformControl {
-		t.Fatalf("root gate must retain closed platform-control authority: %+v %v", control, err)
+	if err != nil || control.Kind() != events.RoutingSourceFlowOwnedControl || control.Route() != (events.RouteIdentity{FlowID: ".", FlowInstance: f.runID, EntityID: f.entityID}) {
+		t.Fatalf("constructed root gate must retain its exact flow-owned control: %+v %v", control, err)
 	}
-	// A root platform control has no flow-owned route. The exact committed card
-	// supplies the consumer's owner; no non-agent delivery history is invented.
+	// The constructed gate keeps its immutable card route; root ingress/control
+	// remains separate. No non-agent delivery history is invented.
 	event := eventtest.RuntimeControlWithRoutingSource(f.eventID, "mailbox.card_decided", "platform", "", []byte(`{"card_id":"`+card.CardID+`"}`), 0, f.runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, f.entityID), control, decidedAt)
 	if err := commitSemanticEventFixture(f.ctx, opened.store.(workflowTestSelectedStore), event); err != nil {
 		t.Fatal(err)

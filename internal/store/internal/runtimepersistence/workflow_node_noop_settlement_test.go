@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	delivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -64,7 +66,7 @@ func TestWorkflowNodeNoopSettlementAtomicBothStores(t *testing.T) {
 					}
 				}
 				if failure == "terminal_run" {
-					if _, err := f.db.Exec(`UPDATE runs SET status='cancelled' WHERE run_id=$1`, runID); err != nil {
+					if _, err := markRunTerminalStatusForTest(f.ctx, f.store, runID, "cancelled", nil, time.Now().UTC()); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -81,8 +83,26 @@ func TestWorkflowNodeNoopSettlementAtomicBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if _, err := f.db.Exec(`UPDATE runs SET completion_due_at=NULL WHERE run_id=$1`, runID); err != nil {
-					t.Fatal(err)
+				if failure != "terminal_run" {
+					source := semanticview.Wrap(f.bundle)
+					root, _ := semanticview.WorkflowStageTopology(source, ".")
+					flow, _ := semanticview.WorkflowStageTopology(source, "node-noop")
+					classifier, err := contracts.NewWorkflowStageClassifier(root, map[string]contracts.WorkflowStageTopology{"node-noop": flow})
+					if err != nil {
+						t.Fatal(err)
+					}
+					catalog, err := runlifecycle.NewCompiledTerminalCatalog(classifier)
+					if err != nil {
+						t.Fatal(err)
+					}
+					lifecycle := f.store.(runLifecycleTerminalTestStore)
+					if _, err := lifecycle.RequestCompletionCandidate(f.ctx, runlifecycle.ImmediateCandidate(runID)); err != nil {
+						t.Fatal(err)
+					}
+					blocked, err := executeRunCompletionCandidateForRun(f.ctx, lifecycle, f.bundle.SourceArtifact.BundleHash(), runID, catalog)
+					if err != nil || blocked.Outcome != runlifecycle.OutcomeAwaitMutation {
+						t.Fatalf("pending delivery must retain mutation-owned completion: %+v %v", blocked, err)
+					}
 				}
 				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 				var remove []string

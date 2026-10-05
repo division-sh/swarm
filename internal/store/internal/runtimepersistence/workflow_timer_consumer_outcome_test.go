@@ -13,7 +13,6 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 type timerConsumerOutcomeStore struct {
@@ -111,7 +110,7 @@ func TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores(t *testing.T) 
 				enteredAt := time.Now().UTC().Add(-time.Hour - time.Second).Truncate(time.Microsecond)
 				plan, err := f.manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 					ContractBundle: semanticview.Wrap(bundle), OccurredAt: enteredAt,
-					Instance: runtimeflowidentity.Instance{TemplateID: ".", ScopeKey: ".", InstanceID: runID, InstancePath: runID, EntityID: uuid.NewString(), HasStoredPath: true},
+					Instance: runtimeflowidentity.Stored(semanticview.Wrap(bundle), ".", runID, runID, runID, ""),
 				})
 				if err != nil {
 					t.Fatal(err)
