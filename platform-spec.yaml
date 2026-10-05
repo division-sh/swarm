@@ -6772,7 +6772,7 @@ engine:
           owner: internal/store/testdata/persistence_authority_findings.tsv
           finding_identity: '{kind, raw-or-typed authority, file, enclosing declaration, member/method/context operation, resolved type/signature}'
           temporary_debt_ratchet:
-            owner: internal/store TestPersistenceAuthorityDebtRatchet
+            owner: internal/store/persistence_authority_debt_test.go
             snapshot: internal/store/testdata/persistence_authority_debt_baseline.tsv
             authorized_by: '#2542'
             purpose: Temporary inherited-debt evidence, never a disposition registry or authority grant.
