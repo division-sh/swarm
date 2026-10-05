@@ -257,6 +257,100 @@ func TestPersistenceAuthorityDebtCensusClearsAmbientSelectionFlags(t *testing.T)
 	}
 }
 
+func TestPersistenceAuthorityDebtTrustedBaseDistinguishesBootstrapFromLandedMerge(t *testing.T) {
+	for _, state := range []struct{ landed, deleted, push, local bool }{{false, false, false, false}, {true, false, false, false}, {true, true, false, false}, {true, false, true, false}, {true, false, false, true}} {
+		landed := state.landed
+		name := "initial-bootstrap-unrelated-master-change"
+		if landed {
+			name = "landed-baseline-merged-integration"
+		}
+		if state.deleted {
+			name = "deleted-landed-baseline-refuses-rebootstrap"
+		}
+		if state.push {
+			name = "master-push-compares-observed-predecessor"
+		}
+		if state.local {
+			name = "local-master-never-self-compares"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			git := func(args ...string) string {
+				t.Helper()
+				out, err := debtGit(root, args...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			write := func(path, text string) {
+				t.Helper()
+				path = filepath.Join(root, path)
+				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(text), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			git("init", "-q", "-b", "master")
+			git("config", "user.name", "Debt Ratchet Control")
+			git("config", "user.email", "ratchet@example.invalid")
+			write("seed.txt", "seed\n")
+			if landed {
+				write(debtBaselinePath, "landed baseline presence; schema validated by the guard\n")
+			}
+			git("add", ".")
+			git("commit", "-qm", "test: integration base")
+			fork := git("rev-parse", "HEAD")
+			git("switch", "-qc", "candidate")
+			write("candidate.txt", "candidate\n")
+			git("add", ".")
+			git("commit", "-qm", "test: candidate")
+			head := git("rev-parse", "HEAD")
+			git("switch", "-q", "master")
+			write("unrelated.txt", "unrelated master change\n")
+			if state.deleted {
+				if err := os.Remove(filepath.Join(root, debtBaselinePath)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			git("add", ".")
+			git("commit", "-qm", "test: unrelated master change")
+			target := git("rev-parse", "HEAD")
+			git("merge", "-q", "--no-ff", "--no-edit", "candidate")
+			merged := git("rev-parse", "HEAD")
+			git("update-ref", "refs/remotes/origin/master", merged)
+			eventPath := filepath.Join(t.TempDir(), "event.json")
+			event := fmt.Sprintf(`{"pull_request":{"base":{"sha":%q},"head":{"sha":%q}}}`, target, head)
+			if state.push {
+				event = fmt.Sprintf(`{"before":%q,"after":%q}`, target, merged)
+			}
+			if err := os.WriteFile(eventPath, []byte(event), 0644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("GITHUB_EVENT_PATH", eventPath)
+			if state.local {
+				t.Setenv("GITHUB_EVENT_PATH", "")
+			}
+			got, err := debtTrustedBase(root)
+			if state.deleted {
+				if err == nil || !strings.Contains(err.Error(), "rebootstrap refused") {
+					t.Fatalf("deleted landed baseline did not refuse rebootstrap: base=%s error=%v", got, err)
+				}
+				return
+			}
+			want := fork
+			if landed {
+				want = target
+			}
+			if err != nil || got != want {
+				t.Fatalf("trusted base=%s error=%v, want %s", got, err, want)
+			}
+		})
+	}
+}
+
 func TestPersistenceAuthorityDebtConstructionDistinguishesNativeOwnerFromRecovery(t *testing.T) {
 	for _, name := range []string{"StartSQLiteRuntimeStoreWithContext", "AdmitSQLiteRuntimeStore", "replacement"} {
 		pkg := types.NewPackage("github.com/division-sh/swarm/internal/store/storetest", "storetest")
