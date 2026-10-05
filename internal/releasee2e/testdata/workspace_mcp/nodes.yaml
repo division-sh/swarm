@@ -11,7 +11,7 @@ intake:
           - {source_field: marker, target_field: marker}
       emit:
         event: work.ready
-        fields: {marker: "${payload.marker}"}
+        fields: {marker: payload.marker}
 completion:
   execution_type: system_node
   subscribes_to: [work.completed]

@@ -59,6 +59,7 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			var owner *workspace.DockerManager
+			activationFault := &activationGatewayFault{}
 			factory := func(projection *sourceartifact.RuntimeProjection, source semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error) {
 				owner = workspace.NewDockerManager()
 				cfg := workspace.DefaultDockerConfig()
@@ -68,7 +69,7 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 				}
 				owner.SetConfig(cfg)
 				owner.SetSemanticSource(source)
-				return owner, nil
+				return &activationGatewayDockerWorkspace{DockerManager: owner, fault: activationFault, network: cfg.WorkspaceNetwork}, nil
 			}
 			rt := startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t, backend, root, true, workspace.BackendDocker, factory, "0.0.0.0:0")
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
@@ -144,6 +145,7 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 				if err != nil || strings.Contains(top, worker.Argument) {
 					t.Fatalf("delivered agent retained its native worker: %q, %v", top, err)
 				}
+				proveDockerActivationRefusalRetry(t, rt, owner, activationFault, actor)
 				return
 			}
 			t.Fatal("delivered native agent has no concrete runtime owner")
