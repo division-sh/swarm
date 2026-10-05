@@ -1107,3 +1107,10 @@ rewriter and planner checks pass. Full-tier local/CI remains required; the
 qualification sequence is focused, core, then one final server2 full.
 Q06's cumulative-unit partition proposal is still unimplemented until its
 recorded disposition. No deadline relaxation, proof omission or tier reduction.
+
+The compiled host surface then exposed the branch-added fixture's retired
+handler `create_entity` flag. Remove its presence rather than adding a new
+construction flag; extend the same finite ledger with the deletion and updated
+whole-file hash. The native compiled read/emit journey and truthful static
+doctor both pass (15.337s); the ledger check remains byte-identical. Runtime
+construction, model selection and all business assertions are unchanged.

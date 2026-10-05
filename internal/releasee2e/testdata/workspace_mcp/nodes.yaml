@@ -4,7 +4,6 @@ intake:
   produces: [work.ready]
   event_handlers:
     work.requested:
-      create_entity: true
       advances_to: working
       data_accumulation:
         writes:
