@@ -404,22 +404,22 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"serveapp-channel", "serveapp-channel-learned", "serveapp-channel-delivery", "serveapp-channel-process-temporal", "serveapp-channel-lifecycle", "serveapp-channel-native", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
 		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
 		"serveapp-mailbox", "serveapp-mailbox-p-q",
-		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-standing",
+		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-preservation", "serveapp-standing",
 	}
 	catalogUnits := []string{
 		"catalog-replay-1", "catalog-replay-2-3", "catalog-runtime",
 		"catalog-runtime-scatter-safety", "catalog-runtime-fork-readiness",
 	}
 	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits} {
-		var selectors []string
+		var units []testplanning.ProofUnit
 		for _, id := range ids {
 			unit, ok := policy.Units[id]
 			if !ok || len(unit.Packages) != 1 || unit.Packages[0] != "github.com/division-sh/swarm/internal/"+pkg || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
 				t.Fatalf("invalid full-coverage partition %s: %+v", id, unit)
 			}
-			selectors = append(selectors, unit.Run)
+			units = append(units, testplanning.ProofUnit{ID: id, Packages: unit.Packages, Run: unit.Run, Skip: unit.Skip, GoTimeout: unit.GoTimeout, CountMode: unit.CountMode, BudgetClass: unit.BudgetClass})
 		}
-		if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal", pkg), selectors); err != nil {
+		if err := testplanning.ValidateGoProofUnitPartition(filepath.Join(catalogRepoRoot(t), "internal", pkg), units); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,6 +66,10 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				t.Fatalf("unbound plan: %+v", plan)
 			}
 			assertCatalogOracleCoverage(t, plan)
+			if err := validateServedPreservationOwnership(plan); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("%s preservation: one lifecycle/full owner with both children; core defers; digest=%s", profile, plan.Digest)
 			if profile == ProfileCore {
 				if err := validateLocalBusCoverage(plan, inventory, policy.Module+"/internal/runtime/bus"); err != nil {
 					t.Fatal(err)
@@ -119,6 +124,63 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 			if profile != ProfileCore {
 				assertNumericTimerInspectionOwnership(t, plan)
 			}
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*Policy)
+	}{
+		{"omitted owner", func(p *Policy) {
+			profile := p.Profiles[ProfileFull]
+			profile.Units = slices.DeleteFunc(slices.Clone(profile.Units), func(id string) bool { return id == "serveapp-preservation" })
+			p.Profiles[ProfileFull] = profile
+		}},
+		{"duplicated owner", func(p *Policy) {
+			profile := p.Profiles[ProfileFull]
+			profile.Units = append(slices.Clone(profile.Units), "serveapp-preservation")
+			p.Profiles[ProfileFull] = profile
+		}},
+		{"overlapping late owner", func(p *Policy) {
+			unit := p.Units["serveapp-other-late"]
+			unit.Skip = ""
+			p.Units["serveapp-other-late"] = unit
+		}},
+		{"broad exclusion", func(p *Policy) {
+			unit := p.Units["serveapp-other-late"]
+			unit.Skip = "^TestIssue2394.*$"
+			p.Units["serveapp-other-late"] = unit
+		}},
+		{"missing postgres child", func(p *Policy) {
+			unit := p.Units["serveapp-preservation"]
+			unit.RequiredChildren = map[string][]string{ServedPreservationTest: {"sqlite"}}
+			p.Units["serveapp-preservation"] = unit
+		}},
+		{"backend-only selection", func(p *Policy) {
+			unit := p.Units["serveapp-preservation"]
+			unit.Run += "/sqlite"
+			p.Units["serveapp-preservation"] = unit
+		}},
+		{"longer timeout", func(p *Policy) {
+			unit := p.Units["serveapp-preservation"]
+			unit.GoTimeout = "15m"
+			p.Units["serveapp-preservation"] = unit
+		}},
+	} {
+		t.Run("preservation rejects "+tc.name, func(t *testing.T) {
+			mutated := policy
+			mutated.Profiles, mutated.Units = maps.Clone(policy.Profiles), maps.Clone(policy.Units)
+			tc.edit(&mutated)
+			plan, err := BuildPlan(mutated, model, packages, ProfileFull, "partition negative control", "test-head")
+			if err == nil {
+				err = BindExecution(&plan, inventory, proofs, mutated)
+			}
+			if err == nil {
+				err = validateServedPreservationOwnership(plan)
+			}
+			if err == nil {
+				t.Fatal("changed preservation ownership or proof envelope accepted")
+			}
+			t.Log(err)
 		})
 	}
 	// A CI-only special-unit repack must not silently remove the bus from local.
@@ -176,6 +238,47 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 			}
 		}
 	}
+}
+
+func validateServedPreservationOwnership(plan RunPlan) error {
+	const id = "serveapp-preservation"
+	owners := 0
+	for _, unit := range plan.Units {
+		if slices.Contains(unit.Packages, ServedReporterPackage) && unitRequires(unit, ServedPreservationTest) {
+			owners++
+		}
+	}
+	if plan.Profile == ProfileCore {
+		if owners != 0 {
+			return fmt.Errorf("core unexpectedly executes preservation proof")
+		}
+		for _, deferred := range plan.DeferredRoots {
+			if deferred.Package == ServedReporterPackage && deferred.Name == ServedPreservationTest && deferred.MinimumTier == ProfileLifecycle && slices.Equal(deferred.FullOwners, []string{id}) {
+				return nil
+			}
+		}
+		return fmt.Errorf("core lost honest preservation deferral")
+	}
+	unit, err := plan.Unit(id)
+	if err != nil {
+		return err
+	}
+	if owners != 1 || !slices.Equal(unit.Packages, []string{ServedReporterPackage}) || unit.Run != ServedPreservationRun || unit.Skip != "" || unit.GoTimeout != "" || unit.CountMode != "count-1" || unit.EnvironmentID != "ci-postgres-gateway-empty-v1" || unit.BudgetClass != "full" || len(unit.RequiredTests) != 1 || !slices.Equal(unit.RequiredChildren[ServedPreservationTest], []string{"sqlite", "postgres"}) {
+		return fmt.Errorf("%s preservation requires exactly one whole-root owner and both children: %+v", plan.Profile, unit)
+	}
+	late, err := plan.Unit("serveapp-other-late")
+	if err != nil {
+		return err
+	}
+	if late.Skip != ServedPreservationRun || unitRequires(late, ServedPreservationTest) {
+		return fmt.Errorf("late unit lacks the exact preservation exclusion")
+	}
+	for _, root := range []string{"TestMockForkChatPublicMCPTransportBothStores", "TestManagedEmitPublicationExactScopeBothStores", "TestChannelOnboardingPendingResetRestartToReadyE2E"} {
+		if !unitRequires(late, root) {
+			return fmt.Errorf("late unit lost complete sibling root %s", root)
+		}
+	}
+	return nil
 }
 
 func assertCatalogOracleCoverage(t *testing.T, plan RunPlan) {
