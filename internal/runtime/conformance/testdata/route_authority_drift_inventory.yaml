@@ -754,6 +754,7 @@ seam_families:
       - internal/runtime/authoringview/view_test.go
       - internal/runtime/routingtopology/topology.go
       - internal/runtime/routingtopology/topology_test.go
+      - internal/runtime/routingtopology/local_endpoint_test.go
     search_dimensions: [connect_route_plan]
     invalid_authority:
       - route authority decisions
