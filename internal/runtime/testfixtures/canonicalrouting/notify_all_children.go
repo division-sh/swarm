@@ -196,7 +196,7 @@ portfolio.notify.completed:
           - source_field: threshold
             target_field: threshold
 `)
-		applyClosedReplacement(t, ownerNodes, "    portfolio.accounts.register.requested:\n", "    portfolio.accounts.register.requested:\n      guard: {check: \"has(entity.threshold)\"}\n")
+		applyClosedReplacement(t, ownerNodes, "    portfolio.accounts.register.requested:\n", "    portfolio.accounts.register.requested:\n      guard: {check: has(entity.threshold)}\n")
 		applyClosedReplacement(t, ownerNodes, `        as: account_id
         max_items: 100
         emit:

@@ -144,7 +144,7 @@
         "add": [
           "\t\t{\"guard cannot borrow later write\", \"\", \"      guard: {check: entity.brief != ''}\\n      data_accumulation:\\n        writes: [{target_field: brief, value: 'supplied'}]\\n\", false},",
           "\t\t{\"read after definite write\", \"\", \"      data_accumulation:\\n        writes: [{target_field: brief, value: 'supplied'}, {target_field: copy, value: entity.brief}]\\n\", true},",
-          "\t\t{\"explicit optional presence\", \"  brief: text?\\n\", \"      guard:\\n        check: \u003e-\\n          !has(entity.brief) || entity.brief != \\\"\\\"\\n\", true},"
+          "\t\t{\"explicit optional presence\", \"  brief: text?\\n\", \"      guard:\\n        check: >-\\n          !has(entity.brief) || entity.brief != \\\"\\\"\\n\", true},"
         ]
       }
     ],
@@ -212,7 +212,7 @@
           "\twriteClosedVariantFile(t, root, \"consumer/nodes.yaml\", \"consumer-node:\\n  execution_type: system_node\\n  event_handlers:\\n    deploy.done:\\n      guard: {check: '\"+strings.ReplaceAll(read, \"'\", \"''\")+\"'}\\n\")"
         ],
         "add": [
-          "\twriteClosedVariantFile(t, root, \"consumer/nodes.yaml\", \"consumer-node:\\n  execution_type: system_node\\n  event_handlers:\\n    deploy.done:\\n      guard:\\n        check: \u003e-\\n          \"+read+\"\\n\")"
+          "\twriteClosedVariantFile(t, root, \"consumer/nodes.yaml\", \"consumer-node:\\n  execution_type: system_node\\n  event_handlers:\\n    deploy.done:\\n      guard:\\n        check: >-\\n          \"+read+\"\\n\")"
         ]
       }
     ],
@@ -268,6 +268,25 @@
     "slots": [
       "constructed ordinary-handler write preserves text changed; quoted text replaces invalid CEL variable",
       "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/notify_all_children.go",
+    "before_hash": "04dfdba1e3ef6df7858ace9372882aa0b29bdccc4e71565bd790f04378e6dbd4",
+    "after_hash": "66cbb50573f07f0a4c6ee9ffca69149dee94e202d0cf66a8719242857acd55d8",
+    "edits": [
+      {
+        "start": 198,
+        "remove": [
+          "\t\tapplyClosedReplacement(t, ownerNodes, \"    portfolio.accounts.register.requested:\\n\", \"    portfolio.accounts.register.requested:\\n      guard: {check: \\\"has(entity.threshold)\\\"}\\n\")"
+        ],
+        "add": [
+          "\t\tapplyClosedReplacement(t, ownerNodes, \"    portfolio.accounts.register.requested:\\n\", \"    portfolio.accounts.register.requested:\\n      guard: {check: has(entity.threshold)}\\n\")"
+        ]
+      }
+    ],
+    "slots": [
+      "numeric registration supporting guard.check is CEL has(entity.threshold); preserve constructor supplied-field proof and exact generator replacement anchors"
     ]
   }
 ]
