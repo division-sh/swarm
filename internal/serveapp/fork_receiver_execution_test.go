@@ -100,7 +100,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 						requireForkReceiverBusinessMutation(t, rt, runID, eventID, entityID)
 					}
 				}
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+				rt := startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, root, name == "same_name_agent_control")
 				if name == "same_name_agent_control" {
 					declarations := semanticview.AgentDeclarations(rt.Runtime.Options.WorkflowModule.SemanticSource())
 					if len(declarations) != 1 || declarations[0].OwnerFlowID != "consumer" || declarations[0].LocalID != "same-name" || declarations[0].Entry.Role != "loaded-decoy" {
