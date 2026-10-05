@@ -77,7 +77,7 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 		d.Complete = false
 		block(failures.ClassDependencyUnavailable)
 	}
-	absentStores := map[string]bool{}
+	absentStores := map[string]map[string]bool{}
 	for _, observation := range r.Observations {
 		if observation.NotRunCause == nil {
 			continue
@@ -86,7 +86,7 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 			block(failures.ClassSchemaInvalid)
 			continue
 		}
-		absentStores[observation.Subject] = true
+		absentStores[observation.Subject] = make(map[string]bool)
 	}
 	seen := make(map[string]bool, len(r.Observations))
 	for _, observation := range r.Observations {
@@ -100,8 +100,9 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 			d.Complete = false
 			continue
 		}
-		if absentStores[observation.Subject] {
+		if required, absent := absentStores[observation.Subject]; absent {
 			if observation.validAbsentStoreDependent() {
+				required[observation.CheckID] = true
 				d.Complete = false
 				continue
 			}
@@ -113,6 +114,13 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 		}
 		if class != "" {
 			block(class)
+		}
+	}
+	for _, observed := range absentStores {
+		for _, required := range absentStoreRequiredAdmissionChecks() {
+			if !observed[required.ID] {
+				block(failures.ClassSchemaInvalid)
+			}
 		}
 	}
 	obligations := make(map[string]bool, len(r.ExecutionObligations))
