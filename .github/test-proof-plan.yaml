@@ -76,6 +76,8 @@ profiles:
     - conformance-2394-pressure
     - serveapp-other
     - serveapp-other-late
+    - serveapp-2564-h1
+    - serveapp-2564-h2
     - serveapp-surfaces
     - serveapp-publication-text
     - serveapp-journeys-first
@@ -146,6 +148,8 @@ profiles:
     - serveapp-other
     - serveapp-i-reporter
     - serveapp-other-late
+    - serveapp-2564-h1
+    - serveapp-2564-h2
     - serveapp-surfaces
     - serveapp-publication-text
     - serveapp-journeys-first
@@ -761,9 +765,27 @@ units:
   serveapp-other-late:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(One.*|F.*|S.*)|Stop.*|Selected.*)|Issue2564.*|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
+    run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(One.*|F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
     required_children:
       TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-2564-h1:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestIssue2564(H1EquivalentCorpus|ServedH1ReconstructedEquivalentBothStores)$'
+    required_children:
+      TestIssue2564ServedH1ReconstructedEquivalentBothStores: [sqlite/overlap, sqlite/no_overlap, postgres/overlap, postgres/no_overlap]
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-2564-h2:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestIssue2564(ReconstructedEquivalentH2BothStores|H2.*)$'
+    required_children:
+      TestIssue2564ReconstructedEquivalentH2BothStores: [sqlite/dense, sqlite/paced, postgres/dense, postgres/paced]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
