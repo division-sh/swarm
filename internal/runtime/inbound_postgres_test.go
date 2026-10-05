@@ -25,7 +25,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -68,12 +67,8 @@ func newBoundedInboundTestEventBus(t *testing.T, selected runtimebus.EventStore,
 
 func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interface {
 	CommitFlowInstanceActivation(context.Context, runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error)
-}, runID, entityID, path, slug string, configRaw []byte) {
+}, runID, entityID, path, slug string) {
 	t.Helper()
-	var config map[string]any
-	if err := canonicaljson.DecodePreservingNumberLexemes(configRaw, &config); err != nil {
-		t.Fatal(err)
-	}
 	now := time.Now().UTC()
 	ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), runtimeeffects.ExecutionModeLive)
 	source := boundedInboundTestSource(t)
@@ -90,7 +85,7 @@ func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interfac
 		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
 		WorkflowName: boundedProviderFlowID, WorkflowVersion: source.WorkflowVersion(),
 		Slug: slug, Name: "Customer A", CurrentState: "active", StageDefined: true,
-		CreatedAt: now, EnteredStageAt: now, Fields: config,
+		CreatedAt: now, EnteredStageAt: now, Fields: map[string]any{},
 	}, runtimepipeline.WorkflowLifecycleMutationPlan{}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -1156,19 +1151,6 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 	}
 }
 
-func inboundGatewayWorkflowConfig(t *testing.T, flowInstance, provider, webhookSecret string) []byte {
-	t.Helper()
-	payload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForRoute(runtimeflowidentity.RouteForInstancePath(flowInstance), "")
-	if err != nil {
-		t.Fatalf("project inbound workflow config: %v", err)
-	}
-	wire, err := canonicaljson.MarshalPreservingNumberKinds(payload)
-	if err != nil {
-		t.Fatalf("marshal inbound workflow config: %v", err)
-	}
-	return wire
-}
-
 func seedPostgresInboundGatewayRuntime(
 	t *testing.T,
 	ctx context.Context,
@@ -1187,8 +1169,7 @@ func seedPostgresInboundGatewayRuntime(
 		Origin: boundedInboundStandingOrigin(t, provider),
 		RunID:  runID,
 	})
-	configBytes := inboundGatewayWorkflowConfig(t, flowInstance, provider, webhookSecret)
-	seedBoundedInboundFlow(t, ctx, pg, runID, entityID, flowInstance, entitySlug, configBytes)
+	seedBoundedInboundFlow(t, ctx, pg, runID, entityID, flowInstance, entitySlug)
 	if strings.TrimSpace(agentID) != "" {
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
@@ -1313,8 +1294,7 @@ func seedSQLiteInboundGatewayRuntime(
 		RunID:     runID,
 		StartedAt: now,
 	})
-	configBytes := inboundGatewayWorkflowConfig(t, flowInstance, provider, webhookSecret)
-	seedBoundedInboundFlow(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, configBytes)
+	seedBoundedInboundFlow(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug)
 	if strings.TrimSpace(agentID) != "" {
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
