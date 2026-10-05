@@ -59,7 +59,6 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				"parent_flow_id":       "parent",
 				"parent_flow_instance": "parent/root",
 				"parent_entity_id":     parentEntityID,
-				"config":               map[string]any{"vertical_id": "vertical-1"},
 			}
 			configRaw, err := json.Marshal(config)
 			if err != nil {

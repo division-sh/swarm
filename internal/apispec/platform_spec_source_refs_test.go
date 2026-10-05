@@ -34,7 +34,8 @@ func TestPlatformSpecDataAccumulationSourceAlignment(t *testing.T) {
 		found++
 		assertScalarContains(t, mustMappingValue(t, check, "trigger"), "does not match its handler event")
 		assertScalarContains(t, mustMappingValue(t, check, "trigger"), "not a derived fan_out source")
-		assertScalarContains(t, mustMappingValue(t, check, "trigger"), "Receiver initialize bindings are validated separately")
+		assertScalarContains(t, mustMappingValue(t, check, "trigger"), "Creating inputs consume the canonical same-name typed constructor")
+		assertScalarContains(t, mustMappingValue(t, check, "trigger"), "input pins own no initialization bindings")
 		assertScalarValue(t, mustMappingValue(t, check, "severity"), "error")
 		assertScalarValue(t, mustMappingValue(t, check, "scope"), "per-node")
 		assertScalarValue(t, mustMappingValue(t, check, "when"), "boot-only")

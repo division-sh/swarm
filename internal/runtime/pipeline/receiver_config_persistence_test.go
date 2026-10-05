@@ -79,7 +79,8 @@ func TestHistoricalWorkflowConfigProjectsOnlyOwnership(t *testing.T) {
 	source := materializedWorkflowInstanceForTest(WorkflowInstance{
 		StorageRef: "parent/one/review", EntityID: uuid.NewString(), WorkflowName: "review",
 		WorkflowVersion: "source-version", InstanceKind: "static", TemplateVersion: "source-template",
-		Status: "active", ParentFlowID: parent.FlowID, ParentFlowInstance: parent.FlowInstance, ParentEntityID: parent.EntityID,
+		EntityType: "workflow_subject",
+		Status:     "active", ParentFlowID: parent.FlowID, ParentFlowInstance: parent.FlowInstance, ParentEntityID: parent.EntityID,
 		Fields: map[string]any{"workflow_version": "business-version", "parent_entity_id": "business-parent", "nested": []any{int64(3), float64(3)}},
 	})
 	projection, err := workflowInstancePersistedProjectionFromInstance(source, source.StorageRef)

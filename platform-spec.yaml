@@ -530,8 +530,8 @@ contract_formats:
       Unknown keys, duplicate effective keys and forbidden branch fields are
       errors on authored presence, including null/empty/false and aliases/merges.
       Required agents omitted means infer same-scope declared roles; [] is an
-      explicit no-role boundary. Receiver defaults remain literal data with
-      separate presence and are checked by the existing receiver type owner.
+      explicit no-role boundary. Supplied instance fields consume the canonical
+      same-name constructor; internal state literals are not receiver defaults.
       Imports use direct nonempty connector_packs/provider_trigger_events
       sequences, not a nested imports envelope. Pin events/reads/writes are
       nonempty sequences when supplied. Retired pin resolution fields
@@ -5788,7 +5788,7 @@ engine:
       process:
         - 1. Resolve the receiving input and canonical instance key from the compiled route plan
         - '2. Platform validates: the receiver exists and declares a valid scalar instance field'
-        - '3. Admit creating input bindings and typed receiver defaults before mutation; reuse consumes committed configuration'
+        - '3. Admit the creating message and canonical same-name supplied state before mutation; reuse consumes current state without reconstruction'
         - Platform loads the exact template FlowNode from the admitted artifact.
         - '5. Platform constructs paths: {template_id}/{instance_id}/{local_name}'
         - 6. Platform atomically creates the entity at initial_state, dormant initial timers, and one durable runtime-readiness plan containing the exact route, declared-agent revisions, run, and optional deterministic creation event occurrence
@@ -9797,7 +9797,7 @@ compliance:
     - State state_changes only follow declared advances_to paths
     - Guards evaluated before state advancement — block if false
     - Events validated against payload schema before publish
-    - Receiver initialization validates typed supplied values and defaults before creation; reuse retains committed configuration
+    - The canonical constructor validates typed supplied state before creation; reuse retains current state without reconstruction
     - Accumulation is idempotent — duplicate events do not double-count
     - Permission checks read from agent.permissions, not hardcoded policy functions
     - Product behavior read from policy configuration, not hardcoded
@@ -9811,7 +9811,7 @@ compliance:
     - Every declared handler has a matching Handle() implementation
     - Every state state_change follows declared advances_to paths
     - Every emitted event has a payload schema in events.yaml
-    - Receiver configuration survives creation, reuse, restart and supported fork/readback without reinitialization
+    - Supplied instance state survives reuse, restart and supported historical readback without reinitialization; creation receipts remain immutable
     - Supported HITL operations preserve mailbox readback and acknowledgment guarantees
     - Every agent subscription resolves to an event some node or agent produces
     - Permission enforcement blocks unauthorized tool calls
@@ -10012,7 +10012,7 @@ tool_model:
         are rejected on presence, including null, empty, alias and merged declarations. There is no action interpreter
         or compatibility spelling. Rule emit.template, timer instructions and connector tool operations are distinct grammar.
       supported_operations: >
-        Receiver input resolution with typed initialize owns declarative creation. Typed state accumulation owns append
+        Connection-owned input resolution and the canonical same-name constructor own declarative creation. Typed state accumulation owns append
         behavior. notify_human and ask_human own supported mailbox effects. Node delivery ownership and settlement do not
         imply an available mailbox business effect for optional/entityless nodes.
       local_git: >
@@ -14085,7 +14085,7 @@ flow_model:
           Created instance identity is deterministic: receiver semantic flow
           id plus ordered field/value key material is hashed into the stored
           template instance id. The created flow instance persists the key
-          fields as receiver primary-entity fields and config variables, with
+          fields only as receiver primary-entity state, with
           entity_type, instance_kind, last_source_event, and parent-route
           control metadata carried by activation. Route installation must use
           the same activation context so stores that expose a publish mutation

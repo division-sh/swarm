@@ -132,14 +132,14 @@ func TestReceiverInitializationPreviewUsesOnlyPreparedActivationVariables(t *tes
 		t.Fatalf("unprepared decision synthesized activation variables: %#v", got)
 	}
 	decision.Activation = &runtimepipeline.FlowInstanceActivationPlan{ActivationVariables: map[string]string{
-		"label": "exact-admitted-label", "instance_id": "exact-admitted-instance", "enabled": "false",
+		"instance_id": "exact-admitted-instance", "entity_id": "exact-admitted-entity",
 	}}
 	got := decision.ActivationVariables()
 	if !reflect.DeepEqual(got, decision.Activation.ActivationVariables) {
 		t.Fatalf("preview differs from prepared activation: %#v", got)
 	}
-	got["label"] = "mutated-preview"
-	if decision.Activation.ActivationVariables["label"] != "exact-admitted-label" {
+	got["instance_id"] = "mutated-preview"
+	if decision.Activation.ActivationVariables["instance_id"] != "exact-admitted-instance" {
 		t.Fatal("preview aliases prepared activation")
 	}
 }

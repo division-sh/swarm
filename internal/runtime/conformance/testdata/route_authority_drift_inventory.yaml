@@ -1237,23 +1237,23 @@ seam_families:
       it does not introduce an alternate routing owner.
       #2307 registers CopyReceiverInitialization (receiver_initialization.go)
       as the closed TemplateSelectExisting/select-or-create refinement consumed
-      by TestReceiverInitializationEventBusAdmissionAndReuse, including typed
-      defaults, hostile admission and descriptor/route reuse.
+      by TestReceiverInitializationEventBusAdmissionAndReuse, including supplied
+      typed state, hostile admission and descriptor/route reuse.
       CopyReceiverConfigHistory (receiver_config_history.go) is the finite
-      agent-consumer source for TestReceiverConfigHistoricalCaptureAndReadinessBothStores
+      agent-consumer source for TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores
       in internal/store/internal/backend/runforkpersistence/receiver_config_history_test.go.
       TestSelectedForkTemplateGenerationAssociations and
       TestSelectedForkTemplateCompanionReadinessBothStores in
       internal/store/internal/backend/runforkpersistence/run_fork_workflow_ownership_test.go
       consume that same complete recorded business declaration. Companion setup
-      decodes the recorded config through the existing route codec before agent
+      decodes the recorded header through the existing route codec before agent
       materialization; generation conflicts and hostile companion mutations
       retain their original assertions and are not masked by undeclared fields.
       It declares nested and flow_path as JSON business fields and status as
       boolean, retaining the original vertical_id key and select-only route.
       Historical number kinds, runtime-control name collisions, fixed-revision
-      capture and cross-run isolation remain assertions over recorded config;
-      the shared agent fixture and committed-config validator are unchanged.
+      capture and cross-run isolation bind the existing state and header owners.
+      Receiver configuration copies and their separate validator are retired.
       CopyReceiverConfigComposedOwner (receiver_config_composed_owner.go) owns
       the exact fixed fan-out/typed-receiver bundle consumed by
       TestReceiverConfigEngineAtomicFaultMatrixBothStores,

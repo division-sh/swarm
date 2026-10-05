@@ -1031,7 +1031,7 @@ func requireRuntimeInitializedOperatingPath(t *testing.T, ctx context.Context, d
 	t.Helper()
 	waitRuntimeDBCount(t, ctx, db, `SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND flow_template = 'operating'`, 1, templateInstanceDeliveryRunID)
 	var path, raw string
-	if err := db.QueryRowContext(ctx, `SELECT instance_path, (config->'config')::text FROM flow_instances WHERE run_id = $1::uuid AND flow_template = 'operating'`, templateInstanceDeliveryRunID).Scan(&path, &raw); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT fi.instance_path, es.fields::text FROM flow_instances fi JOIN entity_state es ON es.run_id=fi.run_id AND es.entity_id=fi.entity_id WHERE fi.run_id = $1::uuid AND fi.flow_template = 'operating'`, templateInstanceDeliveryRunID).Scan(&path, &raw); err != nil {
 		t.Fatal(err)
 	}
 	assertRuntimeInitializationConfig(t, raw)
@@ -1067,7 +1067,7 @@ func assertRuntimeInitializationConfig(t *testing.T, raw string) {
 	if err := json.Unmarshal([]byte(raw), &config); err != nil {
 		t.Fatal(err)
 	}
-	// The declared key is business config, not injected route metadata.
+	// The declared key is business state, not injected route metadata.
 	if len(config) != 2 || config["instance_id"] != "11111111-1111-4111-8111-111111111111" || config["product_id"] != "product-1" {
 		t.Fatalf("receiver config = %s, want exactly the authored instance_id and product_id", raw)
 	}

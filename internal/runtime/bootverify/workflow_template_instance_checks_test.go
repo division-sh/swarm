@@ -2,7 +2,6 @@ package bootverify
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -45,11 +44,10 @@ func TestRun_RejectsRootTemplateInstanceDeclaration(t *testing.T) {
 func TestRun_RejectsInvalidTemplateInstanceDeclarations(t *testing.T) {
 
 	tests := []struct {
-		name           string
-		flowSchema     string
-		flowEntities   string
-		want           string
-		admissionError string
+		name         string
+		flowSchema   string
+		flowEntities string
+		want         string
 	}{
 		{
 			name: "undeclared key field",
@@ -61,8 +59,7 @@ instance: missing_id
 account:
   account_id: uuid
 `,
-			want:           "not declared",
-			admissionError: "compile workflow semantics: compile flow scoring input pins: receiver instance field missing_id has no declaration",
+			want: "not declared",
 		},
 		{
 			name: "unsupported key field type",
@@ -80,17 +77,7 @@ account:
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle, err := admitPrimaryEntityFixtureBundle(t, tc.flowSchema, tc.flowEntities)
-			if tc.admissionError != "" {
-				if err == nil || err.Error() != tc.admissionError {
-					t.Fatalf("admission error = %v, want %q", err, tc.admissionError)
-				}
-				// Admission rejects this authoring first. Corrupt a valid in-memory
-				// projection separately to retain the verifier's original oracle.
-				bundle = loadPrimaryEntityFixtureBundle(t, strings.Replace(tc.flowSchema, "instance: missing_id", "instance: account_id", 1), tc.flowEntities)
-				schema := bundle.FlowSchemas["scoring"]
-				schema.Instance = mustBootverifyTemplateInstanceField(t, "missing_id")
-				bundle.FlowSchemas["scoring"] = schema
-			} else if err != nil {
+			if err != nil {
 				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 			}
 
