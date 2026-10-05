@@ -373,6 +373,7 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
 				opts.configPath = rootOpts.rootFlags.configPath
 			}
+			opts.swarmDir = rootOpts.swarmDirResolutionOptions()
 			code := runVerifyCommandWithOutput(ctx, root.Path(), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
 				return commandExitError{code: code}

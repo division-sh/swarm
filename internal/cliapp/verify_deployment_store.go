@@ -27,7 +27,7 @@ import (
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
-func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
+func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
 	subject := "project:" + repo
 	var selected *storeselected.AdmissionInspection
 	var schemaRequest store.SchemaBootstrapRequest
@@ -42,8 +42,8 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 			return selected.Close()
 		})
 	}()
-	opened := verifyDeploymentObservation(ctx, result, "selected_store_access", "internal/store/selected.OpenAdmissionInspection", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
-		request, schema, err := prepareVerifySelectedStoreInspection(ctx, repo, paths, cfg, source)
+	opened := verifyDeploymentObservation(ctx, result, "selected_store_access", bootverify.SelectedStoreAccessOwner, subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+		request, schema, err := prepareVerifySelectedStoreInspection(ctx, repo, paths, cfg, swarmDir, source)
 		if err != nil {
 			return err
 		}
@@ -60,6 +60,21 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		return err
 	})
 	if !opened {
+		access := result.BootReport.Observations[len(result.BootReport.Observations)-1]
+		if access.NotRunCause != nil {
+			subject = access.Subject
+			accountVerifyStoreTail(result, subject, access.Reason, false)
+			for _, check := range []bootverify.SelectedStoreAdmissionCheck{
+				{ID: "selected_store_schema", Owner: "internal/store/selected.AdmissionInspection.Inspect"},
+				{ID: "startup_process_possession", Owner: "internal/store/selected.AdmissionInspection.ProbePossession"},
+			} {
+				result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+					CheckID: check.ID, Owner: check.Owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
+					Status: bootverify.AdmissionNotRun, Reason: access.Reason, Dependencies: []string{"selected_store_access"},
+				})
+			}
+			return
+		}
 		blockVerifyStoreTail(result, subject, "selected store access did not complete")
 		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
 			CheckID: "startup_process_possession", Owner: "internal/store/selected.AdmissionInspection.ProbePossession", Subject: subject,
@@ -125,12 +140,12 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	}
 }
 
-func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source) (storeselected.AuthorityRequest, store.SchemaBootstrapRequest, error) {
+func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, swarmDirOpts cliSwarmDirOptions, source semanticview.Source) (storeselected.AuthorityRequest, store.SchemaBootstrapRequest, error) {
 	root, err := NewInvocationRoot(repo)
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
-	swarmDir, err := resolveCLISwarmDirFromConfig(root, cliSwarmDirOptions{}, cfg.cli)
+	swarmDir, err := resolveCLISwarmDirFromConfig(root, swarmDirOpts, cfg.cli)
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
@@ -303,21 +318,9 @@ func blockVerifyStoreTail(result *runtime.WorkflowContractValidationResult, subj
 }
 
 func accountVerifyStoreTail(result *runtime.WorkflowContractValidationResult, subject, reason string, fresh bool) {
-	for _, blocked := range []struct{ id, owner string }{
-		{"pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources"},
-		{"retained_source_integrity", "internal/runtime/startuprecovery.Inspect"},
-		{"startup_recovery_admission", "internal/runtime.InspectStartupRecoveryAdmission"},
-		{"startup_authority_lineage", "internal/runtime/startupownership.AdmitAuthorityInspection"},
-		{"pending_reset_admission", "internal/runtime/destructivereset.InspectPendingOperations"},
-		{"retained_route_admission", "internal/runtime/manager.InspectSelectedContractRouteRecoveries"},
-		{"retained_channel_admission", "internal/channelonboarding.InspectRetainedActivations"},
-		{"selected_fork_recovery_admission", "internal/runtime/runforkexecution"},
-		{"retained_actor_admission", "internal/runtime/manager"},
-		{"selected_fork_source_dependencies", "internal/runtime.ValidateWorkflowContractSurface"},
-		{"retained_actor_provider_dependencies", "internal/runtime/llm.CompileManagedCapabilityAdmission"},
-	} {
+	for _, blocked := range bootverify.SelectedStoreDependentAdmissionChecks() {
 		observation := bootverify.AdmissionObservation{
-			CheckID: blocked.id, Owner: blocked.owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
+			CheckID: blocked.ID, Owner: blocked.Owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
 			Status: bootverify.AdmissionNotRun, Reason: reason, Dependencies: []string{"selected_store_access"},
 		}
 		if fresh {

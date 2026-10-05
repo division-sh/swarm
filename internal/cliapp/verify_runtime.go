@@ -50,6 +50,7 @@ type verifyCommandOptions struct {
 	sourceRoot       string
 	platformSpecPath string
 	configPath       string
+	swarmDir         cliSwarmDirOptions
 	portable         bool
 	output           cliOutputOptions
 	logging          cliLoggingOptions
@@ -129,7 +130,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
 		if purpose == runtimebootverify.ExecutionValidation {
-			inspectVerifyDeployment(ctx, repo, resolvedPaths, configResult, source, validationOpts, packBases, &result)
+			inspectVerifyDeployment(ctx, repo, resolvedPaths, configResult, opts.swarmDir, source, validationOpts, packBases, &result)
 		} else {
 			reason := "no explicit, project or local operator deployment configuration was selected"
 			if opts.portable {
@@ -185,7 +186,11 @@ func renderVerifyCommandResult(opts verifyCommandOptions, output verifyCommandRe
 		if !output.OK {
 			fmt.Fprintf(w, "verify failed: source=%s\n", output.SourceLabel)
 		} else {
-			fmt.Fprintf(w, "verify ok: source=%s\n", output.SourceLabel)
+			marker := ""
+			if !output.AdmissionComplete {
+				marker = "*"
+			}
+			fmt.Fprintf(w, "verify ok%s: source=%s\n", marker, output.SourceLabel)
 		}
 		for _, line := range verifyAdmissionTextLines(output) {
 			fmt.Fprintln(w, line)
@@ -249,8 +254,14 @@ func verifyAdmissionTextLines(output verifyCommandResult) []string {
 	} else if output.OK {
 		message = "admission checks passed; startup execution not performed"
 	}
+	if output.OK && !output.AdmissionComplete {
+		message += " * (admission incomplete; unperformed checks are listed below)"
+	}
 	lines := []string{message}
 	for _, observation := range output.Observations {
+		if observation.NotRunCause != nil && observation.NotRunCause.Kind == runtimebootverify.AdmissionAbsentSQLiteStore {
+			lines = append(lines, fmt.Sprintf("store admission: not evaluated \u2014 no selected store at %s (created on first serve)", observation.NotRunCause.Path))
+		}
 		if observation.Status == runtimebootverify.AdmissionPassed || observation.Status == runtimebootverify.AdmissionNotApplicable {
 			continue
 		}

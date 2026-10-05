@@ -327,7 +327,7 @@
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyDeployment",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
     "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
-    "body_sha256": "b77261f479fbfcf774da60793a479dab3867e656948aa42b93a0ce1e7600b391"
+    "body_sha256": "031e7e0c6197af100bcee419960046deacf9aea879fc7c11a5ec1a0ec69120ff"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyListeners",
@@ -369,7 +369,7 @@
     "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentObservation",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
     "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
-    "body_sha256": "7d454382aee554c698be9d423c2138c269470c37b16abacb0adf45ebda999536"
+    "body_sha256": "adbb5989bcfaf97cb8603150f6fcdaab778ea6dcb1fe2ab1a6bbe98183297b21"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentWorkflowOptions",
@@ -381,7 +381,7 @@
     "owner": "internal/cliapp/verify_deployment_store.go::accountVerifyStoreTail",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
-    "body_sha256": "70542e0f45c2f90f956228dc6189ff3f4f428754cfb338eb76e20e416a0fe1bb"
+    "body_sha256": "b173c72a7accbc037af5891ab72560cc7c8ed104c1bc294d49d8e9c16877cf83"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::blockVerifyStoreTail",
@@ -405,13 +405,13 @@
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifySelectedStore",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
-    "body_sha256": "c85d10460459e36a400d924c27326dd63891e4dabefe06560bdf1a318a1c20db"
+    "body_sha256": "a9c9c72d1a3c8c00cd755c9e73023086df643176296f749cd3a95900bd03d345"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::prepareVerifySelectedStoreInspection",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
-    "body_sha256": "62fcd3c10ab77f2ae7d290f80584d60afbe8ab9fcd3f3e3d68537b5f7d08a8ff"
+    "body_sha256": "0a6826e735ff9aa4ab736596e73837c74c2f1f9ab1e52a44c8623236e1ea95e5"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::verifyRetainedSourceLoader",
@@ -471,13 +471,13 @@
     "owner": "internal/cliapp/verify_runtime.go::renderVerifyCommandResult",
     "audit_rows": "A01,A28,A29,A30",
     "proof_families": "P01,P02,P23,P24,P27,P29",
-    "body_sha256": "d10702b5fa32cb72fafc2f966a3e8b4432d898e56afc77f8295e457aa20d56ef"
+    "body_sha256": "b52e5bd08f56a9b54f018e364fe1ac450e3ba8e4bee08ab32df9a59a27cb854e"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::runVerifyCommandWithOutput",
     "audit_rows": "A01,A28,A29,A30",
     "proof_families": "P01,P02,P23,P24,P27,P29",
-    "body_sha256": "ec3af5d80f298412e778db94597c277267e82177470357a51e86864a46ff295f"
+    "body_sha256": "0fb79dd552d422aa9626721bdf89c1eda03d16a5c159fe753764f65c76a3b2e8"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::trimmedStringSlice",
@@ -495,7 +495,7 @@
     "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextLines",
     "audit_rows": "A01,A28,A29,A30",
     "proof_families": "P01,P02,P23,P24,P27,P29",
-    "body_sha256": "f7089c4894c63c42b9f66e8615dd0f09bff5de5e9cdd22ee207cf102b62233d3"
+    "body_sha256": "9a81bac53f2a70cc28832dac51622bad9e920bb4ecda0fa08d17b7acf2a247ae"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::verifyAdmissionTextSubject",
@@ -669,7 +669,7 @@
     "owner": "internal/runtime/bootverify/admission_report.go::Report.AdmissionDecision",
     "audit_rows": "A28,A29,A30",
     "proof_families": "P23,P24",
-    "body_sha256": "52ea5d2f6e72951e31bfc04b7098d63b9bf11fef5a57e43d3405a56a2622ef2a"
+    "body_sha256": "6f5db6a906048295605b92b173bae33ecbd6daf103d1b62355c84960df8a7377"
   },
   {
     "owner": "internal/runtime/bootverify/admission_report.go::Report.admissionBlockingFindings",
@@ -688,6 +688,24 @@
     "audit_rows": "A28,A29,A30",
     "proof_families": "P23,P24",
     "body_sha256": "08d2ca58a9bfa244bf9cb837898fec5cf892ba6d55346c0b053e6f05732b8951"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_store_absence.go::AdmissionObservation.validAbsentStore",
+    "audit_rows": "A19,A28",
+    "proof_families": "2567-P02,P08,P09",
+    "body_sha256": "e9742a81eb32c6e68a5d252f7bcb31cac718d9c2025f6f90f0a9ce1e2bdc7e08"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_store_absence.go::AdmissionObservation.validAbsentStoreDependent",
+    "audit_rows": "A19,A28",
+    "proof_families": "2567-P02,P08,P09",
+    "body_sha256": "dafba8c1ce586dd1801a7be9d119dde1323422144045e70b2c205c0549ba8707"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_store_absence.go::SelectedStoreDependentAdmissionChecks",
+    "audit_rows": "A19,A28",
+    "proof_families": "2567-P02,P08,P09",
+    "body_sha256": "5395aaab510ec52788805d0c9a50383638764141528b1008729a41c13958947d"
   },
   {
     "owner": "internal/runtime/llm/cli_runtime_boot.go::ValidateClaudeCLIRuntimeConfig",
@@ -3546,6 +3564,18 @@
     "body_sha256": "5fa3d579fe0a841a35b0c1480d3ca18647067b72c2fd81a5960b8901d6a26365"
   },
   {
+    "owner": "internal/store/internal/startupownership/sqlite_inspection_absence_unix.go::ObserveSQLiteInspectionAbsence",
+    "audit_rows": "A19,A28",
+    "proof_families": "2567-P07,P08",
+    "body_sha256": "e1031c6e422808ee24d095f5b91aab937feb28e0f6baf0389e064e2992af8f87"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AbsentSQLiteStore.Error",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "1d3bec7f3ab373d618f507b166dc45f35f6f629326b9b8431f3c95d0f743e09e"
+  },
+  {
     "owner": "internal/store/selected/admission.go::*AdmissionInspection.Close",
     "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
     "proof_families": "P08,P18,P19,P20,P21",
@@ -3705,7 +3735,7 @@
     "owner": "internal/store/selected/admission.go::OpenAdmissionInspection",
     "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
     "proof_families": "P08,P18,P19,P20,P21",
-    "body_sha256": "26f29c03fa8d4b382f5c2525e4c4b4b6027ec43a53e68d1beefb3cdd627cfb4d"
+    "body_sha256": "904c95829697cacc33621713551386fe81180aaaf20bbfd01a6cf765b7d0c81b"
   },
   {
     "owner": "internal/store/selected/admission.go::openInspectionStore",

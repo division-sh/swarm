@@ -97,6 +97,10 @@ func OpenSQLiteRuntimeReadOnly(path string) (*private.SQLiteRuntimeStore, error)
 	return store, nil
 }
 
+func ObserveSQLiteInspectionAbsence(ctx context.Context, path string) (bool, error) {
+	return storestartupownership.ObserveSQLiteInspectionAbsence(ctx, path)
+}
+
 func OpenPostgresReadOnly(dsn string) (*private.PostgresStore, error) {
 	cfg, err := pq.NewConfig(dsn)
 	if err != nil {
