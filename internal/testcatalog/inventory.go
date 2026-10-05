@@ -455,16 +455,16 @@ func validateExternalProofRecord(repoRoot string, policy testplanning.Policy, in
 			}
 		}
 		sort.Strings(owners)
-		var runs []string
+		var units []testplanning.ProofUnit
 		for _, owner := range owners {
 			unit := policy.Units[owner]
 			if unit.CountMode != "count-1" {
 				return fmt.Errorf("external proof %s CI owner %s requires count-1", proof.Source, owner)
 			}
-			runs = append(runs, unit.Run)
+			units = append(units, testplanning.ProofUnit{ID: owner, Packages: unit.Packages, Run: unit.Run, Skip: unit.Skip, GoTimeout: unit.GoTimeout, CountMode: unit.CountMode, BudgetClass: unit.BudgetClass})
 		}
 		if profileName == testplanning.ProfileFull {
-			if err := testplanning.ValidateGoProofPartition(filepath.Join(repoRoot, executorDir), runs); err != nil {
+			if err := testplanning.ValidateGoProofUnitPartition(filepath.Join(repoRoot, executorDir), units); err != nil {
 				return fmt.Errorf("external proof %s executor %s profile %s: %w", proof.Source, proof.Executor, profileName, err)
 			}
 		}
