@@ -9168,8 +9168,11 @@ engine:
         canonical-path aliases remain supported. PostgreSQL unavailability is not this exception.
         The observation has deployment class, not_run status, exact store:<path> subject and timed
         observation evidence. Report.AdmissionDecision validates its cause, owner and identity, then
-        permits only the existing finite selected-store dependent checks with matching subject, owner
-        and selected_store_access dependency to remain not_run without blocking. Unknown or malformed
+        requires exactly one valid observation for each of the thirteen selected-store dependent checks
+        (schema, possession and the eleven retained/dependency checks) per absent-store subject, regardless
+        of observation order. Each must have matching owner, class and selected_store_access dependency,
+        and explicitly remain not_run with a reason without blocking. A missing observation, even when
+        another store subject has that check, fails closed. Unknown or malformed
         causes, forged dependents, duplicate and contradictory observations fail closed. Absence
         never fabricates schema, possession or retained-state passes, and admission_complete is false.
       observation_classes: [source, deployment]

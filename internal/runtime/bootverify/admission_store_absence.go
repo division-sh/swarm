@@ -39,6 +39,12 @@ func SelectedStoreDependentAdmissionChecks() []SelectedStoreAdmissionCheck {
 	}
 }
 
+func absentStoreRequiredAdmissionChecks() []SelectedStoreAdmissionCheck {
+	return append(SelectedStoreDependentAdmissionChecks(),
+		SelectedStoreAdmissionCheck{"selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect"},
+		SelectedStoreAdmissionCheck{"startup_process_possession", "internal/store/selected.AdmissionInspection.ProbePossession"})
+}
+
 func (o AdmissionObservation) validAbsentStore(purpose ValidationPurpose) bool {
 	cause := o.NotRunCause
 	return purpose == ExecutionValidation && cause != nil && cause.Kind == AdmissionAbsentSQLiteStore &&
@@ -55,10 +61,7 @@ func (o AdmissionObservation) validAbsentStoreDependent() bool {
 		len(o.Dependencies) != 1 || o.Dependencies[0] != "selected_store_access" {
 		return false
 	}
-	checks := append(SelectedStoreDependentAdmissionChecks(),
-		SelectedStoreAdmissionCheck{"selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect"},
-		SelectedStoreAdmissionCheck{"startup_process_possession", "internal/store/selected.AdmissionInspection.ProbePossession"})
-	for _, check := range checks {
+	for _, check := range absentStoreRequiredAdmissionChecks() {
 		if o.CheckID == check.ID {
 			return o.Owner == check.Owner
 		}

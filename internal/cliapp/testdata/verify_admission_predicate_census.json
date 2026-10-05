@@ -675,7 +675,7 @@
     "owner": "internal/runtime/bootverify/admission_report.go::Report.AdmissionDecision",
     "audit_rows": "A28,A29,A30",
     "proof_families": "P23,P24",
-    "body_sha256": "e6f6ac1ac578f8e55b552429352ecb4dc38e3b1a2c582235dce00097af7a2c1c"
+    "body_sha256": "98b59a7452ab00b81f4a41c486cbbdb14e1b078704da824c78bf63afed8285ac"
   },
   {
     "owner": "internal/runtime/bootverify/admission_report.go::Report.admissionBlockingFindings",
@@ -705,13 +705,19 @@
     "owner": "internal/runtime/bootverify/admission_store_absence.go::AdmissionObservation.validAbsentStoreDependent",
     "audit_rows": "A19,A28",
     "proof_families": "2567-P02,P08,P09",
-    "body_sha256": "dafba8c1ce586dd1801a7be9d119dde1323422144045e70b2c205c0549ba8707"
+    "body_sha256": "e265774cc23cc1bb956141cbdff12f01ca6038603701f584d11ea894ad5ada21"
   },
   {
     "owner": "internal/runtime/bootverify/admission_store_absence.go::SelectedStoreDependentAdmissionChecks",
     "audit_rows": "A19,A28",
     "proof_families": "2567-P02,P08,P09",
     "body_sha256": "5395aaab510ec52788805d0c9a50383638764141528b1008729a41c13958947d"
+  },
+  {
+    "owner": "internal/runtime/bootverify/admission_store_absence.go::absentStoreRequiredAdmissionChecks",
+    "audit_rows": "A19,A28",
+    "proof_families": "2567-P02,P08,P09",
+    "body_sha256": "6ee3529e8e62e79179578431f581df9b8e89424bd74a18efad7275c03b526bd3"
   },
   {
     "owner": "internal/runtime/llm/cli_runtime_boot.go::ValidateClaudeCLIRuntimeConfig",
