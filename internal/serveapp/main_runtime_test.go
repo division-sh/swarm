@@ -45,6 +45,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -476,12 +477,20 @@ func TestProcessLifecycleTerminalEvidencePreservesJoinedProjectionDisposition(t 
 		{name: "release_persistent", releaseFails: true, persistent: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rt := &runtimepkg.Runtime{}
 			hash := runtimeContextTestHash("a")
+			fact := mustServeTestEphemeralSourceArtifactFact(hash)
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+			owner := newSupervisorTestRuntimeOccurrence(t, hash)
+			eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+				SourceArtifactFact: fact, WorkOwner: owner, ContractBundle: source,
+				ReceiverExecution: eventreceiver.NormalExecution(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rt := &runtimepkg.Runtime{Bus: eventBus}
 			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-				SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash),
-				Runtime:            rt, WorkOwner: newSupervisorTestRuntimeOccurrence(t, hash),
-				Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+				SourceArtifactFact: fact, Runtime: rt, WorkOwner: owner, Source: source,
 			})
 			if err != nil {
 				t.Fatal(err)
