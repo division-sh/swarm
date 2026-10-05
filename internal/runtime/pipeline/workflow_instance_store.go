@@ -59,7 +59,6 @@ type WorkflowInstance struct {
 	CurrentState       string
 	StageDefined       bool
 	Revision           int64
-	Config             map[string]any
 	EnteredStageAt     time.Time
 	TransitionHistory  []WorkflowTransitionRecord
 	StateBuckets       map[string]any
@@ -448,7 +447,7 @@ func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersis
 	if !route.Valid() || strings.TrimSpace(record.FlowInstance) != route.InstancePath {
 		return WorkflowInstance{}, fmt.Errorf("workflow entity state row disagrees with admitted route")
 	}
-	payload, err := WorkflowInstanceConfigPayloadForRoute(route, workflowVersion, map[string]any{})
+	payload, err := WorkflowInstanceHeaderPayloadForRoute(route, workflowVersion)
 	if err != nil {
 		return WorkflowInstance{}, fmt.Errorf("project workflow entity state control: %w", err)
 	}
@@ -561,7 +560,6 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 		Revision:           record.Revision,
 		EnteredStageAt:     record.EnteredStageAt.UTC(),
 		StateBuckets:       projection.Accumulator,
-		Config:             projection.Config,
 		Fields:             projection.Fields,
 		Bookkeeping:        projection.Bookkeeping,
 		Gates:              projection.Gates,
@@ -609,7 +607,6 @@ type workflowInstancePersistedProjection struct {
 	Bookkeeping map[string]any                   `json:"bookkeeping"`
 	Gates       map[string]bool                  `json:"gates"`
 	Accumulator map[string]any                   `json:"accumulator"`
-	Config      map[string]any                   `json:"config"`
 	Control     workflowInstancePersistedControl `json:"control"`
 }
 
@@ -1119,7 +1116,7 @@ func decodeWorkflowInstancePersistedProjection(
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
-	config, control, err := decodeWorkflowInstanceConfigPayload(configRaw, control)
+	control, err = decodeWorkflowInstanceHeaderPayload(configRaw, control)
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
@@ -1131,7 +1128,6 @@ func decodeWorkflowInstancePersistedProjection(
 		Bookkeeping: bookkeeping,
 		Gates:       gates,
 		Accumulator: accumulator,
-		Config:      config,
 		Control:     control,
 	}, nil
 }
@@ -1168,23 +1164,18 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	if err := validateWorkflowTransitionHistoryFlow(control.TransitionHistory, strings.TrimSpace(instance.WorkflowName)); err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
-	config, err := clonePersistedWorkflowConfig(instance.Config)
-	if err != nil {
-		return workflowInstancePersistedProjection{}, err
-	}
 	return workflowInstancePersistedProjection{
 		Fields:      cloneStringAnyMap(instance.Fields),
 		Bookkeeping: cloneStringAnyMap(instance.Bookkeeping),
 		Gates:       cloneWorkflowGates(instance.Gates),
 		Accumulator: cloneStringAnyMap(instance.StateBuckets),
-		Config:      config,
 		Control:     control,
 	}, nil
 }
 
 func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion string) map[string]any {
-	// Business keys never share a namespace with persisted runtime controls.
-	config := map[string]any{"config": cloneWorkflowSchemaValue(p.Config)}
+	// This column contains header controls only; business fields live in state.
+	config := map[string]any{}
 	config["workflow_version"] = strings.TrimSpace(workflowVersion)
 	config["instance_id"] = strings.TrimSpace(p.Control.InstanceID)
 	config["storage_ref"] = strings.TrimSpace(p.Control.StorageRef)
@@ -1215,35 +1206,26 @@ func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion strin
 	return config
 }
 
-// WorkflowInstanceConfigPayloadForRoute wraps activation config with the
-// canonical persisted route controls. Route recovery reads the separate
-// business object without interpreting any of its keys as runtime controls.
-func WorkflowInstanceConfigPayloadForRoute(
+// WorkflowInstanceHeaderPayloadForRoute projects persisted route controls only.
+func WorkflowInstanceHeaderPayloadForRoute(
 	route runtimeflowidentity.Route,
 	workflowVersion string,
-	config map[string]any,
 ) (map[string]any, error) {
-	return WorkflowInstanceConfigPayloadForIdentity(runtimeflowidentity.Instance{
+	return WorkflowInstanceHeaderPayloadForIdentity(runtimeflowidentity.Instance{
 		ScopeKey: route.ScopeKey, InstanceID: route.InstanceID, InstancePath: route.InstancePath,
-	}, workflowVersion, config)
+	}, workflowVersion)
 }
 
-func WorkflowInstanceConfigPayloadForIdentity(
+func WorkflowInstanceHeaderPayloadForIdentity(
 	instance runtimeflowidentity.Instance,
 	workflowVersion string,
-	config map[string]any,
 ) (map[string]any, error) {
 	route := instance.Route()
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	if !route.Valid() {
 		return nil, fmt.Errorf("workflow instance config payload requires exact route")
 	}
-	isolated, err := clonePersistedWorkflowConfig(config)
-	if err != nil {
-		return nil, err
-	}
 	return (workflowInstancePersistedProjection{
-		Config: isolated,
 		Control: workflowInstancePersistedControl{
 			StorageRef:         route.InstancePath,
 			InstanceID:         route.InstanceID,
@@ -1253,17 +1235,6 @@ func WorkflowInstanceConfigPayloadForIdentity(
 			ParentEntityID:     instance.ParentEntityID,
 		},
 	}).ConfigPayload(workflowVersion), nil
-}
-
-func clonePersistedWorkflowConfig(config map[string]any) (map[string]any, error) {
-	if config == nil {
-		return map[string]any{}, nil
-	}
-	cloned, err := canonicaljson.CloneRuntimeValue(config)
-	if err != nil {
-		return nil, fmt.Errorf("workflow instance config: %w", err)
-	}
-	return cloned.(map[string]any), nil
 }
 
 func (p workflowInstancePersistedProjection) GatesAny() map[string]any {
@@ -1310,52 +1281,42 @@ func decodeWorkflowInstanceJSONBoolMap(label string, raw []byte) (map[string]boo
 	return out, nil
 }
 
-// WorkflowInstanceBusinessConfigForRoute decodes a recorded config envelope
-// without re-admitting defaults or deriving business keys from route identity.
-func WorkflowInstanceBusinessConfigForRoute(route runtimeflowidentity.Route, raw []byte) (map[string]any, error) {
-	recorded, err := DecodeWorkflowInstanceRecordedConfig(route, raw)
-	if err != nil {
-		return nil, err
-	}
-	return recorded.projection.Config, nil
-}
-
-// Recorded configuration retains runtime controls when historical ownership is
-// projected. It neither re-admits business defaults nor grants execution.
-type WorkflowInstanceRecordedConfig struct {
+// Recorded headers retain runtime controls during historical projection,
+// independently of mutable instance state and execution authority.
+type WorkflowInstanceRecordedHeader struct {
 	projection workflowInstancePersistedProjection
 }
 
-func DecodeWorkflowInstanceRecordedConfig(route runtimeflowidentity.Route, raw []byte) (WorkflowInstanceRecordedConfig, error) {
+func DecodeWorkflowInstanceRecordedHeader(route runtimeflowidentity.Route, raw []byte) (WorkflowInstanceRecordedHeader, error) {
 	if !route.Valid() {
-		return WorkflowInstanceRecordedConfig{}, fmt.Errorf("workflow config readback requires an exact route")
+		return WorkflowInstanceRecordedHeader{}, fmt.Errorf("workflow config readback requires an exact route")
 	}
-	business, control, err := decodeWorkflowInstanceConfigPayload(raw, workflowInstancePersistedControl{StorageRef: route.InstancePath})
+	control, err := decodeWorkflowInstanceHeaderPayload(raw, workflowInstancePersistedControl{StorageRef: route.InstancePath})
 	if err != nil {
-		return WorkflowInstanceRecordedConfig{}, err
+		return WorkflowInstanceRecordedHeader{}, err
 	}
 	if control.InstanceID != route.InstanceID || control.FlowPath != route.InstancePath {
-		return WorkflowInstanceRecordedConfig{}, fmt.Errorf("workflow config readback disagrees with exact route %s", route.InstancePath)
+		return WorkflowInstanceRecordedHeader{}, fmt.Errorf("workflow config readback disagrees with exact route %s", route.InstancePath)
 	}
 	parent := runtimeflowidentity.ParentRoute{FlowID: control.ParentFlowID, FlowInstance: control.ParentFlowInstance, EntityID: control.ParentEntityID}
 	if !parent.Empty() && !parent.Complete() {
-		return WorkflowInstanceRecordedConfig{}, fmt.Errorf("workflow config readback requires complete parent ownership")
+		return WorkflowInstanceRecordedHeader{}, fmt.Errorf("workflow config readback requires complete parent ownership")
 	}
-	return WorkflowInstanceRecordedConfig{projection: workflowInstancePersistedProjection{Config: business, Control: control}}, nil
+	return WorkflowInstanceRecordedHeader{projection: workflowInstancePersistedProjection{Control: control}}, nil
 }
 
-func (c WorkflowInstanceRecordedConfig) WorkflowVersion() string {
+func (c WorkflowInstanceRecordedHeader) WorkflowVersion() string {
 	return c.projection.Control.WorkflowVersion
 }
 
-func (c WorkflowInstanceRecordedConfig) ParentRoute() runtimeflowidentity.ParentRoute {
+func (c WorkflowInstanceRecordedHeader) ParentRoute() runtimeflowidentity.ParentRoute {
 	control := c.projection.Control
 	return runtimeflowidentity.ParentRoute{FlowID: control.ParentFlowID, FlowInstance: control.ParentFlowInstance, EntityID: control.ParentEntityID}
 }
 
-func (c WorkflowInstanceRecordedConfig) Project(route runtimeflowidentity.Route, parent runtimeflowidentity.ParentRoute) ([]byte, error) {
+func (c WorkflowInstanceRecordedHeader) Project(route runtimeflowidentity.Route, parent runtimeflowidentity.ParentRoute) ([]byte, error) {
 	oldParent := c.ParentRoute()
-	if !route.Valid() || c.projection.Config == nil || oldParent.Empty() != parent.Empty() ||
+	if !route.Valid() || oldParent.Empty() != parent.Empty() ||
 		(!parent.Empty() && (!parent.Complete() || parent.FlowID != oldParent.FlowID)) {
 		return nil, fmt.Errorf("historical config projection requires exact route and parent ownership")
 	}
@@ -1365,68 +1326,64 @@ func (c WorkflowInstanceRecordedConfig) Project(route runtimeflowidentity.Route,
 	return canonicaljson.MarshalPreservingNumberKinds(projection.ConfigPayload(c.WorkflowVersion()))
 }
 
-func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePersistedControl) (map[string]any, workflowInstancePersistedControl, error) {
+func decodeWorkflowInstanceHeaderPayload(raw []byte, control workflowInstancePersistedControl) (workflowInstancePersistedControl, error) {
 	config, err := decodeWorkflowInstanceJSONMap("flow_instances.config", raw)
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
-	}
-	business, ok := config["config"].(map[string]any)
-	if !ok || business == nil {
-		return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config requires a separate config object")
+		return workflowInstancePersistedControl{}, err
 	}
 	for key := range config {
 		switch key {
-		case "config", "workflow_version", "instance_id", "storage_ref", "flow_path", "instance_kind", "template_version", "status", "parent_flow_id", "parent_flow_instance", "parent_entity_id", "transition_history":
+		case "workflow_version", "instance_id", "storage_ref", "flow_path", "instance_kind", "template_version", "status", "parent_flow_id", "parent_flow_instance", "parent_entity_id", "transition_history":
 		default:
-			return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config contains unknown runtime control %q", key)
+			return workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config contains unknown runtime control %q", key)
 		}
 	}
 	workflowVersion, err := workflowInstanceOptionalString(config, "workflow_version")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	instanceID, err := workflowInstanceOptionalString(config, "instance_id")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	flowPath, err := workflowInstanceOptionalString(config, "flow_path")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	if _, declared := config["flow_path"]; declared && strings.Trim(strings.TrimSpace(flowPath), "/") == "" {
-		return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config flow_path must name an exact instance route when declared")
+		return workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config flow_path must name an exact instance route when declared")
 	}
 	configStorageRef, err := workflowInstanceOptionalString(config, "storage_ref")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	instanceKind, err := workflowInstanceOptionalString(config, "instance_kind")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	templateVersion, err := workflowInstanceOptionalString(config, "template_version")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	status, err := workflowInstanceOptionalString(config, "status")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	parentFlowID, err := workflowInstanceOptionalString(config, "parent_flow_id")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	parentFlowInstance, err := workflowInstanceOptionalString(config, "parent_flow_instance")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	parentEntityID, err := workflowInstanceOptionalString(config, "parent_entity_id")
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	transitionHistory, err := workflowInstanceTransitionHistoryFromConfig(config)
 	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
+		return workflowInstancePersistedControl{}, err
 	}
 	control.WorkflowVersion = workflowVersion
 	control.InstanceID = strings.TrimSpace(instanceID)
@@ -1435,7 +1392,7 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 		control.StorageRef = strings.TrimSpace(configStorageRef)
 	}
 	if strings.TrimSpace(control.StorageRef) != "" && strings.TrimSpace(configStorageRef) != "" && strings.TrimSpace(control.StorageRef) != strings.TrimSpace(configStorageRef) {
-		return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config storage_ref %q disagrees with canonical storage_ref %q", configStorageRef, control.StorageRef)
+		return workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config storage_ref %q disagrees with canonical storage_ref %q", configStorageRef, control.StorageRef)
 	}
 	control.InstanceKind = strings.TrimSpace(instanceKind)
 	control.TemplateVersion = strings.TrimSpace(templateVersion)
@@ -1444,7 +1401,7 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	control.ParentFlowInstance = strings.Trim(strings.TrimSpace(parentFlowInstance), "/")
 	control.ParentEntityID = strings.TrimSpace(parentEntityID)
 	control.TransitionHistory = transitionHistory
-	return business, control, nil
+	return control, nil
 }
 
 func workflowInstanceOptionalString(config map[string]any, key string) (string, error) {

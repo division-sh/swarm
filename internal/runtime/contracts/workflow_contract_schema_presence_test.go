@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -18,10 +17,8 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	input := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes:\n        approve:\n          advances_to: done\n          input:\n            note:\n              type: text\n              %s\n"
 	timer := "stages:\n  waiting:\n    timers:\n      - after: 1s\n        emit: work.expired\n        advances_to: done\n        %s\n"
 	loop := "loops:\n  revision:\n    revision_field: revision\n    max_attempts: 3\n    escape: {advances_to: done}\n    %s\n"
-	variable := "instance_variables:\n  variables:\n    note:\n      type: text\n      %s\n"
 	required := "required_agents:\n  - role: worker\n    %s\n"
 	connect := "connect:\n  - event: work.requested\n    from: source\n    to: worker\n    %s\n"
-	inputPin := "pins:\n  inputs:\n    - event: work.requested\n      initialize: {note: payload.note}\n      %s\n"
 	outputPin := "pins:\n  outputs:\n    - event: work.completed\n      %s\n"
 	ingress := "ingress:\n  alias: hooks\n  providers: [{provider: partner}]\n  %s\n"
 	provider := "ingress:\n  alias: hooks\n  providers:\n    - provider: partner\n      %s\n"
@@ -65,17 +62,7 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"required.description", required, "description", "Worker", "", "", "MES"},
 		{"required.subscribes_to", required, "subscribes_to", "x", "", "[work.requested]", "MZQ"},
 		{"required.emits", required, "emits", "x", "", "[work.completed]", "MZQ"},
-		{"instance_variables", root, "instance_variables", "x", "{variables: {note: text}}", "", "MP"},
-		{"variables", "instance_variables:\n  description: Configuration\n  %s\n", "variables", "x", "{note: text}", "", "MOP"},
-		{"variable", "instance_variables:\n  variables:\n    %s\n", "note", "text", "{type: text}", "[text]", "SPQ"},
-		{"variable.type", variable, "type", "text", "", "", "S"},
-		{"variable.description", variable, "description", "Note", "", "", "MES"},
-		{"instance_variables.description", "instance_variables:\n  variables: {}\n  %s\n", "description", "Configuration", "", "", "MES"},
-		{"variable.default", variable, "default", "abc", "{a: b}", "[a, b]", "MNESOPZQ"},
-		{"variable.pattern", variable, "pattern", "'[a-z]+'", "", "", "MS"},
-		{"variable.length", variable, "length", "x", "{min: 0, max: 10}", "", "MP"},
-		{"variable.equal_to", variable, "equal_to", "other", "", "", "MS"},
-		{"variable.range", "instance_variables:\n  variables:\n    value:\n      type: numeric\n      %s\n", "range", "x", "{min: -0.5, max: 10}", "", "MP"},
+		{"retired.instance_variables", root, "instance_variables", "x", "{variables: {note: text}}", "[text]", ""},
 		{"auto_emit", root, "auto_emit_on_create", "x", "{event: work.started}", "", "MP"},
 		{"auto_emit.event", "auto_emit_on_create:\n  description: Start\n  %s\n", "event", "work.started", "", "", "S"},
 		{"auto_emit.description", "auto_emit_on_create:\n  event: work.started\n  %s\n", "description", "Start", "", "", "MES"},
@@ -123,10 +110,6 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"retired.pins.outputs.events", "pins:\n  outputs:\n    %s\n", "events", "x", "", "[work.completed]", ""},
 		{"retired.pins.inputs.reads", "pins:\n  inputs:\n    events: [work.requested]\n    %s\n", "reads", "x", "", "[note]", ""},
 		{"retired.pins.outputs.writes", "pins:\n  outputs:\n    events: [work.completed]\n    %s\n", "writes", "x", "", "[note]", ""},
-		{"inputPin.event", inputPin, "event", "work.requested", "", "", "S"},
-		{"inputPin.source", inputPin, "source", "harness", "", "", "M"},
-		{"inputPin.resolution", inputPin, "resolution", "x", "{mode: fan-out}", "", "M"},
-		{"inputPin.initialize", strings.ReplaceAll(inputPin, "      initialize: {note: payload.note}\n", ""), "initialize", "x", "{note: payload.note}", "", "P"},
 		{"retired.outputPin.event", outputPin, "event", "work.completed", "", "", ""},
 		{"retired.outputPin.sink", outputPin, "sink", "harness", "", "", ""},
 	}
@@ -202,19 +185,6 @@ func TestSchemaAdmissionBooleanKindsAndLiteralDefaultPresence(t *testing.T) {
 			}
 		}
 	}
-	for _, tc := range []struct {
-		raw      string
-		expected any
-	}{{"null", nil}, {"''", ""}, {"false", false}, {"0", 0}, {"1.5", 1.5}, {"{}", map[string]any{}}, {"[]", []any{}}, {"{a: null}", map[string]any{"a": nil}}, {"[false, 0]", []any{false, 0}}} {
-		schema, err := admitSchemaFragment("instance_variables: {variables: {note: {type: text, default: " + tc.raw + "}}}\n")
-		if err != nil {
-			t.Fatal(err)
-		}
-		v := schema.InstanceVariables.Variables["note"]
-		if !v.HasDefault || !reflect.DeepEqual(v.Default, tc.expected) {
-			t.Fatalf("default %s changed: %#v", tc.raw, v)
-		}
-	}
 }
 
 func TestSchemaAdmissionIngressBranchPresenceMatrix(t *testing.T) {
@@ -274,7 +244,7 @@ func TestSchemaAdmissionResolutionPresenceDoesNotBypassMode(t *testing.T) {
 					value = "work.requested"
 				}
 				_, err := admitSchemaFragment("pins: {inputs: [{event: work.requested, resolution: {mode: " + mode + ", " + key + ": " + value + "}}]}\n")
-				if err == nil || !strings.Contains(err.Error(), `field "resolution" is not supported`) {
+				if err == nil || !strings.Contains(err.Error(), `must be a scalar text, got mapping`) || !strings.Contains(err.Error(), `["inputs"][0]`) {
 					t.Fatalf("retired pin mode %s %s was not rejected: %v", mode, key, err)
 				}
 			})

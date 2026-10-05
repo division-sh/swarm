@@ -411,17 +411,6 @@ func selectedExecutionSourceFlowCommand(t *testing.T, ctx context.Context, loade
 	if err != nil {
 		t.Fatal(err)
 	}
-	configuration := map[string]any{}
-	if constructorInput != "" {
-		for _, pin := range loaded.Source.FlowInputEventPins(identity.TemplateID) {
-			if pin.EventType() == constructorInput {
-				configuration, err = pin.Initialization().EvaluateWithIdentity(nil, fields)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-		}
-	}
 	graph, found := semanticview.WorkflowStageTopology(loaded.Source, identity.TemplateID)
 	if !found {
 		t.Fatal("component construction requires its compiled stage topology")
@@ -444,7 +433,7 @@ func selectedExecutionSourceFlowCommand(t *testing.T, ctx context.Context, loade
 		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
 		EntityType: contract.EntityType, WorkflowName: identity.TemplateID, WorkflowVersion: loaded.Source.WorkflowVersion(),
 		Mode: schema.EffectiveMode(), CurrentState: stage.ID(), StageDefined: graph.StageCount() != 0,
-		Fields: fields, Config: configuration, RuntimeReadiness: &readiness, CreatedAt: event.CreatedAt(), EnteredStageAt: event.CreatedAt(),
+		Fields: fields, RuntimeReadiness: &readiness, CreatedAt: event.CreatedAt(), EnteredStageAt: event.CreatedAt(),
 	}
 	ctx = effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, event.RunID()), loaded.SourceArtifactFact), event.ExecutionMode())
 	command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, event.CreatedAt())

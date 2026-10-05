@@ -25,11 +25,6 @@ var ruleFieldOptions = map[string]struct{}{
 	"fan_out":           {},
 }
 
-var inputEventPinFieldOptions = map[string]struct{}{
-	"initialize": {},
-	"event":      {},
-}
-
 var computeFieldOptions = map[string]struct{}{
 	"operation":   {},
 	"tiers":       {},

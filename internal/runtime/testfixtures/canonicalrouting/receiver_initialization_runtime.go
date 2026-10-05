@@ -38,21 +38,16 @@ opco.spinup_created:
 `,
 		"operating/schema.yaml": `name: operating
 instance: instance_id
-instance_variables:
-  variables:
-    product_id: string
 pins:
   inputs:
-    - event: opco.spinup_created
-      initialize:
-        product_id: payload.product_id
+    - opco.spinup_created
 stages:
   initializing: {initial: true}
   ready: {terminal: true}
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state:\n  instance_id: string\n",
+		"operating/entities.yaml": "operating_state:\n  instance_id: string\n  product_id: text\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   instance_id: string
   product_id: string
@@ -113,21 +108,16 @@ opco.spinup_created:
 `,
 		"operating/schema.yaml": `name: operating
 instance: instance_id
-instance_variables:
-  variables:
-    product_id: string
 pins:
   inputs:
-    - event: opco.spinup_created
-      initialize:
-        product_id: payload.product_id
+    - opco.spinup_created
 stages:
   initializing: {initial: true}
   ready: {terminal: true}
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state:\n  instance_id: string\n",
+		"operating/entities.yaml": "operating_state:\n  instance_id: string\n  product_id: text\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   instance_id: string?
   template_id: string?

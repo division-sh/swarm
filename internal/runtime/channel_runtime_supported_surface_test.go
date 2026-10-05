@@ -228,7 +228,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 					InstanceID: flowInstanceID, StorageRef: flowInstance, EntityID: entityID,
 					ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: runtimeflowidentity.EntityID(runID),
 					EntityType: "channel_state", WorkflowName: "global", WorkflowVersion: source.WorkflowVersion(),
-					Mode: runtimecontracts.FlowModeStatic, CurrentState: "active", Config: map[string]any{}, Fields: map[string]any{},
+					Mode: runtimecontracts.FlowModeStatic, CurrentState: "active", Fields: map[string]any{},
 				}, construction224At)
 				if err != nil {
 					t.Fatalf("prepare fixture initial lifecycle: %v", err)

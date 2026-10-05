@@ -527,7 +527,6 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 				ContractBundle: source,
 				Instance:       instance,
 				InitialState:   initialState,
-				Config:         map[string]any{},
 				Bookkeeping: map[string]any{
 					"activation":  runtimecontracts.FlowActivationStanding,
 					"bundle_hash": fact.BundleHash(),

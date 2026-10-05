@@ -884,31 +884,25 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 	if instanceCount != 1 {
 		t.Fatalf("flow instance %q count = %d, want 1", instancePath, instanceCount)
 	}
-	if config, ok := want["config"].(map[string]any); ok && len(config) > 0 {
+	if config, ok := want["fields"].(map[string]any); ok && len(config) > 0 {
 		var raw []byte
 		err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-			SELECT config
-			FROM flow_instances
-			WHERE instance_path = $1
-			ORDER BY created_at DESC
+			SELECT e.fields
+			FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path
+			WHERE f.instance_path = $1
+			ORDER BY f.created_at DESC
 			LIMIT 1
 		`, instancePath).Scan(&raw)
 		if err == sql.ErrNoRows {
-			t.Fatalf("expected flow instance config for %s", instancePath)
+			t.Fatalf("expected flow instance fields for %s", instancePath)
 		}
 		if err != nil {
-			t.Fatalf("query flow instance config: %v", err)
+			t.Fatalf("query flow instance fields: %v", err)
 		}
-		var record struct {
-			Config map[string]any `json:"config"`
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("decode flow instance fields: %v", err)
 		}
-		if err := json.Unmarshal(raw, &record); err != nil {
-			t.Fatalf("decode flow instance config: %v", err)
-		}
-		if record.Config == nil {
-			t.Fatal("flow instance record has no business config object")
-		}
-		got := record.Config
 		for key, wantValue := range config {
 			key = strings.TrimSpace(key)
 			if key == "" {
@@ -916,18 +910,18 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 			}
 			gotValue, ok := got[key]
 			if !ok {
-				t.Fatalf("flow instance config missing %q; have keys=%v", key, metadataKeys(got))
+				t.Fatalf("flow instance fields missing %q; have keys=%v", key, metadataKeys(got))
 			}
 			gotCanonical, err := canonicalJSONValue(gotValue)
 			if err != nil {
-				t.Fatalf("canonicalize flow instance config %q got value: %v", key, err)
+				t.Fatalf("canonicalize flow instance fields %q got value: %v", key, err)
 			}
 			wantCanonical, err := canonicalJSONValue(wantValue)
 			if err != nil {
-				t.Fatalf("canonicalize flow instance config %q expected value: %v", key, err)
+				t.Fatalf("canonicalize flow instance fields %q expected value: %v", key, err)
 			}
 			if gotCanonical != wantCanonical {
-				t.Fatalf("flow instance config %q = %s, want %s", key, gotCanonical, wantCanonical)
+				t.Fatalf("flow instance fields %q = %s, want %s", key, gotCanonical, wantCanonical)
 			}
 		}
 	}

@@ -15,7 +15,7 @@ func ConnectionAdmissionCases() []ConnectionAdmissionCase {
 	for _, mode := range []string{"create", "select", "select-or-create"} {
 		out = append(out,
 			ConnectionAdmissionCase{Name: "edge/" + mode, Source: "connect: [{event: work.requested, from: ., to: worker, resolution: " + mode + "}]\n", Mode: mode},
-			ConnectionAdmissionCase{Name: "retired-pin/" + mode, Source: "pins: {inputs: [{event: work.requested, resolution: {mode: " + mode + "}}]}\n", WantError: `field "resolution"`},
+			ConnectionAdmissionCase{Name: "retired-pin/" + mode, Source: "pins: {inputs: [{event: work.requested, resolution: {mode: " + mode + "}}]}\n", WantError: "scalar text"},
 		)
 	}
 	for _, choice := range []string{
@@ -31,7 +31,7 @@ func ConnectionAdmissionCases() []ConnectionAdmissionCase {
 		"scalar":     "work.requested",
 		"initialize": "{event: work.requested, initialize: {priority: payload.priority}}",
 	} {
-		out = append(out, ConnectionAdmissionCase{Name: "retained/" + name, Source: "pins: {inputs: [" + source + "]}\n"})
+		out = append(out, ConnectionAdmissionCase{Name: "pin/" + name, Source: "pins: {inputs: [" + source + "]}\n", WantError: map[string]string{"initialize": "scalar text"}[name]})
 	}
 	out = append(out, ConnectionAdmissionCase{Name: "edge/reply", Source: "connect: [{event: work.replied, from: provider, to: requester, replies_to: work.sent}]\n"})
 	// These are parser-only rejection specimens, never positive fixtures.
@@ -40,7 +40,7 @@ func ConnectionAdmissionCases() []ConnectionAdmissionCase {
 		"{mode: fan-in, aggregation: stream, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}",
 		"{mode: fan-in, aggregation: barrier, window: payload.period_id, dedup_by: [payload.operating_id], singleton: portfolio}",
 	} {
-		out = append(out, ConnectionAdmissionCase{Name: "retired-pin/" + retired, Source: "pins: {inputs: [{event: work.requested, resolution: " + retired + "}]}\n", WantError: `field "resolution"`})
+		out = append(out, ConnectionAdmissionCase{Name: "retired-pin/" + retired, Source: "pins: {inputs: [{event: work.requested, resolution: " + retired + "}]}\n", WantError: "scalar text"})
 	}
 	return out
 }

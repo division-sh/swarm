@@ -41,9 +41,6 @@ func TestSchemaAdmissionOwnsCompleteRoot(t *testing.T) {
 	if schema.Instance.Empty() || schema.Ingress == nil || len(schema.Imports.ConnectorPacks) != 1 || len(schema.Imports.ProviderTriggerEvents) != 1 || len(schema.Connect) != 1 || len(schema.Pins.Inputs.EventPins) != 1 || !schema.RequiredAgentsDeclared || len(schema.RequiredAgents) != 1 || len(schema.StageDeclarations.Entries) != 2 || len(schema.LoopDeclarations.Entries) != 1 {
 		t.Fatalf("nested family lost: %#v", schema)
 	}
-	if variable := schema.InstanceVariables.Variables["note"]; !variable.HasDefault || variable.Default != "" || variable.Refinements.Length.Min == nil || *variable.Refinements.Length.Min != 0 {
-		t.Fatalf("receiver presence lost: %#v", variable)
-	}
 	gate := schema.StageDeclarations.Entries[0].Gate
 	if !gate.Context["null_value"].HasLiteralValue() || gate.Context["null_value"].Literal != nil || gate.Context["zero"].Literal != 0 || !gate.Context["dynamic"].HasCELValue() {
 		t.Fatalf("shared R2 meaning lost: %#v", gate.Context)
@@ -54,7 +51,7 @@ func TestSchemaAdmissionOwnsCompleteRoot(t *testing.T) {
 }
 
 func TestSchemaAdmissionRetiredPresence(t *testing.T) {
-	for _, key := range []string{"initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule"} {
+	for _, key := range []string{"initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule", "instance_variables"} {
 		for _, value := range []string{"null", "''", "false", "x", "{}", "{a: b}", "[]", "[x]"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
 				_, err := loadSchemaFragment(t, "name: retired\n"+key+": "+value+"\n")
@@ -209,7 +206,7 @@ func TestSchemaAdmissionDocumentExpansionBudget(t *testing.T) {
 	for _, variant := range []string{"alias", "merge"} {
 		t.Run(variant, func(t *testing.T) {
 			var source strings.Builder
-			source.WriteString("instance_variables:\n  variables:\n    x: &variable\n      type: text\n      default:\n")
+			source.WriteString("stages:\n  waiting:\n    initial: true\n    gate:\n      decision: test\n      context:\n")
 			for i := 0; i < 15; i++ {
 				if i == 0 {
 					fmt.Fprintf(&source, "        a%d: &a%d [x, x]\n", i, i)
@@ -218,9 +215,9 @@ func TestSchemaAdmissionDocumentExpansionBudget(t *testing.T) {
 				}
 			}
 			if variant == "merge" {
-				source.WriteString("    y: {<<: *variable}\n    z: {<<: *variable}\n")
+				source.WriteString("        merged: {<<: *a14}\n")
 			} else {
-				source.WriteString("    y: {type: text, default: *a14}\n    z: {type: text, default: *a14}\n")
+				source.WriteString("        y: *a14\n        z: *a14\n")
 			}
 			_, err := loadSchemaFragment(t, source.String())
 			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "expansion") {
@@ -251,7 +248,7 @@ func TestSchemaAdmissionAliasesMergesAndDerivedProvenance(t *testing.T) {
 		}
 	}
 	for _, source := range []string{
-		"instance_variables: {variables: {a: &v {type: text}, b: {<<: *v}}}\n",
+		"required_agents: [{role: &r worker, description: *r}, {role: other, description: *r}]\n",
 		"stages: {waiting: &s {}, Waiting: {<<: *s}}\n",
 	} {
 		if _, err := admitSchemaFragment(source); err != nil {

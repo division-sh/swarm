@@ -130,10 +130,7 @@ func ProjectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	if err := cfg.ValidateIntentInputs(); err != nil {
 		return PersistedAgentProjection{}, fmt.Errorf("agent %s intent inputs: %w", strings.TrimSpace(cfg.ID), err)
 	}
-	if err := cfg.ValidateReceiverConfig(); err != nil {
-		return PersistedAgentProjection{}, err
-	}
-	configJSON, err := encodeAgentConfigEnvelope(cfg.Config, cfg.ReceiverConfig)
+	configJSON, err := encodeAgentConfig(cfg.Config)
 	if err != nil {
 		return PersistedAgentProjection{}, fmt.Errorf("marshal agent config: %w", err)
 	}
@@ -181,7 +178,7 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 	}
 	llmBackend = profile.ID
 	memory := agentmemory.Plan{Enabled: row.MemoryEnabled}
-	config, receiverConfig, err := decodeAgentConfigEnvelope(row.ConfigJSON)
+	config, err := decodeAgentConfig(row.ConfigJSON)
 	if err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid config envelope: %w", strings.TrimSpace(row.AgentID), err)
 	}
@@ -251,14 +248,10 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		EntityID:             strings.TrimSpace(row.EntityID),
 		ParentAgent:          strings.TrimSpace(row.ParentAgentID),
 		Config:               config,
-		ReceiverConfig:       receiverConfig,
 		Identity:             identity,
 	}
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
-	if err := cfg.ValidateReceiverConfig(); err != nil {
-		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s: %w", strings.TrimSpace(row.AgentID), err)
-	}
 	if err := cfg.ValidateIntentInputs(); err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s intent carrier: %w", strings.TrimSpace(row.AgentID), err)
 	}

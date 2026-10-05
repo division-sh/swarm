@@ -85,7 +85,7 @@ func (f receiverConfigActivationFixture) revisionCounts(t *testing.T) [3]int64 {
 	return counts
 }
 
-func TestReceiverConfigOnlyWorkflowMutationRegistersEntityMetadataBothStores(t *testing.T) {
+func TestHeaderOnlyWorkflowMutationRegistersEntityMetadataBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixture(t, backend)
@@ -104,7 +104,7 @@ func TestReceiverConfigOnlyWorkflowMutationRegistersEntityMetadataBothStores(t *
 			state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 			state.ExpectedState = state.CurrentState
 			owner := f.store.(pipeline.WorkflowEngineMutationOwner)
-			for i, change := range []string{"workflow_version_control", "config_only_number_kind"} {
+			for i, change := range []string{"workflow_version_control", "template_version_control"} {
 				before := f.revisionCounts(t)
 				var envelope map[string]any
 				if err := canonicaljson.DecodePreservingNumberLexemes(state.Config, &envelope); err != nil {
@@ -113,9 +113,7 @@ func TestReceiverConfigOnlyWorkflowMutationRegistersEntityMetadataBothStores(t *
 				if change == "workflow_version_control" {
 					envelope["workflow_version"] = "revised-source-control"
 				} else {
-					// This probes accounting at the closed persistence boundary,
-					// not permission to update immutable receiver config on reuse.
-					envelope["config"].(map[string]any)["nested"].([]any)[1] = int64(7)
+					envelope["template_version"] = "revised-template-control"
 				}
 				state.Config, err = canonicaljson.MarshalPreservingNumberKinds(envelope)
 				if err != nil {
@@ -152,7 +150,7 @@ func TestReceiverConfigOnlyWorkflowMutationRegistersEntityMetadataBothStores(t *
 				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2`, state.Identity.RunID, state.EntityID).Scan(&mutations); err != nil {
 					t.Fatal(err)
 				}
-				// Config is carried by entity_metadata even when no authored field
+				// Header controls are carried by entity_metadata even when no authored field
 				// changed; it must not rely on a new entity_mutations fact.
 				var mutationFacts int
 				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=$2 AND family='entity_mutations'`, state.Identity.RunID, after[2]).Scan(&mutationFacts); err != nil || mutationFacts != 0 {

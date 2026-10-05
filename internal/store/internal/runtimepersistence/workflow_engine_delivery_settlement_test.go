@@ -38,7 +38,6 @@ func constructWorkflowMutationFixture(t *testing.T, backend, flowID string, at t
 	runID := correlation.RunIDFromContext(f.ctx)
 	req := sqliteFlowActivationRequest(f.bundle, flowID, "receiver", "", flowID+"/receiver")
 	req.OccurredAt = at
-	req.Config = map[string]any{"receiver_key": "receiver"}
 	req.ConstructorInput, req.ResolvedKey = "construct.requested", "receiver"
 	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
 	activation, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)

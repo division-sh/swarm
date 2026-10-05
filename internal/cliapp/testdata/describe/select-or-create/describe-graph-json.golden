@@ -68,7 +68,7 @@
           "producer_schema_digest": "sha256:c764feffa8a6f0df5e5698547a511086d65d15620a3b5044fa7b3ee679e9eef3",
           "receiver_schema_digest": "sha256:c764feffa8a6f0df5e5698547a511086d65d15620a3b5044fa7b3ee679e9eef3",
           "business_key": "account_id",
-          "pin_digest": "sha256:8723ff561dbb7e84d326a135a0021f47a24c2eba537740db19222704798084a8",
+          "pin_digest": "sha256:cb6e6af9a6d310c4f8e0bf9d671b5f515bb274a477cf798ba59704f96a45c3c5",
           "source_file": "account/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -109,7 +109,7 @@
           "flow_path": "producer",
           "producer_schema_digest": "sha256:c764feffa8a6f0df5e5698547a511086d65d15620a3b5044fa7b3ee679e9eef3",
           "receiver_schema_digest": "sha256:c764feffa8a6f0df5e5698547a511086d65d15620a3b5044fa7b3ee679e9eef3",
-          "pin_digest": "sha256:70b7b7fb3593f199efb63d25db7098cc9eace113aeaad156ec9d4e2fa9d74508",
+          "pin_digest": "sha256:9a91ac20d04b08db973fb1384c28a140cec560f560229f1780ed5484027af418",
           "source_file": "producer/schema.yaml",
           "source_line": 1,
           "source_column": 1

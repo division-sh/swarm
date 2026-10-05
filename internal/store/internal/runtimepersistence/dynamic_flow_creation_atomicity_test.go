@@ -325,7 +325,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		WorkOwner: storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, selected))
 	activation, err := am.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(bundle), Instance: identity, Config: map[string]any{"name": "alpha"},
+		ContractBundle: semanticview.Wrap(bundle), Instance: identity,
 		ConstructorInput: "task.started", ResolvedKey: "alpha", TriggerEvent: parent, OccurredAt: occurredAt,
 	})
 	if err != nil {

@@ -20,7 +20,7 @@ func TestProspectiveJoinAdmissionPreservesConstructedParent(t *testing.T) {
 		InstancePath: "parents/one/child", EntityID: flowidentity.EntityID("parents/one/child"), HasStoredPath: true,
 		ParentRoute:    flowidentity.ParentRoute{FlowID: "parents", FlowInstance: "parents/one", EntityID: flowidentity.EntityID("parents/one")},
 		ParentEntityID: flowidentity.EntityID("parents/one")}
-	config, err := WorkflowInstanceConfigPayloadForIdentity(constructed, "v1", map[string]any{"business": "unchanged"})
+	config, err := WorkflowInstanceHeaderPayloadForIdentity(constructed, "v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestProspectiveJoinAdmissionPreservesConstructedParent(t *testing.T) {
 	if err != nil || item == nil || item.ParentFlowID != constructed.ParentRoute.FlowID ||
 		item.ParentFlowInstance != constructed.ParentRoute.FlowInstance || item.ParentEntityID != constructed.ParentEntityID ||
 		item.InstanceID != constructed.InstanceID || item.StorageRef != constructed.InstancePath || item.Revision != 4 ||
-		item.Status != "active" || item.Config["business"] != "unchanged" || len(item.Fields) != 0 {
+		item.Status != "active" || len(item.Fields) != 0 {
 		t.Fatalf("prospective construction metadata changed: item=%#v err=%v", item, err)
 	}
 }

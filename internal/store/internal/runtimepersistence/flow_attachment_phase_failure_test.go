@@ -192,7 +192,6 @@ func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 					}
 					t.Cleanup(func() { close(workflow.retryRelease) })
 					req := f.request("business-key", "phase-failure", "unchanged")
-					req.Config = map[string]any{"request_id": "business-key"}
 					req.OccurredAt = time.Now().UTC()
 					req.TriggerEvent = eventtest.ExistingRunRootIngress(req.TriggerEvent.ID(), "task.started", "constructor-fixture", "", []byte(`{}`), 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
 					plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)

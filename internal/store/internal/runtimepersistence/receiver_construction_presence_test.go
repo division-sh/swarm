@@ -131,7 +131,6 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 						f = newEagerFlowConstructorFixture(t, backend)
 					}
 					req := f.request("business-key", "r1", "first")
-					req.Config = map[string]any{"request_id": "business-key"}
 					if shape == "root" {
 						runID := correlation.RunIDFromContext(f.ctx)
 						req = sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)

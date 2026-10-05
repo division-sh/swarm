@@ -73,7 +73,6 @@ func TestRewritePinMutationConsumersTrackCurrentSequences(t *testing.T) {
 		{"internal/runtime/testfixtures/canonicalrouting/fork_receiver_acquisition_effect_only.go", "  outputs: [receiver.finished]\n", "  outputs:\n    - receiver.finished\n"},
 		{"internal/runtime/testfixtures/canonicalrouting/fork_receiver_notice_effect.go", "  outputs: [receiver.finished]\n", "  outputs:\n    - receiver.finished\n"},
 		{"internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go", "  outputs:\n    [producer.closed]", "  outputs: [producer.closed]"},
-		{"internal/runtime/testfixtures/canonicalrouting/receiver_agent_collision.go", "    - event: work.ready\n        initialize:\n", "    - event: work.ready\n      initialize:\n"},
 		{"internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go", "inputs: [loop.escaped]", "    - loop.escaped\n"},
 		{"internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go", "inputs: [loop.escaped, ordinary.repeated]", "    - loop.escaped\n    - ordinary.repeated\n"},
 	} {

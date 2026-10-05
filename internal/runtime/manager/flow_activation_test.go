@@ -85,7 +85,6 @@ func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSc
 		sourceV2,
 		schemaV2,
 		identity,
-		map[string]any{"account_id": "acct-1"},
 	)
 	if err != nil {
 		t.Fatalf("rebuild pending creation plan: %v", err)
@@ -112,7 +111,6 @@ func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSc
 		sourceNoAuto,
 		schemaNoAuto,
 		identity,
-		map[string]any{"account_id": "acct-1"},
 	)
 	if err != nil || removed != nil {
 		t.Fatalf("removed auto-emit plan = %#v err=%v", removed, err)
@@ -123,7 +121,6 @@ func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSc
 		sourceV2,
 		schemaV2,
 		identity,
-		map[string]any{"account_id": "acct-1"},
 	); err == nil {
 		t.Fatal("introduced auto-emit without persisted lineage")
 	}
@@ -133,7 +130,6 @@ func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSc
 		sourceV2,
 		schemaV2,
 		identity,
-		map[string]any{"account_id": "acct-1"},
 	)
 	if err != nil || preserved != current {
 		t.Fatalf("emitted creation plan was not preserved: plan=%#v err=%v", preserved, err)
@@ -1260,7 +1256,7 @@ func (s *flowActivationTestInstanceStore) LoadRouteRecoveryProjection(_ context.
 	if instanceIdentity.Route() != route {
 		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("flow instance route recovery identity mismatch")
 	}
-	return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{Identity: instanceIdentity, Config: instance.Config}, nil
+	return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{Identity: instanceIdentity}, nil
 }
 
 func (s *flowActivationTestStore) UpsertAgent(_ context.Context, rec PersistedAgent) error {
@@ -2026,7 +2022,6 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 	req := runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle),
 		Instance:       instance,
-		Config:         map[string]any{"instance_key": instanceID},
 		TriggerEvent: eventtest.RunCreatingRootIngress(
 			"77777777-7777-4777-8777-777777777777", events.EventType("spawn.requested"),
 			"spawner", "", json.RawMessage(`{}`), 0,
@@ -2034,10 +2029,13 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 		),
 	}
 	if schema, found := req.ContractBundle.FlowSchemaByID(templateID); found && !schema.Instance.Empty() {
-		if len(schema.Pins.Inputs.EventPins) != 1 {
+		if _, constructor := bundle.FlowInputEventPin(templateID, "construction.requested"); constructor {
+			req.ConstructorInput = "construction.requested"
+		} else if len(schema.Pins.Inputs.EventPins) == 1 {
+			req.ConstructorInput = schema.Pins.Inputs.EventPins[0].Event
+		} else {
 			panic("keyed activation fixture requires one explicit constructor input")
 		}
-		req.ConstructorInput = schema.Pins.Inputs.EventPins[0].Event
 		req.ResolvedKey = instanceID
 	}
 	return req
@@ -2116,6 +2114,11 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	compileFlowActivationFixture(t, bundle)
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "entity_id": "business-value"})
+	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "unexpected": "value"})
+	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "template_id": "application-basic-v1"})
+	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "component_id": "component-1"})
+	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "vertical_id": "11111111-1111-4111-8111-111111111111"})
 	req.InitialState = "queued"
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	if err != nil {
@@ -4572,10 +4575,9 @@ func TestActivateFlowInstancePassesActivationConfigToRouteMaterialization(t *tes
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
-	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"vertical_id": {Type: "string"}})
+	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"vertical_id": {Type: "string"}})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "vertical_id": "11111111-1111-4111-8111-111111111111"}
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -4595,7 +4597,7 @@ func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *test
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
-	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{
+	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{
 		"flow_instance_path": {Type: "string"}, "flow_scope_key": {Type: "string"},
 		"instance_id": {Type: "string"}, "template_id": {Type: "string"},
 	})
@@ -4608,11 +4610,11 @@ func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *test
 	}
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "flow_instance_path": "wrong-config-path",
+	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "flow_instance_path": "wrong-config-path",
 		"flow_scope_key": "wrong-config-scope",
 		"instance_id":    "wrong-config-instance",
 		"template_id":    "wrong-config-template",
-	}
+	})
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	if err == nil || !strings.Contains(err.Error(), "contains interpolation") || !strings.Contains(err.Error(), "instance.by") {
 		t.Fatalf("ActivateFlowInstance error = %v, want agent-name interpolation teaching error", err)
@@ -4718,16 +4720,16 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 			Required: []string{"component_id", "component_type", "integer_score", "double_score"},
 		},
 	})
-	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{
+	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{
 		"component_id": {Type: "string"}, "component_type": {Type: "string"},
 		"integer_score": {Type: "integer"}, "double_score": {Type: "number"},
 	})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "component_id": "component-1",
+	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "component_id": "component-1",
 		"component_type": "api",
 		"integer_score":  int64(75),
 		"double_score":   float64(75),
-	}
+	})
 
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4767,12 +4769,12 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 			Required: []string{"source_event_id"},
 		},
 	})
-	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"source_event_id": {Type: "string"}})
+	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"source_event_id": {Type: "string"}})
 	const triggerEventID = "44444444-4444-4444-4444-444444444444"
 	const payloadSourceEventID = "business-payload-source"
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
-	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "source_event_id": payloadSourceEventID}
+	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "source_event_id": payloadSourceEventID})
 
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4801,10 +4803,9 @@ func TestActivateFlowInstanceCommittedAutoEmitUsesProjectedConfigPayload(t *test
 			Required: []string{"component_id"},
 		},
 	})
-	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"component_id": {Type: "string"}})
+	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"component_id": {Type: "string"}})
 	ctx := testAuthorActivityContext(context.Background())
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "component_id": "component-1"}
 
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4832,9 +4833,8 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 			Required: []string{"template_id"},
 		},
 	})
-	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"template_id": {Type: "string"}})
+	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"template_id": {Type: "string"}})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "template_id": "application-basic-v1"}
 
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4947,11 +4947,10 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
-	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"unexpected": {Type: "string"}})
+	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"unexpected": {Type: "string"}})
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "unexpected": "value"}
 
 	err := activateFlowInstanceForTest(am, ctx, req)
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "unexpected is not allowed") {
@@ -4982,9 +4981,8 @@ func TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigFi
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
-	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"entity_id": {Type: "string"}})
+	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"entity_id": {Type: "string"}})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "entity_id": "business-value"}
 
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "entity_id is not allowed") {
@@ -5105,14 +5103,14 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 			},
 		},
 	})
-	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{
+	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{
 		"name": {Type: "string"}, "priority": {Type: "integer"},
 	})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	req.Config = map[string]any{"instance_key": req.Instance.InstanceID, "name": "alpha",
+	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "name": "alpha",
 		"priority": 1,
-	}
+	})
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -5127,11 +5125,11 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	if got.EntityID != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
 		t.Fatalf("entity_id = %#v, want %q", got.EntityID, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
 	}
-	if got.Config["name"] != "alpha" {
-		t.Fatalf("config name = %#v, want alpha", got.Config["name"])
+	if got.Fields["name"] != "alpha" {
+		t.Fatalf("config name = %#v, want alpha", got.Fields["name"])
 	}
-	if got.Config["priority"] != int64(1) {
-		t.Fatalf("config priority = %#v, want 1", got.Config["priority"])
+	if got.Fields["priority"] != int64(1) {
+		t.Fatalf("config priority = %#v, want 1", got.Fields["priority"])
 	}
 }
 
@@ -5384,7 +5382,6 @@ func TestBuildFlowAgentConfig_SeparatesSubscriptionRouteFromEmitDeclaration(t *t
 		}),
 		map[string]string{"instance_id": "inst-1"},
 		map[string]struct{}{"micro.started": {}},
-		map[string]any{},
 	)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)
@@ -5407,7 +5404,7 @@ func TestConstructedRootAgentBlueprintUsesDeclaredRootScope(t *testing.T) {
 	want := runtimeagentidentity.RootRoute()
 	local := map[string]struct{}{"task.assigned": {}, "task.completed": {}}
 	t.Run("constructor", func(t *testing.T) {
-		cfg, err := buildFlowAgentConfig(managerIdentityTestRunID, source, name, ".", owner.InstanceID, owner.EntityID, owner.InstancePath, "test-agent", entry, nil, local, map[string]any{})
+		cfg, err := buildFlowAgentConfig(managerIdentityTestRunID, source, name, ".", owner.InstanceID, owner.EntityID, owner.InstancePath, "test-agent", entry, nil, local)
 		if err != nil || cfg.Identity.Route != want || cfg.FlowID != "." {
 			t.Fatalf("constructed root agent route=%+v want=%+v err=%v", cfg.Identity.Route, want, err)
 		}
@@ -5454,7 +5451,6 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 		entry,
 		nil,
 		staticFlowLocalEventSetForTest(review.Agents),
-		nil,
 	)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)
@@ -5471,10 +5467,11 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 
 func TestTemplateFlowAgentMaterializationBlueprintStaysRunlessUntilAdmission(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, "review", "review/inst-1", "ent-1", map[string]any{"instance_key": "inst-1"})
+	materialization, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, runtimeflowidentity.Stored(source, "review", "review/inst-1", "inst-1", runtimepipeline.FlowInstanceEntityID("review/inst-1"), ""))
 	if err != nil {
 		t.Fatalf("TemplateFlowAgentMaterializationBlueprints: %v", err)
 	}
+	blueprints := materialization.Agents
 	if len(blueprints) != 1 {
 		t.Fatalf("blueprints = %#v, want one declaration", blueprints)
 	}
@@ -5835,10 +5832,6 @@ func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *tes
 				ContractBundle: source,
 				Instance: runtimeflowidentity.Stored(source, "support", tc.instancePath, tc.instanceID,
 					runtimepipeline.FlowInstanceEntityID(tc.instancePath), "ent-1"),
-				Config: map[string]any{"instance_key": tc.instanceID},
-			}
-			if schema.Instance.Empty() {
-				req.Config = map[string]any{}
 			}
 			am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
 			records, err := am.flowInstanceAgentRecords(managerIdentityTestRunID, req, schema, scope)
@@ -6048,7 +6041,6 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 		}),
 		map[string]string{"instance_id": "inst-1"},
 		map[string]struct{}{"task.completed": {}, "review.failed": {}},
-		map[string]any{},
 	)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)
@@ -6067,36 +6059,6 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	}
 }
 
-func TestBuildFlowAgentConfigKeepsReceiverPromptNamedDataInert(t *testing.T) {
-	source := semanticview.Wrap(testFlowBundle(t, ""))
-	cfg, err := buildFlowAgentConfig(managerIdentityTestRunID,
-		source,
-		managerTestFlowAgentNamePlan(t, source, "review", "reviewer"),
-		"review",
-		"inst-1",
-		"ent-1",
-		"review/inst-1",
-		"reviewer",
-		managerTestAgentEntry("reviewer", runtimecontracts.AgentRegistryEntry{
-			ID:   "reviewer",
-			Type: "generic",
-			Role: "reviewer",
-		}),
-		map[string]string{"instance_id": "inst-1"},
-		map[string]struct{}{},
-		map[string]any{"opaque": []any{map[string]any{"system_prompt": "obsolete"}}},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(cfg.Config) != "{}" || string(cfg.ReceiverConfig) != `{"opaque":[{"system_prompt":"obsolete"}]}` {
-		t.Fatalf("receiver data entered authored config: agent=%s receiver=%s", cfg.Config, cfg.ReceiverConfig)
-	}
-	if err := models.ValidateNoAuthoredSystemPrompt(cfg.ReceiverConfig); err == nil {
-		t.Fatal("same value must still be forbidden as authored agent config")
-	}
-}
-
 func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
 	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
@@ -6106,7 +6068,7 @@ func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.
 			if _, err := buildStaticFlowAgentConfig(managerIdentityTestRunID, source, namePlan, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("buildStaticFlowAgentConfig error = %v, want admission rejection", err)
 			}
-			if _, err := buildFlowAgentConfig(managerIdentityTestRunID, source, namePlan, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
+			if _, err := buildFlowAgentConfig(managerIdentityTestRunID, source, namePlan, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("buildFlowAgentConfig error = %v, want admission rejection", err)
 			}
 		})
@@ -6130,7 +6092,6 @@ func TestBuildFlowAgentConfigRebasesAdmittedSameScopeExactToConcreteInstance(t *
 		}),
 		nil,
 		map[string]struct{}{"task.started": {}},
-		nil,
 	)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)
@@ -6154,7 +6115,7 @@ func TestFlowAgentWildcardConfigurationSurvivesRecoveryAdmission(t *testing.T) {
 			var err error
 			if dynamic {
 				path = "review/inst-1"
-				cfg, err = buildFlowAgentConfig(managerIdentityTestRunID, source, name, "review", "inst-1", "ent-1", path, "reviewer", entry, nil, localEvents, nil)
+				cfg, err = buildFlowAgentConfig(managerIdentityTestRunID, source, name, "review", "inst-1", "ent-1", path, "reviewer", entry, nil, localEvents)
 			} else {
 				cfg, err = buildStaticFlowAgentConfig(managerIdentityTestRunID, source, name, "review", path, "reviewer", entry, localEvents)
 			}
@@ -6217,7 +6178,6 @@ func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t
 		templateEntry,
 		map[string]string{"instance_id": "inst-1"},
 		staticFlowLocalEventSetForTest(templateScope.Agents),
-		map[string]any{},
 	)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)

@@ -1460,8 +1460,8 @@ accounts:
 	`, sourceRunID, entityID, at, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
-	configPayload, err := runtimepipeline.WorkflowInstanceConfigPayloadForRoute(
-		flowidentity.StoredRoute("review", "inst-1", "review/inst-1"), bundle.Semantics.Version, nil)
+	configPayload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForRoute(
+		flowidentity.StoredRoute("review", "inst-1", "review/inst-1"), bundle.Semantics.Version)
 	if err != nil {
 		t.Fatal(err)
 	}

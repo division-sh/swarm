@@ -31,6 +31,18 @@ func CopyConnectionPolicies(t testing.TB, reverse bool) string {
 	return root
 }
 
+func CopyIntegerConnectionPolicies(t testing.TB) string {
+	t.Helper()
+	root := CopyConnectionPolicies(t, false)
+	for range 2 {
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "creation_id: text", "creation_id: integer")
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "reuse_id: text", "reuse_id: integer")
+	}
+	applyClosedReplacement(t, filepath.Join(root, "worker/entities.yaml"), "type: text", "type: integer")
+	applyClosedReplacement(t, filepath.Join(root, "worker/nodes.yaml"), "payload.creation_id != ''", "payload.creation_id > 0")
+	return root
+}
+
 func CopyInstanceDeclarations(t testing.TB, flows ...string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -60,10 +72,15 @@ func CopyMixedConnectionProjections(t testing.TB, reverse bool, intrinsic string
 func CopyNonCreatingInitialization(t testing.TB, connected bool) string {
 	t.Helper()
 	root := t.TempDir()
+	invalid, err := ReceiverInitializeParserSnippet(t).SourceBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := "name: worker\npins:\n  inputs:\n" + "    " + strings.ReplaceAll(strings.TrimSuffix(string(invalid), "\n"), "\n", "\n    ") + "\n"
 	files := map[string]string{
 		"schema.yaml":        "name: init-test\npins:\n  inputs:\n    - work.ready\n  outputs:\n    - work.ready\nconnect:\n  - {event: work.ready, from: ., to: worker}\n",
 		"events.yaml":        "work.ready:\n  label: text\n",
-		"worker/schema.yaml": "name: worker\ninstance_variables:\n  variables:\n    label: text\npins:\n  inputs:\n    - event: work.ready\n      initialize:\n        label: payload.label\n",
+		"worker/schema.yaml": worker,
 		"worker/nodes.yaml":  "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      guard: {check: payload.label != ''}\n",
 	}
 	if !connected {

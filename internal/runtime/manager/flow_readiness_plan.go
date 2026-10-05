@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -152,7 +153,6 @@ func (am *AgentManager) deriveCurrentDynamicFlowRuntimeReadinessPlan(
 	records, err := am.flowInstanceAgentRecords(plan.RunID, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source,
 		Instance:       projection.Identity,
-		Config:         projection.Config,
 	}, schema, scope)
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow readiness agents %s: %w", item.InstancePath, err)
@@ -182,7 +182,6 @@ func (am *AgentManager) deriveCurrentDynamicFlowRuntimeReadinessPlan(
 			source,
 			schema,
 			projection.Identity,
-			projection.Config,
 		)
 		if err != nil {
 			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", item.InstancePath, err)
@@ -200,7 +199,6 @@ func rebuildPendingDynamicFlowRuntimeCreationEventPlan(
 	source semanticview.Source,
 	schema runtimecontracts.FlowSchemaDocument,
 	identity runtimeflowidentity.Instance,
-	config map[string]any,
 ) (*runtimepipeline.DynamicFlowRuntimeCreationEventPlan, error) {
 	if emitted {
 		return current, nil
@@ -215,6 +213,10 @@ func rebuildPendingDynamicFlowRuntimeCreationEventPlan(
 		}
 		return nil, nil
 	}
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(current.Payload, &payload); err != nil {
+		return nil, err
+	}
 	return buildDynamicFlowRuntimeCreationEventPlan(
 		source,
 		schema,
@@ -226,7 +228,7 @@ func rebuildPendingDynamicFlowRuntimeCreationEventPlan(
 			ParentEventID: current.ParentEventID,
 			ExecutionMode: current.ExecutionMode,
 		},
-		config,
+		payload,
 		current.DeliveryContext,
 		current.CreatedAt,
 	)

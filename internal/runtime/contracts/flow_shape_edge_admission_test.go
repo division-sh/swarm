@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -115,7 +116,7 @@ func TestCompiledConnectionInputEvidenceIsDetached(t *testing.T) {
 	}
 }
 
-func TestEdgeResolutionPreservesPinInitialization(t *testing.T) {
+func TestEdgeResolutionHasNoPinInitializationAuthority(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeCreate, FlowInputResolutionModeSelectOrCreate, FlowInputResolutionModeSelect} {
 		t.Run(FlowInputResolutionModeCode(mode), func(t *testing.T) {
@@ -132,12 +133,6 @@ func TestEdgeResolutionPreservesPinInitialization(t *testing.T) {
 			bundle.RootSchema = &schema
 			bundle.FlowTree.Root.Schema = schema
 			err = CompileWorkflowSemantics(bundle)
-			if mode == FlowInputResolutionModeSelect {
-				if err == nil || !strings.Contains(err.Error(), "initialize requires a creating connection") {
-					t.Fatalf("select inherited initialization authority: %v", err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -148,9 +143,8 @@ func TestEdgeResolutionPreservesPinInitialization(t *testing.T) {
 			if !ok || pin.EventType() != "account.ready" {
 				t.Fatal("initialization manufactured shared-pin selection policy")
 			}
-			values, err := pin.Initialization().EvaluateWithIdentity(map[string]any{"count": 0, "label": "kept", "active": false, "attributes": []any{}}, map[string]any{"account_id": "one"})
-			if err != nil || values["count"] != int64(0) || values["label"] != "kept" || values["active"] != false {
-				t.Fatalf("creating edge lost typed initialization: %#v %v", values, err)
+			if _, present := reflect.TypeOf(pin).MethodByName("Initialization"); present {
+				t.Fatal("pin regained construction authority")
 			}
 		})
 	}

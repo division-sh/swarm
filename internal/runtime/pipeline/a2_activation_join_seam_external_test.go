@@ -86,7 +86,6 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				req := pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: identity,
 					ConstructorInput: "order.created", ResolvedKey: identity.InstanceID,
-					Config:       map[string]any{"order_id": identity.InstanceID},
 					TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "order.created", "operator", "", []byte(`{"order_id":"order-1"}`), 0, runID, events.EventEnvelope{}, now), OccurredAt: now}
 				plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 				if err != nil {
@@ -163,7 +162,6 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					siblingReq := req
 					siblingReq.Instance = flowidentity.Derive(source, "orders", "order-2")
 					siblingReq.ResolvedKey = "order-2"
-					siblingReq.Config = map[string]any{"order_id": "order-2"}
 					siblingReq.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "order.created", "operator", "", []byte(`{"order_id":"order-2"}`), 0, runID, events.EventEnvelope{}, now)
 					siblingPlan, err := am.PrepareFlowInstanceActivation(ctx, siblingReq)
 					if err != nil {

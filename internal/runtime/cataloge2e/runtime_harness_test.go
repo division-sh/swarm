@@ -1382,7 +1382,6 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 		h.t.Fatalf("catalog target owner is incomplete: %#v", target)
 	}
 	route := runtimeflowidentity.RouteForInstancePath(target.FlowInstance)
-	config := map[string]any{}
 	constructorInput := ""
 	var resolvedKey any
 	if schema, ok := h.bundle.FlowSchemaByID(target.FlowID); ok && !schema.Instance.Empty() {
@@ -1395,7 +1394,6 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 		if !found {
 			h.t.Fatalf("catalog constructor input %s has no resolved key %s", constructorInput, schema.Instance.Path())
 		}
-		config[schema.Instance.Path()] = resolvedKey
 	}
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
@@ -1409,7 +1407,6 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 			target.EntityID,
 			"",
 		),
-		Config:           config,
 		ConstructorInput: constructorInput,
 		ResolvedKey:      resolvedKey,
 		TriggerEvent:     trigger,

@@ -96,7 +96,6 @@ func TestManagerNativeLostAdmissionCleanupBothStores(t *testing.T) {
 				ctx, cancel := context.WithTimeout(correlation.WithRuntimeInstanceID(f.ctx, grant.RuntimeInstanceID), 20*time.Second)
 				defer cancel()
 				req := f.request("exact-key", "one", "unused")
-				req.Config = map[string]any{"request_id": "exact-key"}
 				plan, err := f.manager.PrepareFlowInstanceActivation(ctx, req)
 				if err != nil {
 					t.Fatal(err)

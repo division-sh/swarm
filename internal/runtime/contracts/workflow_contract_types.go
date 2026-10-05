@@ -923,14 +923,6 @@ func (e ExpressionValue) HasCELValue() bool {
 	return e.Kind == ExpressionKindCEL
 }
 
-type FlowVariable struct {
-	Type        string            `yaml:"type"`
-	Default     any               `yaml:"default"`
-	Description string            `yaml:"description"`
-	HasDefault  bool              `yaml:"-"`
-	IsOptional  bool              `yaml:"-"`
-	Refinements SchemaRefinements `yaml:"-"`
-}
 type EventPayloadSpec struct {
 	Type       string                    `yaml:"type"`
 	Properties map[string]EventFieldSpec `yaml:"properties"`
@@ -1153,7 +1145,6 @@ type FlowSchemaDocument struct {
 	Pins                   FlowPins                 `yaml:"pins"`
 	RequiredAgents         []FlowRequiredAgent      `yaml:"required_agents"`
 	RequiredAgentsDeclared bool                     `yaml:"-"`
-	InstanceVariables      FlowInstanceVariables    `yaml:"instance_variables"`
 	AutoEmitOnCreate       AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
 	admissionProvenance    map[string]EffectiveValueProvenance
 }
@@ -1228,10 +1219,6 @@ func (c TemplateInstanceContract) CanonicalKeyMaterial(values map[string]any) ([
 	return []TemplateInstanceKeyValue{{Field: c.Field, Value: valueText}}, nil
 }
 
-type FlowInstanceVariables struct {
-	Description string                  `yaml:"description"`
-	Variables   map[string]FlowVariable `yaml:"variables"`
-}
 type AutoEmitOnCreateContract struct {
 	Event       string `yaml:"event"`
 	Description string `yaml:"description"`
@@ -1247,8 +1234,7 @@ type FlowOutputPins struct {
 	EventPins []FlowOutputEventPin `yaml:"-"`
 }
 type FlowInputEventPin struct {
-	Event      string            `yaml:"event"`
-	Initialize map[string]string `yaml:"initialize,omitempty"`
+	Event      string `yaml:"event"`
 	sourceLine int
 	sourceCol  int
 }

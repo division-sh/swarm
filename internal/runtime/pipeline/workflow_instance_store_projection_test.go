@@ -31,7 +31,7 @@ func TestWorkflowInstanceReadRejectsUnexpectedFieldRow(t *testing.T) {
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
 		Gates: []byte(`{}`), Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
-		Config:       []byte(`{"config":{},"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", EntityType: "   ", CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := DecodeWorkflowInstancePersistenceRecord(record); err == nil || !strings.Contains(err.Error(), "fieldless workflow review/inst-1 has an unexpected field row") {
@@ -117,7 +117,7 @@ func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
 		Gates: []byte(`{}`), Fields: []byte(`{"integer":75,"decimal":75.0,"exponent":75e0}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
-		Config:       []byte(`{"config":{},"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
@@ -187,7 +187,7 @@ func TestPersistedWorkflowStateRejectsUnsafeIntegerBeforeReadback(t *testing.T) 
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
 		Gates: []byte(`{}`), Fields: []byte(`{"score":9007199254740992}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
-		Config:       []byte(`{"config":{},"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
 	})
 	if err == nil || !strings.Contains(err.Error(), "$.score") || !strings.Contains(err.Error(), "declare the field as string") {
@@ -223,10 +223,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 		WorkflowVersion:    "1.0.0",
 		CurrentState:       "active",
 		EnteredStageAt:     now,
-		Config: map[string]any{
-			"custom_threshold": float64(3),
-		},
-		TransitionHistory: []WorkflowTransitionRecord{lifecycleTransitionRecordFixtureForTest(t, "review", "queued", "active", "evt-1", now)},
+		TransitionHistory:  []WorkflowTransitionRecord{lifecycleTransitionRecordFixtureForTest(t, "review", "queued", "active", "evt-1", now)},
 		StateBuckets: map[string]any{
 			"evidence": map[string]any{
 				"audit": []any{
@@ -234,7 +231,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 				},
 			},
 		},
-		Fields:      map[string]any{"business_brief": map[string]any{"title": "hello"}, "status": "open"},
+		Fields:      map[string]any{"custom_threshold": float64(3), "business_brief": map[string]any{"title": "hello"}, "status": "open"},
 		Bookkeeping: map[string]any{"last_source_event": "review.started"},
 		Gates:       map[string]bool{"g_ready": true},
 	})
@@ -256,8 +253,8 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	if got := loaded.WorkflowVersion; got != "1.0.0" {
 		t.Fatalf("WorkflowVersion = %q, want 1.0.0", got)
 	}
-	if got := strings.TrimSpace(asString(loaded.Config["custom_threshold"])); got != "3" {
-		t.Fatalf("Config custom_threshold = %#v, want 3", loaded.Config["custom_threshold"])
+	if got := strings.TrimSpace(asString(loaded.Fields["custom_threshold"])); got != "3" {
+		t.Fatalf("Config custom_threshold = %#v, want 3", loaded.Fields["custom_threshold"])
 	}
 	if got := strings.TrimSpace(asString(loaded.Fields["status"])); got != "open" {
 		t.Fatalf("Fields status = %#v, want open", loaded.Fields["status"])
@@ -341,10 +338,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		CurrentState:    "reviewing",
 		Status:          "active",
 		EnteredStageAt:  time.Now().UTC().Round(time.Microsecond),
-		Config: map[string]any{
-			"status": "waiting",
-		},
-		Fields: map[string]any{"status": "entity-open"},
+		Fields:          map[string]any{"status": "entity-open"},
 		StateBuckets: map[string]any{
 			"score": float64(9),
 		},
@@ -392,9 +386,6 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	if got := controlStatus; got != "active" {
 		t.Fatalf("flow_instances.config runtime status = %q, want active", got)
 	}
-	if got := loaded.Config["status"]; got != "waiting" {
-		t.Fatalf("business config status = %#v, want waiting", got)
-	}
 }
 
 func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t *testing.T) {
@@ -410,11 +401,8 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		WorkflowName:    "review",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-		Config: map[string]any{
-			"name": "alpha",
-		},
-		EntityType: "workflow_subject",
-		Fields:     map[string]any{"business_brief": "first"},
+		EntityType:      "workflow_subject",
+		Fields:          map[string]any{"business_brief": "first"},
 		StateBuckets: map[string]any{
 			"score": map[string]any{"value": float64(1)},
 		},
@@ -425,9 +413,6 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 
 	duplicate := first
 	duplicate.CurrentState = "mutated"
-	duplicate.Config = map[string]any{
-		"name": "beta",
-	}
 	duplicate.Fields = map[string]any{"business_brief": "second"}
 	duplicate.StateBuckets = map[string]any{
 		"score": map[string]any{"value": float64(99)},
@@ -447,9 +432,6 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 	}
 	if got := loaded.CurrentState; got != "queued" {
 		t.Fatalf("CurrentState = %q, want queued", got)
-	}
-	if got := loaded.Config["name"]; got != "alpha" {
-		t.Fatalf("Config name = %#v, want alpha", got)
 	}
 	if got := loaded.Fields["business_brief"]; got != "first" {
 		t.Fatalf("Fields business_brief = %#v, want first", got)
@@ -570,21 +552,21 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			name:         "control metadata malformed",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
 			mutateKey:    "storage",
-			mutateArg:    `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","transition_history":"bad"}`,
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","transition_history":"bad"}`,
 			wantContains: "flow_instances.config transition_history must be an array of workflow transition records",
 		},
 		{
 			name:         "instance id disagrees with flow path",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
 			mutateKey:    "storage",
-			mutateArg:    `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"storage-ref","flow_path":"storage-ref"}`,
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"storage-ref","flow_path":"storage-ref"}`,
 			wantContains: "instance_id",
 		},
 		{
 			name:         "slash-only flow path fails closed",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
 			mutateKey:    "storage",
-			mutateArg:    `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","flow_path":"/"}`,
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","flow_path":"/"}`,
 			wantContains: "flow_path",
 		},
 	}

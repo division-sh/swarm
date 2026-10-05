@@ -320,7 +320,6 @@ func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtim
 	if err := h.rt.Manager.ActivateFlowInstance(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle:   semanticview.Wrap(h.bundle),
 		Instance:         runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), "worker-flow", "worker-flow/worker-001", "worker-001", entityID, ""),
-		Config:           map[string]any{"worker_id": "worker-001"},
 		ConstructorInput: "source.prepare", ResolvedKey: "worker-001",
 		TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
 	}); err != nil {

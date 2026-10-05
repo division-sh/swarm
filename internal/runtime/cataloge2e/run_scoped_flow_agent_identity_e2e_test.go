@@ -411,7 +411,6 @@ func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, r
 		Instance: runtimeflowidentity.Stored(
 			semanticview.Wrap(h.bundle), "worker-flow", flowPath, "worker-001", entityID, "",
 		),
-		Config:           map[string]any{"worker_id": "worker-001"},
 		ConstructorInput: constructorInput, ResolvedKey: "worker-001",
 		TriggerEvent: trigger,
 		OccurredAt:   at,

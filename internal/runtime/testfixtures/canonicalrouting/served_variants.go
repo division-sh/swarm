@@ -206,18 +206,13 @@ func CopyRootIngressLegacyTemplateTargetRoute(t testing.TB) string {
 	addLegacyTemplateRoot(t, root)
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
 instance: instance_id
-instance_variables:
-  variables:
-    product_id: text
 stages:
   initializing: {initial: true}
   waiting: {}
   ready: {terminal: true}
 pins:
   inputs:
-    - event: opco.create_requested
-      initialize:
-        product_id: payload.product_id
+    - opco.create_requested
     - opco.product_initialization_requested
     - opco.product_review_requested
 auto_emit_on_create:
@@ -284,18 +279,13 @@ func CopyRootIngressLegacyTemplateAutoEmit(t testing.TB) string {
 	addLegacyTemplateRoot(t, root)
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
 instance: instance_id
-instance_variables:
-  variables:
-    product_id: text
 stages:
   initializing: {initial: true}
   spawning: {}
   ready: {terminal: true}
 pins:
   inputs:
-    - event: opco.create_requested
-      initialize:
-        product_id: payload.product_id
+    - opco.create_requested
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)

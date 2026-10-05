@@ -124,7 +124,6 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(ctx cont
 		WorkflowName:     req.Instance.TemplateID,
 		WorkflowVersion:  req.ContractBundle.WorkflowVersion(),
 		CurrentState:     req.InitialState,
-		Config:           req.Config,
 		Fields:           fields,
 		Bookkeeping:      req.Bookkeeping,
 		EnteredStageAt:   req.OccurredAt,

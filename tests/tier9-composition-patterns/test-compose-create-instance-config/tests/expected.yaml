@@ -13,7 +13,7 @@ expected:
   flow_instance_created:
     template: worker
     instance_id: ti-7561254fcace846571c87052
-    config:
+    fields:
       worker_id: w-001
       name: alpha
       priority: 1

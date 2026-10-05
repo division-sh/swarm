@@ -49,8 +49,6 @@ func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 			out.Connect, err = projectSchemaConnectValue(value)
 		case "pins":
 			out.Pins, err = projectSchemaPinsValue(value)
-		case "instance_variables":
-			out.InstanceVariables, err = projectSchemaReceiverVariablesValue(value)
 		case "required_agents":
 			out.RequiredAgentsDeclared = true
 			out.RequiredAgents, err = projectSchemaRequiredAgentsValue(value)
@@ -239,31 +237,6 @@ func projectSchemaRequiredAgentsValue(value yamlsource.Value) ([]FlowRequiredAge
 			}
 		}
 		out = append(out, row)
-	}
-	return out, nil
-}
-
-func projectSchemaReceiverVariablesValue(value yamlsource.Value) (FlowInstanceVariables, error) {
-	fields, err := schemaValueFields(value, "instance_variables", map[string]struct{}{"description": {}, "variables": {}}, true)
-	if err != nil {
-		return FlowInstanceVariables{}, err
-	}
-	out := FlowInstanceVariables{Variables: map[string]FlowVariable{}}
-	if err := schemaValueTexts(fields, map[string]*string{"description": &out.Description}, false); err != nil {
-		return out, err
-	}
-	if variables, present := fields["variables"]; present {
-		members, err := schemaValueDeclarations(variables, false)
-		if err != nil {
-			return out, err
-		}
-		for _, member := range members {
-			parsed, err := decodeWave1FieldValue(member.Value, wave1FieldNodeOptions{Context: "receiver variable", AllowDefault: true})
-			if err != nil {
-				return out, nodeValueError(member.Value, err)
-			}
-			out.Variables[member.Name] = FlowVariable{Type: parsed.Type, IsOptional: parsed.IsOptional, Description: parsed.Description, Refinements: parsed.Refinements, Default: parsed.Default, HasDefault: parsed.HasDefault}
-		}
 	}
 	return out, nil
 }

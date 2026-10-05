@@ -136,7 +136,6 @@ func runFlowAttachmentAcquisitionCuts(t *testing.T, resource string) {
 						t.Fatal(err)
 					}
 					req := f.request("business-key", "agent-acquisition", "unchanged")
-					req.Config = map[string]any{"request_id": "business-key"}
 					plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 					if err != nil {
 						t.Fatal(err)

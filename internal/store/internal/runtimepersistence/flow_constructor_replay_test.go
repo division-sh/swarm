@@ -16,9 +16,11 @@ func TestFlowConstructorImmutableReplayConflictBothStores(t *testing.T) {
 		for _, variant := range []string{"attempt_limit", "policy", "nullable", "instance_id", "flow_path", "fields", "bookkeeping", "accumulator", "initial_stage", "entity_contract", "occurrence", "workflow_version"} {
 			t.Run(backend+"/"+variant, func(t *testing.T) {
 				f, plan := newWorkflowTargetConstructionFixture(t, backend)
-				plan.Instance.Config = map[string]any{
+				for key, value := range map[string]any{
 					"attempt_limit": 3, "policy": map[string]any{"weights": []any{1, 2, 3}},
 					"nullable": nil, "instance_id": "business-key", "flow_path": "business/path",
+				} {
+					plan.Instance.Fields[key] = value
 				}
 				plan.Instance.StateBuckets = map[string]any{"totals": map[string]any{"accepted": 1}}
 				plan.Instance.Bookkeeping = map[string]any{"accepted": 1}
@@ -43,11 +45,11 @@ func TestFlowConstructorImmutableReplayConflictBothStores(t *testing.T) {
 				if err != nil || !found || !stored.CreatedAt.Equal(wantClock) || !stored.EnteredStageAt.Equal(wantClock) {
 					t.Fatalf("constructor lost exact persisted clock: %+v found=%t err=%v", stored, found, err)
 				}
-				wantConfig, err := canonicaljson.MarshalPreservingNumberKinds(plan.Instance.Config)
+				wantConfig, err := canonicaljson.MarshalPreservingNumberKinds(plan.Instance.Fields)
 				if err != nil {
 					t.Fatal(err)
 				}
-				gotConfig, err := canonicaljson.MarshalPreservingNumberKinds(stored.Config)
+				gotConfig, err := canonicaljson.MarshalPreservingNumberKinds(stored.Fields)
 				if err != nil || string(gotConfig) != string(wantConfig) {
 					t.Fatalf("constructor changed business config: got=%s want=%s err=%v", gotConfig, wantConfig, err)
 				}
@@ -62,7 +64,7 @@ func TestFlowConstructorImmutableReplayConflictBothStores(t *testing.T) {
 				}
 				switch variant {
 				case "attempt_limit", "policy", "nullable", "instance_id", "flow_path":
-					conflict.Instance.Config[variant] = "changed"
+					conflict.Instance.Fields[variant] = "changed"
 				case "fields":
 					conflict.Instance.Fields["account_id"] = "changed"
 				case "bookkeeping":

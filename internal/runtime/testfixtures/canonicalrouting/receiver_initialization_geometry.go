@@ -65,18 +65,11 @@ worker.requested:
 `,
 		"worker/schema.yaml": `name: worker
 instance: worker_id
-instance_variables:
-  variables:
-    label: text
-    count: integer
 auto_emit_on_create:
   event: worker.ready
 pins:
   inputs:
-    - event: worker.requested
-      initialize:
-        count: payload.count
-        label: payload.label
+    - worker.requested
   outputs:
     - leaf.requested
 connect:
@@ -93,6 +86,8 @@ leaf.requested:
 `,
 		"worker/entities.yaml": `worker:
   worker_id: {type: text, _unused_reason: canonical receiver key}
+  label: text
+  count: integer
 `,
 		"worker/nodes.yaml": `receiver:
   execution_type: system_node
@@ -112,18 +107,11 @@ leaf.requested:
 `,
 		"worker/leaf/schema.yaml": `name: leaf
 instance: worker_id
-instance_variables:
-  variables:
-    label: text
-    count: integer
 auto_emit_on_create:
   event: leaf.ready
 pins:
   inputs:
-    - event: leaf.requested
-      initialize:
-        count: payload.count
-        label: payload.label
+    - leaf.requested
 `,
 		"worker/leaf/events.yaml": `leaf.ready:
   worker_id: text
@@ -150,5 +138,30 @@ pins:
 	for relative, body := range files {
 		writeClosedVariantFile(t, root, relative, body)
 	}
+	return root
+}
+
+// CopyReceiverStateMutationGeometry retains the ordinary route while giving
+// its creating-input handler an explicit lawful state write.
+func CopyReceiverStateMutationGeometry(t testing.TB) string {
+	t.Helper()
+	root := CopyReceiverInitializationGeometry(t)
+	writeClosedVariantFile(t, root, "worker/nodes.yaml", `receiver:
+  execution_type: system_node
+  subscribes_to: [worker.requested, worker.ready]
+  produces: [leaf.requested]
+  event_handlers:
+    worker.requested:
+      data_accumulation:
+        source_event: worker.requested
+        writes: [label, count]
+    worker.ready:
+      emit:
+        event: leaf.requested
+        fields:
+          worker_id: payload.worker_id + '-leaf'
+          label: "'leaf-' + payload.label"
+          count: payload.count + 1
+`)
 	return root
 }

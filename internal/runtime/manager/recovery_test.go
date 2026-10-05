@@ -431,9 +431,6 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 				StorageRef:   "review/inst-1",
 				EntityID:     "ent-1",
 				WorkflowName: "review",
-				Config: map[string]any{
-					"vertical_id": "11111111-1111-4111-8111-111111111111",
-				},
 			},
 		},
 	}

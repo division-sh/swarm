@@ -963,7 +963,6 @@ func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, eventBus 
 			HasStoredPath: true,
 		},
 		ConstructorInput: "operating.reported", ResolvedKey: "2026-Q3",
-		Config:       map[string]any{"period_id": "2026-Q3"},
 		TriggerEvent: trigger, OccurredAt: enteredAt,
 	})
 	if err != nil {

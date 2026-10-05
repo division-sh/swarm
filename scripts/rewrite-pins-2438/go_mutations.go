@@ -38,12 +38,8 @@ var pinMutationSpellings = map[string][]string{
 	},
 	"fork_receiver_acquisition_effect_only.go": {"  outputs: [receiver.finished]\n", "  outputs:\n    - receiver.finished\n"},
 	"fork_receiver_notice_effect.go":           {"  outputs: [receiver.finished]\n", "  outputs:\n    - receiver.finished\n"},
-	"receiver_agent_collision.go": {
-		"    - event: work.ready\n        initialize:\n", "    - event: work.ready\n      initialize:\n",
-		"          %s: payload.values.%s\n", "        %s: payload.values.%s\n",
-	},
-	"receiver_composition.go": {"events: [work.completed", "outputs: [work.completed"},
-	"channel_delivery.go":     {"  inputs: {events: [work.requested]}", "  inputs: [work.requested]", "      - observer.requested\n", "    - observer.requested\n"},
+	"receiver_composition.go":                  {"events: [work.completed", "outputs: [work.completed"},
+	"channel_delivery.go":                      {"  inputs: {events: [work.requested]}", "  inputs: [work.requested]", "      - observer.requested\n", "    - observer.requested\n"},
 }
 
 var inlinePinSpellings = map[string][]string{

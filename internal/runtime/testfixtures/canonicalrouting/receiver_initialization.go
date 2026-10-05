@@ -10,29 +10,13 @@ import (
 func CopyReceiverInitialization(t testing.TB) string {
 	t.Helper()
 	root := CopyTemplateSelectResolution(t, TemplateSelectResolutionOptions{Mode: SelectResolutionSelectOrCreate})
-	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "name: account\n", `name: account
-instance_variables:
-  variables:
-    count: {type: integer, default: 3}
-    label: text
-    ratio: {type: numeric, default: 2.0}
-    active: boolean
-    attributes: json
-`)
-	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "    - account.ready\n", `    - event: account.ready
-      initialize:
-        count: payload.count
-        label: payload.label
-        ratio: payload.ratio
-        active: payload.active
-        attributes: payload.attributes
-`)
+	applyClosedReplacement(t, filepath.Join(root, "account/entities.yaml"), "  account_id:", "  count: integer?\n  label: text?\n  ratio: numeric?\n  active: boolean?\n  attributes: json?\n  account_id:")
 	for _, event := range []string{"account.setup", "account.ready"} {
 		applyClosedReplacement(t, filepath.Join(root, "producer/events.yaml"), event+":\n  key: account_id\n  account_id: text\n", event+`:
   key: account_id
   account_id: text
   count: integer?
-  label: text?
+  label: text
   ratio: numeric?
   active: boolean?
   attributes: json?

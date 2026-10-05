@@ -619,7 +619,7 @@ func TestSelectedContractConstructedAgentRecordsIncludeInferredFlowRequiredAgent
 	if err != nil {
 		t.Fatal(err)
 	}
-	constructed, err := runtimemanager.ConstructedFlowMaterialization(source, selectedContractAgentTestRunID, instance, map[string]any{})
+	constructed, err := runtimemanager.ConstructedFlowMaterialization(source, selectedContractAgentTestRunID, instance)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,6 @@ import (
 // needed to restore one exact run-scoped materialized route at startup.
 type WorkflowInstanceRouteRecoveryProjection struct {
 	Identity runtimeflowidentity.Instance
-	Config   map[string]any
 }
 
 func (s *workflowInstanceStore) LoadRouteRecoveryProjection(
@@ -32,7 +31,7 @@ func (s *workflowInstanceStore) LoadRouteRecoveryProjection(
 		return WorkflowInstanceRouteRecoveryProjection{}, err
 	}
 
-	config, control, err := decodeWorkflowInstanceConfigPayload(record.Config, workflowInstancePersistedControl{
+	control, err := decodeWorkflowInstanceHeaderPayload(record.Config, workflowInstancePersistedControl{
 		StorageRef: route.InstancePath,
 		EntityID:   record.EntityID,
 	})
@@ -50,7 +49,6 @@ func (s *workflowInstanceStore) LoadRouteRecoveryProjection(
 		ParentFlowInstance: control.ParentFlowInstance,
 		ParentEntityID:     control.ParentEntityID,
 		WorkflowName:       record.WorkflowName,
-		Config:             config,
 	}
 	persistedIdentity, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(record.EntityID), instance)
 	if err != nil {
@@ -58,6 +56,5 @@ func (s *workflowInstanceStore) LoadRouteRecoveryProjection(
 	}
 	return WorkflowInstanceRouteRecoveryProjection{
 		Identity: persistedIdentity,
-		Config:   cloneStringAnyMap(config),
 	}, nil
 }

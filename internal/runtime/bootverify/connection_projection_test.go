@@ -116,13 +116,13 @@ func TestConnectionCommonGuaranteesRespectEveryArrival(t *testing.T) {
 	}
 }
 
-func TestConnectionStaticInitializationRequiresCreatingAuthority(t *testing.T) {
+func TestConnectionDoesNotAdmitRetiredPinInitialization(t *testing.T) {
 	for _, connected := range []bool{false, true} {
 		t.Run(map[bool]string{false: "no-edge", true: "static-edge"}[connected], func(t *testing.T) {
 			root := canonicalrouting.CopyNonCreatingInitialization(t, connected)
 			repo := repoRootForBootverifyTest(t)
 			_, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
-			if err == nil || !strings.Contains(err.Error(), "initialize requires a creating connection") {
+			if err == nil || !strings.Contains(err.Error(), "scalar") {
 				t.Fatalf("non-creating initialization admission = %v", err)
 			}
 		})

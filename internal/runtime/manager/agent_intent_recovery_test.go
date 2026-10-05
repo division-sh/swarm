@@ -11,36 +11,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestAgentFactorySeparatesReceiverDataFromAuthoredPromptAuthority(t *testing.T) {
-	for _, raw := range []string{
-		`{"system_prompt":"inert"}`,
-		`{"nested":{"system_prompt":"inert"}}`,
-		`{"nested":[{"system_prompt":"inert"}]}`,
-	} {
-		for _, receiver := range []bool{false, true} {
-			cfg := managerTestAgentConfig(models.AgentConfig{ID: "worker", Role: "worker", Model: "regular"})
-			cfg.Config = json.RawMessage(`{}`)
-			if receiver {
-				cfg.ReceiverConfig = json.RawMessage(raw)
-			} else {
-				cfg.Config = json.RawMessage(raw)
-			}
-			calls := 0
-			am := newTestAgentManager(t, nil, func(got models.AgentConfig) (Agent, error) {
-				calls++
-				if string(got.ReceiverConfig) != raw || string(got.Config) != "{}" || got.Model != "regular" {
-					t.Fatalf("factory received mixed namespaces: %#v", got)
-				}
-				return newGenericAgent(got), nil
-			})
-			_, err := am.buildAgent(cfg)
-			if receiver {
-				if err != nil || calls != 1 {
-					t.Fatalf("receiver business data rejected before factory: calls=%d err=%v", calls, err)
-				}
-			} else if err == nil || !strings.Contains(err.Error(), "is unsupported") || calls != 0 {
-				t.Fatalf("authored prompt reached factory: calls=%d err=%v", calls, err)
-			}
+func TestAgentFactoryRejectsAuthoredPromptAuthority(t *testing.T) {
+	for _, raw := range []string{`{"system_prompt":"inert"}`, `{"nested":{"system_prompt":"inert"}}`, `{"nested":[{"system_prompt":"inert"}]}`} {
+		cfg := managerTestAgentConfig(models.AgentConfig{ID: "worker", Role: "worker", Model: "regular"})
+		cfg.Config = json.RawMessage(raw)
+		calls := 0
+		am := newTestAgentManager(t, nil, func(got models.AgentConfig) (Agent, error) { calls++; return newGenericAgent(got), nil })
+		_, err := am.buildAgent(cfg)
+		if err == nil || !strings.Contains(err.Error(), "is unsupported") || calls != 0 {
+			t.Fatalf("authored prompt reached factory: calls=%d err=%v", calls, err)
 		}
 	}
 }

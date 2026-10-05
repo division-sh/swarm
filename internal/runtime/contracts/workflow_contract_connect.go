@@ -29,7 +29,6 @@ type compiledFlowInputPinValue struct {
 	context             FlowPinCompilationContext
 	producerEventSchema CompiledEventSchema
 	receiverEventSchema CompiledEventSchema
-	initialization      ReceiverInitialization
 	provenance          CompiledFlowPinProvenance
 	digest              string
 }
@@ -37,11 +36,10 @@ type compiledFlowInputPinValue struct {
 // FlowPinCompilationContext supplies the already-admitted scope and event
 // schema facts required to compile a pin independently of any connect edge.
 type FlowPinCompilationContext struct {
-	FlowID        string
-	FlowPath      string
-	SourceFile    string
-	EventSchema   CompiledEventSchema
-	Configuration ReceiverConfiguration
+	FlowID      string
+	FlowPath    string
+	SourceFile  string
+	EventSchema CompiledEventSchema
 }
 
 // CompiledFlowPinProvenance is diagnostic source evidence. It is immutable
@@ -66,11 +64,7 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 		return CompiledFlowInputPin{}, err
 	}
 	provenance := compiledFlowPinProvenance(context, pin.sourceLine, pin.sourceCol)
-	initialization, err := CompileReceiverInitialization(context.Configuration, pin.Initialize, context.EventSchema)
-	if err != nil {
-		return CompiledFlowInputPin{}, fmt.Errorf("input pin %s: %w", pin.Event, err)
-	}
-	digest, err := compiledFlowPinDigest("input", context, pin.Event, context.EventSchema, context.EventSchema, initialization)
+	digest, err := compiledFlowPinDigest("input", context, pin.Event, context.EventSchema, context.EventSchema)
 	if err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("compile input pin %s digest: %w", pin.Event, err)
 	}
@@ -79,7 +73,7 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 	return CompiledFlowInputPin{value: &compiledFlowInputPinValue{
 		event:   pin.Event,
 		context: storedContext, producerEventSchema: context.EventSchema, receiverEventSchema: context.EventSchema,
-		provenance: provenance, digest: digest, initialization: initialization,
+		provenance: provenance, digest: digest,
 	}}, nil
 }
 
@@ -177,11 +171,7 @@ func (p CompiledFlowInputPin) BindImportedEventSchema(schema CompiledEventSchema
 	value.producerEventSchema = schema
 	value.receiverEventSchema = schema
 	var err error
-	value.initialization, err = CompileReceiverInitialization(value.initialization.configuration, value.initialization.Bindings(), schema)
-	if err != nil {
-		return CompiledFlowInputPin{}, err
-	}
-	value.digest, err = compiledFlowPinDigest("input", value.context, value.event, schema, schema, value.initialization)
+	value.digest, err = compiledFlowPinDigest("input", value.context, value.event, schema, schema)
 	if err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("compile imported input pin %s digest: %w", value.event, err)
 	}
@@ -207,7 +197,7 @@ func CompileFlowOutputPin(context FlowPinCompilationContext, pin FlowOutputEvent
 		return CompiledFlowOutputPin{}, err
 	}
 	provenance := compiledFlowPinProvenance(context, pin.sourceLine, pin.sourceCol)
-	digest, err := compiledFlowPinDigest("output", context, pin.Event, context.EventSchema, CompiledEventSchema{}, ReceiverInitialization{})
+	digest, err := compiledFlowPinDigest("output", context, pin.Event, context.EventSchema, CompiledEventSchema{})
 	if err != nil {
 		return CompiledFlowOutputPin{}, fmt.Errorf("compile output pin %s digest: %w", pin.Event, err)
 	}
@@ -267,7 +257,7 @@ func (p CompiledFlowOutputPin) BindImportedEventSchema(schema CompiledEventSchem
 	value := *p.value
 	value.context.EventSchema = schema
 	var err error
-	value.digest, err = compiledFlowPinDigest("output", value.context, value.event, schema, CompiledEventSchema{}, ReceiverInitialization{})
+	value.digest, err = compiledFlowPinDigest("output", value.context, value.event, schema, CompiledEventSchema{})
 	if err != nil {
 		return CompiledFlowOutputPin{}, fmt.Errorf("compile imported output pin %s digest: %w", value.event, err)
 	}
@@ -309,12 +299,8 @@ func compiledFlowPinProvenance(context FlowPinCompilationContext, line, column i
 	}
 }
 
-func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, event string, producerSchema, receiverSchema CompiledEventSchema, initialization ReceiverInitialization) (string, error) {
+func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, event string, producerSchema, receiverSchema CompiledEventSchema) (string, error) {
 	key, hasKey := producerSchema.BusinessKey()
-	var initialize any
-	if direction == "input" {
-		initialize = initialization.semanticEvidence()
-	}
 	return canonicaljson.Hash(struct {
 		Direction            string `json:"direction"`
 		FlowPath             string `json:"flow_path"`
@@ -325,14 +311,12 @@ func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, 
 		BusinessKeyType      string `json:"business_key_type,omitempty"`
 		HasEventBusinessKey  bool   `json:"has_event_business_key"`
 		ReceiverSchemaDigest string `json:"receiver_schema_digest,omitempty"`
-		Initialization       any    `json:"initialization,omitempty"`
 	}{
 		Direction: direction, FlowPath: context.FlowPath, Event: event,
 		EventSchemaName:   producerSchema.EventName(),
 		EventSchemaDigest: producerSchema.AcceptanceSchemaDigest(),
 		BusinessKeyField:  key.Field, BusinessKeyType: key.SemanticType, HasEventBusinessKey: hasKey,
 		ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(),
-		Initialization:       initialize,
 	})
 }
 
@@ -382,9 +366,6 @@ func (c FlowConnect) normalized() FlowConnect {
 
 func compileFlowInputPins(bundle *WorkflowContractBundle, flowID, flowPath, sourceFile string, in []FlowInputEventPin) ([]CompiledFlowInputPin, error) {
 	if bundle != nil {
-		if _, err := bundle.ReceiverConfigurationForFlow(flowID); err != nil {
-			return nil, err
-		}
 	}
 	out := make([]CompiledFlowInputPin, 0, len(in))
 	seen := make(map[string]struct{}, len(in))
@@ -411,11 +392,6 @@ func flowInputPinCompilationContext(bundle *WorkflowContractBundle, flowID, flow
 	if bundle == nil {
 		return context, nil
 	}
-	configuration, err := bundle.ReceiverConfigurationForFlow(flowID)
-	if err != nil {
-		return FlowPinCompilationContext{}, err
-	}
-	context.Configuration = configuration
 	producerFlowID, producerEvent := flowID, event
 	if row, found, ambiguous := connectedEventSchemaOwnershipRow(bundle, flowID, event); ambiguous {
 		return FlowPinCompilationContext{}, fmt.Errorf("input pin %s has ambiguous connected producer ownership", event)

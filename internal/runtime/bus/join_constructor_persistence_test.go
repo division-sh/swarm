@@ -29,7 +29,7 @@ func TestJoinReceiverReadConsumesHeaderAndOptionalFields(t *testing.T) {
 	fixture, _ := topologyOperationFixture(t)
 	constructed := ConstructedFlowInstanceIdentityFixture(fixture.Source, "workers", "one", busInternalTestRunID)
 	target := events.RouteIdentity{FlowID: constructed.TemplateID, FlowInstance: constructed.InstancePath, EntityID: constructed.EntityID}
-	config, err := pipeline.WorkflowInstanceConfigPayloadForIdentity(constructed, "v1", map[string]any{})
+	config, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(constructed, "v1")
 	if err != nil {
 		t.Fatal(err)
 	}

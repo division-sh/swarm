@@ -11,7 +11,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/google/uuid"
 )
 
 func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testing.T) {
@@ -46,7 +45,7 @@ func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	constructed, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, left, map[string]any{})
+	constructed, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, left)
 	if err != nil || len(constructed.Agents) != 1 {
 		t.Fatalf("constructed static declaration: %+v %v", constructed, err)
 	}
@@ -56,11 +55,18 @@ func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testin
 	}
 	records = append(records, leftRecord)
 	for _, flow := range []string{"right", "nested/deeper"} {
-		materialized, err := TemplateFlowAgentMaterializationRecords(managerIdentityTestRunID, source, flow, flow+"/instance-1", uuid.NewString(), map[string]any{"instance_key": "instance-1"})
+		identity := flowidentity.Stored(source, flow, flow+"/instance-1", "instance-1", runtimepipeline.FlowInstanceEntityID(flow+"/instance-1"), "")
+		materialized, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, identity)
 		if err != nil {
 			t.Fatal(err)
 		}
-		records = append(records, materialized...)
+		for _, blueprint := range materialized.Agents {
+			record, err := blueprint.Materialize(managerIdentityTestRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			records = append(records, record)
+		}
 	}
 	if len(records) != 4 {
 		t.Fatalf("real loader/materializer did not produce all four owners: %+v", records)

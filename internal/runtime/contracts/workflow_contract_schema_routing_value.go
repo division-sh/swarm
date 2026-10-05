@@ -187,29 +187,7 @@ func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
 func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputEventPin, FlowOutputEventPin, error) {
 	input := FlowInputEventPin{sourceLine: value.Location().Line, sourceCol: value.Location().Column}
 	output := FlowOutputEventPin{sourceLine: value.Location().Line, sourceCol: value.Location().Column}
-	var event string
-	var err error
-	if value.Presence() == yamlsource.PresenceScalar {
-		event, err = schemaValueText(value, true)
-	} else if direction == "inputs" {
-		fields, fieldErr := schemaValueFields(value, direction+" event pin", inputEventPinFieldOptions, true)
-		if fieldErr != nil {
-			return input, output, fieldErr
-		}
-		if err = schemaValueRequiredTexts(value, fields, map[string]*string{"event": &event}); err != nil {
-			return input, output, err
-		}
-		if err == nil {
-			if initialize, present := fields["initialize"]; present {
-				input.Initialize, err = projectSchemaInitializeValue(initialize)
-			}
-		}
-		if err == nil && len(input.Initialize) == 0 {
-			err = fmt.Errorf("input event pin mapping requires non-empty initialize")
-		}
-	} else {
-		_, err = schemaValueText(value, true)
-	}
+	event, err := schemaValueText(value, true)
 	if err != nil {
 		return input, output, nodeValueError(value, err)
 	}
@@ -226,23 +204,4 @@ func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputE
 		return input, output, nodeValueError(value, err)
 	}
 	return input, output, nil
-}
-
-func projectSchemaInitializeValue(value yamlsource.Value) (map[string]string, error) {
-	fields, err := schemaValueDeclarations(value, true)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	for _, field := range fields {
-		path, err := schemaValueText(field.Value, true)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := receiverPayloadPath(path); err != nil {
-			return nil, nodeValueError(field.Value, err)
-		}
-		out[field.Name] = path
-	}
-	return out, nil
 }

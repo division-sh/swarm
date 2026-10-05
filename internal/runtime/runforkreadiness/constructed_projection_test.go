@@ -148,7 +148,7 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 					case "delivery_association":
 						attachment.SourceEventID = "invented-input"
 					case "config":
-						attachment.Config = map[string]any{"invented": true}
+						attachment.WorkflowVersion = "invented"
 					case "actor_revision":
 						attachment.Agents = append([]runfork.RunForkSelectedContractAgentExpectation(nil), attachment.Agents...)
 						attachment.Agents[0].ConfigRevision = "crossed"

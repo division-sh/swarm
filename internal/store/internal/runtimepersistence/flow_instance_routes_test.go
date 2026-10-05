@@ -75,7 +75,7 @@ func seedFlowRouteHeaderFixture(t *testing.T, ctx context.Context, exec flowRout
 	t.Helper()
 	at := time.Now().UTC()
 	seedWorkflowHeaderProjectionFixture(t, ctx, exec, runID, entityID, path, flow, entityType, "active", "{}", at)
-	payload, err := runtimepipeline.WorkflowInstanceConfigPayloadForRoute(runtimeflowidentity.RouteForInstancePath(path), "1.0.0", map[string]any{})
+	payload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForRoute(runtimeflowidentity.RouteForInstancePath(path), "1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -398,7 +398,7 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 func stateOnlyWorkflowEngineMutationRecord(t *testing.T, runID, flowID, instancePath, entityID, expectedState string, expectedRevision int64, createdAt time.Time) runtimepipeline.WorkflowEngineStateRecord {
 	t.Helper()
 	route := runtimeflowidentity.StoredRoute(flowID, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath)
-	payload, err := runtimepipeline.WorkflowInstanceConfigPayloadForRoute(route, "1", nil)
+	payload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForRoute(route, "1")
 	if err != nil {
 		t.Fatal(err)
 	}

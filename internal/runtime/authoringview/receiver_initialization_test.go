@@ -2,7 +2,6 @@ package authoringview
 
 import (
 	"context"
-	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -11,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestReceiverInitializationAdmissionProjectionParity(t *testing.T) {
+func TestConstructorInputAdmissionProjectionParity(t *testing.T) {
 	for _, fixture := range []struct {
 		name  string
 		root  func(testing.TB) string
@@ -37,7 +36,7 @@ func TestReceiverInitializationAdmissionProjectionParity(t *testing.T) {
 				t.Fatalf("admitted creation failed verify: %+v", report.Errors())
 			}
 			view := mustBuild(t, source, &report)
-			for flowID, bindings := range fixture.flows {
+			for flowID := range fixture.flows {
 				flow := flowByID(t, view, flowID)
 				pins := source.FlowInputEventPins(flowID)
 				if len(flow.InputPins) != 1 || len(pins) != 1 {
@@ -49,12 +48,8 @@ func TestReceiverInitializationAdmissionProjectionParity(t *testing.T) {
 					t.Fatal("creating input has no admitted producer schema")
 				}
 				receiver, ok := pins[0].ReceiverEventSchema()
-				if !ok || !reflect.DeepEqual(pin.Initialize, bindings) || pin.PinDigest != pins[0].Digest() || pin.ProducerSchemaDigest != producer.AcceptanceSchemaDigest() || pin.ReceiverSchemaDigest != receiver.AcceptanceSchemaDigest() {
+				if !ok || pin.PinDigest != pins[0].Digest() || pin.ProducerSchemaDigest != producer.AcceptanceSchemaDigest() || pin.ReceiverSchemaDigest != receiver.AcceptanceSchemaDigest() {
 					t.Fatalf("%s authoring view differs from compiled initialization: %+v", flowID, pin)
-				}
-				pin.Initialize["label"] = "payload.borrowed"
-				if !reflect.DeepEqual(pins[0].Initialization().Bindings(), bindings) {
-					t.Fatal("authoring readback mutated canonical initialization")
 				}
 			}
 		})

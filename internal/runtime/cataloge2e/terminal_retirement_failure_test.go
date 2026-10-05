@@ -36,9 +36,9 @@ func TestTerminalMiddleMemberFailureRetainsSuffixBothStores(t *testing.T) {
 			at := time.Now().UTC()
 			trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "worker.ready.requested", "cataloge2e", "", []byte(`{"worker_id":"worker-002"}`), 0, catalogRuntimeRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, unrelatedEntity), at)
 			if err := h.rt.Manager.ActivateFlowInstance(activationCtx, runtimepipeline.FlowInstanceActivationRequest{
-				ContractBundle: semanticview.Wrap(h.bundle),
-				Instance:       flowidentity.Stored(semanticview.Wrap(h.bundle), "worker-flow", unrelatedPath, "worker-002", unrelatedEntity, ""),
-				Config:         map[string]any{"worker_id": "worker-002"}, ConstructorInput: "worker.ready.requested", ResolvedKey: "worker-002", TriggerEvent: trigger, OccurredAt: at,
+				ContractBundle:   semanticview.Wrap(h.bundle),
+				Instance:         flowidentity.Stored(semanticview.Wrap(h.bundle), "worker-flow", unrelatedPath, "worker-002", unrelatedEntity, ""),
+				ConstructorInput: "worker.ready.requested", ResolvedKey: "worker-002", TriggerEvent: trigger, OccurredAt: at,
 			}); err != nil {
 				t.Fatal(err)
 			}

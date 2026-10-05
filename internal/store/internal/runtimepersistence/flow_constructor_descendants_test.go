@@ -39,7 +39,6 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 				req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
 				if keyed {
 					req.ConstructorInput, req.ResolvedKey = "task.started", "r1"
-					req.Config = map[string]any{"request_id": "r1"}
 					req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "task.started", "constructor-fixture", "", []byte(`{"request_id":"r1"}`), 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
 				}
 				plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
@@ -88,7 +87,6 @@ func newEagerFlowConstructorFixture(t *testing.T, backend string) receiverConfig
 func eagerFlowConstructorPlan(t *testing.T, f receiverConfigActivationFixture) pipeline.FlowInstanceActivationPlan {
 	t.Helper()
 	req := f.request("business-key", "r1", "first")
-	req.Config = map[string]any{"request_id": "business-key"}
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 	if err != nil {
 		t.Fatal(err)

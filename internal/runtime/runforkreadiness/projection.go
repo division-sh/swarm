@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -101,11 +100,7 @@ func Project(
 		if !found {
 			return nil, fmt.Errorf("selected fixed actor census missing constructed header for %s", instance.InstancePath)
 		}
-		config, err := runtimepipeline.WorkflowInstanceBusinessConfigForRoute(route, entity.MaterializationMetadata.FlowConfig)
-		if err != nil {
-			return nil, err
-		}
-		flow, err := runtimemanager.ConstructedFlowMaterialization(source, plan.SourceRunID, instance, config)
+		flow, err := runtimemanager.ConstructedFlowMaterialization(source, plan.SourceRunID, instance)
 		if err != nil {
 			return nil, err
 		}
@@ -244,7 +239,6 @@ func Project(
 }
 
 func bindConstructedWorkflowState(state *runfork.RunForkSelectedContractWorkflowState, flow runtimemanager.FlowInstanceMaterializationPlan) error {
-	state.Config = flow.Config
 	for _, blueprint := range flow.Agents {
 		plan := blueprint.Identity.Normalize()
 		revision, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, plan)
@@ -417,9 +411,9 @@ func selectedContractReadinessState(source semanticview.Source, eventID, flowID 
 		WorkflowVersion: strings.TrimSpace(source.WorkflowVersion()), Mode: "static",
 	}
 	var err error
-	state.Config, err = runtimepipeline.WorkflowInstanceBusinessConfigForRoute(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+	_, err = runtimepipeline.DecodeWorkflowInstanceRecordedHeader(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
 	if err != nil {
-		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract fixed-revision receiver configuration for entity %s: %w", entity.EntityID, err)
+		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract fixed-revision header for entity %s: %w", entity.EntityID, err)
 	}
 	if flowID == semanticview.RootExecutionFlowID(source) {
 		state.AddressKind = runfork.RunForkSelectedContractWorkflowStateRunScope
@@ -437,12 +431,10 @@ func selectedContractReadinessState(source semanticview.Source, eventID, flowID 
 }
 
 func selectedContractWorkflowStatesEqual(left, right runfork.RunForkSelectedContractWorkflowState) bool {
-	leftConfig, leftErr := canonicaljson.MarshalPreservingNumberKinds(left.Config)
-	rightConfig, rightErr := canonicaljson.MarshalPreservingNumberKinds(right.Config)
 	return left.EntityID == right.EntityID && left.EntityType == right.EntityType && left.FlowID == right.FlowID &&
 		left.WorkflowVersion == right.WorkflowVersion && left.Mode == right.Mode &&
 		left.ExecutionMode == right.ExecutionMode && left.AddressKind == right.AddressKind &&
-		left.Route == right.Route && leftErr == nil && rightErr == nil && string(leftConfig) == string(rightConfig) &&
+		left.Route == right.Route &&
 		selectedContractWorkflowStateAgentsEqual(left.Agents, right.Agents)
 }
 

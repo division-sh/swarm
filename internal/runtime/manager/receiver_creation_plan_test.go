@@ -41,7 +41,7 @@ func TestRebuildPendingCreationConsumesCompiledReceiverOccurrence(t *testing.T) 
 		RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,
 		Payload: []byte(`{"worker_id":"worker-001"}`), CreatedAt: time.Unix(100, 0).UTC(),
 	}
-	plan, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(current, false, source, schema, identity, map[string]any{"worker_id": "worker-001"})
+	plan, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(current, false, source, schema, identity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestRebuildPendingCreationConsumesCompiledReceiverOccurrence(t *testing.T) 
 		t.Fatalf("rebuilt occurrence lacks its compiled receiver proof: %+v", proof)
 	}
 	for _, invalid := range []map[string]any{{}, {"worker_id": 17}, {"worker_id": "worker-001", "unexpected": true}} {
-		if _, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(current, false, source, schema, identity, invalid); err == nil {
+		if _, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(current, false, source, schema, identity); err == nil {
 			t.Fatalf("rebuild accepted invalid receiver payload: %+v", invalid)
 		}
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestSelectedContractReceiverConfigRejectsInvalidBusinessEvidence(t *testing.T) {
+func TestSelectedContractHeaderRejectsEveryReceiverConfigCopy(t *testing.T) {
 	for _, business := range []string{
 		`{}`,
 		`{"vertical_id":7}`,
@@ -17,7 +17,7 @@ func TestSelectedContractReceiverConfigRejectsInvalidBusinessEvidence(t *testing
 			req := templateAdmissionRequest(t)
 			req.Plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","config":` + business + `}`)
 			admitted, err := Admit(req)
-			if err == nil || !strings.Contains(err.Error(), "receiver configuration") {
+			if err == nil || !strings.Contains(err.Error(), "unknown") {
 				t.Fatalf("invalid business evidence acquired admission: %v", err)
 			}
 			if _, err := admitted.Projection(); err == nil {

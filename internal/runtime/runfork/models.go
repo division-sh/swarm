@@ -1173,7 +1173,6 @@ type RunForkSelectedContractWorkflowState struct {
 	Mode            string
 	AddressKind     RunForkSelectedContractWorkflowStateAddressKind
 	Route           runtimeflowidentity.Route
-	Config          map[string]any
 	Agents          []RunForkSelectedContractAgentExpectation
 }
 

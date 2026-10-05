@@ -155,7 +155,6 @@ func prepareConstructedRootAgentForTest(t *testing.T) (*AgentManager, *flowActiv
 	req := runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source,
 		Instance:       owner,
-		Config:         map[string]any{},
 		TriggerEvent:   testFlowActivationTriggerEvent("77777777-7777-4777-8777-777777777777"),
 	}
 	ctx := testAuthorActivityContext(context.Background())

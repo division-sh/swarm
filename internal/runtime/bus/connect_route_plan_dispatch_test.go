@@ -1060,15 +1060,7 @@ func connectRoutePlanActivationAddressFields(fields map[string]any) map[string]s
 }
 
 func connectRoutePlanActivationVariables(req runtimepipeline.FlowInstanceActivationRequest) map[string]string {
-	out := map[string]string{}
-	for key, raw := range req.Config {
-		key = strings.TrimSpace(key)
-		value := strings.TrimSpace(fmt.Sprint(raw))
-		if key != "" && value != "" {
-			out[key] = value
-		}
-	}
-	return out
+	return map[string]string{"instance_id": req.Instance.InstanceID, "entity_id": req.Instance.EntityID, "flow_path": req.Instance.InstancePath}
 }
 
 func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimepipelineobligation.CommittedScope) error {
@@ -2466,8 +2458,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	if err != nil {
 		t.Fatal(err)
 	}
-	if activation.Config["vertical_id"] != "v-1" || fields["vertical_id"] != "v-1" {
-		t.Fatalf("activation config/constructor fields = %#v/%#v, want vertical_id v-1", activation.Config, fields)
+	if activation.ResolvedKey != "v-1" || fields["vertical_id"] != "v-1" {
+		t.Fatalf("activation key/constructor fields = %#v/%#v, want vertical_id v-1", activation.ResolvedKey, fields)
 	}
 	if _, exists := fields["entity_type"]; exists {
 		t.Fatalf("constructor fields retain typed entity_type: %#v", fields)
@@ -2742,8 +2734,8 @@ func TestCommittedReplayReusesPersistedSyntheticInstanceSourceWithoutReminting(t
 	if minted == eventID {
 		t.Fatalf("minted validation_case_id = source event id %q, want deterministic uuid mint distinct from event_id mint", minted)
 	}
-	if activation.Config["validation_case_id"] != minted || fields["validation_case_id"] != minted {
-		t.Fatalf("activation config/constructor fields = %#v/%#v, want carried validation_case_id %q", activation.Config, fields, minted)
+	if fields["validation_case_id"] != minted {
+		t.Fatalf("constructor fields = %#v, want carried validation_case_id %q", fields, minted)
 	}
 	if got := activation.Bookkeeping["last_source_event"]; got != eventID {
 		t.Fatalf("last_source_event = %v, want %q", got, eventID)
@@ -2866,8 +2858,8 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if activation.ResolvedKey != eventID || fields["validation_case_id"] != eventID || activation.Config["validation_case_id"] != eventID {
-		t.Fatalf("activation key/config/constructor fields = %#v/%#v/%#v, want event_id-minted validation_case_id %q", activation.ResolvedKey, activation.Config, fields, eventID)
+	if activation.ResolvedKey != eventID || fields["validation_case_id"] != eventID {
+		t.Fatalf("activation key/constructor fields = %#v/%#v, want event_id-minted validation_case_id %q", activation.ResolvedKey, fields, eventID)
 	}
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "validator", "validator-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "validator",
@@ -2970,7 +2962,7 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 			}
 		}
 	}
-	for label, facts := range map[string]map[string]any{"config": request.Config, "bookkeeping": request.Bookkeeping} {
+	for label, facts := range map[string]map[string]any{"bookkeeping": request.Bookkeeping} {
 		for key := range facts {
 			normalized := strings.ToLower(key)
 			if strings.Contains(normalized, "on_missing") || strings.Contains(normalized, "on_conflict") || strings.Contains(normalized, "policy") {
@@ -3365,18 +3357,17 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		t.Fatalf("missing publish activations = %d, want 1 create", got)
 	}
 	activation := store.activations[0]
-	if _, ok := activation.Config["template_instance_on_missing"]; ok {
-		t.Fatalf("activation config retains on_missing policy fact: %#v", activation.Config)
-	}
-	if _, ok := activation.Config["template_instance_on_conflict"]; ok {
-		t.Fatalf("activation config retains on_conflict policy fact: %#v", activation.Config)
-	}
 	fields, err := testFlowActivationConstructorFields(activation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if activation.Config["account_id"] != "acct-2" || fields["account_id"] != "acct-2" {
-		t.Fatalf("activation config/constructor fields = %#v/%#v, want carried account_id acct-2", activation.Config, fields)
+	for _, policy := range []string{"template_instance_on_missing", "template_instance_on_conflict"} {
+		if _, exists := fields[policy]; exists {
+			t.Fatalf("constructor retains policy fact: %#v", fields)
+		}
+	}
+	if activation.ResolvedKey != "acct-2" || fields["account_id"] != "acct-2" {
+		t.Fatalf("activation key/constructor fields = %#v/%#v, want carried account_id acct-2", activation.ResolvedKey, fields)
 	}
 	createdWant := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "account", "account-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "account",
@@ -3952,8 +3943,8 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 	if err != nil {
 		t.Fatal(err)
 	}
-	if activation.Config["vertical_id"] != "v-1" || fields["vertical_id"] != "v-1" {
-		t.Fatalf("renamed activation config/constructor fields = %#v/%#v, want receiver vertical_id from adapter source_vertical_id", activation.Config, fields)
+	if activation.ResolvedKey != "v-1" || fields["vertical_id"] != "v-1" {
+		t.Fatalf("renamed activation key/constructor fields = %#v/%#v, want receiver vertical_id from adapter source_vertical_id", activation.ResolvedKey, fields)
 	}
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",

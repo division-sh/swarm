@@ -2810,8 +2810,7 @@ type_system:
       same declared domain: opaque json and object are not interchangeable.
   schema_refinements:
     description: |
-      Declared event payload fields, named-type fields, entity fields, and
-      receiver instance variables
+      Declared event payload fields, named-type fields, and entity fields
       may carry only the closed schema-refinement vocabulary listed here.
       These refinements extend the shared type/schema owner; they are not a
       handler-level validation row, not a rule artifact grammar, not CEL, and
@@ -4128,8 +4127,8 @@ handler_specification:
         fail_closed: Missing source namespace, invalid source namespace, missing source field, missing emitted event payload
           schema, missing required emitted payload field after lowering, undeclared target payload field, and envelope-owned
           payload keys are hard invalidity.
-        excluded_surfaces: "`emit.from` is not valid for receiver initialize, connect maps, or data-handoff maps. Those
-          remain separate mapping surfaces and must not inherit emitted-payload lowering."
+        excluded_surfaces: "`emit.from` is valid only on emitted-event payload surfaces. It is not a constructor, connection
+          transform or data-handoff form. Constructor state consumes same-name supplied fields, not emit lowering."
       expression_value_grammar:
         scope: "Every executable value slot in emit.fields (including guard escalation and fan_out emits), activity.input,
           stage gate context/outcome emits, and data_accumulation write value/key/index. Predicate and fan_out.identity
@@ -4170,7 +4169,7 @@ handler_specification:
           Diagnostic coordinates consume admitted source paths and exact rule sequence positions, never display IDs.
         slot_categories:
           expression: "Executable values and boolean controls above, plus fan_out.identity; quote style selects meaning."
-          path: "emit.from, write source/target paths, collection sources, receiver initialization and connection paths retain their structural path grammar."
+          path: "emit.from, write source/target paths, collection sources and connection paths retain their structural path grammar."
           data: "Policy R3, schema/event defaults, scenario documents (#2532), manifests, test input and CLI --data retain literal-by-default data admission; state.yaml retains its own type/initial-value grammar."
         stability: "The contract value-slot grammar is frozen after #2556; no parallel spellings or compatibility surface."
         lowered_owner: "Authoring admission materializes one literal or CEL expression value. Verification and runtime
@@ -5761,12 +5760,12 @@ engine:
       scope plus local instance ID. The exact parent context is checked against
       the canonical constructor and authored immediate child relation; it grants
       no subscription, connection or output-consumer authority.
-      Selected-fork readiness and configuration projections consume the fixed
-      revision's recorded owner and configuration parent together. They project
+      Selected-fork readiness and header projections consume the fixed
+      revision's recorded owner and construction parent together. They project
       that exact parent into the fork run through the historical ownership owner,
       retain the authored scope independently of the concrete path, and preserve
-      business configuration. A missing or contradictory recorded parent fails
-      closed; route text and business-only configuration cannot replace it.
+      business fields through the existing state projection. A missing or contradictory recorded parent fails
+      closed; route text and business fields cannot replace it.
       A root creating input is prepared through this same activation owner before
       recipient classification. Its concrete root coordinate is the exact run ID,
       for keyed as well as keyless root constructors; a resolved root key
@@ -5838,9 +5837,9 @@ engine:
           fabricates routes when the registry lacks that scope. An unknown template fails before in-memory or durable route
           mutation.
         subscriber_identity_variables: Dynamic flow-instance route subscribers MUST render from the same activation variable
-          set used to materialize the child instance's agents. That set includes admitted receiver configuration plus runtime built-ins
+          set used to materialize the child instance's agents. That set contains runtime built-ins only,
           `instance_id`, `template_id`, `flow_scope_key`, and `flow_instance_path`; built-ins remain authoritative for their
-          reserved names.
+          reserved names. Business state is not an activation-variable or subscriber-name authority.
         persisted_truth: Materialized `routing_rules.subscriber_id` rows store concrete rendered subscriber IDs. Route
           persistence, delivery planning, active-agent lookup, and runtime recovery consume that materialized route truth and
           MUST NOT independently reinterpret authored subscriber templates. For a topology change, the compiled graph selects
@@ -9550,7 +9549,7 @@ engine:
       severity: error
       scope: per-node
       trigger: A non-empty data_accumulation.source_event does not match its handler event and is not a derived fan_out source.
-        Receiver initialize bindings are validated separately by the compiled input-pin owner against the bound source schema.
+        Creating inputs consume the canonical same-name typed constructor; input pins own no initialization bindings.
       when: boot-only
     - id: phantom_produces
       severity: warning
@@ -13727,7 +13726,7 @@ flow_model:
         - internal/runtime/contracts.CompiledConnectionInput
         - internal/runtime/core/pinrouting.ConnectRoutePlan
       rule: |
-        Each admitted flow pin has one exact scalar local event identity. The sole transient input mapping carries event and nonempty initialize pending the constructor cut. No events wrapper, source, sink, resolution, field grant or reply option bag is admitted. Null, explicit empty, duplicate, non-exact, qualified, wildcard or alias-bearing entries fail ordinary admission. Event declarations own payload schema and business keys. CompiledConnectionInput owns immutable ordinary source/receiver projection and initialization. Compiled connect owns exact child boundary pins or parent-local event schemas, ordinary resolution, paired reply facts, provenance and execution digests. Verify, runtime, durable claims, restart, retry, replay, selected fork, graph and readback consume that evidence without authored-map fallback or synthetic private input edges. Stream partitioning, accumulation keys and finite joins remain handler-owned.
+        Each admitted flow pin has one exact scalar local event identity. No mapping, events wrapper, source, sink, resolution, field grant, initialization or reply option bag is admitted. Null, explicit empty, duplicate, non-exact, qualified, wildcard or alias-bearing entries fail ordinary admission. Event declarations own payload schema and business keys. CompiledConnectionInput owns immutable ordinary source/receiver schema projection only. The canonical constructor owns same-name supplied state. Compiled connect owns exact child boundary pins or parent-local event schemas, ordinary resolution, paired reply facts, provenance and execution digests. Verify, runtime, durable claims, restart, retry, replay, selected fork, graph and readback consume that evidence without authored-map fallback or synthetic private input edges. Stream partitioning, accumulation keys and finite joins remain handler-owned.
       retired_on_presence:
         - pins.inputs.reads
         - pins.outputs.writes
@@ -13819,26 +13818,37 @@ flow_model:
       resolved_input_pin:
         location: schema.yaml pins.inputs
         canonical_form: |
-          Inputs form one names-only sequence. A scalar exact event identity is the ordinary form. The sole transient mapping is {event, initialize} with nonempty initialization, pending the separately allocated constructor cut. No events wrapper, source, resolution, replies_to or correlation_key is admitted on a pin. Reply facts belong on the response connect row; ordinary instance selection belongs on each connect. initialize requires a creating connection and never supplies an alternate instance identity. A select edge cannot consume a pin with initialization bindings.
+          Inputs form one names-only sequence of scalar exact event identities. Mappings, an events wrapper and all pin passengers are invalid. Reply facts belong on the response connect row; ordinary instance selection belongs on each connect. Pins own no business-value mapping, default or alternate identity.
         scalar_form: |
           A scalar input pin on a template receiver is not a selector. Declared interfaces are never inferred from subscriptions or emits.
-        receiver_initialization:
-          syntax: 'initialize: {priority: payload.priority, timeout_ms: payload.settings.timeout_ms}'
-          declarations: |
-            Configuration variables are declared under instance_variables.variables using the shared type vocabulary and refinements, with an optional default and description. Scalar declarations denote types, not descriptions. Named records, lists and typed maps retain their recursive constraints, including enum/UUID map keys and sibling equal_to. Optional presence, explicit null and default presence survive source projection. The instance key's type remains owned by its canonical entity declaration. No initialize.config wrapper, from wrapper, whole-payload copy, sender entity/event lookup or inferred payload leaf is supported.
-          admission: |
-            Compile exact destination names and payload paths with the receiver-scoped type catalog and the admitted producer schema. Shared type and value admission validates every supplied value and every default before any instance creation, route installation, agent readiness or automatic creation event. Absence is different from explicit null; only absence can use a default. Invalid supplied data never becomes a default. Defaults and admitted nested values are isolated from authored maps and sibling instances. Integer/double execution kinds are preserved. Initialization facts, types and defaults participate in compiled pin identity and survive imported-schema binding. Default identity includes runtime numeric kinds: integer 2 and double 2.0 cannot alias even when the variable admits both.
-            Every input with initialization bindings requires actual incoming creating connections (create or select-or-create). Admission checks all such inputs, including static/no-policy edges and inputs with no connection. Any select or non-creating incoming edge is refused; no implicit creation or pin-owned policy is manufactured. Bound provider/activity composition repeats this check through the same compiled connection owner.
-          event_boundary: |
-            Initialization consumes the admitted event payload, not raw transport JSON. The existing shared event rule may normalize external null in an optional typed field to omission before initialization. That lawful omission is distinct from a present null retained inside a JSON value; initialization validates the latter as supplied and never turns it into a default. No raw-wire presence reconstruction or receiver-specific event normalization is introduced.
+        state_construction:
+          ownership: |
+            The canonical constructor owns initial fields: same-name projection from the admitted creating message
+            onto supplied state fields, with the typed instance key resolved independently by the existing key owner.
+            Internal literal state cannot be overridden. There is no instance_variables grammar, initialize pin
+            mapping, independent configuration type/default evaluator or implicit nested flattening. Explicit typed
+            producer fields may construct the required message; source admission and public authentication remain strict.
           lifecycle: |
-            Initialization applies only when a receiver is created. Select-or-create reuse, ordinary ensure, retry and recovery consume committed configuration and never update it from another incoming request or reapply current defaults. The existing activation/publication transaction owns atomic visibility; no separate action executor or follow-up initialization write exists. Automatic creation payloads and first node/agent consumers observe the same admitted configuration. Runtime coordinates and provenance are not business configuration and cannot overwrite same-named business fields. Public-input/API publication admission is scoped to the admitted event. Committed followup automatic events re-admit their own exact event and route, retaining run, source and claim authority but not the ingress grant; existing admission checks remain strict.
+            The existing atomic activation commits the constructed header, declared fields, initial lifecycle and
+            creating receipt before first execution. Reuse, retry, revision and restart consume current fields and
+            immutable creation evidence independently; they never reinitialize state from another message or an
+            original configuration copy. Automatic creation events are prepared from admitted initial fields and
+            persisted as immutable occurrence evidence. A pending occurrence remains that original payload after
+            recovery or source revision, even when a handler has lawfully changed current state.
           persistence: |
-            flow_instances.config is a closed runtime-control record containing an explicit config object for business variables. Both stores, route recovery and historical readers consume that object without flattening its members into control fields. Absent, null or non-object config evidence and unknown runtime-control members fail closed; no old-store fallback is supported. Business variables named config, status, instance_id or flow_path remain business data inside that object. Rendering built-ins own their reserved presentation names only, not persisted business values.
-          agent_carrier: |
-            AgentConfig.receiver_config carries the exact admitted receiver business object separately from AgentConfig.config and the typed runtime descriptor. Agent persistence has one closed config envelope with required config and receiver_config members: config is the agent-owned opaque object; receiver_config is an object for a configured receiver or explicit null for an agent without receiver configuration. There is no flattened or legacy decoder. Runtime-looking business names, including flow_path, model, mode, constraints and nested system_prompt, are inert values; they cannot select model, memory, tools, permissions, intent or prompt authority. Authored prompt overrides and malformed runtime descriptors remain rejected in their own namespaces. Writer, hydration, first agent execution, reuse, restart, revision hashing and supported historical projection preserve receiver values and integer/double kinds without stripping, defaulting or interpreting their names. This internal carrier adds no authored wrapper or new fork capability.
-          historical: |
-            Restart, readback and supported fork preparation consume exact committed or lawfully admitted configuration evidence. The shared receiver configuration owner validates recorded values against the selected receiver declaration without applying defaults, before installing agents, routes or readiness. Missing required values, invalid values and incompatible selected types fail closed even when the recorded runtime-control envelope is structurally valid. They do not derive business identity/configuration from path leaves, hashed instance IDs, current source defaults or first-match maps. Missing required historical evidence fails closed under the existing fork policy; this rule adds no fork capability.
+            Business values live only in declared entity fields and their existing mutation history. The retained
+            flow_instances.config column and historical FlowConfig carrier contain closed runtime header controls
+            only: route, parent, version, lifecycle and transition evidence. A business config member or unknown
+            control is invalid. Header/parent/creating-receipt checks remain fail-closed; no repair-on-read exists.
+            Actor config persists the ordinary agent-owned opaque object, not an envelope with receiver_config.
+            The typed runtime descriptor, authored prompt guards, numeric kinds, owned bytes and actor revisions
+            retain their existing contracts. Business names cannot grant actor tools, model or prompt authority.
+          history: |
+            Supported historical projection consumes the fixed entity-state and header owners and binds their
+            complete evidence. Mutable business fields are not duplicated into attachment plans, actor records or
+            activation variables. Missing required state, malformed headers or contradictory receipts refuse through
+            the existing owners. No new historical family, constructor, mapper, old-store decoder or fork capability
+            is introduced. events.ReceiverInitialization remains the separate immutable materialization receipt.
         instance_fields:
           identity: 'The template flow''s scalar `instance: <field>` is the only receiver identity owner.'
           source: Omitted connect.key_from derives required payload.<instance>; a different top-level payload field is supported, while generated.uuid and event.id require create. Explicit same-name key_from is redundant and rejected.
@@ -13880,7 +13890,7 @@ flow_model:
               rename: work.accepted
     ownership_split:
       output_pins: Output pins own exact local producer event interface identity, never receiver identity or observation policy.
-      input_pins: Input pins own receiver interface identity and transient typed creating-input initialization pending slice 2c.
+      input_pins: Input pins own receiver interface identity only. Constructor-supplied state is message-owned, not a pin passenger.
       parent_connect: Parent connect owns the directed inter-flow event edge, optional rename, ordinary resolution/key_from and paired reply facts.
       receiver_input_resolution: Instance selection and paired reply resolution are connection-owned. Accumulation and finite joins remain handler-owned and do not select recipients.
       analyzer: Analyzer owns validation, bind-visible event projection, explicit rename, and lowering to concrete immutable route-plan facts.
@@ -19367,7 +19377,7 @@ run_model:
       without repeating the creating business event, initial-entry contributions or timer arming. Exact materialize-only
       reuse consumes the recorded header/optional-fields relation; a field-row count is
       not an instance count or construction proof. Materialize-only projection retains recorded workflow version,
-      business configuration and runtime controls through the shared persisted-config owner, and recorded header
+      runtime controls through the shared persisted-header owner, business fields through the existing state-history owner, and recorded header
       status, stage-entry, creation, update and termination clocks through fixed-revision metadata. Mutation bookkeeping
       time is not stage-entry time. Only exact instance/parent ownership is projected. It does not create readiness
       or initial-materialization receipts.
@@ -19400,12 +19410,12 @@ run_model:
       mode; it does not elect a mode from retained frontier events, which may have different modes. Template attachment
       retains its exact admitted generation mode. Missing mode or plan evidence refuses before header writes. Exact
       child reuse requires the readiness row and validates its plan hash without repairing missing or corrupt evidence.
-      A template receiver's business configuration comes from the exact fixed-revision metadata config envelope,
-      validated against its recorded route by the shared persisted-config decoder. It is not reconstructed from
-      a path leaf, hashed instance ID, current flow row, selected-source defaults, or the triggering event payload.
-      Runtime controls are newly admitted for the child while recorded business values remain unchanged. The sealed
-      readiness binding includes the exact configuration and its numeric kinds; missing or contradictory evidence
-      refuses before fork mutation. Old selected stores lacking that evidence are unsupported.
+      A receiver's business fields come from the exact fixed-revision entity-state mutation history, not a second
+      configuration envelope. They are not reconstructed from a path leaf, hashed instance ID, current flow row,
+      selected-source defaults or the triggering event payload. Runtime header controls are admitted independently
+      while recorded business fields retain their selected value and numeric kinds. The sealed readiness binding
+      includes the complete entity snapshot and header evidence; missing or contradictory evidence refuses before
+      fork mutation. Old selected stores are unsupported, with no migration or compatibility reader.
       Runtime preparation and persistence consume one complete admitted receiver relation, bound to the fixed snapshot,
       selected declaration, full frontier event/mode relation, and resolved agent configuration. Caller-supplied subsets,
       substituted configuration, and independently supplied agent expectations cannot authorize materialization or reuse.
@@ -21340,12 +21350,12 @@ observation_model:
             producer-authored business payload keys.
       auto_emit_on_create_surface:
         construction_order:
-        - 1. Start from the admitted receiver business configuration, not runtime control metadata.
+        - 1. Start from the canonical constructor's admitted initial fields, not runtime control metadata or an independent configuration copy.
         - '2. Keep activation lifecycle context, including instance_id, template_id, flow_path, and parent_entity_id, on runtime
           activation metadata and event envelope context; do not synthesize it into payload.'
         - 3. Attach runtime-owned envelope context to the emitted event carrier; envelope fields are not copied into payload.
-        collision_priority: Admitted receiver configuration owns the business payload. Activation lifecycle context is separate
-          from payload, so same-named config fields such as template_id remain business fields when the target schema declares
+        collision_priority: Admitted initial state owns the business payload. Activation lifecycle context is separate
+          from payload, so same-named state fields such as template_id remain business fields when the target schema declares
           them.
         note: This surface is authored only as `auto_emit_on_create.event`, so runtime owns the payload construction. It still
           must satisfy the active event schema fail-closed. Hidden activation lifecycle context does not silently widen the
@@ -21356,10 +21366,10 @@ observation_model:
             post-commit publish.
           validation_view: Validate the constructed payload carrier against the target event schema after canonical Wave 1 type-aware
             schema lowering. Runtime-owned envelope fields are not synthesized into payload for validation.
-          rejection_rule: If any config-authored business field is undeclared or violates the schema, flow activation fails.
+          rejection_rule: If any initial business field is undeclared or violates the schema, flow activation fails.
             Hidden activation lifecycle context fields do not fail validation merely because the target schema omits same-named
             payload fields. If an event schema declares a lifecycle-shaped field name such as template_id as business payload,
-            the config payload must supply it explicitly. Runtime does not downgrade auto_emit_on_create schema violations into
+            the initial fields must supply it explicitly. Runtime does not downgrade auto_emit_on_create schema violations into
             warning-only success on the queued post-commit branch.
   entity_state:
     description: The entity document after handler execution commits.

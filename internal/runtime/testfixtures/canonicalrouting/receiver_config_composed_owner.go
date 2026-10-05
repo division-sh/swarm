@@ -39,21 +39,13 @@ func CopyReceiverConfigComposedOwner(t testing.TB) string {
 `,
 		"review/schema.yaml": `name: review
 instance: request_id
-instance_variables:
-  variables:
-    label: string
-    nested: json
-    enabled: {type: boolean, default: true}
 stages:
   pending: {initial: true}
 pins:
   inputs:
-    - event: items.child
-      initialize:
-        label: payload.label
-        nested: payload.nested
+    - items.child
 `,
-		"review/entities.yaml": "review_item:\n  request_id: string\n",
+		"review/entities.yaml": "review_item:\n  request_id: string\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
 		"review/events.yaml":   "task.started:\n",
 		"review/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [items.child]\n  event_handlers:\n    items.child:\n      guard: {check: true}\n",
 	} {

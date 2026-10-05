@@ -3,4 +3,5 @@ flow.spawn_with_config:
   config: WorkerConfig
 flow.spawned:
   worker_id: text
-  config: WorkerConfig
+  max_retries: integer
+  timeout_ms: integer

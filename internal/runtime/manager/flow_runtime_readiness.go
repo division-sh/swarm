@@ -147,7 +147,6 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	req := runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source,
 		Instance:       projection.Identity,
-		Config:         projection.Config,
 	}
 	records, err := am.flowInstanceAgentRecords(plan.RunID, req, schema, scope)
 	if err != nil {

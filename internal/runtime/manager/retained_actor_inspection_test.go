@@ -108,7 +108,7 @@ func TestRetainedActorInspectionDoesNotRewriteReadinessActorsOrHideReadFailure(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	constructed, err := ConstructedFlowMaterialization(source, runID, child, map[string]any{})
+	constructed, err := ConstructedFlowMaterialization(source, runID, child)
 	if err != nil || len(constructed.Agents) != 1 {
 		t.Fatalf("constructed readiness actor: %+v %v", constructed, err)
 	}

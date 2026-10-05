@@ -46,7 +46,7 @@ func TestWorkflowJoinConstructedDescendantAdmissionOnBothStores(t *testing.T) {
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			plan, err := am.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 				ContractBundle: source, Instance: parent, ConstructorInput: "order.created", ResolvedKey: "one",
-				Config: map[string]any{"order_id": "one"}, OccurredAt: at,
+				OccurredAt:   at,
 				TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "order.created", "operator", "", []byte(`{"order_id":"one"}`), 0, runID, events.EventEnvelope{}, at),
 			})
 			if err != nil {

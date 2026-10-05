@@ -464,7 +464,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	constructed, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, child, map[string]any{})
+	constructed, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, child)
 	if err != nil || len(constructed.Agents) != 1 {
 		t.Fatalf("constructed actor missing from its attachment: %+v %v", constructed, err)
 	}

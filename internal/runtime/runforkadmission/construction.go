@@ -34,7 +34,7 @@ func FixedConstructionForRoute(source semanticview.Source, plan runfork.RunForkP
 			metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
 			return flowidentity.Instance{}, matched, false, fmt.Errorf("selected readiness requires one exact fixed-revision construction header")
 		}
-		config, err := pipeline.DecodeWorkflowInstanceRecordedConfig(route, metadata.FlowConfig)
+		config, err := pipeline.DecodeWorkflowInstanceRecordedHeader(route, metadata.FlowConfig)
 		if err != nil {
 			return flowidentity.Instance{}, matched, false, err
 		}

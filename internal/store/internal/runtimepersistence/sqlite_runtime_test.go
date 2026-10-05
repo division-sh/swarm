@@ -1093,7 +1093,6 @@ func sqliteFlowActivationRequest(bundle *runtimecontracts.WorkflowContractBundle
 func sqliteKeyedFlowActivationRequest(t *testing.T, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, instanceID string) runtimepipeline.FlowInstanceActivationRequest {
 	t.Helper()
 	req := sqliteFlowActivationRequest(bundle, "review", instanceID, "", "review/"+instanceID)
-	req.Config = map[string]any{"request_id": instanceID}
 	req.ConstructorInput, req.ResolvedKey = "task.started", instanceID
 	payload, err := json.Marshal(map[string]string{"request_id": instanceID})
 	if err != nil {
@@ -1588,7 +1587,6 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
 	createdAt := time.Now().UTC()
 	req := sqliteFlowActivationRequest(f.bundle, "root", "acme", "", "root/acme")
-	req.Config = map[string]any{"company_id": "acme"}
 	req.ConstructorInput, req.ResolvedKey = "company.opened", "acme"
 	req.Bookkeeping = map[string]any{"evidence": map[string]any{"seed": true}}
 	req.OccurredAt = createdAt

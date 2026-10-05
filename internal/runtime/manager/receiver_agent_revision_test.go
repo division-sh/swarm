@@ -4,27 +4,23 @@ import (
 	"encoding/json"
 	"testing"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestReceiverAgentRevisionPreservesNamespaceAndNumberKinds(t *testing.T) {
-	blueprints, err := TemplateFlowAgentMaterializationBlueprints(semanticview.Wrap(testFlowBundle(t, "")), "review", "review/inst-1", "ent-1", map[string]any{"instance_key": "inst-1"})
+func TestAgentRevisionPreservesOpaqueNumberKinds(t *testing.T) {
+	source := semanticview.Wrap(testFlowBundle(t, ""))
+	instance := runtimeflowidentity.Stored(source, "review", "review/inst-1", "inst-1", runtimepipeline.FlowInstanceEntityID("review/inst-1"), "")
+	materialization, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, instance)
 	if err != nil {
 		t.Fatal(err)
 	}
-	blueprint := blueprints[0]
+	blueprint := materialization.Agents[0]
 	seen := map[string]string{}
-	for name, raw := range map[string]string{
-		"empty":              `{}`,
-		"integer":            `{"number":7}`,
-		"double":             `{"number":7.0}`,
-		"nested_integer":     `{"items":[{"number":7}]}`,
-		"nested_double":      `{"items":[{"number":7.0}]}`,
-		"prompt_named_data":  `{"system_prompt":"inert"}`,
-		"control_named_data": `{"model":"inert","flow_path":"inert","mode":"inert"}`,
-	} {
+	for name, raw := range map[string]string{"empty": `{}`, "integer": `{"number":7}`, "double": `{"number":7.0}`, "nested_integer": `{"items":[{"number":7}]}`, "nested_double": `{"items":[{"number":7.0}]}`} {
 		cfg := blueprint.Config
-		cfg.ReceiverConfig = json.RawMessage(raw)
+		cfg.Config = json.RawMessage(raw)
 		revision, err := AgentConfigPlanRevision(cfg, blueprint.Identity)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -45,16 +41,5 @@ func TestReceiverAgentRevisionPreservesNamespaceAndNumberKinds(t *testing.T) {
 		if err != nil || recoveredRevision != revision {
 			t.Fatalf("%s roundtrip changed revision: %s %s %v", name, revision, recoveredRevision, err)
 		}
-	}
-	left, right := blueprint.Config, blueprint.Config
-	left.Config, left.ReceiverConfig = json.RawMessage(`{"number":7}`), json.RawMessage(`{}`)
-	right.Config, right.ReceiverConfig = json.RawMessage(`{}`), json.RawMessage(`{"number":7}`)
-	leftRevision, err := AgentConfigPlanRevision(left, blueprint.Identity)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rightRevision, err := AgentConfigPlanRevision(right, blueprint.Identity)
-	if err != nil || leftRevision == rightRevision {
-		t.Fatalf("agent and receiver namespaces alias: %s %s %v", leftRevision, rightRevision, err)
 	}
 }

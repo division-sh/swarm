@@ -52,16 +52,11 @@ type reply struct {
 }
 
 type pinEntry struct {
-	Event      string            `yaml:"event"`
-	Initialize map[string]string `yaml:"initialize,omitempty"`
+	Event string
 }
 
 func (p pinEntry) MarshalYAML() (any, error) {
-	if p.Initialize == nil {
-		return p.Event, nil
-	}
-	type initializedPin pinEntry
-	return initializedPin(p), nil
+	return p.Event, nil
 }
 
 func main() {
@@ -391,7 +386,6 @@ func rewritePin(item yamlsource.Value, direction string) (pinEntry, *reply, erro
 	if len(fields) == 1 {
 		return pinEntry{}, nil, fmt.Errorf("pin mapping has no non-default option")
 	}
-	var initialize map[string]string
 	var paired *reply
 	for _, field := range fields {
 		key, value := field.Name, field.Value
@@ -400,11 +394,6 @@ func rewritePin(item yamlsource.Value, direction string) (pinEntry, *reply, erro
 		case key == "source" && direction == "inputs", key == "sink" && direction == "outputs":
 			if text, err := exactText(value); err != nil || text != "harness" {
 				return pinEntry{}, nil, fmt.Errorf("unexpected %s value", key)
-			}
-		case key == "initialize" && direction == "inputs":
-			initialize, err = textMapping(value)
-			if err != nil || len(initialize) == 0 {
-				return pinEntry{}, nil, fmt.Errorf("invalid initialization: %v", err)
 			}
 		case key == "resolution" && direction == "inputs":
 			paired, err = replyFrom(value, name)
@@ -415,10 +404,7 @@ func rewritePin(item yamlsource.Value, direction string) (pinEntry, *reply, erro
 			return pinEntry{}, nil, fmt.Errorf("unknown %s pin key %q", direction, key)
 		}
 	}
-	if initialize != nil && paired != nil {
-		return pinEntry{}, nil, fmt.Errorf("unexpected combined reply/initialization")
-	}
-	return pinEntry{Event: name, Initialize: initialize}, paired, nil
+	return pinEntry{Event: name}, paired, nil
 }
 
 func exactText(value yamlsource.Value) (string, error) {
