@@ -115,7 +115,12 @@ func (o HTTPObservation) rpc(ctx context.Context, method string, params any, res
 	req.Header.Set("MCP-Protocol-Version", "2025-03-26")
 	transport := &http.Transport{Proxy: nil}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// Discovery is bounded independently; business calls retain the worker's
+	// caller-owned lifetime instead of inheriting the observation deadline.
+	if method != "tools/call" {
+		client.Timeout = 5 * time.Second
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		if method == "tools/call" {

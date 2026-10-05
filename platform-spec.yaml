@@ -24676,6 +24676,10 @@ cli_specification:
         workspace_gateway_unreachable before model dispatch, not outcome_uncertain. Reachable missing, malformed,
         foreign or changed definitions remain exact capability mismatches. Failure after dispatch retains truthful
         uncertain or committed settlement, and settled deliveries must not be replayed.
+        Business tools/call requests consume the caller-owned execution lifetime, not the bounded discovery
+        timeout. A valid reply received within that lifetime MUST NOT become outcome_uncertain solely because
+        it took longer than the initialize/tools-list observation bound. Cancellation or a lost reply after
+        dispatch remains nonretryable outcome_uncertain; it does not authorize replay.
         For live agent-present `cli_test` managed agents, startup validation MUST execute the Claude
         CLI/container startup probe for every managed agent before accepting MCP-only
         `tools/list` or optional `tools/call` gateway proof. Provider-native builtin surfaces

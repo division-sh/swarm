@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -206,6 +207,112 @@ func TestHTTPObservationLostCallReplyIsUncertainNotPreModelRefusal(t *testing.T)
 				t.Fatalf("post-call outcome = %+v, calls=%d", failure, calls.Load())
 			}
 		})
+	}
+}
+
+func TestHTTPObservationBusinessCallOutlivesDiscoveryDeadline(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var request struct {
+			Method string `json:"method"`
+			Params struct {
+				Name string            `json:"name"`
+				Meta map[string]string `json:"_meta"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer private-boot" || r.Header.Get("X-SWARM-Context-Token") != "private-turn" || request.Method != "tools/call" || request.Params.Name != "emit_event" || request.Params.Meta["claudecode/toolUseId"] != "same-occurrence" {
+			t.Error("slow call lost exact authorization or occurrence")
+			return
+		}
+		timer := time.NewTimer(6 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[]}}`))
+		case <-r.Context().Done():
+			t.Error("business call inherited the discovery timeout")
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := testObservation(server.URL).Call(ctx, "emit_event", map[string]any{}, "same-occurrence")
+	if err != nil || ctx.Err() != nil || string(result) != `{"content":[]}` || calls.Load() != 1 {
+		t.Fatalf("slow business result=%s calls=%d caller=%v error=%v", result, calls.Load(), ctx.Err(), err)
+	}
+}
+
+func TestHTTPObservationDiscoveryRetainsItsOwnDeadline(t *testing.T) {
+	for _, method := range []string{"initialize", "tools/list"} {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+			joined := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct{ Method string }
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				if request.Method != method {
+					_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26"}}`))
+					return
+				}
+				<-r.Context().Done()
+				close(joined)
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_, err := testObservation(server.URL).Probe(ctx)
+			assertObservationFailure(t, err, "workspace_gateway_unreachable")
+			if ctx.Err() != nil {
+				t.Fatalf("discovery relied on the caller deadline: %v", ctx.Err())
+			}
+			select {
+			case <-joined:
+			case <-ctx.Done():
+				t.Fatal("timed-out observation left its HTTP request running")
+			}
+		})
+	}
+}
+
+func TestHTTPObservationCallerCancellationAfterDispatchRemainsUncertain(t *testing.T) {
+	entered, joined := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		close(entered)
+		<-r.Context().Done()
+		close(joined)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := testObservation(server.URL).Call(ctx, "emit_event", map[string]any{}, "same-occurrence")
+		result <- err
+	}()
+	<-entered
+	cancel()
+	err := <-result
+	assertObservationFailure(t, err, "workspace_tool_outcome_uncertain")
+	failure := failures.Normalize(err, "test", "execute")
+	if !errors.Is(err, context.Canceled) || failure.Class != failures.ClassOutcomeUncertain || failure.Retryable || calls.Load() != 1 {
+		t.Fatalf("post-dispatch cancellation=%+v calls=%d error=%v", failure, calls.Load(), err)
+	}
+	select {
+	case <-joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled caller left its HTTP request running")
 	}
 }
 

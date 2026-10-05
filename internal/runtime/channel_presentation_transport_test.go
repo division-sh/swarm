@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -44,6 +46,19 @@ func TestChannelPresentationExecutorAndRegisteredForkCatalogUnderReplacement(t *
 	if err := policy.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	if token := registry.RegisterConversationForkSandboxTurnContext(pinned, time.Minute, policy.AvailableToolNames()); token != "" {
+		t.Fatal("fork authority alone admitted an unconfigured sandbox executor")
+	}
+	provider := &channelForkCatalogRuntime{}
+	conversation, err := llm.NewForkChatConversation(actor.ID, "catalog-test", "Inspect the frozen catalog", definitions, agentmemory.Plan{}, 1, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversation.SetToolExecutor(executor)
+	if _, err := conversation.RunForkChat(pinned, "Inspect without executing tools"); err != nil {
+		t.Fatal(err)
+	}
+	pinned = provider.turn
 	token := registry.RegisterConversationForkSandboxTurnContext(pinned, time.Minute, policy.AvailableToolNames())
 	if token == "" {
 		t.Fatal("real fork registry refused valid turn")
@@ -109,4 +124,14 @@ func TestChannelPresentationExecutorAndRegisteredForkCatalogUnderReplacement(t *
 	if !strings.Contains(response.Body.String(), `"error"`) {
 		t.Fatal("revoked token acquired a successor")
 	}
+}
+
+type channelForkCatalogRuntime struct {
+	llm.NoopRuntime
+	turn context.Context
+}
+
+func (r *channelForkCatalogRuntime) StartSession(ctx context.Context, agentID, prompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	r.turn = ctx
+	return &llm.Session{ID: uuid.NewString(), AgentID: agentID, SystemPrompt: prompt, Tools: tools}, nil
 }
