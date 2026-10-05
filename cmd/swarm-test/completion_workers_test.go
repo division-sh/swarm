@@ -226,7 +226,11 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child := exec.Command("sh", "-c", `trap '' INT TERM HUP; touch "$1"; while [ ! -f "$2" ]; do sleep .01; done`, "descendant", filepath.Join(root, "started-"+unit), filepath.Join(root, "release"))
+			delay := ""
+			if unit == os.Getenv("SWARM_COMPLETION_DEATH_DELAY_UNIT") {
+				delay = filepath.Join(root, "continue-delayed")
+			}
+			child := exec.Command("sh", "-c", `trap '' INT TERM HUP; touch "$1"; while [ -n "$3" ] && [ ! -f "$3" ]; do sleep .01; done; while [ ! -f "$2" ]; do sleep .01; done`, "descendant", filepath.Join(root, "started-"+unit), filepath.Join(root, "release"), delay)
 			if err := lease.InheritTo(child); err != nil {
 				t.Fatal(err)
 			}
@@ -250,28 +254,47 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 		}
 		os.Exit(executeCompletionWorkers(context.Background(), plan, root, filepath.Join(root, "worker"), os.Environ(), true, 2))
 	}
-	root := t.TempDir()
+	root := os.Getenv("SWARM_COMPLETION_DEATH_TEST_ROOT")
+	var err error
+	if root == "" {
+		root, err = os.MkdirTemp("", "swarm-completion-death-")
+	} else {
+		err = os.Mkdir(root, 0700)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parent *exec.Cmd
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := cleanupCompletionDeathFixture(ctx, parent, root); err != nil {
+			t.Error(err)
+		}
+	})
 	script := "#!/bin/sh\nset -eu\nexport SWARM_COMPLETION_DEATH_UNIT=\"$3\"\nexec \"$SWARM_COMPLETION_DEATH_BINARY\" -test.run=^TestCompletionParentDeathRetainsWorkerDescendants$\n"
 	if err := os.WriteFile(filepath.Join(root, "worker"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	parent := exec.Command(os.Args[0], "-test.run=^TestCompletionParentDeathRetainsWorkerDescendants$")
+	parent = exec.Command(os.Args[0], "-test.run=^TestCompletionParentDeathRetainsWorkerDescendants$")
 	parent.Env = append(os.Environ(), fixture+"="+root, "SWARM_COMPLETION_DEATH_BINARY="+os.Args[0])
+	if err := prepareChildProcessTree(parent); err != nil {
+		t.Fatal(err)
+	}
 	if err := parent.Start(); err != nil {
 		t.Fatal(err)
 	}
 	var workers []int
-	t.Cleanup(func() {
-		_ = os.WriteFile(filepath.Join(root, "release"), []byte("release\n"), 0600)
-		for _, pid := range workers {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-		}
-		if parent.ProcessState == nil {
-			_ = parent.Process.Kill()
-			_ = parent.Wait()
-		}
-	})
 	for _, unit := range []string{"one", "two"} {
+		if unit == "two" && os.Getenv("SWARM_COMPLETION_DEATH_INTERRUPT") != "" {
+			waitForTestPath(t, filepath.Join(root, "started-two"), 10*time.Second)
+			if os.Getenv("SWARM_COMPLETION_DEATH_INTERRUPT") == "release_failure" {
+				if err := os.Mkdir(filepath.Join(root, "release"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Fatal("fixture interrupted before collecting the second worker PID")
+		}
 		workers = append(workers, waitForSignalFixturePID(t, filepath.Join(root, "worker-"+unit)))
 		waitForTestPath(t, filepath.Join(root, "started-"+unit), 10*time.Second)
 	}
@@ -306,11 +329,7 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 	}
 	ctx, finish := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finish()
-	lease, err := admission.Acquire(ctx, testpostgres.RunCommand{Args: []string{"go", "test", "./successor-after-join"}}, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := lease.Complete(ctx, false); err != nil {
+	if err := joinCompletionFixtureDescendants(ctx, root); err != nil {
 		t.Fatal(err)
 	}
 }
