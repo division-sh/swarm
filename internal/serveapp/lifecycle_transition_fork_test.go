@@ -11,7 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -140,7 +139,11 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 		ca["flow_instance"] != runID || ca["flow_instance_id"] != runID {
 		t.Fatalf("fork-local anchor not exact: parent=%#v child=%#v", pa, ca)
 	}
-	raw, err := json.Marshal(eventtest.RootRoutingSource(entity))
+	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(source)
 	if err != nil {
 		t.Fatal(err)
 	}
