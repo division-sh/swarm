@@ -13370,7 +13370,7 @@ flow_model:
             admission into a declared event boundary, not a third authored producer-to-consumer delivery scope.
           delivery_scopes:
           - typed_pubsub delivery between authored producers and consumers in one exact flow identity, with match exact|pattern and boundary same_flow proof
-          - inter_flow_connect delivery between authored producers and consumers, lowered from declared output pin through parent connect to declared input pin
+          - inter_flow_connect delivery between authored producers and consumers through the compiled parent connect; child boundaries require declared pins, while endpoints local to the declaring parent require no extra public pin
           root_input_source_rule: >
             `root_input_sources` is the deterministic admission-provenance projection for declared standing ingress. Each
             entry names the authored alias, provider, admission kind/pin/authentication/event/acknowledgement facts,
@@ -13384,8 +13384,9 @@ flow_model:
             exact or pattern only when producer and consumer have the same canonical flow identity, always with boundary
             same_flow. A different flow identity returns no typed-pubsub relation regardless of canonical event-name equality,
             relative path shape, filesystem ancestry, or wildcard match. Cross-flow delivery authority exists only as an
-            immutable compiled inter_flow_connect edge lowered from output/input pins and the exact nearest-LCA schema.yaml
-            connect row. Contract lookup, schema lookup, endpoint census, boot verification, topology, RouteTable/EventBus,
+            immutable compiled inter_flow_connect edge lowered from the exact nearest-LCA schema.yaml connect row and
+            the required pins at crossed child boundaries, without extra pins on parent-local endpoints.
+            Contract lookup, schema lookup, endpoint census, boot verification, topology, RouteTable/EventBus,
             and describe projections MUST consume this same distinction and MUST NOT search ancestors, descendants, or the
             all-flow catalog as delivery authority. Slash-qualified node, timer, or agent patterns are rejected with a teaching
             error naming pins/connect. Flow-local exact and slash-free pattern subscriptions remain valid. RouteTable remains
@@ -13408,6 +13409,14 @@ flow_model:
           connect_source_rule: Every inter_flow_connect edge preserves exact admitted schema.yaml file:line provenance; no path reconstruction is allowed. Missing provenance fails with connect_source_location_missing.
           endpoint_rule: >
             Producers, consumers, input pins, and output pins come from one immutable authored endpoint census.
+            Compiled LocalEndpoint distinguishes a parent-local event from a declared child boundary. The topology
+            projects its genuine handler/agent consumers through the shared typed relation owner using the compiled
+            receiver-local and resolved identity, including rename. Multiple real consumers remain distinct; a public
+            input is neither required nor fabricated. Parent-local producer projection likewise needs no fake output.
+            An admitted selected-root export is a boundary exposure, not an executable consumer or delivery edge.
+            Connected exposures and delivery boundaries preserve compiled owner, source location, endpoint roles,
+            local schema evidence, and reply/resolution facts. Root public input/output eligibility remains exclusively
+            declaration-owned; neither projected connections nor exposures expand deployment admission.
             Compiled stage-gate verdict emits and bounded-loop cap escape emits are producer endpoints, alongside
             effective handler/activity, agent, timer, and auto-emit producers. Absent emits create no endpoint.
             Gate endpoints preserve declaring flow, stage, decision and verdict; loop escapes preserve declaring flow
@@ -13431,8 +13440,9 @@ flow_model:
           qualified_cross_flow_subscription_retirement: >
             A concrete qualified subscription that crosses a flow boundary is a hard invalidity and never creates a
             route, recipient, or topology edge. The authored endpoint census may retain exact file:line evidence only
-            to produce the retirement diagnostic. Inter-flow delivery must use declared output/input pins plus parent
-            connect, while the receiver subscribes to its local event identity. Slash-qualified wildcard subscriptions
+            to produce the retirement diagnostic. Inter-flow delivery must use the compiled parent connect and
+            declared pins at crossed child boundaries; parent-local endpoints need no additional public pins.
+            The receiver subscribes to its local event identity. Slash-qualified wildcard subscriptions
             are rejected by the same boundary rule; neither exact qualification nor wildcard ancestry is authorization
             proof or a compatibility path.
           supported_outputs:

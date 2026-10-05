@@ -8,7 +8,34 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func TestParentLocalReturnProjectionDoesNotGrantRootInput(t *testing.T) {
+	for _, requester := range []bool{false, true} {
+		root := canonicalrouting.CopyRootReplyBoundary(t, requester, true)
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := semanticview.Wrap(bundle)
+		set, err := DeriveRootInputSet(source)
+		if err != nil || !reflect.DeepEqual(set.Declared, []string{"request.started", "request.stop"}) || !reflect.DeepEqual(set.Routable, set.Declared) {
+			t.Fatalf("root input authority changed: %+v, %v", set, err)
+		}
+		for _, event := range []string{"provider.requested", "provider.replied", "request.finished"} {
+			_, err := ValidateInputEvents(source, []string{event})
+			refusal, ok := AsRootInputValidationError(err)
+			if !ok || refusal.Reason != RootInputNotDeclared {
+				t.Fatalf("local return or export %s acquired public admission: %v", event, err)
+			}
+		}
+		if _, err := ValidateInputEvents(source, []string{"request.started"}); err != nil {
+			t.Fatalf("declared root input lost admission: %v", err)
+		}
+	}
+}
 
 func TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput(t *testing.T) {
 	bundle := rootInputTestBundle(t, "scan.corpus_file_requested")
