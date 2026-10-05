@@ -446,6 +446,25 @@ func TestRun_AcceptsParentCompositionConnectToRootInput(t *testing.T) {
 	}
 }
 
+func TestRun_CheckedInChildReturnDoesNotExposeRootInput(t *testing.T) {
+	bundle := loadFixtureBundle(t, "tests/tier11-flow-composition/test-child-flow-pin-wiring")
+	source := semanticview.Wrap(bundle)
+	if _, declared := source.FlowInputEventPin(".", "work.completed"); declared {
+		t.Fatal("child return must not become externally injectable through a redundant root input")
+	}
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	if issues := graph.Issues(); len(issues) != 0 {
+		t.Fatalf("child-to-root connection requires no root input: %+v", issues)
+	}
+	plans := graph.Plans()
+	if len(plans) != 1 || plans[0].SourceEndpoint().IsRoot() || !plans[0].ReceiverEndpoint().IsRoot() || plans[0].ReceiverLocalEvent() != "work.completed" {
+		t.Fatalf("expected the explicit child return into its parent-local consumer, got %+v", plans)
+	}
+	if receiver := plans[0].Readback().Receiver; !receiver.LocalEndpoint || receiver.PinDigest != "" || receiver.EventSchemaDigest == "" {
+		t.Fatalf("parent-local consumer acquired public pin authority: %+v", receiver)
+	}
+}
+
 func TestRun_RejectsUnconnectedInputDespiteUnambiguousSiblingSchemas(t *testing.T) {
 	root := writeCompositionConnectAmbiguityFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))

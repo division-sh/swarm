@@ -4,7 +4,6 @@ stages:
 pins:
   inputs:
     - job.submit
-    - work.completed
 connect:
   - event: work.completed
     from: child
