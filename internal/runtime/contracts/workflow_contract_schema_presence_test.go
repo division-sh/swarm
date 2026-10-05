@@ -62,7 +62,7 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"required.description", required, "description", "Worker", "", "", "MES"},
 		{"required.subscribes_to", required, "subscribes_to", "x", "", "[work.requested]", "MZQ"},
 		{"required.emits", required, "emits", "x", "", "[work.completed]", "MZQ"},
-		{"retired.instance_variables", root, "instance_variables", "x", "{variables: {note: text}}", "[text]", ""},
+		{"retired.instance_variables", root, "instance_variables", "x", "{variables: {note: text}}", "[text]", "M"},
 		{"auto_emit", root, "auto_emit_on_create", "x", "{event: work.started}", "", "MP"},
 		{"auto_emit.event", "auto_emit_on_create:\n  description: Start\n  %s\n", "event", "work.started", "", "", "S"},
 		{"auto_emit.description", "auto_emit_on_create:\n  event: work.started\n  %s\n", "description", "Start", "", "", "MES"},
