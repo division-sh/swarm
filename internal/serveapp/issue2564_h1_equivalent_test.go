@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
@@ -15,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/apiv1"
 )
 
 // Reconstructed equivalent H1, NOT the unchanged/unavailable original archive.
@@ -60,9 +63,15 @@ func TestIssue2564ServedH1ReconstructedEquivalentBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mode := range []string{"overlap", "no_overlap"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
+				deadline, bounded := t.Deadline()
+				if !bounded {
+					t.Fatal("reconstructed H1 requires a bounded qualification deadline")
+				}
+				ctx, cancel := context.WithDeadline(t.Context(), deadline)
+				defer cancel()
 				provider := &issue2564H1Provider{t: t, sessions: map[string]*issue2564H1Session{}}
 				rt := issue2564H1StartServed(t, backend, issue2564H1WriteCorpus(t, issue2564H1Corpus()), provider)
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				seed := issue2564H1Publish(t, ctx, rt.Endpoint, map[string]any{
 					"event_name": "hub.start", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "h1-start-h01",
 				})
@@ -76,7 +85,7 @@ func TestIssue2564ServedH1ReconstructedEquivalentBothStores(t *testing.T) {
 					go func(hub int) {
 						defer starts.Done()
 						key := fmt.Sprintf("h%02d", hub)
-						result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+						result := issue2564H1Publish(t, ctx, rt.Endpoint, map[string]any{
 							"event_name": "hub.start", "run_id": seed.RunID, "source_event_id": seed.EventID,
 							"payload": map[string]any{"hub_id": key}, "idempotency_key": "h1-start-" + key,
 						})
@@ -90,11 +99,11 @@ func TestIssue2564ServedH1ReconstructedEquivalentBothStores(t *testing.T) {
 					return
 				}
 				if mode == "no_overlap" {
-					waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+					issue2564H1WaitQuiescence(t, ctx, rt, seed.RunID, provider)
 					provider.assert(t, issue2564H1Hubs*2*issue2564H1Fields)
 				}
-				issue2564H1PublishBumps(t, rt, seed.RunID, seed.EventID)
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				issue2564H1PublishBumps(t, ctx, rt, seed.RunID, seed.EventID)
+				issue2564H1WaitQuiescence(t, ctx, rt, seed.RunID, provider)
 				acks := provider.assert(t, issue2564H1Hubs*2*issue2564H1Fields)
 				issue2564H1AssertStore(t, rt, seed.RunID, mode, acks)
 				if t.Failed() {
@@ -392,7 +401,78 @@ func (p *issue2564H1Provider) assert(t *testing.T, want int) map[string]issue256
 	return acks
 }
 
-func issue2564H1PublishBumps(t *testing.T, rt servedControlProofRuntime, runID, sourceEvent string) {
+// The published H1 has no per-request or per-phase stopwatch. Keep its single
+// qualification deadline instead of borrowing short budgets from small fixtures.
+func issue2564H1Publish(t *testing.T, ctx context.Context, endpoint string, params map[string]any) servedEventPublishRPCResult {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": params["idempotency_key"], "method": "event.publish", "params": params})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
+	started := time.Now()
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("H1 public event.publish: %v", err)
+	}
+	defer response.Body.Close()
+	var envelope servedJSONRPCEnvelope
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || envelope.Error != nil {
+		t.Fatalf("H1 publication HTTP=%d error=%+v", response.StatusCode, envelope.Error)
+	}
+	var result servedEventPublishRPCResult
+	if err := json.Unmarshal(envelope.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Logf("H1_PUBLICATION_LATENCY key=%v elapsed=%s event=%s", params["idempotency_key"], elapsed, result.EventID)
+	}
+	return result
+}
+
+func issue2564H1WaitQuiescence(t *testing.T, ctx context.Context, rt servedControlProofRuntime, run string, provider *issue2564H1Provider) {
+	t.Helper()
+	stable, nextLog := 0, time.Now()
+	for {
+		var active int
+		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress')`, run).Scan(&active); err != nil {
+			t.Fatalf("H1 durable delivery progress: %v", err)
+		}
+		if active == 0 {
+			stable++
+			if stable == 4 {
+				return
+			}
+		} else {
+			stable = 0
+		}
+		if time.Now().After(nextLog) {
+			provider.mu.Lock()
+			acks := 0
+			for _, session := range provider.sessions {
+				acks += len(session.acks)
+			}
+			t.Logf("H1_PROGRESS active_deliveries=%d provider_sessions=%d acknowledged_saves=%d", active, len(provider.sessions), acks)
+			provider.mu.Unlock()
+			nextLog = time.Now().Add(5 * time.Second)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("H1 qualification deadline before quiescence: %v", ctx.Err())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+func issue2564H1PublishBumps(t *testing.T, ctx context.Context, rt servedControlProofRuntime, runID, sourceEvent string) {
 	t.Helper()
 	var workers sync.WaitGroup
 	start := make(chan struct{})
@@ -403,7 +483,7 @@ func issue2564H1PublishBumps(t *testing.T, rt servedControlProofRuntime, runID, 
 			defer workers.Done()
 			<-start
 			for n := publisher; n < issue2564H1Bumps; n += issue2564H1Publishers {
-				result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				result := issue2564H1Publish(t, ctx, rt.Endpoint, map[string]any{
 					"event_name": "hub.bump", "run_id": runID, "source_event_id": sourceEvent,
 					"payload":         map[string]any{"hub_id": fmt.Sprintf("h%02d", n%issue2564H1Hubs+1), "n": n},
 					"idempotency_key": fmt.Sprintf("h1-bump-%03d", n),
