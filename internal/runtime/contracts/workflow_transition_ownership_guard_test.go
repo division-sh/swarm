@@ -398,9 +398,12 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/bootverify.runtimeHandledEventRequirements::edge inventory":                                           1,
 		// Trigger projections originate at execution/lifecycle producers; validation
 		// and persistence consume them without deriving a replacement accepted event.
-		"internal/runtime/engine.EngineMutation.ValidateTransitionEvidence::accepted trigger TriggerEventID":              1,
-		"internal/runtime/engine.EngineMutation.ValidateTransitionEvidence::accepted trigger TriggerEventType":            1,
-		"internal/runtime/engine.EngineMutation.ValidateTransitionEvidence::accepted trigger TriggeredAt":                 1,
+		// Exact accepted evidence is checked separately for preserved-state timer
+		// reactions and real transitions. Preservation cannot create a stage entry;
+		// transitions still require their exact compiled cause.
+		"internal/runtime/engine.EngineMutation.ValidateTransitionEvidence::accepted trigger TriggerEventID":              2,
+		"internal/runtime/engine.EngineMutation.ValidateTransitionEvidence::accepted trigger TriggerEventType":            2,
+		"internal/runtime/engine.EngineMutation.ValidateTransitionEvidence::accepted trigger TriggeredAt":                 2,
 		"internal/runtime/engine.Executor.persist::accepted trigger TriggerEventID":                                       1,
 		"internal/runtime/engine.Executor.persist::accepted trigger TriggerEventType":                                     1,
 		"internal/runtime/engine.Executor.persist::accepted trigger TriggeredAt":                                          1,
