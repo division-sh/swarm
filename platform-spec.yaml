@@ -6771,6 +6771,13 @@ engine:
         structural_enforcement:
           owner: internal/store/testdata/persistence_authority_findings.tsv
           finding_identity: '{kind, raw-or-typed authority, file, enclosing declaration, member/method/context operation, resolved type/signature}'
+          temporary_debt_ratchet:
+            owner: internal/store TestPersistenceAuthorityDebtRatchet
+            snapshot: internal/store/testdata/persistence_authority_debt_baseline.tsv
+            authorized_by: '#2542'
+            purpose: Temporary inherited-debt evidence, never a disposition registry or authority grant.
+            rule: |
+              The exact source-owned resolved census and selected-boundary scan include test/support/inactive source and non-SQL construction/carrier/alias/callback/context escapes. Site identities retain resolved evidence and multiplicity without line numbers or unstable occurrence ordinals. Actual head debt must be contained in the head snapshot, the head snapshot in the trusted integration-base snapshot, and actual head debt in actual trusted-base source debt. Counts are derived from those rows and can only decrease; deleting a site never pays for a different site or increased multiplicity. Bootstrap occurs once from the actual extraction base. Collector/role changes, missing or corrupt evidence, scan failures, reseeding and stale-site resurrection fail closed. Normal CI is read-only; explicit local refresh removes only eliminated sites. Existing registry and production/completed-family guards remain independent and authoritative. Final closure requires zero debt and both expanded strict completion guards; the temporary snapshot cannot excuse a violation.
           rules:
             - The registry resolves named aliases, embedded fields, effective method sets after promotion, interface methods, function-valued fields, function parameters/results, and context reads/writes.
             - Public PostgresStore and SQLiteRuntimeStore effective method sets, and every exported non-backend semantic-owner method set, must contain zero raw SQL/query/dialect/transaction-callback parameters or results.
