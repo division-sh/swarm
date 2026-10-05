@@ -261,6 +261,23 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 		t.Fatal(err)
 	}
 	var workers []int
+	admission := testpostgres.NewRunAdmission(filepath.Join(root, "state"), nil)
+	joinDescendants := func(ctx context.Context) (err error) {
+		var joined []*testpostgres.RunLease
+		defer func() {
+			for _, lease := range joined {
+				err = errors.Join(err, lease.Complete(ctx, false))
+			}
+		}()
+		for range 2 {
+			lease, acquireErr := admission.Acquire(ctx, testpostgres.RunCommand{Args: []string{"go", "test", "./successor-after-join"}}, 2)
+			if acquireErr != nil {
+				return acquireErr
+			}
+			joined = append(joined, lease)
+		}
+		return nil
+	}
 	t.Cleanup(func() {
 		_ = os.WriteFile(filepath.Join(root, "release"), []byte("release\n"), 0600)
 		for _, pid := range workers {
@@ -269,6 +286,11 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 		if parent.ProcessState == nil {
 			_ = parent.Process.Kill()
 			_ = parent.Wait()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := joinDescendants(ctx); err != nil {
+			t.Errorf("join both fixture descendants before removing their release file: %v", err)
 		}
 	})
 	for _, unit := range []string{"one", "two"} {
@@ -286,7 +308,6 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	admission := testpostgres.NewRunAdmission(filepath.Join(root, "state"), nil)
 	blocked, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	if lease, err := admission.Acquire(blocked, testpostgres.RunCommand{Args: []string{"go", "test", "./successor"}}, 2); !errors.Is(err, context.DeadlineExceeded) {
@@ -306,11 +327,7 @@ func TestCompletionParentDeathRetainsWorkerDescendants(t *testing.T) {
 	}
 	ctx, finish := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finish()
-	lease, err := admission.Acquire(ctx, testpostgres.RunCommand{Args: []string{"go", "test", "./successor-after-join"}}, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := lease.Complete(ctx, false); err != nil {
+	if err := joinDescendants(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
