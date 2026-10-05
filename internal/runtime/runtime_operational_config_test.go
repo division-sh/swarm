@@ -322,8 +322,10 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 		},
 	}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
-		EventStore:              eventStore,
-		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
+		EventStore:               eventStore,
+		ManagerPersistenceRoles:  runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
+		EffectsStore:             &startupEffectStore{},
+		ManagedCapabilitiesStore: &startupCapabilityStore{},
 		Options: RuntimeOptions{
 			SelfCheck:      false,
 			WorkflowModule: module,

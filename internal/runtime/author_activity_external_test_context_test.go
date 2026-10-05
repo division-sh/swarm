@@ -19,6 +19,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -238,6 +239,19 @@ func completeExternalRuntimeTestWorkflowDeps(t testing.TB, selected any, deps ru
 	owner, ok := selected.(externalRuntimeTestWorkflowOwner)
 	if !ok {
 		t.Fatalf("selected workflow test owner %T lacks exact decision and expiry roles", selected)
+	}
+	managed, ok := selected.(interface {
+		runtimeeffects.Store
+		managedcapabilities.Persistence
+	})
+	if !ok {
+		t.Fatalf("selected workflow test owner %T lacks managed effect and capability roles", selected)
+	}
+	if deps.EffectsStore == nil {
+		deps.EffectsStore = managed
+	}
+	if deps.ManagedCapabilitiesStore == nil {
+		deps.ManagedCapabilitiesStore = managed
 	}
 	if deps.DecisionCards == nil {
 		deps.DecisionCards = owner
