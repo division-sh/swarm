@@ -290,9 +290,10 @@ func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (stri
 	return resolveCLIServeListenerAddressesFromConfig(opts, cfg)
 }
 
-func resolveCLIServeListenerAddressesFromConfig(opts cliServeListenerAddressOptions, cfg cliCommandConfig) (string, string, error) {
+func resolveCLIServeListenerAddressesFromConfig(opts cliServeListenerAddressOptions, cfg cliCommandConfig) (string, string, ListenerAddressSource, error) {
 	apiAddr, apiResolved := resolveCLIServeListenerAddressFlag(opts.APIListenAddr, opts.APIListenAddrFlagSet)
 	mcpAddr, mcpResolved := resolveCLIServeListenerAddressFlag(opts.MCPListenAddr, opts.MCPListenAddrFlagSet)
+	mcpSource := ListenerAddressFlag
 	if !apiResolved {
 		apiAddr = defaultAPIListenAddr
 		if config := strings.TrimSpace(cfg.Serve.APIListenAddr); config != "" {

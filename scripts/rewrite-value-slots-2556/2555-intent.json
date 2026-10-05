@@ -1,0 +1,17 @@
+[
+  {
+    "file": "internal/releasee2e/testdata/workspace_mcp/nodes.yaml",
+    "before_hash": "1b21ffe11994e4e6e66bd7281dfa77529522cf62caf5620f071315ad9ef275f1",
+    "after_hash": "43c03e3c4da1658c232e7b18a896274c244f496c6a457a19621d7ef2e152ca17",
+    "edits": [
+      {
+        "start": 13,
+        "remove": ["        fields: {marker: \"${payload.marker}\"}"],
+        "add": ["        fields: {marker: payload.marker}"]
+      }
+    ],
+    "slots": [
+      "intake.event_handlers.work.requested.emit.fields.marker: preserve the payload field as CEL, not interpolated text; no schema/default/scenario-data rewrite"
+    ]
+  }
+]
