@@ -60,15 +60,19 @@ Source configuration: module-wide `go/packages`, test syntax/types/imports and
 effective method sets, checkout-owned Go sources, inactive parsing and selected
 boundary scope; ambient GOFLAGS and GOWORK source-selection overrides cleared.
 
-Measured final-policy receipt: `ratchet-bootstrap-final-policy-20261005.jsonl`
+Measured final-policy receipt: `ratchet-bootstrap-all-ordinary-scope-20261005.jsonl`
 under `/home/youmew/.cache/swarm-2542-local-20261003`.
 
-- Collected findings: 53,203.
+- Collected findings: 53,329.
 - Raw-operation occurrences across all roles: 38,167.
-- Exact debt occurrences: 15,107.
-- Distinct debt identities: 11,851.
+- Exact debt occurrences: 15,233.
+- Distinct debt identities: 11,968.
 - Raw-operation debt occurrences: 11,391.
 - Guard-only delta: added 0, removed 0; initial snapshot equals actual base debt.
+
+The final module-loader control exposed 126 existing non-SQL constructor
+occurrences omitted by the initial ordinary-package filter. These are inherited
+debt in the extraction base, not additions from this guard PR.
 
 These are separate metrics. They are not B's migrated integration census of
 8,476 findings / 6,567 residual raw-operation sites, nor a number of bugs.
@@ -76,7 +80,7 @@ These are separate metrics. They are not B's migrated integration census of
 ## Proof And Residual Closure
 
 `TestPersistenceAuthorityDebtRatchet` executes the complete head/base census and
-comparison. Ten named hostile/control roots cover new sites, equal/lower-count
+comparison. Eleven named hostile/control roots cover new sites, equal/lower-count
 payment, duplicates, raised/reseeded snapshots, stale resurrection, corrupted
 data, aliases/embedding/callbacks/opaque construction, inactive imports, role
 relabeling, failed/missing census, unchanged legacy debt, actual deletion, benign
@@ -85,7 +89,11 @@ ratchet to remain selected by existing `store-admission-full` at core, lifecycle
 and full; no planner or shard change is introduced.
 
 Failed initial receipts are retained. They exposed the missing non-SQL
-constructor debt selection and git archive's PAX header, both repaired directly.
+constructor debt selection, ordinary-package construction filtering, and git
+archive's PAX header, all repaired directly. A real module-loader negative
+control now covers opaque construction in API, CLI, and shared-support tests.
+The copied unused scanner wrapper was removed before pushing; focused U1000
+analysis passes without suppression or changes to the existing static policy.
 Positive package success is checked alongside every expected root/backend cell;
 no skip, retry-to-green or timeout inflation supplies closure evidence.
 
