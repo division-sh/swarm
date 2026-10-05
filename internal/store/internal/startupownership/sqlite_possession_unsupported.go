@@ -12,6 +12,11 @@ func CaptureSQLiteInspectionIdentity(string) (*SQLiteBackendIdentity, error) {
 	return nil, err
 }
 
+func ObserveSQLiteInspectionAbsence(context.Context, string) (bool, error) {
+	_, err := acquireSQLiteFilePossession("")
+	return false, err
+}
+
 func probeSQLitePossession(context.Context, string, *SQLiteBackendIdentity) (bool, error) {
 	_, err := acquireSQLiteFilePossession("")
 	return false, err

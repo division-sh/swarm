@@ -36,6 +36,7 @@ type AdmissionObservation struct {
 	FinishedAt   time.Time                  `json:"finished_at,omitzero"`
 	Dependencies []string                   `json:"dependencies,omitempty"`
 	FailureClass failures.Class             `json:"failure_class,omitempty"`
+	NotRunCause  *AdmissionNotRunCause      `json:"not_run_cause,omitempty"`
 }
 
 // Startup obligations require production authority and are not observations.
@@ -58,8 +59,8 @@ type AdmissionFindingPolicy struct {
 }
 
 // AdmissionDecision preserves finding policy and reduces evidence independently
-// of presentation. Unobserved deployment predicates are allowed only in portable
-// validation, where completeness remains false.
+// of presentation. Unobserved deployment predicates remain incomplete; only
+// portable validation and proved local-store absence may be nonblocking.
 func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecision {
 	d := AdmissionDecision{Complete: r.Purpose == ExecutionValidation && len(r.Observations) > 0}
 	priority := 0
@@ -76,6 +77,17 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 		d.Complete = false
 		block(failures.ClassDependencyUnavailable)
 	}
+	absentStores := map[string]bool{}
+	for _, observation := range r.Observations {
+		if observation.NotRunCause == nil {
+			continue
+		}
+		if !observation.validAbsentStore(r.Purpose) {
+			block(failures.ClassSchemaInvalid)
+			continue
+		}
+		absentStores[observation.Subject] = true
+	}
 	seen := make(map[string]bool, len(r.Observations))
 	for _, observation := range r.Observations {
 		identity := observation.CheckID + "\x00" + observation.Subject + "\x00" + string(observation.Class)
@@ -84,6 +96,17 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 			block(failures.ClassSchemaInvalid)
 		}
 		seen[identity] = true
+		if observation.NotRunCause != nil {
+			d.Complete = false
+			continue
+		}
+		if absentStores[observation.Subject] && observation.CheckID != "selected_store_access" {
+			if observation.validAbsentStoreDependent() {
+				d.Complete = false
+				continue
+			}
+			block(failures.ClassSchemaInvalid)
+		}
 		complete, class := observation.decision(r.Purpose)
 		if !complete {
 			d.Complete = false

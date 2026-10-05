@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
 const (
@@ -104,6 +105,16 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 		result.BootReport.Observations = append(result.BootReport.Observations, observation)
 		return true
 	}
+	var absent *storeselected.AbsentSQLiteStore
+	if id == "selected_store_access" && owner == bootverify.SelectedStoreAccessOwner &&
+		ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && errors.As(err, &absent) {
+		observation.Status = bootverify.AdmissionNotRun
+		observation.Subject = "store:" + absent.Path
+		observation.Reason = absent.Error()
+		observation.NotRunCause = &bootverify.AdmissionNotRunCause{Kind: bootverify.AdmissionAbsentSQLiteStore, Path: absent.Path}
+		result.BootReport.Observations = append(result.BootReport.Observations, observation)
+		return false
+	}
 	if failure, ok := failures.As(err); ok {
 		failureClass = failure.Failure.Class
 	}
@@ -119,12 +130,12 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 	return false
 }
 
-func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) {
+func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) {
 	backend, workspaces, workspaceOK := inspectVerifySourceAdmission(ctx, cfg, source, opts, result)
 	inspectVerifyListeners(ctx, repo, cfg, result)
 	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)
 	inspectVerifyPublicIngress(ctx, result, "source:"+result.BootReport.SourceArtifactHash)
-	inspectVerifySelectedStore(ctx, repo, paths, cfg, source, opts, packBases, workspaces, workspaceOK, result)
+	inspectVerifySelectedStore(ctx, repo, paths, cfg, swarmDir, source, opts, packBases, workspaces, workspaceOK, result)
 	result.BootReport.Sort()
 }
 

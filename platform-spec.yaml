@@ -9158,7 +9158,20 @@ engine:
         Post-registry clauses record their own execution and an early refusal leaves a named unperformed
         tail, not an empty success list. Observations are scoped to the admitted source identity and
         selected configuration; they never grant execution authority or a future lease.
-      observation_fields: [check_id, owner, subject, class, status, reason, started_at, finished_at, dependencies, failure_class]
+      observation_fields: [check_id, owner, subject, class, status, reason, started_at, finished_at, dependencies, failure_class, not_run_cause]
+      first_use_store_absence: >
+        Only selected_store_access from internal/store/selected.OpenAdmissionInspection may carry
+        not_run_cause: {kind: absent_sqlite_store, path: <exact absolute selected SQLite path>}.
+        The existing filesystem identity owner proves a valid missing leaf or never-created ancestor
+        without creating anything. Unsafe aliases, dangling ancestors, non-directories, open failures
+        and an observed-existing store disappearing later are not absence evidence. Existing system
+        canonical-path aliases remain supported. PostgreSQL unavailability is not this exception.
+        The observation has deployment class, not_run status, exact store:<path> subject and timed
+        observation evidence. Report.AdmissionDecision validates its cause, owner and identity, then
+        permits only the existing finite selected-store dependent checks with matching subject, owner
+        and selected_store_access dependency to remain not_run without blocking. Unknown or malformed
+        causes, forged dependents, duplicate and contradictory observations fail closed. Absence
+        never fabricates schema, possession or retained-state passes, and admission_complete is false.
       observation_classes: [source, deployment]
       observation_statuses: [passed, failed, unavailable, not_run, not_applicable]
       applicability: >
@@ -9320,7 +9333,15 @@ engine:
         admission_complete: true and live_readiness: not_evaluated. Text and quiet say admission
         checks passed; startup execution not performed, with all outstanding execution obligations.
         Required missing, failed, disallowed, timed-out or uncleaned observations are incomplete
-        and nonzero. Portable success reports structural scope and admission_complete: false,
+        and nonzero, except the validated first_use_store_absence case, which exits zero only if
+        no other blocker exists. That case retains deployment scope, admission_complete: false and
+        live_readiness: not_evaluated. Text and quiet show the success asterisk and
+        "store admission: not evaluated — no selected store at <path> (created on first serve)";
+        JSON retains the exact path and typed not_run_cause. All store-independent checks still run.
+        Verify carries the inherited --swarm-dir value and explicit-set bit into the frozen config
+        resolver, preserving flag > config paths.swarm_dir > default and the separate explicit
+        SQLite path override. Boot remains the independent creation and execution authority.
+        Portable success reports structural scope and admission_complete: false,
         including whether --portable was explicitly requested or no deployment context existed.
     structural_validation:
       owner: internal/runtime.ValidateWorkflowContractSurface and internal/runtime/bootverify

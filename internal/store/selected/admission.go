@@ -3,6 +3,7 @@ package selected
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -60,7 +61,26 @@ type AdmissionInspection struct {
 	store admissionInspectionPort
 }
 
+// AbsentSQLiteStore is a non-creating observation, not an empty database or
+// permission to skip the independent construction checks at serve time.
+type AbsentSQLiteStore struct {
+	Path string
+}
+
+func (e *AbsentSQLiteStore) Error() string {
+	return fmt.Sprintf("no selected store at %s (created on first serve)", e.Path)
+}
+
 func OpenAdmissionInspection(ctx context.Context, req AuthorityRequest) (*AdmissionInspection, error) {
+	if req.Selection.Backend == storebackend.BackendSQLite {
+		absent, err := storeconstruction.ObserveSQLiteInspectionAbsence(ctx, req.Selection.SQLitePath)
+		if err != nil {
+			return nil, err
+		}
+		if absent {
+			return nil, &AbsentSQLiteStore{Path: req.Selection.SQLitePath}
+		}
+	}
 	selected, err := openInspectionStore(ctx, req)
 	if err != nil {
 		return nil, err
