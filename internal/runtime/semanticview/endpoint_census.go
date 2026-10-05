@@ -539,6 +539,13 @@ func (b *endpointCensusBuilder) addAgent(plan AgentNamePlan, agent runtimecontra
 		endpoint.SourceLocation = "emit_events"
 		b.add(endpoint)
 	}
+	if timeout := agent.TurnTimeout; timeout != nil {
+		endpoint := b.endpoint(EventEndpointProducer, EventEndpointAgent, flowID, timeout.Emit)
+		endpoint.AgentLocalID, endpoint.AgentID, endpoint.Role = plan.LocalID, plan.AgentID, role
+		endpoint.FlowPath, endpoint.SourceFile = strings.TrimSpace(flowPath), strings.TrimSpace(sourceFile)
+		endpoint.Site, endpoint.SourceLocation = "turn_timeout.emit", "turn_timeout.emit"
+		b.add(endpoint)
+	}
 	for _, eventType := range normalizedSortedStrings(agent.Subscriptions) {
 		endpoint := b.endpoint(EventEndpointConsumer, EventEndpointAgent, flowID, eventType)
 		endpoint.AgentLocalID = plan.LocalID
@@ -724,6 +731,10 @@ func (b *endpointCensusBuilder) endpointSourceLine(endpoint AuthoredEventEndpoin
 	case EventEndpointNodeHandler, EventEndpointNodeGenerated:
 		return yamlActorEventLine(root, endpoint.NodeID, []string{"subscribes_to", "event_handlers"}, eventType)
 	case EventEndpointAgent:
+		if endpoint.Site == "turn_timeout.emit" {
+			actor := yamlMappingValue(yamlDocumentMapping(root), endpoint.AgentLocalID)
+			return yamlMappingValue(yamlMappingValue(actor, "turn_timeout"), "emit").Line()
+		}
 		field := "subscriptions"
 		if endpoint.Direction == EventEndpointProducer {
 			field = "emit_events"

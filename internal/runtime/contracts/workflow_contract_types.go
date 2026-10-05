@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
@@ -1506,6 +1507,7 @@ type AgentRegistryEntry struct {
 	Mock                   mockperformance.Performance     `yaml:"mock" json:"mock,omitempty"`
 	MemoryPlan             agentmemory.Plan                `yaml:"-" json:"memory_plan"`
 	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
+	TurnTimeout            *timeridentity.TurnTimeout      `yaml:"-" json:"turn_timeout,omitempty"`
 	Subscriptions          []string                        `yaml:"subscriptions"`
 	SubscriptionsBootstrap []string                        `yaml:"subscriptions_bootstrap"`
 	SubscribesTo           []string                        `yaml:"subscribes_to"`
@@ -1537,6 +1539,7 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"memory":             {},
 	"mock":               {},
 	"max_turns_per_task": {},
+	"turn_timeout":       {},
 	"subscriptions":      {},
 	"tools":              {},
 	"native_tools":       {},

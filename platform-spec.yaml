@@ -8098,6 +8098,19 @@ engine:
         intent: Required authored source under agent_intent_model; no generated prose, filename, directory, role, or runtime fallback exists.
         model: Cost/provider-bearing. It remains explicit in Layer 1 and missing model aliases fail validation.
         manager_fallback: No platform default in Layer 1; explicit value only.
+        turn_timeout: Optional authored logical provider-turn bound. Omission introduces no bound; no default is inferred.
+      turn_timeout_declaration:
+        syntax: 'turn_timeout: {after: 10m, emit: investigation.aborted}'
+        admission: >-
+          The object requires exactly after and emit. after is a positive duration
+          string, not a number or expression. emit is a nonblank exact declared
+          event reference in the agent's owner scope whose schema admits an empty
+          payload. Null, bare, empty, unknown-field and malformed forms fail before
+          runtime construction on both disk and retained-source loaders.
+        ownership: >-
+          The declaration is preserved in exact agent configuration and plan
+          identity. Its event is a platform-owned agent timeout producer, not an
+          additional provider emit tool or inferred routing permission.
       generated_view:
         rule: Generated/expanded views MUST show each effective Layer 1 field value and whether it was authored
           directly or platform-defaulted, except memory which is shown only by value.

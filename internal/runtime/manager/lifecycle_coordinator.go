@@ -712,6 +712,9 @@ func lifecycleConfigRevision(rec PersistedAgent) (string, error) {
 // AgentConfigPlanRevision returns the run-independent revision admitted by
 // declaration and readiness topology owners before a concrete run exists.
 func AgentConfigPlanRevision(config models.AgentConfig, plan runtimeagentidentity.Plan) (string, error) {
+	if err := config.ValidateTurnTimeout(); err != nil {
+		return "", err
+	}
 	plan = plan.Normalize()
 	if err := plan.Validate(); err != nil {
 		return "", err

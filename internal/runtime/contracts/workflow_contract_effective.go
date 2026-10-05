@@ -70,6 +70,9 @@ func EffectiveAgentRegistryEntry(logicalID string, entry AgentRegistryEntry) Age
 	if strings.TrimSpace(effective.Model) != "" || effective.AuthoredFields["model"] {
 		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "model", AgentFieldSourceAuthored)
 	}
+	if effective.TurnTimeout != nil {
+		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "turn_timeout", AgentFieldSourceAuthored)
+	}
 	if strings.TrimSpace(effective.ManagerFallback) != "" || effective.AuthoredFields["manager_fallback"] {
 		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "manager_fallback", AgentFieldSourceAuthored)
 	}
@@ -210,7 +213,7 @@ func inferredRequiredAgentFacts(agents map[string]AgentRegistryEntry, sourceFile
 		out = append(out, RequiredAgentFact{
 			Role:         agentID,
 			SubscribesTo: normalizeStrings(agent.Subscriptions),
-			Emits:        normalizeStrings(agent.EmitEvents),
+			Emits:        agent.ProducedEvents(),
 			Source:       RequiredAgentSourceInferred,
 			SourceFile:   sourceFile,
 		})
