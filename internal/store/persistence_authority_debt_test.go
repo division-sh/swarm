@@ -246,16 +246,22 @@ func debtGit(root string, args ...string) ([]byte, error) {
 
 func debtTrustedBase(root string) (string, error) {
 	target := "origin/master"
+	candidate := ""
 	if eventPath := os.Getenv("GITHUB_EVENT_PATH"); eventPath != "" {
 		data, err := os.ReadFile(eventPath)
 		if err != nil {
 			return "", err
 		}
 		var event struct {
+			Before      string `json:"before"`
+			After       string `json:"after"`
 			PullRequest *struct {
 				Base struct {
 					SHA string `json:"sha"`
 				} `json:"base"`
+				Head struct {
+					SHA string `json:"sha"`
+				} `json:"head"`
 			} `json:"pull_request"`
 		}
 		if err := json.Unmarshal(data, &event); err != nil {
@@ -263,9 +269,22 @@ func debtTrustedBase(root string) (string, error) {
 		}
 		if event.PullRequest != nil {
 			target = event.PullRequest.Base.SHA
-			if !authorityDebtHex(target, 40) {
-				return "", fmt.Errorf("missing authenticated PR base identity")
+			candidate = event.PullRequest.Head.SHA
+			if !authorityDebtHex(target, 40) || !authorityDebtHex(candidate, 40) {
+				return "", fmt.Errorf("missing authenticated PR base/head identity")
 			}
+		} else if event.Before != "" || event.After != "" {
+			if !authorityDebtHex(event.Before, 40) || !authorityDebtHex(event.After, 40) {
+				return "", fmt.Errorf("missing authenticated push predecessor/head identity")
+			}
+			head, err := debtGit(root, "rev-parse", "HEAD")
+			if err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(string(head)) != event.After {
+				return "", fmt.Errorf("push event does not name the tested head")
+			}
+			target = event.Before
 		}
 	}
 	// Hosted proof checkouts are shallow. Retrieve history, not a caller-chosen
@@ -287,11 +306,46 @@ func debtTrustedBase(root string) (string, error) {
 			return "", err
 		}
 	}
-	base, err := debtGit(root, "merge-base", "HEAD", target)
+	comparison := "HEAD"
+	if candidate != "" {
+		entries, err := debtGit(root, "ls-tree", target, "--", debtBaselinePath)
+		if err != nil {
+			return "", err
+		}
+		if len(bytes.TrimSpace(entries)) == 0 {
+			history, err := debtGit(root, "log", "-1", "--format=%H", target, "--", debtBaselinePath)
+			if err != nil {
+				return "", err
+			}
+			if len(bytes.TrimSpace(history)) != 0 {
+				return "", fmt.Errorf("landed debt baseline disappeared from authenticated lineage; rebootstrap refused")
+			}
+			// Initial bootstrap is tied to the candidate's extraction base, not
+			// GitHub's synthetic merge. Once landed, the tested integration tree
+			// consumes the already-landed baseline without a rebootstrap.
+			if _, err := debtGit(root, "cat-file", "-e", candidate+"^{commit}"); err != nil {
+				if _, err := debtGit(root, "fetch", "--no-tags", "origin", candidate); err != nil {
+					return "", err
+				}
+			}
+			comparison = candidate
+		}
+	}
+	base, err := debtGit(root, "merge-base", comparison, target)
 	if err != nil {
 		return "", err
 	}
 	sha := strings.TrimSpace(string(base))
+	if head, err := debtGit(root, "rev-parse", "HEAD"); err != nil {
+		return "", err
+	} else if sha == strings.TrimSpace(string(head)) {
+		// A local checkout at master still needs an independent predecessor.
+		parent, err := debtGit(root, "rev-parse", "HEAD^")
+		if err != nil {
+			return "", err
+		}
+		sha = strings.TrimSpace(string(parent))
+	}
 	if !authorityDebtHex(sha, 40) {
 		return "", fmt.Errorf("invalid trusted integration base")
 	}

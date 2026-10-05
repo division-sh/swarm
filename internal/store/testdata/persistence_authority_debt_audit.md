@@ -45,7 +45,10 @@ resurrection. Totals are derived, not independently editable ceilings. Missing,
 corrupt, duplicate, reseeded or raised snapshots and partial/type-failed scans
 fail closed. Trusted base is Git's actual common integration base; hosted PR
 events supply the authenticated target, and shallow checkouts retrieve history.
-Behind-master alone is not a qualification failure.
+Behind-master alone is not a qualification failure. Initial hosted bootstrap
+uses the authenticated candidate's extraction base, not a synthetic merge's
+unrelated newer master parent. Once a baseline is landed, the tested integration
+consumes that landed baseline; it cannot bootstrap again.
 
 Normal tests/CI are read-only. One explicit local mode,
 `SWARM_REFRESH_PERSISTENCE_AUTHORITY_DEBT=downward`, removes eliminated rows and
@@ -60,7 +63,7 @@ Source configuration: module-wide `go/packages`, test syntax/types/imports and
 effective method sets, checkout-owned Go sources, inactive parsing and selected
 boundary scope; ambient GOFLAGS and GOWORK source-selection overrides cleared.
 
-Measured final-policy receipt: `ratchet-bootstrap-all-ordinary-scope-20261005.jsonl`
+Measured final-policy receipt: `ratchet-bootstrap-final-trusted-policy-20261005.jsonl`
 under `/home/youmew/.cache/swarm-2542-local-20261003`.
 
 - Collected findings: 53,329.
@@ -80,7 +83,7 @@ These are separate metrics. They are not B's migrated integration census of
 ## Proof And Residual Closure
 
 `TestPersistenceAuthorityDebtRatchet` executes the complete head/base census and
-comparison. Eleven named hostile/control roots cover new sites, equal/lower-count
+comparison. Twelve named hostile/control roots cover new sites, equal/lower-count
 payment, duplicates, raised/reseeded snapshots, stale resurrection, corrupted
 data, aliases/embedding/callbacks/opaque construction, inactive imports, role
 relabeling, failed/missing census, unchanged legacy debt, actual deletion, benign
@@ -92,6 +95,12 @@ Failed initial receipts are retained. They exposed the missing non-SQL
 constructor debt selection, ordinary-package construction filtering, and git
 archive's PAX header, all repaired directly. A real module-loader negative
 control now covers opaque construction in API, CLI, and shared-support tests.
+The synthetic hosted-merge control also reproduced a bootstrap identity change
+caused only by an unrelated master commit; candidate-derived initial bootstrap
+and landed-baseline integration now both pass through the same trusted owner.
+The same Git-history control proves missing landed lineage refuses rebootstrap,
+hosted pushes use their observed predecessor, and local master never compares
+its policy/debt snapshot only against itself.
 The copied unused scanner wrapper was removed before pushing; focused U1000
 analysis passes without suppression or changes to the existing static policy.
 Positive package success is checked alongside every expected root/backend cell;
