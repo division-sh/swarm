@@ -123,7 +123,6 @@ type AgentLifecyclePhase string
 const (
 	AgentLifecycleRegistered AgentLifecyclePhase = "registered"
 	AgentLifecycleRunning    AgentLifecyclePhase = "running"
-	AgentLifecycleDraining   AgentLifecyclePhase = "draining"
 	AgentLifecycleTerminated AgentLifecyclePhase = "terminated"
 	AgentLifecycleFailed     AgentLifecyclePhase = "failed"
 )

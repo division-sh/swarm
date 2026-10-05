@@ -214,9 +214,6 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 			record.Failure = failureEnvelope(outputErr, "agent-manager", "observe_completion_settlement")
 			return eventProcessResult{record: record, err: outputErr}
 		}
-		if observation.Finalization != nil {
-			am.lifecycle.observeProviderDrainFinalization(*observation.Finalization)
-		}
 		if err != nil {
 			agentFailure := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event")
 			record.Outcome = startupManagerReplayOutcomeDropped

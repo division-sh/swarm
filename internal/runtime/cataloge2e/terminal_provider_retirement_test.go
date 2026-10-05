@@ -270,9 +270,6 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 				}
 				state, found, err := reader.LoadAgentLifecycleState(ctx, attempt.Authority.Target.AgentIdentity)
 				want := runtimemanager.AgentLifecycleTerminated
-				if launched {
-					want = runtimemanager.AgentLifecycleDraining
-				}
 				if replacement {
 					want = runtimemanager.AgentLifecycleRunning
 					select {

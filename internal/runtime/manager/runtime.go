@@ -1054,9 +1054,6 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 	if err := am.reconcileExternalEffectsForStartup(ctx); err != nil {
 		return summary, err
 	}
-	if err := am.lifecycle.refreshRecoveredProviderDrainFinalizations(ctx); err != nil {
-		return summary, err
-	}
 	if am.budget != nil {
 		if err := am.budget.ProjectRecoveryBudgetState(ctx); err != nil {
 			return summary, fmt.Errorf("project recovered budget state: %w", err)
@@ -1441,7 +1438,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 
 	am.lifecycle.mu.Lock()
 	execution := cell.execution
-	if execution == nil || execution.agent == nil || cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if execution == nil || execution.agent == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
 		am.lifecycle.mu.Unlock()
 		return replaceExecutionResult{}, fmt.Errorf("%w: %s", ErrAgentNotFound, strings.TrimSpace(agentID))
 	}

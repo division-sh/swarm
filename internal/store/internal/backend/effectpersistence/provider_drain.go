@@ -91,15 +91,16 @@ func resolveCompletionSettlementPermitPostgres(
 	}
 	var epoch, generation int64
 	var phase string
+	var transitionID sql.NullString
 	err = tx.QueryRowContext(ctx, `
-		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
+		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_last_transition_id::text
 		FROM agents
 		WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
 		  AND agent_route_presence=$4 AND flow_scope_key=$5
 		  AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid
 		FOR UPDATE
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase, &transitionID)
 	if err != nil {
 		return completionSettlementPermit{}, err
 	}
@@ -111,8 +112,7 @@ func resolveCompletionSettlementPermitPostgres(
 		return completionSettlementPermit{}, err
 	}
 	if epoch != permit.SuccessorEpoch || generation != int64(permit.SuccessorGeneration) ||
-		(permit.Target == runtimeeffects.ProviderDrainTargetRunning && phase != "running") ||
-		(permit.Target != runtimeeffects.ProviderDrainTargetRunning && phase != "draining") {
+		phase != string(permit.Target) || !transitionID.Valid || transitionID.String != permit.LifecycleTransitionID {
 		return completionSettlementPermit{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_successor_mismatch", "external-effects", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
 	}
 	return completionSettlementPermit{Kind: completionSettlementDrained, Drain: permit}, nil
@@ -156,14 +156,15 @@ func resolveCompletionSettlementPermitSQLite(
 	}
 	var epoch, generation int64
 	var phase string
+	var transitionID sql.NullString
 	err = tx.QueryRowContext(ctx, `
-		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
+		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_last_transition_id
 		FROM agents
 		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
 		  AND agent_route_presence=? AND flow_scope_key=?
 		  AND flow_instance_id=? AND flow_instance=? AND run_id=?
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase, &transitionID)
 	if err != nil {
 		return completionSettlementPermit{}, err
 	}
@@ -175,8 +176,7 @@ func resolveCompletionSettlementPermitSQLite(
 		return completionSettlementPermit{}, err
 	}
 	if epoch != permit.SuccessorEpoch || generation != int64(permit.SuccessorGeneration) ||
-		(permit.Target == runtimeeffects.ProviderDrainTargetRunning && phase != "running") ||
-		(permit.Target != runtimeeffects.ProviderDrainTargetRunning && phase != "draining") {
+		phase != string(permit.Target) || !transitionID.Valid || transitionID.String != permit.LifecycleTransitionID {
 		return completionSettlementPermit{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_successor_mismatch", "external-effects", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
 	}
 	return completionSettlementPermit{Kind: completionSettlementDrained, Drain: permit}, nil
@@ -368,18 +368,19 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 	}
 	var epoch, generation int64
 	var phase string
+	var transitionID sql.NullString
 	if postgres {
 		err = tx.QueryRowContext(ctx, `
-			SELECT lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase FROM agents
+			SELECT lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,lifecycle_last_transition_id::text FROM agents
 			WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3 AND agent_route_presence=$4
 			  AND flow_scope_key=$5 AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid FOR UPDATE
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase, &transitionID)
 	} else {
 		err = tx.QueryRowContext(ctx, `
-			SELECT lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase FROM agents
+			SELECT lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,lifecycle_last_transition_id FROM agents
 			WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=? AND agent_route_presence=?
 			  AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=? AND run_id=?
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase, &transitionID)
 	}
 	if err != nil {
 		return providerDrainRecoveryResolution{}, err
@@ -397,8 +398,7 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 		)
 	}
 	if epoch != permit.SuccessorEpoch || generation != int64(permit.SuccessorGeneration) ||
-		(permit.Target == runtimeeffects.ProviderDrainTargetRunning && phase != "running") ||
-		(permit.Target != runtimeeffects.ProviderDrainTargetRunning && phase != "draining") {
+		phase != string(permit.Target) || !transitionID.Valid || transitionID.String != permit.LifecycleTransitionID {
 		return providerDrainRecoveryResolution{}, runtimefailures.New(
 			runtimefailures.ClassLifecycleConflict,
 			"provider_attempt_drain_successor_mismatch",
@@ -642,22 +642,8 @@ func finalizeProviderDrainPostgres(
 	if pending != 0 {
 		return nil, nil
 	}
-	fields, err := agentIdentityFields(attempt.Authority.Normal.Identity)
-	if err != nil {
-		return nil, err
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE agents SET lifecycle_phase=$8
-		WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
-		  AND agent_route_presence=$4 AND flow_scope_key=$5
-		  AND flow_instance_id=$6 AND flow_instance=$7
-		  AND lifecycle_runtime_epoch=$9 AND lifecycle_generation=$10 AND run_id=$11::uuid AND lifecycle_phase='draining'
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		string(permit.Target), permit.SuccessorEpoch, permit.SuccessorGeneration, fields.RunID)
-	if err := requireExternalAttemptTransition(res, err); err != nil {
-		return nil, err
-	}
+	// The locked completion permit already validated the exact successor. Closing
+	// its final sidecar acknowledges provider settlement, not a lifecycle change.
 	return providerDrainFinalization(attempt, permit), nil
 }
 
@@ -676,22 +662,6 @@ func finalizeProviderDrainSQLite(
 	}
 	if pending != 0 {
 		return nil, nil
-	}
-	fields, err := agentIdentityFields(attempt.Authority.Normal.Identity)
-	if err != nil {
-		return nil, err
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE agents SET lifecycle_phase=?
-		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
-		  AND agent_route_presence=? AND flow_scope_key=?
-		  AND flow_instance_id=? AND flow_instance=?
-		  AND lifecycle_runtime_epoch=? AND lifecycle_generation=? AND run_id=? AND lifecycle_phase='draining'
-	`, string(permit.Target), fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		permit.SuccessorEpoch, permit.SuccessorGeneration, fields.RunID)
-	if err := requireExternalAttemptTransition(res, err); err != nil {
-		return nil, err
 	}
 	return providerDrainFinalization(attempt, permit), nil
 }
