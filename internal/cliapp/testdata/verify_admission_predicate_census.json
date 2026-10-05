@@ -141,7 +141,7 @@
     "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.checkGatewayEnv",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
-    "body_sha256": "04890909aa6dce79eeec9536381e543c67aa2a656910a5310deffd7066ddab22"
+    "body_sha256": "2521d714970d369eb7b72e3a87b461c5cc22967ea61a5d18f8d37eb542926c22"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.checkListener",
@@ -660,6 +660,18 @@
     "body_sha256": "c6e50b64e43bb54fa8c9aa50fe0d81d7d4cde72e20c4b3d733486311b83c5813"
   },
   {
+    "owner": "internal/cliapp/workspace_listener.go::WorkspaceMCPListenAddr",
+    "audit_rows": "A15,A18",
+    "proof_families": "P13,P15",
+    "body_sha256": "37e5c8c8711531a8448e3c51eaf6c3fd66d39d9bc530f2f22cacfa72989d8673"
+  },
+  {
+    "owner": "internal/cliapp/workspace_listener.go::workspaceMCPListenAddr",
+    "audit_rows": "A15,A18",
+    "proof_families": "P13,P15",
+    "body_sha256": "fe0a225422a51fb9ca92bd47d025d9ab8f6a9704fa6e27e827cd177f701bce18"
+  },
+  {
     "owner": "internal/runtime/bootverify/admission_report.go::AdmissionExecutionObligation.validIdentity",
     "audit_rows": "A28,A29,A30",
     "proof_families": "P23,P24",
@@ -742,6 +754,12 @@
     "audit_rows": "A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
     "body_sha256": "2be0033b0f30ce9a5e9436596fc3198ea8962b8915132dd4315e9ae9a9b9c27a"
+  },
+  {
+    "owner": "internal/runtime/llm/mock_startup_probe.go::*MockRuntime.ProbeStartupVisibleToolSurface",
+    "audit_rows": "A11,A18",
+    "proof_families": "P09,P15",
+    "body_sha256": "2ad1678c9c5d1e208a24d3383fc17e78eeceb0137ee02962a9d897abcc4dc9cc"
   },
   {
     "owner": "internal/runtime/llm/provider_admission.go::*ProviderAdmissionRegistry.Admit",
@@ -873,7 +891,7 @@
     "owner": "internal/runtime/llm/provider_contract.go::ProviderContract.Validate",
     "audit_rows": "A11,A25",
     "proof_families": "P09,P15,P21",
-    "body_sha256": "7fe25c68b6cd0f46f24b7f12362f878b3282696d18309c769e855fe84c84872d"
+    "body_sha256": "ca79544486a86a5905fff37a973cf5d42c7dcdd22ec8fcaff3a1c0bfaeba0fe8"
   },
   {
     "owner": "internal/runtime/llm/provider_contract.go::ProviderContractForProfile",
@@ -994,6 +1012,54 @@
     "audit_rows": "A12",
     "proof_families": "P10,P21",
     "body_sha256": "b8ba4169b245e6897d9a4ae880b8a21a876e64ee39221844e196e814f3c713e6"
+  },
+  {
+    "owner": "internal/runtime/llm/workspace_mcp_admission.go::*ClaudeCLIRuntime.probeWorkspaceMCP",
+    "audit_rows": "A11,A18,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "dac707a384a4405a37d3b6e77c58a5e9716ef55a505c2369fd6430a6739c4ebb"
+  },
+  {
+    "owner": "internal/runtime/llm/workspace_mcp_admission.go::ObserveWorkspaceGateway",
+    "audit_rows": "A11,A18,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "74e66ee6fc7867b3b2597d7acd5f8ea95304d7b00bcdae51e9c392147052c319"
+  },
+  {
+    "owner": "internal/runtime/llm/workspace_mcp_admission.go::compareWorkspaceMCPDefinitions",
+    "audit_rows": "A11,A18,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "3911b7f4fc86d1b56019c7a47b753b78de24a7cae9d1aabb2950f24687972535"
+  },
+  {
+    "owner": "internal/runtime/llm/workspace_mcp_admission.go::probeWorkspaceMCP",
+    "audit_rows": "A11,A18,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "2653293213ae68d10ea3fe173287bbc405ee07446dff706704a7c82925e806a4"
+  },
+  {
+    "owner": "internal/runtime/llm/workspace_mcp_admission.go::validatePlannedWorkspaceMCPDefinitions",
+    "audit_rows": "A11,A18,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "c203e5dfa5fc0fe8ffeb76f775477d99ca525f660ee5b61d91cfefa99c35dc87"
+  },
+  {
+    "owner": "internal/runtime/llm/workspace_mcp_admission.go::validateWorkspaceMCPDefinitions",
+    "audit_rows": "A11,A18,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "35bfefd384feb41cb9d9f689771ed1863b7e032b698be78fcd273f938eea7ccd"
+  },
+  {
+    "owner": "internal/runtime/llm/workspace_mcp_admission.go::workspaceMCPDefinitionMismatch",
+    "audit_rows": "A11,A18,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "a16fad628401f801ac8efeb152cf00d0168bb4bc79687999a160dbb9dd214084"
+  },
+  {
+    "owner": "internal/runtime/manager/activation_gateway.go::*AgentManager.ProveUnpublishedActivation",
+    "audit_rows": "A11,A18",
+    "proof_families": "P09,P15",
+    "body_sha256": "b023e2807ca53144ca544fbdab1785383c54bc4d2a00599866a86d394779cea0"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.InstallStartupTopology",
@@ -1161,7 +1227,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::NewAgentManagerWithOptions",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "7686da8574a64f2bed874876a43bf3cc60840cf8c19f5c3a92babe69d28459f4"
+    "body_sha256": "140c9dc41c79c4badb487715c8f03543f9f1b1198ff2e8ea0c2c744ff18ab9d6"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::ValidateAgentBuildConfiguration",
@@ -1611,7 +1677,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "41457d9ef47038b3ad4536774d0a26ca06c742896965012d681e276f36febfb8"
+    "body_sha256": "01970884884e923386f45b9765f21af9e6c7c366a54fcadf250908700cc37c4f"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartupLifecycleLocked",
@@ -1773,7 +1839,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "c3fae9c20bfa726789ad8ec6f3f0c03a58e2196851e60db47a4149345118ee3d"
+    "body_sha256": "f240bf19ee0f713925d4dd04d0736279d7f467e98d581da391767c56480a79d1"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -1822,6 +1888,12 @@
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
     "body_sha256": "a101eff4f67dfe8030b4d6cf53e1df94009bbbbccb77f9b30749539901756c48"
+  },
+  {
+    "owner": "internal/runtime/runtime_activation_gateway.go::*Runtime.observeActivationWorkspaceGateway",
+    "audit_rows": "A11,A18,A25",
+    "proof_families": "P09,P15,P21",
+    "body_sha256": "184347cdcd0f2545cbe41e6fc1c2dab8c8de462317ac439c1cf3afce733b078a"
   },
   {
     "owner": "internal/runtime/runtime_claude_startup.go::ManagedProviderPreflightAuthority.probeAuthority",
@@ -1965,7 +2037,7 @@
     "owner": "internal/runtime/runtime_claude_startup.go::validateManagedProviderPreflightConfigs",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
-    "body_sha256": "354d5df66aad0ef7a8e063bb9bbbbdcd345048ffb38b3f6680031ba93ea87587"
+    "body_sha256": "0401042b3c609d3c4b455d2eeede70e4367a72deadc079c0a65c8559380e890d"
   },
   {
     "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredential",
@@ -2008,6 +2080,12 @@
     "audit_rows": "A11,A13,A25",
     "proof_families": "P09,P11,P15,P21",
     "body_sha256": "1b061177a91e1cd431d4142bd70b3b197bb7a7bf0b5edb5942dbe5e7a74c3186"
+  },
+  {
+    "owner": "internal/runtime/runtime_prepared_catalog.go::*PreparedSelectedForkProviderCatalog.ObserveActivationGateway",
+    "audit_rows": "A11,A13,A25",
+    "proof_families": "P09,P11,P15,P21",
+    "body_sha256": "ab5df2ff8acd92299f28b58d6e29c2b35cd452d79d65f1339a7a926642d12c60"
   },
   {
     "owner": "internal/runtime/runtime_prepared_catalog.go::*PreparedSelectedForkProviderCatalog.ValidateActors",
@@ -2757,13 +2835,13 @@
     "owner": "internal/serveapp/main.go::buildForkChatSandboxLLMRuntimes",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "f67a127303fbdd2c2b2ab4c696fb491272bad7607d252e329d9cc74257740cfe"
+    "body_sha256": "c316c68308fc91bd91b1960eb34c912fb3bd80c694058110fd870fe6de926e0f"
   },
   {
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "24d1436c5fbde603ca250efd39bc545987ecf29b4687b31c8320e95f8d8c4ea1"
+    "body_sha256": "a68c32b45b66149bca152b6b73529c74cc3dc6352dd68f63029b3810c6031d27"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
@@ -2805,7 +2883,7 @@
     "owner": "internal/serveapp/main.go::createServeToolGatewayBinding",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "07f43763b44e13958beb2c331ac4b31935d75c0db06ed351f9f184c69752b6bf"
+    "body_sha256": "02865459385f85d2ed6d610904e51027936b62117396e9bd1cff572bbb813cd0"
   },
   {
     "owner": "internal/serveapp/main.go::ensureServeSchemaTables",
@@ -3069,7 +3147,7 @@
     "owner": "internal/serveapp/main.go::serveMCPContainerGatewayURL",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "433e4ff71e703224ed51ac358a6301ca3251857679fff373d054430ed57a00ba"
+    "body_sha256": "99a41fbe7dd76d546f923e1020e733434d6fda8092783b6f6d5c3d2725ea7a71"
   },
   {
     "owner": "internal/serveapp/main.go::serveOperatorChannelInterfaces",
