@@ -405,6 +405,16 @@ func commitWorkflowEngineMutation(
 		}
 		var err error
 		err = attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			// Run authority precedes the paired header/field projection. A stop
+			// holding that authority must never wait for this writer's header lock.
+			if postgres {
+				err = requirePostgresRunActive(txctx, tx, command.State.Identity.RunID)
+			} else {
+				err = requireSQLiteRunActive(txctx, tx, command.State.Identity.RunID)
+			}
+			if err != nil {
+				return err
+			}
 			if command.Writer != nil {
 				current, err := store.RequireActiveSourceTx(txctx, tx, command.State.Identity.RunID)
 				if err != nil {

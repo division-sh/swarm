@@ -471,6 +471,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		activityIntents  []ActivityIntent
 		activityRequests []EmitIntent
 		postCommitErr    error
+		flowDeactivation CommittedFlowDeactivation
 	)
 	err := e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
 		for {
@@ -529,6 +530,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 				committed, err := e.persist(lockCtx, frame)
 				result = frame.result
 				result.Committed = committed.Committed
+				flowDeactivation = committed.FlowDeactivation
 				if err != nil && !committed.Committed {
 					result.EmitIntents = nil
 					result.ActivityIntents = nil
@@ -568,6 +570,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		return result, err
 	}
 	postCommitErr = errors.Join(postCommitErr, err)
+	if result.Committed && flowDeactivation != nil {
+		postCommitErr = errors.Join(postCommitErr, finalizeCommittedFlowDeactivation(ctx, flowDeactivation))
+	}
 	if req.Preview {
 		return result, postCommitErr
 	}
@@ -575,6 +580,15 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	result.ActivityIntents = append([]ActivityIntent(nil), activityIntents...)
 	result.ActivityRequestIntents = append([]EmitIntent(nil), activityRequests...)
 	return result, postCommitErr
+}
+
+func finalizeCommittedFlowDeactivation(ctx context.Context, pending CommittedFlowDeactivation) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("committed flow deactivation panic: %v", recovered)
+		}
+	}()
+	return pending.FinalizeFlowDeactivation(ctx)
 }
 
 func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSnapshot, error) {

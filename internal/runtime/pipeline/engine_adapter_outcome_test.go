@@ -176,6 +176,10 @@ func TestCommittedEngineAttemptsIndependentFinalizersAfterTerminalPanic(t *testi
 		state: pipelineEngineStateRepo{coordinator: &PipelineCoordinator{}}, publication: planner,
 	}
 	result, err := owner.commitPreparedEngineMutation(context.Background(), runtimeengine.EngineMutation{}, WorkflowEngineMutationCommand{}, nil, terminal)
+	if result.FlowDeactivation == nil {
+		t.Fatal("committed terminal reservation was not transferred to unlocked execution")
+	}
+	err = errors.Join(err, result.FlowDeactivation.FinalizeFlowDeactivation(context.Background()))
 	if !result.Committed || terminal.commits != 1 || terminal.aborts != 1 || planner.finalizes != 1 || err == nil ||
 		!strings.Contains(err.Error(), "terminal cleanup panic") || !strings.Contains(err.Error(), "wakeup evidence 0 is invalid") {
 		t.Fatalf("result=%+v error=%v terminal=%+v finalizes=%d", result, err, terminal, planner.finalizes)

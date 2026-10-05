@@ -3819,6 +3819,10 @@ handler_specification:
       positively acknowledged result remains committed despite later cancellation, panic or cleanup failure; those
       diagnostics do not authorize rollback, plan release or handler retry. Provider calls, asynchronous waits,
       descendant execution and postcommit dispatch run under neither the handler SQL transaction nor its entity lock.
+      A prepared terminal-retirement reservation transfers with the positively acknowledged engine result and is
+      consumed immediately after the entity lock is released, before dispatch. Retirement may acquire its own fresh
+      instance mutation fence; it cannot recursively reacquire the still-held handler fence. Unacknowledged attempts
+      abort their reservation, while committed cleanup failure preserves the original acknowledgement and follow-up.
       After acknowledgement, publication and lifecycle finalizers attempt every independent committed consequence;
       one diagnostic does not abandon sibling handoffs. A publication with failed activation or receiver-readiness
       prerequisites retains an exact recovery disposition and cannot be dispatched directly. A diagnostic-only
