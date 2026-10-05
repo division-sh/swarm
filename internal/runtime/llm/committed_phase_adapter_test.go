@@ -92,7 +92,7 @@ func TestHTTPCompletionCommittedPhasesPreserveDispatchAndResponse(t *testing.T) 
 			name: "anthropic_api",
 			body: `{"model":"test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"done"}]}`,
 			send: func(ctx context.Context, client *http.Client) ([]byte, *completionDispatch, error) {
-				runtime := &AnthropicAPIRuntime{httpClient: client, apiURL: "http://effect.test", apiKey: "test"}
+				runtime := &AnthropicAPIRuntime{httpClient: client, apiURL: "http://effect.test", credentialCache: providerCredentialCache{value: "test"}}
 				raw, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return raw, dispatch, err
 			},
@@ -101,7 +101,7 @@ func TestHTTPCompletionCommittedPhasesPreserveDispatchAndResponse(t *testing.T) 
 			name: "openai_compatible",
 			body: `{"model":"test","choices":[{"message":{"role":"assistant","content":"done"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`,
 			send: func(ctx context.Context, client *http.Client) ([]byte, *completionDispatch, error) {
-				runtime := &OpenAICompatibleRuntime{httpClient: client, baseURL: "http://effect.test", apiKey: "test"}
+				runtime := &OpenAICompatibleRuntime{httpClient: client, baseURL: "http://effect.test", credentialCache: providerCredentialCache{value: "test"}}
 				raw, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return raw, dispatch, err
 			},
@@ -110,7 +110,7 @@ func TestHTTPCompletionCommittedPhasesPreserveDispatchAndResponse(t *testing.T) 
 			name: "openai_responses",
 			body: `{"id":"resp_1","model":"test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":1,"output_tokens":1}}`,
 			send: func(ctx context.Context, client *http.Client) ([]byte, *completionDispatch, error) {
-				runtime := &OpenAIResponsesRuntime{httpClient: client, baseURL: "http://effect.test", apiKey: "test"}
+				runtime := &OpenAIResponsesRuntime{httpClient: client, baseURL: "http://effect.test", credentialCache: providerCredentialCache{value: "test"}}
 				raw, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return raw, dispatch, err
 			},
@@ -154,7 +154,7 @@ func TestHTTPCompletionAcknowledgedHeartbeatPreservesProviderResponseAndSettleme
 	var calls atomic.Int32
 	runtime := &OpenAICompatibleRuntime{
 		httpClient: &http.Client{Transport: committedPhaseResponseTransport{calls: &calls, body: `{"model":"test","choices":[{"message":{"role":"assistant","content":"done"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`}},
-		baseURL:    "http://effect.test", apiKey: "test",
+		baseURL:    "http://effect.test", credentialCache: providerCredentialCache{value: "test"},
 	}
 	raw, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 	if err != nil || calls.Load() != 1 || len(raw) == 0 || dispatch == nil || dispatch.state != runtimeeffects.StateSettled || dispatch.invocation != completionProviderInvocationStarted {
@@ -203,7 +203,7 @@ func TestHTTPCompletionUnacknowledgedOrForeignHeartbeatFailsClosed(t *testing.T)
 			var calls atomic.Int32
 			runtime := &OpenAICompatibleRuntime{
 				httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: &calls}},
-				baseURL:    "http://effect.test", apiKey: "test",
+				baseURL:    "http://effect.test", credentialCache: providerCredentialCache{value: "test"},
 			}
 			_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 			if !errors.Is(err, fault) || calls.Load() != 0 || dispatch == nil || dispatch.invocation != completionProviderInvocationNotStarted || dispatch.mutationErr != nil {
@@ -263,7 +263,7 @@ func TestHTTPCompletionCommittedLaunchCanceledBeforeInvocationSettlesNoDispatch(
 	var calls atomic.Int32
 	runtime := &OpenAICompatibleRuntime{
 		httpClient: &http.Client{Transport: committedPhaseResponseTransport{calls: &calls, body: `{"choices":[]}`}},
-		baseURL:    "http://effect.test", apiKey: "test",
+		baseURL:    "http://effect.test", credentialCache: providerCredentialCache{value: "test"},
 	}
 	_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 	if !errors.Is(err, context.Canceled) || !errors.Is(err, launchFault) || calls.Load() != 0 || dispatch == nil || dispatch.invocation != completionProviderInvocationNotStarted {

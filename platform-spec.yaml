@@ -7490,6 +7490,16 @@ engine:
         backend_selection_config_discovery: '#1128'
         model_alias_runtime_migration: '#1129'
         docs_config_secrets_cleanup: '#1130'
+      api_credential_cache:
+        owner: internal/runtime/llm.ProviderCredentialResolver and runtime-local providerCredentialCache
+        applies_to: [anthropic, openai_compatible, openai_responses]
+        rule: >-
+          Concurrent sessions share only a safely synchronized successful credential cache within their owning
+          API runtime. Initialization and every request-header read consume the same cache owner; requests use
+          an immutable value snapshot and release cache synchronization before HTTP I/O or session/tool execution.
+          Failed or canceled resolution does not permanently populate the cache and a later call may resolve again.
+          The existing resolver owns source/precedence and typed missing/read failures. No process-global credential,
+          environment fallback, test prewarming, serialized first-turn execution or credential-rotation policy change.
       canonical_selector:
         cli_flag: --backend
         config_key: llm.backend

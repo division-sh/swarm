@@ -292,7 +292,7 @@ func TestAnthropicDrainedCompletionStopsBeforeMutableProjection(t *testing.T) {
 	conversations := &captureConversationStore{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(time.Second), "worker-1", conversations, nil)
 	runtime.apiURL = provider.URL
-	runtime.apiKey = "test-key"
+	runtime.credentialCache = providerCredentialCache{value: "test-key"}
 	runtime.httpClient = provider.Client()
 	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
 
@@ -432,7 +432,7 @@ func TestManagedSessionAdoptionFailsClosedBeforeProviderDispatch(t *testing.T) {
 
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, registry, "worker-1", nil, nil)
 	runtime.apiURL = provider.URL
-	runtime.apiKey = "test-key"
+	runtime.credentialCache = providerCredentialCache{value: "test-key"}
 	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
 	conversation := newTestManagedConversation(t, "agent-1", "support/inst-1", "support", nil, testMemory(), 1, runtime)
 	conversation.SetToolExecutor(openAIToolExecutor{})
