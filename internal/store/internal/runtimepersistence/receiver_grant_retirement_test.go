@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -118,6 +119,11 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					t.Fatalf("exact lifecycle/grant: state=%+v grant=%+v found=%v err=%v", state, evidence, found, err)
 				}
 				req := sqliteFlowActivationRequest(bundle, "global", "global", "", identity.FlowInstance())
+				rootIdentity := flowidentity.Stored(source, ".", runID, runID, runID, "")
+				req.Instance, err = flowidentity.KeylessChild(source, rootIdentity, "global")
+				if err != nil {
+					t.Fatal(err)
+				}
 				entityID := req.Instance.EntityID
 				route := events.DeliveryRoute{
 					Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
