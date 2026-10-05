@@ -12,6 +12,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -130,11 +131,12 @@ func authorizeStaticDeclarationMutation(ctx context.Context, tx *sql.Tx, req run
 func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, sqlite bool) error {
 	authority := req.Topology.Authority.Readiness
 	present := req.TargetPhase != runtimemanager.AgentLifecycleTerminated
-	preparation := authority.AttemptID == "" && authority.PlanRevision != 0
+	preparation := authority.Preparation
+	preparationRebind := preparation && req.OperationKind == "source_set_rebind"
 	takeoverPreparation := !preparation && req.OperationKind == "process_takeover" && req.Agent == nil
 	if preparation {
 		switch req.OperationKind {
-		case "spawn", "reconfigure", "process_takeover":
+		case "spawn", "reconfigure", "process_takeover", "source_set_rebind":
 		default:
 			return topologyConflict(req, "readiness_preparation_operation_not_admitted")
 		}
@@ -150,7 +152,7 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 	}
 	if present {
 		var err error
-		if preparation {
+		if preparation && !preparationRebind {
 			err = AuthorizeDynamicFlowTopologyPreparationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
 		} else if takeoverPreparation {
 			err = AuthorizeDynamicFlowTakeoverPreparationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
@@ -162,48 +164,36 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 		}
 	}
 	query := `
-		SELECT readiness.plan, instance.status, readiness.plan_revision,
-		       readiness.activation_attempt_id, readiness.activation_attempt_grant_id, readiness.activation_attempt_revision, readiness.activation_attempt_state
+		SELECT readiness.plan, readiness.plan_hash, instance.status,
+		       readiness.activation_attempt_id, readiness.activation_attempt_grant_id, readiness.activation_attempt_state
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 		WHERE readiness.run_id = ? AND readiness.instance_path = ?`
 	args := []any{authority.RunID, authority.InstancePath}
 	if !sqlite {
 		query = `
-			SELECT readiness.plan, instance.status, readiness.plan_revision,
-			       readiness.activation_attempt_id::text, readiness.activation_attempt_grant_id::text, readiness.activation_attempt_revision, readiness.activation_attempt_state
+			SELECT readiness.plan, readiness.plan_hash, instance.status,
+			       readiness.activation_attempt_id::text, readiness.activation_attempt_grant_id::text, readiness.activation_attempt_state
 			FROM flow_instance_runtime_readiness AS readiness
 			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 			WHERE readiness.run_id = $1::uuid AND readiness.instance_path = $2
 			FOR UPDATE OF readiness, instance`
 	}
 	var raw []byte
-	var instanceStatus string
-	var planRevision int64
+	var instanceStatus, planHash string
 	var attemptID, grantID, attemptState sql.NullString
-	var attemptRevision sql.NullInt64
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&raw, &instanceStatus, &planRevision, &attemptID, &grantID, &attemptRevision, &attemptState); err != nil {
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&raw, &planHash, &instanceStatus, &attemptID, &grantID, &attemptState); err != nil {
 		if err == sql.ErrNoRows {
 			return topologyConflict(req, "readiness_owner_missing")
 		}
 		return err
 	}
-	fingerprint, err := canonicaljson.HashRaw(raw)
+	plan, err := runtimepipeline.DecodeFlowReadinessPlan(raw, planHash)
 	if err != nil {
-		return fmt.Errorf("hash flow readiness plan: %w", err)
+		return err
 	}
-	if fingerprint != strings.TrimSpace(authority.PlanFingerprint) {
+	if planHash != authority.PlanFingerprint {
 		return topologyConflict(req, "readiness_plan_changed")
-	}
-	var plan struct {
-		BundleHash string `json:"bundle_hash"`
-		Agents     []struct {
-			Identity       runtimeagentidentity.Identity `json:"identity"`
-			ConfigRevision string                        `json:"config_revision"`
-		} `json:"agents"`
-	}
-	if err := canonicaljson.DecodeInto(raw, &plan); err != nil {
-		return fmt.Errorf("decode flow readiness plan: %w", err)
 	}
 	desiredRevision := ""
 	for _, agent := range plan.Agents {
@@ -214,15 +204,18 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 			return topologyConflict(req, "readiness_agent_duplicated")
 		}
 		desiredRevision = strings.TrimSpace(agent.ConfigRevision)
+		if present && req.Agent != nil && req.Agent.Config.EntityID != agent.EntityID {
+			return topologyConflict(req, "readiness_agent_entity_mismatch")
+		}
 	}
 	if present {
 		if plan.BundleHash != req.ProcessBinding.BundleHash {
 			return topologyConflict(req, "readiness_generation_source_mismatch")
 		}
-		if preparation && planRevision != int64(authority.PlanRevision) {
+		if preparation && (!attemptID.Valid || attemptID.String != authority.AttemptID) {
 			return topologyConflict(req, "readiness_preparation_plan_not_current")
 		}
-		if preparation && attemptID.Valid {
+		if preparation && !preparationRebind && attemptState.String != "planned" && attemptState.String != "aborted" && attemptState.String != "retired" {
 			if !grantID.Valid {
 				return topologyConflict(req, "readiness_preparation_predecessor_grant_missing")
 			}
@@ -234,13 +227,16 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 				return topologyConflict(req, "readiness_preparation_predecessor_not_joined")
 			}
 		}
-		if !preparation && !takeoverPreparation && (authority.AttemptID == "" || authority.PlanRevision == 0 ||
+		if (!preparation || preparationRebind) && !takeoverPreparation && (authority.AttemptID == "" ||
 			!attemptID.Valid || attemptID.String != authority.AttemptID ||
-			!grantID.Valid || grantID.String != req.ProcessBinding.GenerationGrantID ||
-			!attemptRevision.Valid || attemptRevision.Int64 != int64(authority.PlanRevision) ||
-			planRevision != int64(authority.PlanRevision) || !attemptState.Valid ||
-			(attemptState.String != "accepted" && attemptState.String != "topology_committed")) {
+			!attemptState.Valid ||
+			(attemptState.String != "accepted")) {
 			return topologyConflict(req, "readiness_activation_attempt_not_current")
+		}
+		if (!preparation || preparationRebind) && !takeoverPreparation {
+			if err := VerifyFlowActivationAttemptProcessTx(ctx, tx, grantID.String, req.ProcessBinding); err != nil {
+				return err
+			}
 		}
 		if strings.TrimSpace(instanceStatus) != "active" {
 			return topologyConflict(req, "readiness_instance_not_active")

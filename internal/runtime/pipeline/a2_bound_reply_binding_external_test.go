@@ -114,22 +114,28 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			options := runtimepipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe}
 			pc := newGateRecoveryCoordinator(bus, selected, options)
 			bus.SetInterceptors(pc)
+			commitKeylessConstructorComponent(t, ctx, selected, pc, source)
+			parent, found, err := pc.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, runID))
+			if err != nil || !found {
+				t.Fatalf("load initialized requester parent: found=%v err=%v", found, err)
+			}
 			path := "requester/" + key
 			owner := testRunScopedWorkflowInstanceForRun(runID, path)
 			readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 				Identity: flowidentity.Instance{TemplateID: "requester", ScopeKey: "requester", InstanceID: key, InstancePath: path, EntityID: flowidentity.EntityID(path), HasStoredPath: true},
 				RunID:    runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 			}
+			readiness.Identity.ParentRoute = flowidentity.ParentRoute{FlowID: parent.WorkflowName, FlowInstance: parent.StorageRef, EntityID: parent.EntityID}
+			readiness.Identity.ParentEntityID = parent.EntityID
 			now := time.Now().UTC()
-			if _, err := pc.MaterializeInitialEntry(ctx, owner, runtimepipeline.WorkflowInstance{
+			constructed := commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 				InstanceID: key, StorageRef: path, EntityID: flowidentity.EntityID(path), WorkflowName: "requester", WorkflowVersion: source.WorkflowVersion(),
+				ParentFlowID: parent.WorkflowName, ParentFlowInstance: parent.StorageRef, ParentEntityID: parent.EntityID,
 				Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "request_state",
 				Fields: map[string]any{"order_id": key, "expected": []any{"a", "b"}},
-			}, now); err != nil {
-				t.Fatal(err)
-			}
+			}, now)
 			markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
-			if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner}); err != nil {
+			if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: constructed.Identity}); err != nil {
 				t.Fatal(err)
 			}
 			load := func() runtimepipeline.WorkflowInstance {
@@ -186,16 +192,16 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				siblingOwner := testRunScopedWorkflowInstanceForRun(runID, siblingPath)
 				siblingReadiness := readiness
 				siblingReadiness.Identity = flowidentity.Instance{TemplateID: siblingFlow, ScopeKey: siblingFlow, InstanceID: siblingKey,
-					InstancePath: siblingPath, EntityID: siblingEntity, HasStoredPath: true}
-				if _, err := pc.MaterializeInitialEntry(ctx, siblingOwner, runtimepipeline.WorkflowInstance{
+					InstancePath: siblingPath, EntityID: siblingEntity, HasStoredPath: true,
+					ParentRoute: readiness.Identity.ParentRoute, ParentEntityID: readiness.Identity.ParentEntityID}
+				siblingConstruction := commitA2FixtureConstruction(t, pc, selected.events, ctx, siblingOwner, runtimepipeline.WorkflowInstance{
 					InstanceID: siblingKey, StorageRef: siblingPath, EntityID: siblingEntity, WorkflowName: siblingFlow, WorkflowVersion: source.WorkflowVersion(),
+					ParentFlowID: parent.WorkflowName, ParentFlowInstance: parent.StorageRef, ParentEntityID: parent.EntityID,
 					Mode: "template", RuntimeReadiness: &siblingReadiness, CurrentState: "awaiting", EntityType: "request_state",
 					Fields: map[string]any{"order_id": siblingKey, "expected": []any{"a", "b"}},
-				}, now); err != nil {
-					t.Fatal(err)
-				}
+				}, now)
 				markGateRecoveryTopologyReadyFixture(t, selected, siblingReadiness, now)
-				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: siblingOwner}); err != nil {
+				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: siblingOwner, Instance: siblingConstruction.Identity}); err != nil {
 					t.Fatal(err)
 				}
 				loadSibling = func() runtimepipeline.WorkflowInstance {

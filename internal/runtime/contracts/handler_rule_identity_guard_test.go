@@ -99,7 +99,7 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 		"internal/runtime/bootverify/workflow_compute_module_checks.go::checkComputeModuleValueRows":                               {Count: 1, Reason: "diagnostic row label"},
 		"internal/runtime/bootverify/workflow_contained_state_operation_checks.go::wave1ContainedStateOperations":                  {Count: 2, Reason: "diagnostic operation label"},
 		"internal/runtime/bootverify/workflow_entity_contract_coverage_checks.go::wave1HandlerWriteTargets":                        {Count: 2, Reason: "diagnostic write-site label"},
-		"internal/runtime/bootverify/workflow_executable_reader_census.go::appendRulesExecutableReaders":                           {Count: 1, Reason: "diagnostic reader label"},
+		"internal/runtime/pipeline/workflow_executable_readers.go::appendRulesExecutableReaders":                                   {Count: 1, Reason: "executable reader diagnostic label; constructor assignment verification consumes the shared reader census"},
 		"internal/runtime/bootverify/workflow_input_alignment_checks.go::payloadFieldCoverageSites":                                {Count: 2, Reason: "diagnostic payload-site label"},
 		"internal/runtime/bootverify/workflow_policy_sheet_lookup_checks.go::checkPolicySheetLookupValueRows":                      {Count: 1, Reason: "diagnostic row label"},
 		"internal/runtime/bootverify/workflow_policy_sheet_lookup_checks.go::policySheetLookupDuplicateComputedBindings":           {Count: 1, Reason: "diagnostic row label"},

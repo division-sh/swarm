@@ -69,10 +69,8 @@ worker:
   produces: [task.result]
   event_handlers:
     task.assigned:
-      create_entity: true
       advances_to: working
     task.feedback:
-      create_entity: true
       advances_to: done
       emit: task.result
 `)

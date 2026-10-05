@@ -4,7 +4,6 @@ alpha-intake:
   produces: [internal.step2]
   event_handlers:
     work.begin:
-      create_entity: true
       advances_to: active
       emit: internal.step2
 

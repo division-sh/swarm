@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -34,6 +35,8 @@ type recordingEventStore struct {
 type directRecipientTransactionalStore struct {
 	mu            sync.Mutex
 	descriptors   []runtimebus.ActiveAgentDescriptor
+	targetOwners  []runtimebus.ActiveTargetDescriptor
+	targetRunID   string
 	events        []events.Event
 	settlements   map[string]events.RouteSettlement
 	deliveries    map[string][]string
@@ -42,6 +45,33 @@ type directRecipientTransactionalStore struct {
 	active        []string
 	scopes        map[string]runtimepipelineobligation.CommittedScope
 	receipts      map[string]runtimepipelineobligation.DispositionKind
+}
+
+func (s *directRecipientTransactionalStore) ListSelectedRunTargetOwners(_ context.Context, runID string) ([]runtimebus.ActiveTargetDescriptor, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if runID != s.targetRunID {
+		return nil, nil
+	}
+	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
+}
+
+func (s *directRecipientTransactionalStore) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, paths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
+	owners, err := s.ListSelectedRunTargetOwners(ctx, runID)
+	var selected []runtimebus.ActiveTargetDescriptor
+	for _, owner := range owners {
+		if sourceEntityID != "" && owner.EntityID == sourceEntityID {
+			selected = append(selected, owner)
+			continue
+		}
+		for _, path := range paths {
+			if owner.FlowInstance == path {
+				selected = append(selected, owner)
+				break
+			}
+		}
+	}
+	return selected, err
 }
 
 type outboxClaimStore struct {
@@ -1212,7 +1242,9 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	store := &directRecipientTransactionalStore{}
+	store := &directRecipientTransactionalStore{targetRunID: runtimebustest.DefaultRunID, targetOwners: []runtimebus.ActiveTargetDescriptor{{
+		ID: "review", FlowInstance: "review/inst-1", EntityID: runtimeflowidentity.EntityID("review/inst-1"),
+	}}}
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
@@ -1233,8 +1265,9 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	wantBlueprint := runtimebus.DeliveryRouteBlueprint{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")), Target: events.RouteIdentity{
 		FlowID:       "review",
 		FlowInstance: "review/inst-1",
+		EntityID:     runtimeflowidentity.EntityID("review/inst-1"),
 	}, Handler: runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "review", "target-node")).ForEvent("task.started")}
-	want := events.DeliveryRoute{Recipient: wantBlueprint.Recipient, Target: events.MustEntitylessReceiverTarget(wantBlueprint.Target)}
+	want := events.DeliveryRoute{Recipient: wantBlueprint.Recipient, Target: events.MustExistingEntityTarget(wantBlueprint.Target)}
 	guardSawMaterializedRoute := false
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),

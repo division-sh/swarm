@@ -161,7 +161,8 @@ func TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores(t *
 				return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "retry_owner_unavailable", "test", "prepare_handler", nil)
 			}
 			owner := configurePipelineTestDeliveryOwner(t, pc)
-			runID, entityID := correlation.RunIDFromContext(ctx), uuid.NewString()
+			runID := correlation.RunIDFromContext(ctx)
+			entityID := runID
 			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
@@ -220,7 +221,8 @@ func TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores(
 			})
 			pc.workflowStore = store
 			owner := configurePipelineTestDeliveryOwner(t, pc)
-			runID, entityID := correlation.RunIDFromContext(ctx), uuid.NewString()
+			runID := correlation.RunIDFromContext(ctx)
+			entityID := runID
 			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {

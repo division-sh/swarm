@@ -75,6 +75,36 @@ func TestCompiledStageClassifierRequiresExactFlowAndDeclaredStage(t *testing.T) 
 	}
 }
 
+func TestCompiledStageClassifierAcceptsCanonicalConstructedRoot(t *testing.T) {
+	root := BuildWorkflowStageTopology(".", "ready", []string{"ready", "Ready"}, []string{"Ready"}, nil, nil, nil)
+	child := BuildWorkflowStageTopology("child", "ready", []string{"ready", "Ready"}, []string{"ready"}, nil, nil, nil)
+	classifier, err := NewWorkflowStageClassifier(root, map[string]WorkflowStageTopology{"child": child})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const runID = "ce1b0281-3c09-40de-82c1-f089c16a987a"
+	for _, tc := range []struct {
+		flow, instance, stage string
+		terminal, known       bool
+	}{
+		{".", runID, "ready", false, true},
+		{".", runID, "Ready", true, true},
+		{".", runID, "READY", false, false},
+		{".", "child", "Ready", false, false},
+		{"child", "child/key", "ready", true, true},
+		{"child", ".", "ready", false, false},
+		{"foreign", runID, "Ready", false, false},
+	} {
+		terminal, known := classifier.Terminal(tc.flow, tc.instance, tc.stage)
+		if terminal != tc.terminal || known != tc.known {
+			t.Errorf("flow=%q instance=%q stage=%q: terminal=%t known=%t, want %t/%t", tc.flow, tc.instance, tc.stage, terminal, known, tc.terminal, tc.known)
+		}
+	}
+	if _, err := NewWorkflowStageClassifier(root, map[string]WorkflowStageTopology{".": child}); err == nil {
+		t.Fatal("canonical root key accepted a foreign stage topology")
+	}
+}
+
 func TestCompiledStageClassifierPreservesStatelessStoragePosture(t *testing.T) {
 	root := BuildWorkflowStageTopology(".", "", nil, nil, nil, nil, nil)
 	staged := BuildWorkflowStageTopology("staged", "ready", []string{"ready", "Ready"}, []string{"Ready"}, nil, nil, nil)

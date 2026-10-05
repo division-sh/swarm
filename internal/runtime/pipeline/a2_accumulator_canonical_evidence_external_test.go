@@ -203,7 +203,7 @@ func TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores(t *testi
 				`{"id":"original","value":3,"amount":7,"nested":{"numbers":[1,2],"fraction":1.0}}`), "")
 			var original []byte
 			if err := proof.selected.db.QueryRowContext(proof.ctx,
-				`SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$1`, proof.runID).Scan(&original); err != nil {
+				`SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, proof.runID).Scan(&original); err != nil {
 				t.Fatal(err)
 			}
 			var buckets map[string]any
@@ -224,12 +224,13 @@ func TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			// SQL installs corruption only while this component driver is idle;
+			// Corrupt the constructed header, which owns runtime accumulator state,
+			// only while this component driver is idle;
 			// all positive state, publications, claims and outcomes use real owners.
 			write := func(raw []byte) {
 				t.Helper()
 				result, err := proof.selected.db.ExecContext(proof.ctx,
-					`UPDATE entity_state SET accumulator=$1 WHERE run_id=$2 AND entity_id=$2`, string(raw), proof.runID)
+					`UPDATE flow_instances SET accumulator=$1 WHERE run_id=$2 AND entity_id=$2`, string(raw), proof.runID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -323,12 +324,7 @@ func newA2CanonicalAccumulatorProof(t *testing.T, selected gateRecoveryStoreCase
 		},
 	}}
 	restartA2CanonicalAccumulatorProof(t, proof)
-	if _, err := proof.pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), pipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "widget", WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-		CurrentState: "waiting", Fields: map[string]any{"score": int64(0)},
-	}, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
+	commitKeylessConstructorComponent(t, ctx, selected, proof.pc, source)
 	return proof
 }
 
@@ -346,13 +342,14 @@ func restartA2CanonicalAccumulatorProof(t *testing.T, proof *a2AccumulatorPersis
 		proof.selected.events, proof.selected.trace = reconstructed, previous
 	}
 	reconstructed := proof.selected.events
+	proof.logger = &exactJoinRuntimeLogger{}
 	admitter := swarmruntime.NewRuntimePayloadAdmitter(nil, proof.module.source, authorActivityTestSourceArtifactFact)
 	reconstructed.(swarmruntime.EventPayloadAdmissionBinder).SetEventPayloadAdmitter(admitter)
 	work, ok := worklifetime.OccurrenceFromContext(proof.ctx)
 	if !ok {
 		t.Fatal("canonical evidence proof lost its actual runtime lifetime")
 	}
-	bus, err := newScopedTestEventBus(t, reconstructed, runtimebus.EventBusOptions{ContractBundle: proof.module.source, PayloadAdmitter: admitter, WorkOwner: work})
+	bus, err := newScopedTestEventBus(t, reconstructed, runtimebus.EventBusOptions{ContractBundle: proof.module.source, PayloadAdmitter: admitter, WorkOwner: work, Logger: proof.logger})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -373,7 +374,7 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 			ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 			runID := runtimeRunID(ctx)
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
-			entityID := uuid.NewString()
+			entityID := runID
 			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "drafting", EnteredStageAt: now,
@@ -392,7 +393,7 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 
 			inbound := workflowLifecycleEventForTest(t, workflowStore, ctx, ".", runID, entityID, "draft.ready", time.Now().UTC())
 			ctx = runtimecorrelation.WithInboundEvent(ctx, inbound)
-			err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(runID), entityID, "drafting", "awaiting_review", "draft.ready", inbound.CreatedAt())
+			err := pc.applyWorkflowGateIntents(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID).Route, entityID, "drafting", "awaiting_review", "draft.ready", inbound.CreatedAt())
 			if err == nil || err.Error() != cards.createErr.Error() {
 				t.Fatalf("applyWorkflowGateIntents error = %v, want planted card failure", err)
 			}
@@ -424,7 +425,7 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			workflowStore, ctx := tc.open(t)
 			runID := runtimeRunID(ctx)
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
-			entityID := uuid.NewString()
+			entityID := runID
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "drafting", EnteredStageAt: now, Fields: map[string]any{},
@@ -439,7 +440,7 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			})
 			inbound := workflowLifecycleEventForTest(t, workflowStore, ctx, ".", runID, entityID, "draft.ready", time.Now().UTC())
 			ctx = runtimecorrelation.WithInboundEvent(ctx, inbound)
-			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(runID), entityID, "drafting", "awaiting_review", "draft.ready", inbound.CreatedAt()); err != nil {
+			if err := pc.applyWorkflowGateIntents(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID).Route, entityID, "drafting", "awaiting_review", "draft.ready", inbound.CreatedAt()); err != nil {
 				t.Fatal(err)
 			}
 			if len(cards.created) != 1 || len(cards.createTx) != 1 || !cards.createTx[0] {
@@ -476,7 +477,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
-			entityID := uuid.NewString()
+			entityID := runID
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{},
@@ -511,7 +512,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle(t))}, Persistence: workflowPersistenceForTest(workflowStore),
 				DecisionCards: cards, SourceArtifactFact: mustPipelineTestSourceArtifactFact(bundleHash),
 			})
-			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(runID), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
+			if err := pc.applyWorkflowGateIntents(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID).Route, entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			card := cards.created[0]
@@ -571,21 +572,21 @@ func TestWorkflowGateCommittedDecisionWinsOrdinaryAndTimerExitRacesOnBothStores(
 				runID := runtimeRunID(ctx)
 				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
-				entityID := uuid.NewString()
+				entityID := runID
 				if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{},
 					EntityType: "test_entity"})); err != nil {
 					t.Fatal(err)
 				}
 				cards := &gateLifecycleCardStore{}
 				pc := newGateLifecyclePipelineCoordinator(&recordingPipelineBus{}, workflowStore.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle(t))}, Persistence: workflowPersistenceForTest(workflowStore), DecisionCards: cards, SourceArtifactFact: mustPipelineTestSourceArtifactFact(pipelineTestBundleHash)})
-				if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(runID), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
+				if err := pc.applyWorkflowGateIntents(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID).Route, entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 				card := cards.created[0]
 				if err := workflowStore.CommitDecision(ctx, card, uuid.NewString(), now.Add(time.Minute)); err != nil {
 					t.Fatal(err)
 				}
-				route := testWorkflowInstanceRoute(runID)
+				route := testRunScopedWorkflowInstanceFromContext(ctx, runID).Route
 				sourceEvent := "ordinary.transition"
 				if exitKind == "timer" {
 					graph, found := semanticview.WorkflowStageTopology(pc.SemanticSource(), ".")
@@ -623,14 +624,14 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
-			entityID := uuid.NewString()
+			entityID := runID
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
 			cards := &gateLifecycleCardStore{}
 			pc := newGateLifecyclePipelineCoordinator(&recordingPipelineBus{}, workflowStore.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle(t))}, Persistence: workflowPersistenceForTest(workflowStore), DecisionCards: cards, SourceArtifactFact: mustPipelineTestSourceArtifactFact(pipelineTestBundleHash)})
-			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(runID), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
+			if err := pc.applyWorkflowGateIntents(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID).Route, entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			decisionEventID := uuid.NewString()
@@ -666,14 +667,14 @@ func TestInitialStageLifecycleArmsStandingGateOnBothStores(t *testing.T) {
 			ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
-			entityID := uuid.NewString()
+			entityID := runID
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
 			cards := &gateLifecycleCardStore{}
 			pc := newGateLifecyclePipelineCoordinator(&recordingPipelineBus{}, workflowStore.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle(t))}, Persistence: workflowPersistenceForTest(workflowStore), DecisionCards: cards, SourceArtifactFact: mustPipelineTestSourceArtifactFact(pipelineTestBundleHash)})
-			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(runID), entityID); err != nil {
+			if err := applyTestInitialEntryEffect(ctx, pc, testRunScopedWorkflowInstanceFromContext(ctx, runID).Route, entityID); err != nil {
 				t.Fatal(err)
 			}
 			if len(cards.created) != 1 || mustStageGateAnchor(t, cards.created[0]).EntityID != entityID {
@@ -691,7 +692,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Mock)
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
-			entityID := uuid.NewString()
+			entityID := runID
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
@@ -699,7 +700,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			cards := &gateLifecycleCardStore{}
 			bus := &recordingPipelineBus{}
 			pc := newGateLifecyclePipelineCoordinator(bus, workflowStore.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle(t))}, Persistence: workflowPersistenceForTest(workflowStore), DecisionCards: cards, SourceArtifactFact: mustPipelineTestSourceArtifactFact(pipelineTestBundleHash)})
-			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(runID), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
+			if err := pc.applyWorkflowGateIntents(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID).Route, entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			if err := pc.MarkTerminated(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID), time.Now().UTC()); err != nil {
@@ -715,6 +716,9 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			if cards.created[0].ExecutionMode != executionmode.Mock || bus.publishes[0].ExecutionMode() != executionmode.Mock {
 				t.Fatalf("terminated-flow modes = card:%q event:%q, want mock", cards.created[0].ExecutionMode, bus.publishes[0].ExecutionMode())
 			}
+			if bus.publishes[0].ParentEventID() != "" {
+				t.Fatal("explicit flow termination fabricated accepted-event lineage")
+			}
 		})
 	}
 }
@@ -725,7 +729,7 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 			workflowStore, ctx := tc.open(t)
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
-			entityID := uuid.NewString()
+			entityID := runID
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "drafting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
@@ -733,7 +737,7 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 			cards := &gateLifecycleCardStore{}
 			bus := &recordingPipelineBus{}
 			pc := newGateLifecyclePipelineCoordinator(bus, workflowStore.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle(t))}, Persistence: workflowPersistenceForTest(workflowStore), DecisionCards: cards, SourceArtifactFact: mustPipelineTestSourceArtifactFact(pipelineTestBundleHash)})
-			route := testWorkflowInstanceRoute(runID)
+			route := testRunScopedWorkflowInstanceFromContext(ctx, runID).Route
 			entryCtx := testPersistedWorkflowStateTransitionContext(t, workflowStore, ctx, route, entityID, "draft.ready")
 			if err := pc.persistWorkflowStateForTest(entryCtx, route, entityID, "awaiting_review", "draft.ready"); err != nil {
 				t.Fatal(err)
@@ -748,6 +752,68 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 			cardAnchor := mustStageGateAnchor(t, cards.created[0])
 			if got := bus.publishes[0]; got.RunID() != runID || got.EntityID() != entityID || got.FlowInstance() != cardAnchor.Route.InstancePath {
 				t.Fatalf("ordinary-exit identity = run:%q entity:%q flow:%q, want %q/%q/%q", got.RunID(), got.EntityID(), got.FlowInstance(), runID, entityID, cardAnchor.Route.InstancePath)
+			}
+			inbound, ok := runtimecorrelation.InboundEventFromContext(transitionCtx)
+			if !ok || bus.publishes[0].ParentEventID() != inbound.ID() {
+				t.Fatalf("ordinary-exit parent = %q, want exact accepted event %q", bus.publishes[0].ParentEventID(), inbound.ID())
+			}
+			instance, found, err := workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
+			if err != nil || !found {
+				t.Fatalf("load committed supersession: found=%t err=%v", found, err)
+			}
+			carrier, err := workflowInstanceStateCarrier(instance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			activation, found, err := gateruntime.Load(carrier.StateBuckets, instance.WorkflowName, cards.created[0].Snapshot.Decision)
+			if err != nil || !found || activation.Status != gateruntime.StatusSuperseded {
+				t.Fatalf("load superseded activation: found=%t activation=%+v err=%v", found, activation, err)
+			}
+			transition, err := compiledLifecycleTransitionForTest(pc, instance.WorkflowName, "awaiting_review", "operating", string(inbound.Type()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted := func(target runtimeflowidentity.Route, entity string, mode executionmode.Mode, selected *workflowlifecycle.Transition) workflowlifecycle.Effect {
+				t.Helper()
+				effect, err := workflowlifecycle.NewAcceptedEvent(target, identity.NormalizeEntityID(entity), inbound.ID(), string(inbound.Type()), mode, inbound.CreatedAt(), selected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return effect
+			}
+			initial, err := workflowlifecycle.NewInitialEntry(route, identity.NormalizeEntityID(entityID), instance.CurrentState, cards.created[0].ExecutionMode, inbound.CreatedAt())
+			if err != nil {
+				t.Fatal(err)
+			}
+			valid := accepted(route, entityID, cards.created[0].ExecutionMode, transition)
+			for _, hostile := range []struct {
+				name   string
+				run    string
+				effect workflowlifecycle.Effect
+			}{
+				{"unknown", runID, workflowlifecycle.Effect{}},
+				{"initial", runID, initial},
+				{"no_transition", runID, accepted(route, entityID, cards.created[0].ExecutionMode, nil)},
+				{"foreign_run", uuid.NewString(), valid},
+				{"foreign_route", runID, accepted(testWorkflowInstanceRoute("other-flow"), entityID, cards.created[0].ExecutionMode, transition)},
+				{"foreign_entity", runID, accepted(route, uuid.NewString(), cards.created[0].ExecutionMode, transition)},
+				{"crossed_mode", runID, accepted(route, entityID, executionmode.Mock, transition)},
+			} {
+				t.Run(hostile.name, func(t *testing.T) {
+					if _, err := workflowGateExitSupersededEvent(cards.created[0], activation, instance, hostile.run, hostile.effect); err == nil {
+						t.Fatal("crossed stage-exit facts acquired causal publication authority")
+					}
+				})
+			}
+			foreign := activation
+			foreign.CardID = uuid.NewString()
+			if _, err := workflowGateExitSupersededEvent(cards.created[0], foreign, instance, runID, valid); err == nil {
+				t.Fatal("another card acquired supersession publication authority")
+			}
+			foreign = activation
+			foreign.ActivationID = uuid.NewString()
+			if _, err := workflowGateExitSupersededEvent(cards.created[0], foreign, instance, runID, valid); err == nil {
+				t.Fatal("another activation acquired supersession publication authority")
 			}
 		})
 	}

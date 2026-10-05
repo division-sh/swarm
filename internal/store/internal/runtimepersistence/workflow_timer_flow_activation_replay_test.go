@@ -55,7 +55,9 @@ func TestWorkflowTimerCauseReplayFlowActivationGateBothStores(t *testing.T) {
 					}
 					t.Cleanup(lease.Release)
 					fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
-					publisher, err := newStoreTestEventBus(t, f.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
+					publisher, err := newStoreTestEventBus(t, f.store.(storeTestDurableEventBusStore), bus.EventBusOptions{
+						ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: scope.RuntimeInstanceID,
+					})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -85,7 +87,8 @@ func TestWorkflowTimerCauseReplayFlowActivationGateBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					admitted, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, plan.Readiness, 1, binding)
+					request := pipeline.NewDynamicFlowRuntimeActivationRequest(plan.Readiness, 1, "planned", binding)
+					admitted, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, request)
 					if err != nil || !admitted.Acknowledged {
 						t.Fatalf("real flow activation attempt: %+v, %v", admitted, err)
 					}

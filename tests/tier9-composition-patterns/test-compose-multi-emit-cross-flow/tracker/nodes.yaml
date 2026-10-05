@@ -4,5 +4,4 @@ recorder:
   produces: []
   event_handlers:
     task.record:
-      create_entity: true
       advances_to: recorded

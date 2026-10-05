@@ -22,6 +22,7 @@ import (
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -257,6 +258,23 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	}
 	var bus *runtimebus.EventBus
 	var err error
+	var constructor *manager.AgentManager
+	if opts.PipelineObligations != nil && opts.ContractBundle != nil {
+		if opts.TemplateInstancePlanner != nil || opts.FlowActivationFinalizer != nil {
+			return nil, fmt.Errorf("API durable fixture owns its canonical construction composition")
+		}
+		opts.TemplateInstancePlanner = runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, request runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			return constructor.PrepareFlowInstanceActivation(ctx, request)
+		})
+		// Component API proofs acknowledge construction; served qualification
+		// separately proves executable topology and attachment readiness.
+		opts.FlowActivationFinalizer = runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(_ context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+			if !committed.Acknowledged {
+				return fmt.Errorf("component construction was not acknowledged")
+			}
+			return committed.Validate()
+		})
+	}
 	if opts.PipelineObligations == nil {
 		bus, err = runtimebus.NewEphemeralEventBusWithOptions(eventStore, opts)
 	} else {
@@ -264,6 +282,12 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	}
 	if err != nil {
 		return nil, err
+	}
+	if opts.TemplateInstancePlanner != nil {
+		constructor, err = newAPITestFlowConstructor(t, eventStore, bus, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
 		for _, route := range routes {
@@ -309,6 +333,21 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	return bus, nil
 }
 
+func newAPITestFlowConstructor(t *testing.T, selected runtimebus.EventStore, bus *runtimebus.EventBus, opts runtimebus.EventBusOptions) (*manager.AgentManager, error) {
+	t.Helper()
+	persistence, ok := selected.(runtimepipeline.WorkflowPersistenceOwner)
+	if !ok {
+		return nil, fmt.Errorf("API constructor fixture lacks workflow persistence")
+	}
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeAPITestDurableWorkflowOptions(t, selected, bus, runtimepipeline.PipelineCoordinatorOptions{
+		Module: newRunCompletionSystemNodeModule(t, opts.ContractBundle), Persistence: runtimepipeline.NewWorkflowPersistence(persistence),
+		SourceArtifactFact: opts.SourceArtifactFact,
+	}))
+	return manager.NewAgentManagerWithOptions(bus, nil, manager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
+		SemanticSource: opts.ContractBundle, SourceArtifactFact: opts.SourceArtifactFact, WorkflowInstances: coordinator,
+	}), nil
+}
 func mustAPITestSourceArtifactNamed(name string) *sourceartifact.AdmittedSourceArtifact {
 	return sourceartifactfixture.New("schema.yaml", []byte("name: "+name+"\n"))
 }

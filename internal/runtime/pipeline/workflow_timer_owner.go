@@ -392,7 +392,15 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		}
 	}
 	for _, ref := range append(append(unchanged, committed.Wakeups...), committed.Cancellations...) {
-		if reconcileErr := l.queueWakeupReconcile(ctx, ref); reconcileErr != nil {
+		var reconcileErr error
+		if attempt != nil {
+			// Attachment owns partial acquisition and retry; readiness cannot
+			// acknowledge a projection delegated to background recovery.
+			reconcileErr = l.ReconcileWakeup(ctx, ref)
+		} else {
+			reconcileErr = l.queueWakeupReconcile(ctx, ref)
+		}
+		if reconcileErr != nil {
 			err = errors.Join(err, reconcileErr)
 		}
 	}

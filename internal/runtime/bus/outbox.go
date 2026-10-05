@@ -105,6 +105,11 @@ type CommittedEnginePublication struct {
 	committed CommittedPublication
 }
 
+func (p CommittedEnginePublication) WithCommitAcknowledgment() CommittedEnginePublication {
+	p.committed = p.committed.WithCommitAcknowledgment()
+	return p
+}
+
 func NewCommittedEnginePublication(plan EnginePublicationPlan, committed CommittedPublication) (CommittedEnginePublication, error) {
 	if err := plan.ValidateDurablePublicationPlan(); err != nil {
 		return CommittedEnginePublication{}, err

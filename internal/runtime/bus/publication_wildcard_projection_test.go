@@ -32,7 +32,7 @@ func TestPublicationWildcardProjectionPreservesExactCachedRoute(t *testing.T) {
 			if mode == "template" {
 				paths = []string{"source/one", "source/two"}
 				for _, instance := range []string{"one", "two"} {
-					if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+					if err := routes.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
 						Identity: testRunScopedFlowRoute(flowidentity.DeriveRoute("source", instance)),
 					}); err != nil {
 						t.Fatal(err)

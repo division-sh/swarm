@@ -3,14 +3,13 @@ package runtimepersistence
 import (
 	"context"
 
-	"github.com/division-sh/swarm/internal/apiidempotency"
-	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/bus"
 )
 
-func (s *PostgresStore) CommitDeploymentRunCreation(ctx context.Context, command durabledata.RunCreationCommand, request apiidempotency.Request) (durabledata.RunCreationOperationRecord, error) {
-	return s.eventPostgresOwner.CommitDeploymentRunCreation(ctx, command, request)
+func (s *PostgresStore) CommitDeploymentRunCreation(ctx context.Context, command bus.DeploymentRunCreationCommand) (bus.CommittedDeploymentRunCreation, error) {
+	return s.eventPostgresOwner.CommitDeploymentRunCreation(ctx, command)
 }
 
-func (s *SQLiteRuntimeStore) CommitDeploymentRunCreation(ctx context.Context, command durabledata.RunCreationCommand, request apiidempotency.Request) (durabledata.RunCreationOperationRecord, error) {
-	return s.eventSQLiteOwner.CommitDeploymentRunCreation(ctx, command, request)
+func (s *SQLiteRuntimeStore) CommitDeploymentRunCreation(ctx context.Context, command bus.DeploymentRunCreationCommand) (bus.CommittedDeploymentRunCreation, error) {
+	return s.eventSQLiteOwner.CommitDeploymentRunCreation(ctx, command)
 }

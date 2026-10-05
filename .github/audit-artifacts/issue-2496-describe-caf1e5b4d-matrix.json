@@ -1,0 +1,252 @@
+{
+  "root": [
+    {
+      "test": "TestReadProofFactoringCompiledDescribe",
+      "status": "pass",
+      "elapsed_seconds": 40.58
+    }
+  ],
+  "cells": [
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-text",
+      "status": "pass",
+      "elapsed_seconds": 0.33
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-json",
+      "status": "pass",
+      "elapsed_seconds": 5.51
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-quiet",
+      "status": "pass",
+      "elapsed_seconds": 5.95
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-json",
+      "status": "pass",
+      "elapsed_seconds": 10.9
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-text",
+      "status": "pass",
+      "elapsed_seconds": 11.73
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-no-color",
+      "status": "pass",
+      "elapsed_seconds": 16.38
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-json",
+      "status": "pass",
+      "elapsed_seconds": 17.15
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-text",
+      "status": "pass",
+      "elapsed_seconds": 21.59
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-quiet",
+      "status": "pass",
+      "elapsed_seconds": 22.59
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-json",
+      "status": "pass",
+      "elapsed_seconds": 27.07
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-quiet",
+      "status": "pass",
+      "elapsed_seconds": 27.41
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-text",
+      "status": "pass",
+      "elapsed_seconds": 27.77
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/routes-quiet",
+      "status": "pass",
+      "elapsed_seconds": 27.65
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/routes-json",
+      "status": "pass",
+      "elapsed_seconds": 22.82
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/routes-text",
+      "status": "pass",
+      "elapsed_seconds": 22.6
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-no-color",
+      "status": "pass",
+      "elapsed_seconds": 18.04
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-json",
+      "status": "pass",
+      "elapsed_seconds": 17.41
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-text",
+      "status": "pass",
+      "elapsed_seconds": 13.18
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-quiet",
+      "status": "pass",
+      "elapsed_seconds": 12.59
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-json",
+      "status": "pass",
+      "elapsed_seconds": 8.59
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-text",
+      "status": "pass",
+      "elapsed_seconds": 7.75
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/routes-quiet",
+      "status": "pass",
+      "elapsed_seconds": 8.13
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/routes-json",
+      "status": "pass",
+      "elapsed_seconds": 8.15
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/routes-text",
+      "status": "pass",
+      "elapsed_seconds": 12.13
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-text",
+      "status": "pass",
+      "elapsed_seconds": 11.89
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-no-color",
+      "status": "pass",
+      "elapsed_seconds": 12.4
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-no-color",
+      "status": "pass",
+      "elapsed_seconds": 12.01
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-json",
+      "status": "pass",
+      "elapsed_seconds": 11.76
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-text",
+      "status": "pass",
+      "elapsed_seconds": 11.77
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-json",
+      "status": "pass",
+      "elapsed_seconds": 11.52
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-quiet",
+      "status": "pass",
+      "elapsed_seconds": 11.51
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-json",
+      "status": "pass",
+      "elapsed_seconds": 11.25
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/routes-quiet",
+      "status": "pass",
+      "elapsed_seconds": 11.26
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-quiet",
+      "status": "pass",
+      "elapsed_seconds": 11.28
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-text",
+      "status": "pass",
+      "elapsed_seconds": 11.7
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-text",
+      "status": "pass",
+      "elapsed_seconds": 11.99
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-json",
+      "status": "pass",
+      "elapsed_seconds": 12.39
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/routes-quiet",
+      "status": "pass",
+      "elapsed_seconds": 12.14
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/routes-json",
+      "status": "pass",
+      "elapsed_seconds": 12.03
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-no-color",
+      "status": "pass",
+      "elapsed_seconds": 12.18
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/routes-json",
+      "status": "pass",
+      "elapsed_seconds": 12.03
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/routes-text",
+      "status": "pass",
+      "elapsed_seconds": 12.15
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-json",
+      "status": "pass",
+      "elapsed_seconds": 12.07
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-text",
+      "status": "pass",
+      "elapsed_seconds": 12.16
+    },
+    {
+      "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/routes-text",
+      "status": "pass",
+      "elapsed_seconds": 12.03
+    }
+  ],
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "status": "pass",
+      "elapsed_seconds": 94.5
+    }
+  ],
+  "failures": [],
+  "skips": [],
+  "source_head": "caf1e5b4df728b4c9df7a0896b1d25d58ce06586",
+  "master_base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "command": "go run ./cmd/swarm-test -- -json -count=1 -run '^TestReadProofFactoringCompiledDescribe$' ./internal/cliapp",
+  "receipt": "/tmp/agent-e-2496-describe-caf1e5b4d.log",
+  "internal_repetitions_per_cell": 2,
+  "exact_named_cell_set": "Matches all 45 named cells in the frozen d32c35033 PASS receipt; unchanged permanent assertions.",
+  "qualification_boundary": "Fresh compiled-describe characterization only; not a default-suite or chosen-class closure claim."
+}

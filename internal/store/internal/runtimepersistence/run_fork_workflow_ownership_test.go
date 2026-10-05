@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -307,16 +308,15 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, seed, seedRoutes); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_mutations
-		(run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at)
-		VALUES ($1, $2, 'lifecycle_state', '', 'null', '"waiting"', $3, 'platform', 'ownership-fixture', 'seed', $4),
-		($5, $6, 'authored_field', 'marker', 'null', '"source-owned"', $7, 'platform', 'ownership-fixture', 'seed', $8)`, runID, runID, seedEventID, at, runID, runID, seedEventID, at); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state
-		(run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-		VALUES ($1, $2, $3, 'root', 'waiting', '{}', '{"marker":"source-owned"}', '{}', '{}', 7, $4, $5, $6)`, runID, runID, runID, at, at, at); err != nil {
-		t.Fatal(err)
+	commitPreparedWorkflowAggregateFixture(t, ctx, fixture.store.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
+		InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: "root", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+		Mode: "static", StageDefined: true, CurrentState: "waiting", Fields: map[string]any{"marker": "source-owned"}, CreatedAt: at, EnteredStageAt: at,
+	}, at)
+	// Native snapshot correspondence retains a deliberately non-initial revision.
+	for _, table := range []string{"flow_instances", "entity_state"} {
+		if _, err := fixture.db.ExecContext(ctx, `UPDATE `+table+` SET revision=7 WHERE run_id=$1`, runID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, postgres)
 	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(node), Target: target}}); err != nil {
@@ -356,7 +356,7 @@ func requireForkWorkflowOwnershipPreserved(t *testing.T, db *sql.DB, sourceRun, 
 	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id = $1 AND instance_path = $2 AND flow_template = '.' AND status = 'active'`, forkRun, forkRun).Scan(&childCompanions); err != nil {
 		t.Fatal(err)
 	}
-	if sourceCompanions != 0 || childCompanions != 1 {
+	if sourceCompanions != 1 || childCompanions != 1 {
 		t.Fatalf("fresh child construction copied or changed source companion: source=%d child=%d", sourceCompanions, childCompanions)
 	}
 }

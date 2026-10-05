@@ -1,8 +1,10 @@
 package serveapp
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -10,8 +12,77 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/gorilla/websocket"
 )
+
+func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRuntime, runID, instance, template, entityID, entityType, state, parent, wantPhase string, wantRevision int, fields map[string]any) {
+	t.Helper()
+	var gotEntity, gotTemplate, gotState string
+	var gotType sql.NullString
+	var revision int
+	var createdAt, updatedAt string
+	var orderedClocks bool
+	if err := rt.DB.QueryRow(`SELECT entity_id,flow_template,entity_type,current_state,revision,CAST(created_at AS TEXT),CAST(updated_at AS TEXT),updated_at>=created_at FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, instance).
+		Scan(&gotEntity, &gotTemplate, &gotType, &gotState, &revision, &createdAt, &updatedAt, &orderedClocks); err != nil {
+		t.Fatal(err)
+	}
+	if gotEntity != entityID || gotTemplate != template || gotState != state || gotType.String != entityType || gotType.Valid != (entityType != "") || revision != wantRevision || createdAt == "" || updatedAt == "" || !orderedClocks {
+		t.Fatalf("constructed receiver mismatch: run=%s instance=%s entity=%s template=%s type=%+v state=%s revision=%d", runID, instance, gotEntity, gotTemplate, gotType, gotState, revision)
+	}
+	var phase, planHash, rawPlan string
+	err := rt.DB.QueryRow(`SELECT phase,plan_hash,CAST(plan AS TEXT) FROM flow_instance_runtime_readiness WHERE run_id=$1 AND instance_path=$2`, runID, instance).Scan(&phase, &planHash, &rawPlan)
+	if wantPhase == "" {
+		// A historical, fieldless source-only root is inventoried, not attached.
+		if err != sql.ErrNoRows || template != "." || entityType != "" || parent != "" {
+			t.Fatalf("historical source-only projection acquired attachment: phase=%s err=%v", phase, err)
+		}
+	} else {
+		if err != nil || phase != wantPhase || planHash == "" {
+			t.Fatalf("receiver lacks exact canonical attachment: %s/%s phase=%s hash=%s err=%v", runID, instance, phase, planHash, err)
+		}
+		plan, err := pipeline.DecodeFlowReadinessPlan([]byte(rawPlan), planHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantParent := flowidentity.ParentRoute{}
+		if parent != "" {
+			parentTemplate := parent
+			if parent == runID {
+				parentTemplate = "."
+			}
+			wantParent = flowidentity.ParentRoute{FlowID: parentTemplate, FlowInstance: parent, EntityID: flowidentity.EntityID(parent)}
+		}
+		if plan.RunID != runID || plan.BundleHash != rt.BundleHash || plan.Identity.TemplateID != template || plan.Identity.InstancePath != instance || plan.Identity.EntityID != entityID || plan.Identity.ParentRoute != wantParent || plan.Identity.ParentEntityID != wantParent.EntityID {
+			t.Fatalf("receiver attachment lost exact construction/source identity: %+v", plan)
+		}
+	}
+	var count int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, instance).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if entityType == "" {
+		if count != 0 {
+			t.Fatalf("fieldless receiver acquired a field companion: %d", count)
+		}
+		return
+	}
+	if count != 1 {
+		t.Fatalf("declared receiver lacks its unique field companion: %d", count)
+	}
+	var raw string
+	if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance=$2 AND entity_id=$3 AND entity_type=$4`, runID, instance, entityID, entityType).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var gotFields map[string]any
+	if err := json.Unmarshal([]byte(raw), &gotFields); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotFields, fields) {
+		t.Fatalf("receiver business fields changed: got=%s want=%v", raw, fields)
+	}
+}
 
 func requireReceiverPublicReadback(t *testing.T, rt servedControlProofRuntime, runID string) {
 	t.Helper()

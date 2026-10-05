@@ -45,9 +45,9 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 
 		const (
 			runID        = "6a000000-0000-0000-0000-000000000001"
-			entityID     = "6a000000-0000-0000-0000-000000000002"
 			flowInstance = boundedProviderFlowID
 		)
+		entityID := runtimeflowidentity.EntityID(flowInstance)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
@@ -74,9 +74,9 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 	t.Run("sqlite", func(t *testing.T) {
 		const (
 			runID        = "6b000000-0000-0000-0000-000000000001"
-			entityID     = "6b000000-0000-0000-0000-000000000002"
 			flowInstance = boundedProviderFlowID
 		)
+		entityID := runtimeflowidentity.EntityID(flowInstance)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")

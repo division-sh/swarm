@@ -9,13 +9,13 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/google/uuid"
 )
 
@@ -32,8 +32,6 @@ type runForkActivationLineage struct {
 	ForkEventRevision int64
 	SourceRunStatus   string
 	EntityIDs         []string
-	FlowInstances     []string
-	SourceFlows       []string
 }
 
 type RunForkActivationLineage = runForkActivationLineage
@@ -84,7 +82,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 				return fmt.Errorf("fork activation requires source run status running or paused before freeze; got %q", lineage.SourceRunStatus)
 			}
 			if len(lineage.EntityIDs) == 0 {
-				return fmt.Errorf("fork activation requires materialized fork entity_state rows")
+				return fmt.Errorf("fork activation requires constructed instance headers")
 			}
 			binding, err := loadRunForkSelectedContractBinding(ctx, tx, lineage.ForkRunID)
 			if err == nil {
@@ -219,7 +217,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 				return fmt.Errorf("fork activation requires source run status running or paused before freeze; got %q", lineage.SourceRunStatus)
 			}
 			if len(lineage.EntityIDs) == 0 {
-				return fmt.Errorf("fork activation requires materialized fork entity_state rows")
+				return fmt.Errorf("fork activation requires constructed instance headers")
 			}
 			binding, err := loadRunForkSelectedContractBinding(txctx, tx, lineage.ForkRunID)
 			if err == nil {
@@ -423,40 +421,13 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 	if forkEventTime.Valid {
 		lineage.ForkEventTime = forkEventTime.Time
 	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT entity_id::text, COALESCE(flow_instance, '')
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		ORDER BY entity_id
-	`, lineage.ForkRunID)
+	headers, err := workflowheader.InventoryForMutation(ctx, tx, true, lineage.ForkRunID)
 	if err != nil {
-		return runForkActivationLineage{}, fmt.Errorf("load fork materialized state facts: %w", err)
+		return runForkActivationLineage{}, fmt.Errorf("load fork constructed inventory: %w", err)
 	}
-	defer rows.Close()
-	flowSet := map[string]struct{}{}
-	sourceFlowSet := map[string]struct{}{}
-	for rows.Next() {
-		var entityID, flowInstance string
-		if err := rows.Scan(&entityID, &flowInstance); err != nil {
-			return runForkActivationLineage{}, fmt.Errorf("scan fork materialized state facts: %w", err)
-		}
-		if entityID = strings.TrimSpace(entityID); entityID != "" {
-			lineage.EntityIDs = append(lineage.EntityIDs, entityID)
-		}
-		if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
-			if _, ok := flowSet[flowInstance]; !ok {
-				flowSet[flowInstance] = struct{}{}
-				lineage.FlowInstances = append(lineage.FlowInstances, flowInstance)
-			}
-			if sourceFlow := runtimeflowidentity.SemanticScope(flowInstance); sourceFlow != "" {
-				sourceFlowSet[sourceFlow] = struct{}{}
-			}
-		}
+	for _, header := range headers {
+		lineage.EntityIDs = append(lineage.EntityIDs, header.EntityID)
 	}
-	if err := rows.Err(); err != nil {
-		return runForkActivationLineage{}, fmt.Errorf("read fork materialized state facts: %w", err)
-	}
-	lineage.SourceFlows = stringSetValues(sourceFlowSet)
 	lineage.ForkBundleHash = strings.TrimSpace(lineage.ForkBundleHash)
 	lineage.SourceBundleHash = strings.TrimSpace(lineage.SourceBundleHash)
 	return lineage, nil
@@ -508,40 +479,13 @@ func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privater
 	if present {
 		lineage.ForkEventTime = forkEventTime
 	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT CAST(entity_id AS TEXT), COALESCE(flow_instance, '')
-		FROM entity_state
-		WHERE run_id = $1
-		ORDER BY entity_id
-	`, lineage.ForkRunID)
+	headers, err := workflowheader.InventoryForMutation(ctx, tx, false, lineage.ForkRunID)
 	if err != nil {
-		return runForkActivationLineage{}, fmt.Errorf("load sqlite fork materialized state facts: %w", err)
+		return runForkActivationLineage{}, fmt.Errorf("load sqlite fork constructed inventory: %w", err)
 	}
-	defer rows.Close()
-	flowSet := map[string]struct{}{}
-	sourceFlowSet := map[string]struct{}{}
-	for rows.Next() {
-		var entityID, flowInstance string
-		if err := rows.Scan(&entityID, &flowInstance); err != nil {
-			return runForkActivationLineage{}, fmt.Errorf("scan sqlite fork materialized state facts: %w", err)
-		}
-		if entityID = strings.TrimSpace(entityID); entityID != "" {
-			lineage.EntityIDs = append(lineage.EntityIDs, entityID)
-		}
-		if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
-			if _, ok := flowSet[flowInstance]; !ok {
-				flowSet[flowInstance] = struct{}{}
-				lineage.FlowInstances = append(lineage.FlowInstances, flowInstance)
-			}
-			if sourceFlow := runtimeflowidentity.SemanticScope(flowInstance); sourceFlow != "" {
-				sourceFlowSet[sourceFlow] = struct{}{}
-			}
-		}
+	for _, header := range headers {
+		lineage.EntityIDs = append(lineage.EntityIDs, header.EntityID)
 	}
-	if err := rows.Err(); err != nil {
-		return runForkActivationLineage{}, fmt.Errorf("read sqlite fork materialized state facts: %w", err)
-	}
-	lineage.SourceFlows = stringSetValues(sourceFlowSet)
 	lineage.ForkBundleHash = strings.TrimSpace(lineage.ForkBundleHash)
 	lineage.SourceBundleHash = strings.TrimSpace(lineage.SourceBundleHash)
 	return lineage, nil

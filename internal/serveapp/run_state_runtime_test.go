@@ -21,29 +21,46 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
 const runStatusTestRuntimeInstanceID = "22222222-2222-2222-2222-222222222222"
 
+type runStatusManagerBus struct {
+	*runtimebus.EventBus
+	t *testing.T
+}
+
+func (b runStatusManagerBus) Publish(ctx context.Context, evt events.Event) error {
+	err := b.EventBus.Publish(ctx, evt)
+	if err != nil {
+		b.t.Logf("run-status manager publication %s: %v", evt.Type(), err)
+	}
+	return err
+}
+
 func runStatusSubscriptionSource() semanticview.Source {
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}, "scan.completed": {}},
 	}
 	source := semanticviewtest.WrapRootAgents(bundle)
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
 	}
+	bundle.Semantics.Version = "1.0.0"
 	return source
 }
 
@@ -81,8 +98,8 @@ func registerRunStatusEventCatalog(t *testing.T, registrar runStatusEventCatalog
 		t.Fatal("run status author activity scope is unavailable")
 	}
 	lease, err := registrar.RegisterAuthorActivityEventCatalog(scope, []runtimeauthoractivity.EventDescriptor{
-		{EventType: "scan.completed", Disposition: runtimeauthoractivity.StoryDifferent},
-		{EventType: "scan.requested", Disposition: runtimeauthoractivity.StoryDifferent},
+		{EventType: "scan.completed", Disposition: runtimeauthoractivity.StoryAuthored},
+		{EventType: "scan.requested", Disposition: runtimeauthoractivity.StoryAuthored},
 	})
 	if err != nil {
 		t.Fatalf("register run status event catalog: %v", err)
@@ -102,6 +119,7 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 		t.Fatalf("activate run status delivery authority: %v", err)
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		ContractBundle:     runStatusSubscriptionSource(),
 		ExecutionPosture:    executionposture.Live,
 		RuntimeInstanceID:   runStatusTestRuntimeInstanceID,
 		SourceArtifactFact:  sourceFact,
@@ -166,16 +184,21 @@ func publishRunStatusExistingRootEvent(t *testing.T, bus *runtimebus.EventBus, s
 func seedRunStatusEntityState(t *testing.T, pg *store.PostgresStore, source runtimecorrelation.SourceArtifactFact, runID, entityID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if _, err := storetest.DatabaseForTest(pg).ExecContext(context.Background(), `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'run-status-test', 'default', 'status-entity', 'Status Entity', 'ready',
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $3, $3
-		)
-	`, runID, entityID, now); err != nil {
-		t.Fatalf("seed run status entity_state: %v", err)
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(runStatusAuthorActivityContext(source), runID), runtimeeffects.ExecutionModeLive)
+	// This isolated completion control seeds a prepared header/fields aggregate;
+	// its empty topology is not public construction or attachment qualification.
+	command, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID: runID, StorageRef: runID, EntityID: entityID,
+		WorkflowName: ".", WorkflowVersion: "1.0.0", EntityType: "default",
+		CurrentState: "ready", StageDefined: true, CreatedAt: now, EnteredStageAt: now,
+		Fields: map[string]any{},
+	}, runtimepipeline.WorkflowLifecycleMutationPlan{}, now)
+	if err != nil {
+		t.Fatalf("prepare run status aggregate: %v", err)
+	}
+	committed, err := pg.CommitFlowInstanceActivation(ctx, command)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("seed run status aggregate: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
 	}
 	if err := storetest.SyncRunCounters(runStatusAuthorActivityContext(source), pg, runID); err != nil {
 		t.Fatalf("synchronize run status counters: %v", err)
@@ -195,7 +218,7 @@ func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, source runtim
 	}
 	if _, err := storetest.ExecuteRunCompletionCandidate(
 		runStatusAuthorActivityContext(source), pg, bundleHash, runID,
-		stagecatalogfixture.NewTerminalCatalog([]string{"ready"}, map[string][]string{"run-status-test": {"ready"}}),
+		stagecatalogfixture.NewTerminalCatalog([]string{"ready"}, map[string][]string{".": {"ready"}}),
 	); err != nil {
 		t.Fatalf("execute normal run completion candidate: %v", err)
 	}
@@ -241,6 +264,16 @@ func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEv
 			return
 		}
 		if time.Now().After(deadline) {
+			rows, queryErr := db.QueryContext(ctx, `SELECT status, COALESCE(CAST(failure AS TEXT), '') FROM event_deliveries WHERE run_id=$1::uuid`, runID)
+			if queryErr == nil {
+				for rows.Next() {
+					var status, failure string
+					if scanErr := rows.Scan(&status, &failure); scanErr == nil {
+						t.Logf("delivery status=%s failure=%s", status, failure)
+					}
+				}
+				rows.Close()
+			}
 			t.Fatalf("run %s did not settle after release: last err=%v event_count=%d want_events=%d active_deliveries=%d", runID, err, eventCount, wantEvents, activeDeliveries)
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -253,7 +286,7 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 	eb, _, source := newRunStatusEventBus(t, pg)
 	registerRunStatusEventCatalog(t, pg, source)
 	runID := uuid.NewString()
-	entityID := uuid.NewString()
+	entityID := runID
 	eventID := publishRunStatusRootEvent(t, eb, source, runID, entityID)
 	seedRunStatusEntityState(t, pg, source, runID, entityID)
 	markRunStatusCompleted(t, pg, source, eventID)
@@ -295,7 +328,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		started:       agentStarted,
 		release:       releaseAgent,
 	}
-	am := runtimemanager.NewAgentManagerWithOptions(eb, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	am := runtimemanager.NewAgentManagerWithOptions(runStatusManagerBus{eb, t}, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		if cfg.ID != testAgent.id {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
@@ -317,7 +350,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	installServeTestExactAgentReadiness(t, eb, servedRuntimeRootIdentityForRun(t, runID, testAgent.id))
 	defer func() { _ = am.Shutdown() }()
 
-	entityID := uuid.NewString()
+	entityID := runID
 	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
 	seedRunStatusEntityState(t, pg, source, runID, entityID)
 
@@ -419,7 +452,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		started:       agentStarted,
 		release:       releaseAgent,
 	}
-	am := runtimemanager.NewAgentManagerWithOptions(eb, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	am := runtimemanager.NewAgentManagerWithOptions(runStatusManagerBus{eb, t}, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		if cfg.ID != testAgent.id {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
@@ -441,7 +474,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	installServeTestExactAgentReadiness(t, eb, servedRuntimeRootIdentityForRun(t, runID, testAgent.id))
 	defer func() { _ = am.Shutdown() }()
 
-	entityID := uuid.NewString()
+	entityID := runID
 	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
 	seedRunStatusEntityState(t, pg, source, runID, entityID)
 

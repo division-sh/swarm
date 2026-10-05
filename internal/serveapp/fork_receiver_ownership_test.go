@@ -165,7 +165,9 @@ func snapshotForkReceiverApplication(t *testing.T, rt servedControlProofRuntime)
 
 func readForkReceiverRows(t *testing.T, rt servedControlProofRuntime, runID string) map[string]forkReceiverRow {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT entity_id,flow_instance,entity_type,current_state,CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 ORDER BY entity_id`, runID)
+	rows, err := rt.DB.Query(`SELECT es.entity_id,es.flow_instance,es.entity_type,fi.current_state,CAST(es.fields AS TEXT)
+		FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
+		WHERE es.run_id=$1 ORDER BY es.entity_id`, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +210,11 @@ func readForkReceiverCompanions(t *testing.T, rt servedControlProofRuntime, runI
 		if err != nil {
 			t.Fatal(err)
 		}
+		columnJSON, err := json.Marshal(columns)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[table+"/columns"] = []string{string(columnJSON)}
 		out[table] = []string{}
 		for rows.Next() {
 			values, pointers := make([]any, len(columns)), make([]any, len(columns))
@@ -235,6 +242,63 @@ func readForkReceiverCompanions(t *testing.T, rt servedControlProofRuntime, runI
 		sort.Strings(out[table])
 	}
 	return out
+}
+
+func requireOptionalForkReceiverHeaderProgress(t *testing.T, rt servedControlProofRuntime, runID, path string, before, after map[string][]string, deliveries int) {
+	t.Helper()
+	if !reflect.DeepEqual(before["flow_instance_runtime_readiness"], after["flow_instance_runtime_readiness"]) ||
+		!reflect.DeepEqual(before["flow_instances/columns"], after["flow_instances/columns"]) ||
+		len(before["flow_instances"]) != 1 || len(after["flow_instances"]) != 1 {
+		t.Fatalf("optional receiver lost its exact header/readiness shape: before=%v after=%v", before, after)
+	}
+	var columns []string
+	var old, current []any
+	for _, value := range []struct {
+		raw    string
+		target any
+	}{
+		{before["flow_instances/columns"][0], &columns}, {before["flow_instances"][0], &old}, {after["flow_instances"][0], &current},
+	} {
+		if err := json.Unmarshal([]byte(value.raw), value.target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(old) != len(columns) || len(current) != len(columns) {
+		t.Fatal("incomplete optional header snapshot")
+	}
+	for index, column := range columns {
+		switch column {
+		case "revision":
+			previous, ok := old[index].(float64)
+			next, nextOK := current[index].(float64)
+			if !ok || !nextOK || previous <= 0 || next != previous+float64(deliveries) {
+				t.Fatalf("optional header revision=%v -> %v, want exactly %d admitted deliveries", old[index], current[index], deliveries)
+			}
+		case "updated_at":
+			var advanced bool
+			if err := rt.DB.QueryRow(`SELECT updated_at>$3 FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, path, old[index]).Scan(&advanced); err != nil || !advanced || reflect.DeepEqual(old[index], current[index]) {
+				t.Fatalf("optional header update time did not advance: %v -> %v err=%v", old[index], current[index], err)
+			}
+		case "config":
+			oldRaw, ok := old[index].(string)
+			newRaw, nextOK := current[index].(string)
+			var previous, next map[string]any
+			if !ok || !nextOK || json.Unmarshal([]byte(oldRaw), &previous) != nil || json.Unmarshal([]byte(newRaw), &next) != nil || next["status"] != "active" {
+				t.Fatalf("optional header status serialization: %v -> %v", old[index], current[index])
+			}
+			if status, present := previous["status"]; present && status != "active" {
+				t.Fatalf("unexpected seeded optional status: %v", status)
+			}
+			previous["status"] = "active"
+			if !reflect.DeepEqual(previous, next) {
+				t.Fatalf("optional header changed other configuration: %v -> %v", previous, next)
+			}
+		default:
+			if !reflect.DeepEqual(old[index], current[index]) {
+				t.Fatalf("optional header changed %s: %v -> %v", column, old[index], current[index])
+			}
+		}
+	}
 }
 
 func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, runID, sourceEvent, path, kind, entityID string) events.DeliveryRoute {
@@ -433,9 +497,10 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		for _, receiver := range receivers {
 			if receiver.Policy == canonicalrouting.ForkReceiverOptionalAbsent || receiver.Policy == canonicalrouting.ForkReceiverOptionalExisting {
 				path := prefix + receiver.Path
-				if !reflect.DeepEqual(seedRows[path], sourceRows[path]) || !reflect.DeepEqual(seedCompanions[path], readForkReceiverCompanions(t, rt, seed.RunID, path)) {
-					t.Fatalf("optional receiver changed seeded state/companions: %s", path)
+				if !reflect.DeepEqual(seedRows[path], sourceRows[path]) {
+					t.Fatalf("optional receiver changed seeded state %s: before=%+v after=%+v", path, seedRows[path], sourceRows[path])
 				}
+				requireOptionalForkReceiverHeaderProgress(t, rt, seed.RunID, path, seedCompanions[path], readForkReceiverCompanions(t, rt, seed.RunID, path), len(frontiers))
 			}
 		}
 	}
@@ -445,26 +510,34 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		t.Fatalf("source producer prerequisite: %+v", sourceRows)
 	}
 	producerRoute := producerEvidence.Source.Route()
-	if producerEvidence.Source.Kind() != events.RoutingSourceStaticFlow || producerRoute.FlowID != prefix+"producer" || producerRoute.FlowInstance != prefix+"producer" || producerRoute.EntityID != producer.ID {
+	var producerHeaderID string
+	if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$2`, seed.RunID, prefix+"producer").Scan(&producerHeaderID); err != nil {
+		t.Fatal(err)
+	}
+	if (producerExists && producer.ID != producerHeaderID) || producerEvidence.Source.Kind() != events.RoutingSourceStaticFlow || producerRoute.FlowID != prefix+"producer" || producerRoute.FlowInstance != prefix+"producer" || producerRoute.EntityID != producerHeaderID {
 		t.Fatalf("source event lacks independently expected producer ownership: %+v rows=%+v", producerEvidence, sourceRows)
 	}
 	sourceRoutes := map[string]events.DeliveryRoute{}
 	for _, receiver := range receivers {
 		path := prefix + receiver.Path
-		kind, id := "entityless_receiver", ""
+		kind, id := "existing_entity", ""
 		if receiver.Policy != canonicalrouting.ForkReceiverOptionalAbsent {
 			row, exists := sourceRows[path]
 			marker := receiver.Path + "-owned"
 			kind = "existing_entity"
-			if receiver.Policy == canonicalrouting.ForkReceiverAutoMaterializing || receiver.Policy == canonicalrouting.ForkReceiverExplicitCreate {
-				kind, marker = "materializing_entity", receiver.Path+"-created"
+			if receiver.Policy == canonicalrouting.ForkReceiverConstructorOwned {
+				marker = receiver.Path + "-created"
 			}
 			if !exists || row.ID == producer.ID || row.Type != "receipt" || row.State != "active" || row.Fields["marker"] != marker {
 				t.Fatalf("independent source receiver prerequisite: %s %+v", receiver.Path, sourceRows)
 			}
 			id = row.ID
-		} else if _, exists := sourceRows[path]; exists {
-			t.Fatalf("optional source receiver invented state: %+v", sourceRows)
+		} else {
+			row, exists := sourceRows[path]
+			if !exists || row.Type != "receipt" || len(row.Fields) != 0 {
+				t.Fatalf("optional empty contract lacks its exact initialized field companion: %+v", sourceRows)
+			}
+			id = row.ID
 		}
 		for _, occurrence := range frontiers {
 			sourceRoutes[path] = requireEffect(t, rt, seed.RunID, occurrence, path, receiver.Path, kind, id)
@@ -559,8 +632,14 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	}
 	if option.selectedMissing {
 		// This is changed-selected execution through the actual owner, not a
-		// mutation of the successful source bundle or a forged route plan.
-		selectedRoot := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredMissing}}, false)
+		// mutation of the successful source bundle or a forged route plan. Eager
+		// construction already owns "consumer", even with empty fields; select
+		// a different receiver that was genuinely absent at the fork point.
+		const missingReceiver = "missing"
+		selectedRoot := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{
+			{Path: "consumer", Policy: canonicalrouting.ForkReceiverOptionalAbsent},
+			{Path: missingReceiver, Policy: canonicalrouting.ForkReceiverRequiredMissing},
+		}, false)
 		bundle := loadWorkflowValidationBundleAt(t, selectedRoot)
 		if selected == nil {
 			t.Fatal("missing selected store owner")
@@ -579,8 +658,8 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash},
 				AgentRuntime:      rt.ForkRuntime,
 			})
-			if err == nil || !strings.Contains(err.Error(), "receiver target owner is missing") || !strings.Contains(err.Error(), "consumer") || result.ExecutedEventCount != 0 || result.Materialization.ForkRunID != "" {
-				t.Fatalf("required missing receiver must reject before materialization: result=%+v err=%v", result, err)
+			if err == nil || !strings.Contains(err.Error(), "receiver target owner is missing") || !strings.Contains(err.Error(), missingReceiver) || result.ExecutedEventCount != 0 || result.Materialization.ForkRunID != "" {
+				t.Fatalf("required missing receiver must reject before materialization: executions=%d child=%q err=%v", result.ExecutedEventCount, result.Materialization.ForkRunID, err)
 			}
 			if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, after) {
 				t.Fatalf("required-missing attempt %d changed application state", attempt)
@@ -603,8 +682,12 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		t.Fatalf("backend/container composition changed immutable non-root producer: source=%+v child=%+v", producerEvidence, childProducer)
 	}
 	if producerRoute.EntityID != "" {
+		var childHeaderID string
+		if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`, fork.ForkRunID, producerRoute.FlowInstance, producerRoute.FlowID).Scan(&childHeaderID); err != nil {
+			t.Fatal(err)
+		}
 		row := childRows[producerRoute.FlowInstance]
-		if row.ID != producerRoute.EntityID || row.Type != producer.Type || row.Flow != producer.Flow {
+		if childHeaderID != producerRoute.EntityID || (producerExists && (row.ID != producerRoute.EntityID || row.Type != producer.Type || row.Flow != producer.Flow)) {
 			t.Fatalf("child producer route has no exact physical owner: route=%+v row=%+v", producerRoute, row)
 		}
 	}
@@ -618,14 +701,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			t.Fatalf("fork changed exact compiled connect claim: source=%+v child=%+v", sourceRoute, childRoute)
 		}
 		if id == "" {
-			var companions int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, fork.ForkRunID, path).Scan(&companions); err != nil {
-				t.Fatal(err)
-			}
-			if _, exists := childRows[path]; exists || companions != 0 {
-				t.Fatalf("optional child fabricated entity/companion: %+v count=%d", childRows, companions)
-			}
-		} else if got := childRows[path]; !reflect.DeepEqual(got, sourceRows[path]) {
+			t.Fatalf("constructed receiver lacks exact header identity: %s", path)
+		}
+		if got := childRows[path]; !reflect.DeepEqual(got, sourceRows[path]) {
 			t.Fatalf("receiver state transferred or changed: source=%+v child=%+v", sourceRows[path], got)
 		}
 	}
@@ -657,10 +735,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 func TestSelectedForkCanonicalReceiverAcquisitionStateEffectBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend)+"/auto_materializing", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverAutoMaterializing}}, false, forkReceiverJourneyOptions{executionOnly: true})
-		})
-		t.Run(string(backend)+"/explicit_create", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverExplicitCreate}}, false, forkReceiverJourneyOptions{executionOnly: true})
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverConstructorOwned}}, false, forkReceiverJourneyOptions{executionOnly: true})
 		})
 	}
 }
@@ -726,7 +801,7 @@ func TestSelectedForkReceiverPolicyPermutationExecutionBothStores(t *testing.T) 
 			})
 		}
 		t.Run(string(backend)+"/materializing_mixed", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, append(append([]canonicalrouting.ForkReceiver{}, receivers...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverAutoMaterializing}), false, forkReceiverJourneyOptions{executionOnly: true})
+			runForkReceiverOwnershipJourney(t, backend, append(append([]canonicalrouting.ForkReceiver{}, receivers...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverConstructorOwned}), false, forkReceiverJourneyOptions{executionOnly: true})
 		})
 		t.Run(string(backend)+"/same_owner_two_events_and_duplicate", func(t *testing.T) {
 			runForkReceiverOwnershipJourney(t, backend, receivers, false, forkReceiverJourneyOptions{repeated: true, executionOnly: true})
@@ -744,8 +819,8 @@ func TestSelectedForkReceiverStaticAcquisitionBootRefusal(t *testing.T) {
 	}
 }
 
-func TestSelectedForkReceiverCreateCompilationIsNotDynamicFlowCreation(t *testing.T) {
-	for _, policy := range []canonicalrouting.ForkReceiverPolicy{canonicalrouting.ForkReceiverExplicitCreate, canonicalrouting.ForkReceiverAutoMaterializing} {
+func TestSelectedForkReceiverConstructorCompilationIsNotHandlerCreation(t *testing.T) {
+	for _, policy := range []canonicalrouting.ForkReceiverPolicy{canonicalrouting.ForkReceiverConstructorOwned} {
 		t.Run(fmt.Sprint(policy), func(t *testing.T) {
 			source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: policy}}, false)))
 			found := false
@@ -760,10 +835,9 @@ func TestSelectedForkReceiverCreateCompilationIsNotDynamicFlowCreation(t *testin
 					}
 					if node.FlowPath() == "consumer" && event == "work.ready" {
 						found = true
-						if handler.CreateEntity != (policy == canonicalrouting.ForkReceiverExplicitCreate) {
-							t.Fatalf("compiled create_entity fact differs: %+v", handler)
+						if handler.CreateEntity {
+							t.Fatalf("ordinary handler retained construction authority: %+v", handler)
 						}
-						t.Logf("consumer/work.ready CreateEntity=%t", handler.CreateEntity)
 					}
 				}
 			}
@@ -883,7 +957,7 @@ func TestSelectedForkOptionalReceiverOwnershipExecutionBothStores(t *testing.T) 
 		for _, test := range []struct {
 			name   string
 			policy canonicalrouting.ForkReceiverPolicy
-		}{{"entityless", canonicalrouting.ForkReceiverOptionalAbsent}, {"existing", canonicalrouting.ForkReceiverOptionalExisting}} {
+		}{{"empty_fields", canonicalrouting.ForkReceiverOptionalAbsent}, {"existing", canonicalrouting.ForkReceiverOptionalExisting}} {
 			t.Run(fmt.Sprintf("%s/%s", backend, test.name), func(t *testing.T) {
 				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: test.policy}}, false, forkReceiverJourneyOptions{executionOnly: true})
 			})
@@ -1003,7 +1077,11 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 					t.Fatalf("source producer ownership: %+v", sourceRows)
 				}
 				sourceEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
-				if sourceEvidence.Source.Kind() != events.RoutingSourceStaticFlow || sourceEvidence.Source.Route() != (events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producer.ID}) {
+				var producerHeaderID string
+				if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path='producer' AND flow_template='producer'`, seed.RunID).Scan(&producerHeaderID); err != nil {
+					t.Fatal(err)
+				}
+				if (exists && producer.ID != producerHeaderID) || sourceEvidence.Source.Kind() != events.RoutingSourceStaticFlow || sourceEvidence.Source.Route() != (events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerHeaderID}) {
 					t.Fatalf("immutable producer evidence: %+v", sourceEvidence)
 				}
 				sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, consumer.ID)
@@ -1073,8 +1151,7 @@ func TestSelectedForkReceiverGeometryPostRevisionPolicyRefusalBothStores(t *test
 		{"optional_entityless", canonicalrouting.ForkReceiverOptionalAbsent},
 		{"optional_existing", canonicalrouting.ForkReceiverOptionalExisting},
 		{"required_existing", canonicalrouting.ForkReceiverRequiredExisting},
-		{"auto_materializing", canonicalrouting.ForkReceiverAutoMaterializing},
-		{"explicit_create", canonicalrouting.ForkReceiverExplicitCreate},
+		{"auto_materializing", canonicalrouting.ForkReceiverConstructorOwned},
 	} {
 		cases = append(cases, geometry{name: policy.name, receivers: []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: policy.value}}})
 	}
@@ -1090,7 +1167,7 @@ func TestSelectedForkReceiverGeometryPostRevisionPolicyRefusalBothStores(t *test
 		cases = append(cases, geometry{name: fmt.Sprintf("permutation_%d%d%d", order[0], order[1], order[2]), receivers: []canonicalrouting.ForkReceiver{policies[order[0]], policies[order[1]], policies[order[2]]}})
 	}
 	cases = append(cases,
-		geometry{name: "materializing_mixed", receivers: append(append([]canonicalrouting.ForkReceiver{}, policies...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverAutoMaterializing})},
+		geometry{name: "materializing_mixed", receivers: append(append([]canonicalrouting.ForkReceiver{}, policies...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverConstructorOwned})},
 		geometry{name: "same_owner_two_events_and_duplicate", receivers: policies, repeated: true},
 		geometry{name: "nested_sibling_run", receivers: []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}, {Path: "sibling", Policy: canonicalrouting.ForkReceiverOptionalExisting}}, nested: true},
 	)

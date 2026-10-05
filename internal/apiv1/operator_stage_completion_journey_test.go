@@ -164,18 +164,24 @@ func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerun
 func stageCompletionWaitForDelivery(t *testing.T, db *sql.DB, backend, runID, eventName string) {
 	t.Helper()
 	nodeID := identitytest.FlowNode(t, "discovery", "pipeline").Key()
+	rootNodeID := ""
+	want := 1
+	if eventName == "flow.finish" {
+		rootNodeID = identitytest.RootNode(t, "root-completion").Key()
+		want = 2
+	}
 	query := `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
-		WHERE e.run_id = ? AND e.event_name = ? AND d.subscriber_type = 'node' AND d.subscriber_id = ? AND d.status = 'delivered'`
+		WHERE e.run_id = ? AND e.event_name = ? AND d.subscriber_type = 'node' AND d.subscriber_id IN (?,?) AND d.status = 'delivered'`
 	if backend == "postgres" {
 		query = `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
-			WHERE e.run_id = $1::uuid AND e.event_name = $2 AND d.subscriber_type = 'node' AND d.subscriber_id = $3 AND d.status = 'delivered'`
+			WHERE e.run_id = $1::uuid AND e.event_name = $2 AND d.subscriber_type = 'node' AND d.subscriber_id IN ($3,$4) AND d.status = 'delivered'`
 	}
 	requireAPIV1Convergence(t, "case-distinct handler delivery "+eventName, func() (bool, error) {
 		var count int
-		if err := db.QueryRow(query, runID, eventName, nodeID).Scan(&count); err != nil {
+		if err := db.QueryRow(query, runID, eventName, nodeID, rootNodeID).Scan(&count); err != nil {
 			return false, err
 		}
-		return count == 1, fmt.Errorf("delivered %s count=%d, want one", eventName, count)
+		return count == want, fmt.Errorf("delivered %s count=%d, want %d exact root/child deliveries", eventName, count, want)
 	})
 }
 

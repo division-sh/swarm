@@ -153,7 +153,7 @@ func TestSelectedInputValidationCannotWidenRecipientDisposition(t *testing.T) {
 	if len(validation.FilterSubscribers(subscribers)) == 0 {
 		t.Fatal("fixture has no valid input recipients")
 	}
-	none, err := validation.SelectRecipients(nil)
+	none, err := validation.SelectRecipients(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -74,7 +74,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 					err := am.FinalizeCommittedFlowInstanceActivation(ctx, activation)
 					if err == nil {
 						readiness, found, readErr := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, activation.Plan.Identity.Route())
-						if readErr != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.CreationEventEmittedAt.IsZero() {
+						if readErr != nil || !found || (readiness.Phase != pipeline.FlowAttachmentReady) || (activation.Plan.Readiness.CreationEvent == nil) != readiness.CreationEventEmittedAt.IsZero() {
 							err = fmt.Errorf("readiness incomplete inside initial finalizer: %+v found=%v err=%v", readiness, found, readErr)
 						}
 					}
@@ -127,15 +127,32 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			if err != nil || replay || got.ResourceID != eventID {
 				t.Fatalf("initial public completion: %+v replay=%v err=%v", got, replay, err)
 			}
-			if len(finalizationErrors) != 1 {
+			if len(finalizationErrors) != 2 || len(finalized) != 2 {
 				t.Fatalf("first-pass finalizations=%d", len(finalizationErrors))
 			}
-			if finalizationErrors[0] != nil {
-				t.Fatalf("initial root finalization failed before duplicate or recovery: %v", finalizationErrors[0])
+			var plan pipeline.FlowInstanceActivationPlan
+			seen := make(map[string]bool)
+			for i, activation := range finalized {
+				if finalizationErrors[i] != nil || seen[activation.Plan.Identity.InstancePath] {
+					t.Fatalf("initial finalization failed or repeated before recovery: %+v err=%v", activation, finalizationErrors[i])
+				}
+				seen[activation.Plan.Identity.InstancePath] = true
+				if activation.Plan.Identity.InstancePath == runID {
+					if activation.Plan.Identity.ScopeKey != "." || activation.Plan.Readiness.CreationEvent != nil {
+						t.Fatal("root construction invented creating emission or changed owner")
+					}
+					continue
+				}
+				if activation.Plan.Identity.TemplateID != "telegram-chat" {
+					t.Fatalf("finalized foreign receiver: %+v", activation.Plan.Identity)
+				}
+				plan = activation.Plan
 			}
-			plan := finalized[0].Plan
+			if !seen[runID] || plan.Identity.InstancePath == "" {
+				t.Fatal("initial publication omitted root or selected receiver construction")
+			}
 			readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, plan.Identity.Route())
-			if err != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.CreationEventEmittedAt.IsZero() {
+			if err != nil || !found || (readiness.Phase != pipeline.FlowAttachmentReady) || readiness.CreationEventEmittedAt.IsZero() {
 				t.Fatalf("first-pass readiness incomplete: %+v found=%v err=%v", readiness, found, err)
 			}
 			if plan.Readiness.CreationEvent == nil {
@@ -171,7 +188,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 				t.Fatal(err)
 			}
 			got, replay, err = publisher.PublishAPIEventWithRunCreationAcknowledged(ctx, event, &apiEndpoint, request, completion, &runCreation)
-			if err != nil || !replay || got.ResourceID != eventID || len(finalizationErrors) != 1 {
+			if err != nil || !replay || got.ResourceID != eventID || len(finalizationErrors) != 2 {
 				t.Fatalf("duplicate replay reran finalization: replay=%v callbacks=%d err=%v", replay, len(finalizationErrors), err)
 			}
 		})

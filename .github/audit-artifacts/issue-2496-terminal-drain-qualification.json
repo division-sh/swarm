@@ -1,0 +1,4619 @@
+{
+  "source_head": "7b715426e9db9dc029083ae7dc62b229dc8a9376",
+  "boundary": "Local terminal-ordering qualification only. No survivor-grant closure, complete managed default, fresh describe or exact-head CI claim. No push/rebase.",
+  "receipts": [
+    {
+      "raw": "issue-2496-terminal-drain-native.jsonl.gz",
+      "source": "initial working-tree matrix; before stronger retirement assertions",
+      "sha256_uncompressed": "5390f0f87d993e73e04cde6ed24005107b2a64af88fa346fcd342dafa7a42e66",
+      "bytes_uncompressed": 6399,
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 52.495
+        }
+      ],
+      "root_outcomes_including_repetitions": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 5,
+        "fail": 0,
+        "skip": 0
+      },
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 51.44
+        }
+      ],
+      "native_shutdown_cells": [
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 19.34
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 15.39
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 10.02
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.69
+        }
+      ]
+    },
+    {
+      "raw": "issue-2496-terminal-drain-composed-race.jsonl.gz",
+      "source": "272d5feb7 runtime/manager source; before individual Runtime retirement guard",
+      "sha256_uncompressed": "f5c9871553034362f0a856e045ef97db3eaf2a1a583d04bc37f69ac740af2d71",
+      "bytes_uncompressed": 43323,
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 5.842
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 133.999
+        }
+      ],
+      "root_outcomes_including_repetitions": {
+        "pass": 27,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 39,
+        "fail": 0,
+        "skip": 0
+      },
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease",
+          "action": "pass",
+          "elapsed": 1.72
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation",
+          "action": "pass",
+          "elapsed": 0.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.16
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease",
+          "action": "pass",
+          "elapsed": 0.35
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.15
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease",
+          "action": "pass",
+          "elapsed": 0.35
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.15
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 47.22
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 41.78
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 43.25
+        }
+      ],
+      "native_shutdown_cells": [
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 15.77
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 14.29
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 10.2
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.95
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 14.02
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 13.88
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 6.95
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.93
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 14.03
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 15.53
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 6.91
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.78
+        }
+      ]
+    },
+    {
+      "raw": "issue-2496-terminal-drain-manager-suite.jsonl.gz",
+      "source": "272d5feb7",
+      "sha256_uncompressed": "b9079407a869e08ff71dc7ec877dbd2ed3a262ab3cb96793735331c9e6c299a5",
+      "bytes_uncompressed": 704605,
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 17.911
+        }
+      ],
+      "root_outcomes_including_repetitions": {
+        "pass": 322,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 673,
+        "fail": 0,
+        "skip": 0
+      },
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRequireAdmittedAgentIdentityRejectsRunlessAndMismatchedIdentity",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentFactorySeparatesReceiverDataFromAuthoredPromptAuthority",
+          "action": "pass",
+          "elapsed": 0.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSelectedStoreRecoveryReconstructsCanonicalPromptBeforeProviderFactory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSelectedStoreRecoveryRejectsCriteriaMismatchBeforeProviderFactory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerDefaultsLLMBackendFromCanonicalProfile",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentModelUsesConfiguredLiveBackendWithoutMock",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentModelMockCommandSelectsExactArtifactWithEveryLiveBackend",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentModelMaterializesSelectionWithoutOptionalModel",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentModelMockRetainsAndRequiresCapturedArtifact",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAuthoredMockSelectionSurvivesReconfigureAndRestart",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentRuntimeSetRecoveryRejectsBackendDriftWithoutRewritingDescriptor",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommandRecoveryNeverSelectsAnIncompleteStoredDescriptor",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmission",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAutoPublicationUsesAdmittedIdentityBeforeID",
+          "action": "pass",
+          "elapsed": 1.5
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAutoPublicationRejectsForeignOrConcreteDeclarationBeforePlan",
+          "action": "pass",
+          "elapsed": 0.29
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerControlAdmissionRejectsDifferentSourceArtifactFact",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentDeliveryExecutionContextRejectsPublisherValuesAndBuildsNormalReceiverState",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerWorkUsesContextualStandingOccurrence",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedReadinessCannotConstructMissingStaticDeclaration",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteStateSeparatesLaunchRetirementAndAbsence",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteFinalizationPreservesIndependentFailures",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteTransitionCompletionDoesNotReleaseSuccessor",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteRetirementCompletionSignalsAfterStateClears",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteLaunchHasLivePublicationOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutableAgentPreparationUpgradesExactlyOnceWhenManagerStarts",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutablePreparationAcceptsTakenOverRunningDurableState",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFreshSpawnDuringLiveManagerReturnsRunnableProjection",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutableReadinessRejectsPartialLiveManagerProjections",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleOnlyAdoptionNeverStartsObsoleteAgent",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPersistedAdoptionOwnerFenceCompensatesWithoutRouteOrLoop",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerExecutionProjectionHasNoLegacyExecutionAuthority",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerWithOptionsRejectsUnconfiguredReceiverExecution",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionReconfigureSerializesRestartSelection",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionReconfigureSerializesBothRunModes",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionPreparationFailuresCompensateBeforeLaunchInBothRunModes",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSelectedForkEphemeralRegistrationInstallsCarrierOnlyRoute",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionDirectiveLeaseFencesReplacement",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionRunCancellationRemovesExactRoute",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionTeardownRemovesExactRoute",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionNaturalLoopExitRemovesExactRoute",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionRecoveryStartsPersistedRunningCell",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRunningManagerDeliveryCarrierDispositionMatrix",
+          "action": "pass",
+          "elapsed": 0.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerFenceWinsDequeuedDeliveryAdmissionReturnsContinuationOnce",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDelivery",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetirement",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestQuarantineCarriesTriggeringPanicFailureWithoutReclassification",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowReadinessVerifiesAgentEntityOwnership",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationFinalizerRefusesUnacknowledgedEvidence",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowReadinessPassUsesAtMostTwoPublicLoads",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStartupFinalizationConsumesRetainedPreparationAttempt",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationPostMarkFailureReturnsToPendingRetry",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationShutdownPreservesFailedAttemptDisposition",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationShutdownRetriesAcknowledgedFailedAbandonment",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationFailedAttemptShutdownRetainsPersistentSettlement",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationFailedAttemptShutdownRetriesSettlementPanic",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCompletedStandingPreRunHandoffRetainsReconstructionAuthority",
+          "action": "pass",
+          "elapsed": 0.08
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestInterruptedStandingPreRunRequiresExplicitRecovery",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSchema",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowInstanceActivationExecutionModeAuthority",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAddsDerivedRouteTableInstance",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationCommitErrorFinalizesOnlyAcknowledgedReadiness",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceRejectsMissingCanonicalEntityContract",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowAttachmentReadyReplayDoesNotRepeatInstallation",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary",
+          "action": "pass",
+          "elapsed": 0.17
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure",
+          "action": "pass",
+          "elapsed": 0.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSelectedFlowActivationRetainsExactRetirementIdentity",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestart",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessRejectsABAAfterAdmissionBeforeExecution",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation",
+          "action": "pass",
+          "elapsed": 0.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessWaitOutcomeOrdering",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopology",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopology",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSignal",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationBoundaryWaitReportsEarlyExitAndCancellation",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMaterializedTopology",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupCanonicalizesCompletedPredecessorWithoutReplay",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupDerivesEntireTransitionSetBeforeWriting",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupPostBatchPendingRequiresReplayAfterRestart",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupRequiresReplayForPendingPredecessor",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupExcludesTerminalDynamicFlowTopology",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureFlowInstanceRebindsPersistedDeclaredAgentsToNewActivationAttempt",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceUsesStagedInitialState",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePassesActivationConfigToRouteMaterialization",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePublishesAutoEmitEvent",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePreservesReplyContextIntoAutoEmit",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitRejectsMissingTriggerLineage",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationContext",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceCommittedAutoEmitUsesProjectedConfigPayload",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePublishesAutoEmitAfterNamedCommit",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSideEffects",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigField",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestValidateAutoEmitPayload_RejectsListTypeViolation",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestValidateAutoEmitPayload_AllowsNamedTypeThroughCanonicalSchema",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeclaredAgentEmitEventsKeepPermissionIndependentOfInstance",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePersistsFlowInstanceConfig",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePersistsFullParentRouteMetadata",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceResolvesAgentPermissions",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceRemovesAgentsAndRoutes",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceConsumesTerminalEvidenceAfterNamedCommit",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceReportsPostCommitAgentFailureAfterRouteRetirement",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenRoutePersistenceFails",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestBuildFlowAgentConfig_SeparatesSubscriptionRouteFromEmitDeclaration",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentBlueprintUsesDeclaredRootScope",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTemplateFlowAgentMaterializationBlueprintStaysRunlessUntilAdmission",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticFlowRequiredAgentPreflightRegistersSubscriptions",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStandingFlowAgentsBindAttemptBeforeManagerRun",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAgentPreflightKeepsDistinctSameIDPhysicalDeclarations",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticFlowRequiredAgentPreflightInfersFromOmittedRequiredAgents",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticFlowRequiredAgentPreflightUsesFlowOwnedDeclaration",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAgentPreflightRecordsRegistersRootAndFlowSubscriptions",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAgentPreflight_FilesystemFlowOwnedAgentsCarryCanonicalFlowPath",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAgentPreflight_StructurallyNestedProjectAgentsStartWithOwningFlowPath",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceFailsWithoutWorkflowInstanceStore",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestBuildFlowAgentConfigKeepsReceiverPromptNamedDataInert",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestBuildFlowAgentConfigRebasesAdmittedSameScopeExactToConcreteInstance",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowAgentWildcardConfigurationSurvivesRecoveryAdmission",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerRetainsAdmissionBeforeBeginAndResolvesLostResponse",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerCancelledAdmissionRetainsResolutionUntilRetirement",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentPreparationUsesExactReadinessOwner",
+          "action": "pass",
+          "elapsed": 0.15
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicReadinessOwnershipIsMemoizedOnlyWithinOneInspection",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowLegacyExecutionAuthorityAPIsAbsent",
+          "action": "pass",
+          "elapsed": 1.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessProductionConsumersStatic",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleReintroductionClassifiesExactExecutionAuthority",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleReintroductionRejectsPersistenceWithoutExecutionBinding",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleTerminalMutationClassifiesGrantRetirementAndProcessTakeover",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReplayDoesNotReplaceSuccessfulGeneration",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReconfigureOperationIdentityTracksTransitionOccurrence",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReconfigureOperationIdentityIsStableBeforeCommit",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReconfigureRetryAdoptsCommittedOccurrence",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorPersistenceFailureLeavesPriorGenerationOwned",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSpawnPersistenceFailurePublishesNoCell",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfRetirementCommitsAfterAcceptedLoopSettles",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorDeliveryAdmissionFenceWins",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSourceSetTransitionBlocksDirectAndWaitsDelivery",
+          "action": "pass",
+          "elapsed": 0.1
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease",
+          "action": "pass",
+          "elapsed": 0.16
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorDeliveryAdmissionWinsBeforeDeferredFence",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReplacementRejectsPredecessorDeliveryAdmission",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorStartupAbortCompletesIssuedTransitions",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleDiagnosticOriginRequiresExactTypedSelectedPoint",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureProjectsDiagnosticThroughReplacementLaunch",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleDiagnosticProjectionDrainsBeyondOneBatchAndFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleDiagnosticProjectionRefusesMissingLogger",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleDiagnosticFailureDoesNotChangeCompletedRetirement",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleConfigRevisionUsesCanonicalConfigFacts",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerWatcherAndExplicitShutdownJoinOneTransition",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerResetSerializesAfterSharedShutdown",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerConcurrentResetsJoinOneResetTransition",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerShutdownDuringResetJoinsResetTransition",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerSharedShutdownPreservesCallerGraceResults",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerAuthBreakerAndExplicitShutdownJoinOneTransition",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceiptPreservesCommittedSettlementAndContinuation",
+          "action": "pass",
+          "elapsed": 0.19
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventDoesNotResettleAcknowledgedReceiptError",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventQuiescenceReadFailureDoesNotAbandonClaim",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventCancellationRetainsFinalReceipt",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrOutput",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventDeterministicOutputIdentitySurvivesPartialSuccessRetry",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecordDeadLetterEscalation_RequiresThreshold",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecordPoisonQuarantine_RequiresDistinctEntities",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEvent_RecordsCanonicalDeliveryLifecycleTransitions",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventRenewsExactClaimAroundAgentHandler",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventHeartbeatCoversBlockedOutputAndPreventsReclaim",
+          "action": "pass",
+          "elapsed": 4.51
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventSettlementFailureIsNotReportedAsReplayed",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescendant",
+          "action": "pass",
+          "elapsed": 0.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEvent_SkipsHandlerForAlreadyQuiescedDelivery",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceiptUsesCanonicalHandlerRetryBase",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceipt_ContextCancellationReturnsFailureAndLeavesClaimForLeaseRecovery",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceiptLongRunningClaimUsesExactRenewalTime",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReceiverAgentRevisionPreservesNamespaceAndNumberKinds",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTemplateFlowMaterializationValidatesCompleteCommittedConfig",
+          "action": "pass",
+          "elapsed": 0.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation",
+          "action": "pass",
+          "elapsed": 0.83
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureReceiverConfigPreservesIdentityOnlyVersusMissingEvidence",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAdmitsReceiverConfigBeforeAllConsumers",
+          "action": "pass",
+          "elapsed": 0.09
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureFlowInstanceReuseCannotReplaceCommittedConfigOrPendingAutoEmit",
+          "action": "pass",
+          "elapsed": 0.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationPreparedConfigDoesNotAliasNestedCallerValues",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReceiverConfigRecoverySourceRevisionDoesNotReadmitDefaults",
+          "action": "pass",
+          "elapsed": 0.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTemplateFlowMaterializationRequiresExactCommittedConfig",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRebuildPendingCreationConsumesCompiledReceiverOccurrence",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_PersistenceFailureLeavesPriorProjection",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInvocation",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_TopologyOnlyRebindPreservesMemory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverReturnsBudgetRecoveryProjectionFailure",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStartupRecoversProviderDrainsBeforeStaticReintroductionAndDeliveryReplay",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMockOnlyPostureRejectsPersistedLiveAgentBeforeStartupReconstruction",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMockOnlyPostureRejectsLiveAgentRestartBeforeSuccessorFactory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRestoresPersistedFlowInstanceRoutes",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDirectiveReconciliationPrecedesGenericPipelineRecovery",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRejectsSelectedContractRouteRecoveryFromCurrentRouteOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRejectsSelectedContractRouteRecoveryFingerprintMismatch",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecover_UsesCanonicalLoadedAgentMetadata",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecover_UsesCanonicalPipelineRecoveryOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleRegistrationRequiresRunOwnershipForSpawnAndAdoption",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicReadinessRunOwnershipBeforeEnqueueAndAfterAdmission",
+          "action": "pass",
+          "elapsed": 0.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentFrameConfigRejectsNoncanonicalFlowInstanceBeforeLookup",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentFrameConfigRejectsNoncanonicalAgentIDBeforeLookup",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConsumeProviderSettledDirectiveUsesExactDurableTerminalState",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectivePersistsCanonicalDirectiveEventBeforeBoardStep",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveAcknowledgedReserveAndAdmitContinue",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveAcknowledgedTerminalWritesDoNotReportPending",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveTargetErrorFailsBeforeBoardStep",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveConcurrentSameKeyExecutesBoardStepOnce",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveHeartbeatTimeoutAvoidsSerializedOutcomeBoundary",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveHeartbeatTimeoutSkipsSerializedFailurePersistence",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveCompliantHeartbeatReleasesSerializedOutcomeBoundary",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveCompletionRepairDoesNotRepeatBoardStep",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveResultPersistenceFailureNeverReadmitsBoardStep",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveExecutionFailureIsDurableAndReplaySafe",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveExpiredTerminalKeyStartsFreshOperation",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveRejectsSourceBeforeExpiredReplayReconciliation",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeState_OnlyResetsOwnedTurnContextRegistry",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeStateWithSource_PublishesPlatformResetOnlyForExplicitAdminSources",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeStateFailureAlwaysLeavesResetPhase",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRun_UsesRuntimeShutdownAdmissionOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerGenerationBarrierRejectsLateWorkAndJoinsAcceptedWork",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerReservedTransitionExecutorSurvivesOuterFenceBeforeRun",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestIdleManagerConstructionOwnsNoRuntimeLease",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdown",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRejectsMalformedCanonicalRecipientEvidence",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverCanonicalRecipientReadbackPreservesSelectedEvidence",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverDeploymentRevisionRouteHasNoSyntheticEvent",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDefaultManagerAgentID_UsesInjectedSemanticSource",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDefaultManagerAgentID_DoesNotUseAmbientWorkflowSemanticSource",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext",
+          "action": "pass",
+          "elapsed": 0.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdownWithOptions_RejectsNegativeGrace",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndResumes",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPrepareDurableTopologySourceSetRebindRejectsForeignGrantAtValidPredecessorRank",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPrepareDurableTopologySourceSetRebindRejectsCensusProjectionMismatch",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPrepareDurableTopologySourceSetRebindLeavesTerminatedRowsAndEphemeralCellsInert",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPrepareDurableTopologySourceSetRebindSerializesDurableRegistration",
+          "action": "pass",
+          "elapsed": 0.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticTopologyStartupReintroducesDesiredFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedTerminalCompletionSurvivesRetirementBeforeCommit",
+          "action": "pass",
+          "elapsed": 0.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedTerminalCompletionRetainsCommittedAuxiliaryError",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalCompletionRouteFailureStillJoinsEveryFinalizer",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPanicRetirementReturnsBeforeOwnLoopFinalizer",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalPanicRejectsMissingAndPredecessorAuthority",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalPanicPersistenceFailureRetainsRetirement",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessRetirementReleasesAttemptBeforeJoin",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessReplacementReleasesDependentCaller",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalFlowFencesWholeSetBeforeRetirementJoin",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalLoopRouteJoinReleasesSourceSetPublication",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalRetirementReleasesOperationLockBeforeJoin",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReplacementRetainsTransitionWithoutFinalizerDependencies",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerReceiptOutcomeBothSelectedStores",
+          "action": "pass",
+          "elapsed": 2.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalPanicFinalizationBothStores",
+          "action": "pass",
+          "elapsed": 1.35
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerReconfigureConsumesNativeToolAdmissionValidator",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerSpawnAgentConsumesNativeToolAdmissionValidator",
+          "action": "pass",
+          "elapsed": 0
+        }
+      ],
+      "native_shutdown_cells": []
+    },
+    {
+      "raw": "issue-2496-terminal-drain-final-race.jsonl.gz",
+      "source": "7b715426e",
+      "sha256_uncompressed": "cbd08db302e7331e73915bae3a594c05e4cc118c04d3ca9711c7db3eb1b77efa",
+      "bytes_uncompressed": 76484,
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 7.426
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "action": "pass",
+          "elapsed": 1.381
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "action": "pass",
+          "elapsed": 2.95
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 220.195
+        }
+      ],
+      "root_outcomes_including_repetitions": {
+        "pass": 48,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 72,
+        "fail": 0,
+        "skip": 0
+      },
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerRetriesShutdownAfterPriorFailure",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease",
+          "action": "pass",
+          "elapsed": 2
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.18
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.15
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.16
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0.08
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease",
+          "action": "pass",
+          "elapsed": 0.39
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.16
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.16
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.17
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0.09
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease",
+          "action": "pass",
+          "elapsed": 0.37
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.17
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.17
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.16
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "test": "TestFlowConstructorProofPartitionRequiresBothStores",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "test": "TestFlowConstructorProofPartitionRequiresBothStores",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "test": "TestFlowConstructorProofPartitionRequiresBothStores",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSupervisorPreservesSelectedRetirementFailureAcrossShutdownBranches",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSupervisorReleasesConstructedProjectionOnlyAfterSuccessfulJoin",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSupervisorDelegatesRegisteredResetContextShutdownOnlyToManager",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSupervisorPreservesSelectedRetirementFailureAcrossShutdownBranches",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSupervisorReleasesConstructedProjectionOnlyAfterSuccessfulJoin",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSupervisorDelegatesRegisteredResetContextShutdownOnlyToManager",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSupervisorPreservesSelectedRetirementFailureAcrossShutdownBranches",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSupervisorReleasesConstructedProjectionOnlyAfterSuccessfulJoin",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestSupervisorDelegatesRegisteredResetContextShutdownOnlyToManager",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 84.39
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerRetriesShutdownAfterPriorFailure",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 82.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerRetriesShutdownAfterPriorFailure",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 50.64
+        }
+      ],
+      "native_shutdown_cells": [
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 36.9
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 20.84
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 15.52
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 11.13
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 43.37
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 22.79
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 7.56
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 8.31
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 17.71
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 17.99
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 7.47
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 7.48
+        }
+      ]
+    },
+    {
+      "raw": "issue-2496-terminal-drain-final-manager-suite.jsonl.gz",
+      "source": "7b715426e",
+      "sha256_uncompressed": "9d676fdb7b55529cd35071714b9ada0fc7f1a6b38265a9c8bfd53a84cd799bc2",
+      "bytes_uncompressed": 707326,
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 18.168
+        }
+      ],
+      "root_outcomes_including_repetitions": {
+        "pass": 322,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 673,
+        "fail": 0,
+        "skip": 0
+      },
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRequireAdmittedAgentIdentityRejectsRunlessAndMismatchedIdentity",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentFactorySeparatesReceiverDataFromAuthoredPromptAuthority",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSelectedStoreRecoveryReconstructsCanonicalPromptBeforeProviderFactory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSelectedStoreRecoveryRejectsCriteriaMismatchBeforeProviderFactory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerDefaultsLLMBackendFromCanonicalProfile",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentModelUsesConfiguredLiveBackendWithoutMock",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentModelMockCommandSelectsExactArtifactWithEveryLiveBackend",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentModelMaterializesSelectionWithoutOptionalModel",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentModelMockRetainsAndRequiresCapturedArtifact",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAuthoredMockSelectionSurvivesReconfigureAndRestart",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentRuntimeSetRecoveryRejectsBackendDriftWithoutRewritingDescriptor",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommandRecoveryNeverSelectsAnIncompleteStoredDescriptor",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmission",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAutoPublicationUsesAdmittedIdentityBeforeID",
+          "action": "pass",
+          "elapsed": 1.56
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAutoPublicationRejectsForeignOrConcreteDeclarationBeforePlan",
+          "action": "pass",
+          "elapsed": 0.29
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerControlAdmissionRejectsDifferentSourceArtifactFact",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentDeliveryExecutionContextRejectsPublisherValuesAndBuildsNormalReceiverState",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerWorkUsesContextualStandingOccurrence",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedReadinessCannotConstructMissingStaticDeclaration",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteStateSeparatesLaunchRetirementAndAbsence",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteFinalizationPreservesIndependentFailures",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteTransitionCompletionDoesNotReleaseSuccessor",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteRetirementCompletionSignalsAfterStateClears",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCommittedRouteLaunchHasLivePublicationOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutableAgentPreparationUpgradesExactlyOnceWhenManagerStarts",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutablePreparationAcceptsTakenOverRunningDurableState",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFreshSpawnDuringLiveManagerReturnsRunnableProjection",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutableReadinessRejectsPartialLiveManagerProjections",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleOnlyAdoptionNeverStartsObsoleteAgent",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPersistedAdoptionOwnerFenceCompensatesWithoutRouteOrLoop",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerExecutionProjectionHasNoLegacyExecutionAuthority",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerWithOptionsRejectsUnconfiguredReceiverExecution",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionReconfigureSerializesRestartSelection",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionReconfigureSerializesBothRunModes",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionPreparationFailuresCompensateBeforeLaunchInBothRunModes",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSelectedForkEphemeralRegistrationInstallsCarrierOnlyRoute",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionDirectiveLeaseFencesReplacement",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionRunCancellationRemovesExactRoute",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionTeardownRemovesExactRoute",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionNaturalLoopExitRemovesExactRoute",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionRecoveryStartsPersistedRunningCell",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRunningManagerDeliveryCarrierDispositionMatrix",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerFenceWinsDequeuedDeliveryAdmissionReturnsContinuationOnce",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDelivery",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetirement",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestQuarantineCarriesTriggeringPanicFailureWithoutReclassification",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowReadinessVerifiesAgentEntityOwnership",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationFinalizerRefusesUnacknowledgedEvidence",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowReadinessPassUsesAtMostTwoPublicLoads",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStartupFinalizationConsumesRetainedPreparationAttempt",
+          "action": "pass",
+          "elapsed": 0.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationPostMarkFailureReturnsToPendingRetry",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationShutdownPreservesFailedAttemptDisposition",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationShutdownRetriesAcknowledgedFailedAbandonment",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationFailedAttemptShutdownRetainsPersistentSettlement",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationFailedAttemptShutdownRetriesSettlementPanic",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestCompletedStandingPreRunHandoffRetainsReconstructionAuthority",
+          "action": "pass",
+          "elapsed": 0.08
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestInterruptedStandingPreRunRequiresExplicitRecovery",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSchema",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowInstanceActivationExecutionModeAuthority",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAddsDerivedRouteTableInstance",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationCommitErrorFinalizesOnlyAcknowledgedReadiness",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceRejectsMissingCanonicalEntityContract",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowAttachmentReadyReplayDoesNotRepeatInstallation",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary",
+          "action": "pass",
+          "elapsed": 0.17
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure",
+          "action": "pass",
+          "elapsed": 0.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSelectedFlowActivationRetainsExactRetirementIdentity",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestart",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessRejectsABAAfterAdmissionBeforeExecution",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation",
+          "action": "pass",
+          "elapsed": 0.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessWaitOutcomeOrdering",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopology",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopology",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSignal",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationBoundaryWaitReportsEarlyExitAndCancellation",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMaterializedTopology",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupCanonicalizesCompletedPredecessorWithoutReplay",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupDerivesEntireTransitionSetBeforeWriting",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupPostBatchPendingRequiresReplayAfterRestart",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupRequiresReplayForPendingPredecessor",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceScopedStartupExcludesTerminalDynamicFlowTopology",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureFlowInstanceRebindsPersistedDeclaredAgentsToNewActivationAttempt",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceUsesStagedInitialState",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePassesActivationConfigToRouteMaterialization",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePublishesAutoEmitEvent",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePreservesReplyContextIntoAutoEmit",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitRejectsMissingTriggerLineage",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationContext",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceCommittedAutoEmitUsesProjectedConfigPayload",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePublishesAutoEmitAfterNamedCommit",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSideEffects",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigField",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestValidateAutoEmitPayload_RejectsListTypeViolation",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestValidateAutoEmitPayload_AllowsNamedTypeThroughCanonicalSchema",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeclaredAgentEmitEventsKeepPermissionIndependentOfInstance",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePersistsFlowInstanceConfig",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstancePersistsFullParentRouteMetadata",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceResolvesAgentPermissions",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceRemovesAgentsAndRoutes",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceConsumesTerminalEvidenceAfterNamedCommit",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceReportsPostCommitAgentFailureAfterRouteRetirement",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenRoutePersistenceFails",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestBuildFlowAgentConfig_SeparatesSubscriptionRouteFromEmitDeclaration",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentBlueprintUsesDeclaredRootScope",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTemplateFlowAgentMaterializationBlueprintStaysRunlessUntilAdmission",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticFlowRequiredAgentPreflightRegistersSubscriptions",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStandingFlowAgentsBindAttemptBeforeManagerRun",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAgentPreflightKeepsDistinctSameIDPhysicalDeclarations",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticFlowRequiredAgentPreflightInfersFromOmittedRequiredAgents",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticFlowRequiredAgentPreflightUsesFlowOwnedDeclaration",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAgentPreflightRecordsRegistersRootAndFlowSubscriptions",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAgentPreflight_FilesystemFlowOwnedAgentsCarryCanonicalFlowPath",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAgentPreflight_StructurallyNestedProjectAgentsStartWithOwningFlowPath",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceFailsWithoutWorkflowInstanceStore",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestBuildFlowAgentConfigKeepsReceiverPromptNamedDataInert",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestBuildFlowAgentConfigRebasesAdmittedSameScopeExactToConcreteInstance",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowAgentWildcardConfigurationSurvivesRecoveryAdmission",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerRetainsAdmissionBeforeBeginAndResolvesLostResponse",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerCancelledAdmissionRetainsResolutionUntilRetirement",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConstructedRootAgentPreparationUsesExactReadinessOwner",
+          "action": "pass",
+          "elapsed": 0.15
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicReadinessOwnershipIsMemoizedOnlyWithinOneInspection",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowLegacyExecutionAuthorityAPIsAbsent",
+          "action": "pass",
+          "elapsed": 1.09
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicFlowRuntimeReadinessProductionConsumersStatic",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleReintroductionClassifiesExactExecutionAuthority",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleReintroductionRejectsPersistenceWithoutExecutionBinding",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleTerminalMutationClassifiesGrantRetirementAndProcessTakeover",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReplayDoesNotReplaceSuccessfulGeneration",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReconfigureOperationIdentityTracksTransitionOccurrence",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReconfigureOperationIdentityIsStableBeforeCommit",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReconfigureRetryAdoptsCommittedOccurrence",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorPersistenceFailureLeavesPriorGenerationOwned",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSpawnPersistenceFailurePublishesNoCell",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfRetirementCommitsAfterAcceptedLoopSettles",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorDeliveryAdmissionFenceWins",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSourceSetTransitionBlocksDirectAndWaitsDelivery",
+          "action": "pass",
+          "elapsed": 0.1
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease",
+          "action": "pass",
+          "elapsed": 0.16
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorDeliveryAdmissionWinsBeforeDeferredFence",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorReplacementRejectsPredecessorDeliveryAdmission",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleCoordinatorStartupAbortCompletesIssuedTransitions",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleDiagnosticOriginRequiresExactTypedSelectedPoint",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureProjectsDiagnosticThroughReplacementLaunch",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleDiagnosticProjectionDrainsBeyondOneBatchAndFailsClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleDiagnosticProjectionRefusesMissingLogger",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleDiagnosticFailureDoesNotChangeCompletedRetirement",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleConfigRevisionUsesCanonicalConfigFacts",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerWatcherAndExplicitShutdownJoinOneTransition",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerResetSerializesAfterSharedShutdown",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerConcurrentResetsJoinOneResetTransition",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerShutdownDuringResetJoinsResetTransition",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerSharedShutdownPreservesCallerGraceResults",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerAuthBreakerAndExplicitShutdownJoinOneTransition",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceiptPreservesCommittedSettlementAndContinuation",
+          "action": "pass",
+          "elapsed": 0.2
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventDoesNotResettleAcknowledgedReceiptError",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventQuiescenceReadFailureDoesNotAbandonClaim",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventCancellationRetainsFinalReceipt",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrOutput",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventDeterministicOutputIdentitySurvivesPartialSuccessRetry",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecordDeadLetterEscalation_RequiresThreshold",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecordPoisonQuarantine_RequiresDistinctEntities",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEvent_RecordsCanonicalDeliveryLifecycleTransitions",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventRenewsExactClaimAroundAgentHandler",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventHeartbeatCoversBlockedOutputAndPreventsReclaim",
+          "action": "pass",
+          "elapsed": 4.51
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEventSettlementFailureIsNotReportedAsReplayed",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescendant",
+          "action": "pass",
+          "elapsed": 0.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestProcessEvent_SkipsHandlerForAlreadyQuiescedDelivery",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceiptUsesCanonicalHandlerRetryBase",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceipt_ContextCancellationReturnsFailureAndLeavesClaimForLeaseRecovery",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestWriteReceiptLongRunningClaimUsesExactRenewalTime",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReceiverAgentRevisionPreservesNamespaceAndNumberKinds",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTemplateFlowMaterializationValidatesCompleteCommittedConfig",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation",
+          "action": "pass",
+          "elapsed": 0.85
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureReceiverConfigPreservesIdentityOnlyVersusMissingEvidence",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestActivateFlowInstanceAdmitsReceiverConfigBeforeAllConsumers",
+          "action": "pass",
+          "elapsed": 0.1
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestEnsureFlowInstanceReuseCannotReplaceCommittedConfigOrPendingAutoEmit",
+          "action": "pass",
+          "elapsed": 0.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowActivationPreparedConfigDoesNotAliasNestedCallerValues",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReceiverConfigRecoverySourceRevisionDoesNotReadmitDefaults",
+          "action": "pass",
+          "elapsed": 0.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTemplateFlowMaterializationRequiresExactCommittedConfig",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRebuildPendingCreationConsumesCompiledReceiverOccurrence",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_PersistenceFailureLeavesPriorProjection",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInvocation",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_TopologyOnlyRebindPreservesMemory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverReturnsBudgetRecoveryProjectionFailure",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStartupRecoversProviderDrainsBeforeStaticReintroductionAndDeliveryReplay",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMockOnlyPostureRejectsPersistedLiveAgentBeforeStartupReconstruction",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestMockOnlyPostureRejectsLiveAgentRestartBeforeSuccessorFactory",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRestoresPersistedFlowInstanceRoutes",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDirectiveReconciliationPrecedesGenericPipelineRecovery",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRejectsSelectedContractRouteRecoveryFromCurrentRouteOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRejectsSelectedContractRouteRecoveryFingerprintMismatch",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecover_UsesCanonicalLoadedAgentMetadata",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecover_UsesCanonicalPipelineRecoveryOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestLifecycleRegistrationRequiresRunOwnershipForSpawnAndAdoption",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDynamicReadinessRunOwnershipBeforeEnqueueAndAfterAdmission",
+          "action": "pass",
+          "elapsed": 0.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentFrameConfigRejectsNoncanonicalFlowInstanceBeforeLookup",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResolveAgentFrameConfigRejectsNoncanonicalAgentIDBeforeLookup",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestConsumeProviderSettledDirectiveUsesExactDurableTerminalState",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectivePersistsCanonicalDirectiveEventBeforeBoardStep",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveAcknowledgedReserveAndAdmitContinue",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveAcknowledgedTerminalWritesDoNotReportPending",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveTargetErrorFailsBeforeBoardStep",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveConcurrentSameKeyExecutesBoardStepOnce",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveHeartbeatTimeoutAvoidsSerializedOutcomeBoundary",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveHeartbeatTimeoutSkipsSerializedFailurePersistence",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveCompliantHeartbeatReleasesSerializedOutcomeBoundary",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveCompletionRepairDoesNotRepeatBoardStep",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveResultPersistenceFailureNeverReadmitsBoardStep",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveExecutionFailureIsDurableAndReplaySafe",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveExpiredTerminalKeyStartsFreshOperation",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManager_SendDirectiveRejectsSourceBeforeExpiredReplayReconciliation",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeState_OnlyResetsOwnedTurnContextRegistry",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeStateWithSource_PublishesPlatformResetOnlyForExplicitAdminSources",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeStateFailureAlwaysLeavesResetPhase",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRun_UsesRuntimeShutdownAdmissionOwner",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerGenerationBarrierRejectsLateWorkAndJoinsAcceptedWork",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerReservedTransitionExecutorSurvivesOuterFenceBeforeRun",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestIdleManagerConstructionOwnsNoRuntimeLease",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdown",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverRejectsMalformedCanonicalRecipientEvidence",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverCanonicalRecipientReadbackPreservesSelectedEvidence",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestRecoverDeploymentRevisionRouteHasNoSyntheticEvent",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDefaultManagerAgentID_UsesInjectedSemanticSource",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestDefaultManagerAgentID_DoesNotUseAmbientWorkflowSemanticSource",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext",
+          "action": "pass",
+          "elapsed": 0.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdownWithOptions_RejectsNegativeGrace",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndResumes",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPrepareDurableTopologySourceSetRebindRejectsForeignGrantAtValidPredecessorRank",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPrepareDurableTopologySourceSetRebindRejectsCensusProjectionMismatch",
+          "action": "pass",
+          "elapsed": 0.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPrepareDurableTopologySourceSetRebindLeavesTerminatedRowsAndEphemeralCellsInert",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPrepareDurableTopologySourceSetRebindSerializesDurableRegistration",
+          "action": "pass",
+          "elapsed": 0.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestStaticTopologyStartupReintroducesDesiredFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedTerminalCompletionSurvivesRetirementBeforeCommit",
+          "action": "pass",
+          "elapsed": 0.1
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedTerminalCompletionRetainsCommittedAuxiliaryError",
+          "action": "pass",
+          "elapsed": 0.03
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalCompletionRouteFailureStillJoinsEveryFinalizer",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPanicRetirementReturnsBeforeOwnLoopFinalizer",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalPanicRejectsMissingAndPredecessorAuthority",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalPanicPersistenceFailureRetainsRetirement",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessRetirementReleasesAttemptBeforeJoin",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessReplacementReleasesDependentCaller",
+          "action": "pass",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalFlowFencesWholeSetBeforeRetirementJoin",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalLoopRouteJoinReleasesSourceSetPublication",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalRetirementReleasesOperationLockBeforeJoin",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReplacementRetainsTransitionWithoutFinalizerDependencies",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestManagerReceiptOutcomeBothSelectedStores",
+          "action": "pass",
+          "elapsed": 2.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalPanicFinalizationBothStores",
+          "action": "pass",
+          "elapsed": 1.36
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerSpawnAgentConsumesNativeToolAdmissionValidator",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestAgentManagerReconfigureConsumesNativeToolAdmissionValidator",
+          "action": "pass",
+          "elapsed": 0
+        }
+      ],
+      "native_shutdown_cells": []
+    }
+  ]
+}

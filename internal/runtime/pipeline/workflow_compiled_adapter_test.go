@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -135,8 +137,8 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
         on_fail: discard
       advances_to: done
 `,
-		"child/schema.yaml":   "name: child\nstages:\n  ready: {initial: true}\n  shared: {terminal: true}\n  foreign_only: {}\n  done: {terminal: true}\n  killed: {terminal: true}\n",
-		"child/entities.yaml": "test_entity:\n  marker: text\n",
+		"child/schema.yaml":   "name: child\ninstance: instance_key\nstages:\n  ready: {initial: true}\n  shared: {terminal: true}\n  foreign_only: {}\n  done: {terminal: true}\n  killed: {terminal: true}\n",
+		"child/entities.yaml": "test_entity:\n  marker: text\n  instance_key: text\n",
 		"child/events.yaml":   "direct:\nkill:\nguarded:\nguard_observed:\n  marker: text\n",
 		"child/nodes.yaml": `router:
   execution_type: system_node
@@ -216,10 +218,7 @@ func newCompiledAdapterFixture(t *testing.T, backend string, bundle *contracts.W
 	if flow != "." {
 		path = flow + "/" + uuid.NewString()
 	}
-	f := &compiledAdapterFixture{t: t, db: db, store: store, pc: pc, bundle: bundle, ctx: ctx, flow: flow, path: path, entityID: uuid.NewString(), bus: bus}
-	if !seed {
-		f.entityID = FlowInstanceEntityID(path)
-	}
+	f := &compiledAdapterFixture{t: t, db: db, store: store, pc: pc, bundle: bundle, ctx: ctx, flow: flow, path: path, entityID: FlowInstanceEntityID(path), bus: bus}
 	f.node = pipelineSourceNode(t, pc.SemanticSource(), flow, "router")
 	if seed {
 		instance := materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -228,6 +227,9 @@ func newCompiledAdapterFixture(t *testing.T, backend string, bundle *contracts.W
 			CurrentState: stage, Fields: map[string]any{"marker": "unchanged"},
 			EnteredStageAt: time.Now().UTC().Add(-time.Minute),
 		})
+		if schema, found := pc.SemanticSource().FlowSchemaByID(flow); found && !schema.Instance.Empty() {
+			instance.Fields[schema.Instance.Path()] = instance.InstanceID
+		}
 		if err := store.upsert(ctx, instance); err != nil {
 			t.Fatal(err)
 		}
@@ -305,16 +307,6 @@ func (f *compiledAdapterFixture) executeExistingRecipient(event string, evt even
 		f.t.Fatal("claimed component execution requires an already-existing recipient")
 	}
 	return f.executeAdmittedRecipient(event, evt, events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: f.flow, FlowInstance: f.path, EntityID: f.entityID,
-	}))
-}
-
-func (f *compiledAdapterFixture) executeMaterializingRecipient(event string, evt events.Event) (contractHandlerExecutionResult, error) {
-	f.t.Helper()
-	if _, found := f.load(); found || f.entityID != FlowInstanceEntityID(f.path) {
-		f.t.Fatal("first materialization requires absence and the exact canonical future entity")
-	}
-	return f.executeAdmittedRecipient(event, evt, events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID: f.flow, FlowInstance: f.path, EntityID: f.entityID,
 	}))
 }
@@ -408,8 +400,26 @@ func TestPipelineCompiledTransitionNoOpOnBothStores(t *testing.T) {
 		for _, event := range []string{"self", "write_only", "fallback", "emit_only"} {
 			t.Run(backend+"/"+event, func(t *testing.T) {
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
-				if _, err := f.store.MaterializeInitialEntry(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), f.initialInstance("ready"), time.Now().UTC()); err != nil {
-					t.Fatal(err)
+				{
+					// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
+					preparedInstance, preparedLifecycle, err := f.pc.PrepareInitialEntryLifecycle(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), f.initialInstance("ready"), time.Now().UTC())
+					if err != nil {
+						t.Fatalf("prepare fixture lifecycle: %v", err)
+					}
+					if err := f.store.upsert(f.ctx, preparedInstance); err != nil {
+						t.Fatalf("seed fixture state: %v", err)
+					}
+					var committedLifecycle CommittedWorkflowLifecycleMutation
+					if err := f.store.runPipelineMutation(f.ctx, func(txctx context.Context) error {
+						var commitErr error
+						committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, f.store, preparedLifecycle)
+						return commitErr
+					}); err != nil {
+						t.Fatalf("seed fixture lifecycle: %v", err)
+					}
+					if err := f.pc.FinalizeInitialEntryLifecycle(f.ctx, committedLifecycle); err != nil {
+						t.Fatalf("finalize fixture lifecycle: %v", err)
+					}
 				}
 				before, _ := f.load()
 				timersBefore, err := f.store.listPersistedWorkflowTimerActivations(f.ctx, correlation.RunIDFromContext(f.ctx), f.entityID, true)
@@ -896,12 +906,32 @@ func TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores(t *testing.
 func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 	bundle := compiledAdapterSource(t, true)
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend+"/first_event", func(t *testing.T) {
+		t.Run(backend+"/requires_constructed_header", func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
 			evt := f.event("direct")
-			_, err := f.executeMaterializingRecipient("direct", evt)
+			_, err := f.execute("direct", evt)
+			if err == nil {
+				t.Fatal("ordinary handler constructed missing state")
+			}
+			if _, found := f.load(); found || f.bus.publishedCount() != 0 {
+				t.Fatal("refused unconstructed handler changed state or published work")
+			}
+			instance, lifecycle, err := f.pc.PrepareInitialEntryLifecycle(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), f.initialInstance("ready"), time.Now().UTC())
 			if err != nil {
 				t.Fatal(err)
+			}
+			// Unit-fixture setup, not proof of the selected-store constructor.
+			if err := f.store.upsert(f.ctx, instance); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.runPipelineMutation(f.ctx, func(txctx context.Context) error {
+				_, err := commitPipelineTestWorkflowLifecycle(txctx, f.store, lifecycle)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.execute("direct", evt); err != nil {
+				t.Fatalf("constructed handler execution: %v", err)
 			}
 			after, found := f.load()
 			if !found || after.CurrentState != "done" || len(after.TransitionHistory) != 1 || after.TransitionHistory[0].From != "ready" {
@@ -913,7 +943,7 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
 				at := time.Now().UTC()
 				instance := f.initialInstance(stage)
-				if _, err := f.store.MaterializeInitialEntry(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), instance, at); err == nil {
+				if _, _, err := f.pc.PrepareInitialEntryLifecycle(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), instance, at); err == nil {
 					t.Fatalf("noninitial stage %q materialized", stage)
 				}
 				if _, found := f.load(); found {
@@ -941,13 +971,25 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 			if stateless {
 				name, source, stage = "stateless", statelessCompiledAdapterSource(t), "pending"
 			}
-			t.Run(backend+"/exact_initial_replay/"+name, func(t *testing.T) {
+			t.Run(backend+"/deterministic_initial_preparation/"+name, func(t *testing.T) {
 				f := newCompiledAdapterFixture(t, backend, source, ".", "", false)
 				at := time.Now().UTC()
 				instance := f.initialInstance(stage)
-				result, err := f.store.MaterializeInitialEntry(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), instance, at)
-				if err != nil || result != WorkflowInitialMaterializationCreated {
-					t.Fatalf("initial creation: %v %v", result, err)
+				prepared, lifecycle, err := f.pc.PrepareInitialEntryLifecycle(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), instance, at)
+				if err != nil {
+					t.Fatalf("initial preparation: %v", err)
+				}
+				if _, found := f.load(); found {
+					t.Fatal("preparation persisted executable state")
+				}
+				if err := f.store.upsert(f.ctx, prepared); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.store.runPipelineMutation(f.ctx, func(txctx context.Context) error {
+					_, err := commitPipelineTestWorkflowLifecycle(txctx, f.store, lifecycle)
+					return err
+				}); err != nil {
+					t.Fatal(err)
 				}
 				before, found := f.load()
 				if !found || before.CurrentState != stage || len(before.TransitionHistory) != 0 {
@@ -961,24 +1003,42 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 				if err != nil || len(timersBefore) != wantTimers {
 					t.Fatalf("initial timer effects: %v %#v", err, timersBefore)
 				}
-				result, err = f.store.MaterializeInitialEntry(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), instance, at)
-				if err != nil || result != WorkflowInitialMaterializationAlreadyExists {
-					t.Fatalf("initial replay: %v %v", result, err)
+				beforeJSON, err := canonicaljson.Bytes(before)
+				if err != nil {
+					t.Fatal(err)
+				}
+				repeated, repeatedLifecycle, err := f.pc.PrepareInitialEntryLifecycle(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), before, at)
+				if err != nil {
+					t.Fatalf("initial preparation changed: instance=%#v lifecycle=%#v err=%v", repeated, repeatedLifecycle, err)
+				}
+				repeatedJSON, err := canonicaljson.Bytes(repeated)
+				if err != nil || !bytes.Equal(beforeJSON, repeatedJSON) {
+					t.Fatalf("repeated preparation changed persisted instance facts: before=%s repeated=%s err=%v", beforeJSON, repeatedJSON, err)
+				}
+				if lifecycle.StageEntry == nil || repeatedLifecycle.StageEntry == nil || *lifecycle.StageEntry != *repeatedLifecycle.StageEntry {
+					t.Fatalf("repeated preparation changed exact stage-entry identity: first=%#v repeated=%#v", lifecycle.StageEntry, repeatedLifecycle.StageEntry)
+				}
+				repeatedLifecycle.StageEntry = nil
+				if !reflect.DeepEqual(repeatedLifecycle, WorkflowLifecycleMutationPlan{}) {
+					t.Fatalf("preparation repeated persisted initial-entry contributions: %#v", repeatedLifecycle)
 				}
 				after, _ := f.load()
-				if !reflect.DeepEqual(before, after) {
-					t.Fatal("initial replay changed durable state")
+				afterJSON, err := canonicaljson.Bytes(after)
+				if err != nil || !bytes.Equal(beforeJSON, afterJSON) {
+					t.Fatalf("repeated preparation changed durable state: before=%s after=%s err=%v", beforeJSON, afterJSON, err)
 				}
 				timersAfter, err := f.store.listPersistedWorkflowTimerActivations(f.ctx, correlation.RunIDFromContext(f.ctx), f.entityID, true)
 				if err != nil || !reflect.DeepEqual(timersBefore, timersAfter) {
-					t.Fatalf("initial replay repeated timer effects: %v %#v", err, timersAfter)
+					t.Fatalf("repeated preparation persisted timer effects: %v %#v", err, timersAfter)
 				}
 				if stateless {
 					if _, err := f.executeExistingRecipient("noop", f.event("noop")); err != nil {
 						t.Fatalf("stateless no-advance: %v", err)
 					}
-					if after, _ := f.load(); after.CurrentState != "pending" || len(after.TransitionHistory) != 0 {
-						t.Fatal("stateless handler invented transition")
+					after, _ := f.load()
+					afterJSON, err := canonicaljson.Bytes(after)
+					if err != nil || !bytes.Equal(beforeJSON, afterJSON) {
+						t.Fatalf("explicit empty handler mutated constructed state: before=%s after=%s err=%v", beforeJSON, afterJSON, err)
 					}
 				}
 			})
@@ -1039,12 +1099,12 @@ func requireCompiledPreviewAgreement(t *testing.T, f *compiledAdapterFixture, ev
 			t.Fatal(err)
 		}
 	}
-	if !reflect.DeepEqual(preview.Metadata, result.PreviewMetadata) || !reflect.DeepEqual(preview.InitialValues, cloneStringAnyMap(result.InitialValuesMaterialized)) ||
+	if !reflect.DeepEqual(preview.Metadata, result.PreviewMetadata) ||
 		!reflect.DeepEqual(preview.Computed, result.Outcome.Computed) || !slices.Equal(preview.Emits, result.Outcome.Emits) ||
 		!slices.Equal(preview.ActionsExecuted, result.Outcome.ActionsExecuted) || preview.SetsGate != result.Outcome.SetsGate ||
 		!slices.Equal(preview.ClearGates, result.Outcome.ClearGates) || preview.FanOutCount != result.Outcome.FanOutCount {
-		t.Fatalf("preview lost execution outputs: metadata=%#v/%#v initial=%#v/%#v computed=%#v/%#v emits=%#v/%#v actions=%#v/%#v gates=%s/%s clear=%#v/%#v fanout=%d/%d",
-			preview.Metadata, result.PreviewMetadata, preview.InitialValues, result.InitialValuesMaterialized, preview.Computed, result.Outcome.Computed,
+		t.Fatalf("preview lost execution outputs: metadata=%#v/%#v computed=%#v/%#v emits=%#v/%#v actions=%#v/%#v gates=%s/%s clear=%#v/%#v fanout=%d/%d",
+			preview.Metadata, result.PreviewMetadata, preview.Computed, result.Outcome.Computed,
 			preview.Emits, result.Outcome.Emits, preview.ActionsExecuted, result.Outcome.ActionsExecuted, preview.SetsGate, result.Outcome.SetsGate,
 			preview.ClearGates, result.Outcome.ClearGates, preview.FanOutCount, result.Outcome.FanOutCount)
 	}
@@ -1155,15 +1215,20 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 		})
 		t.Run(backend+"/initial", func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
+			seedConstructorUnitInstance(t, f.pc, f.ctx, ".")
 			evt := f.event("direct")
+			before, found := f.load()
+			if !found || before.CurrentState != "ready" || len(before.TransitionHistory) != 0 {
+				t.Fatalf("initial constructor evidence: found=%v instance=%+v", found, before)
+			}
 			preview, previewErr := PreviewContractHandlerExecution(f.ctx, bundle, f.node, evt, f.previewState(), nil)
 			if previewErr != nil {
 				t.Fatal(previewErr)
 			}
-			if _, found := f.load(); found {
-				t.Fatal("initial preview created an instance")
+			if afterPreview, found := f.load(); !found || !reflect.DeepEqual(afterPreview, before) {
+				t.Fatal("initial preview changed the constructed instance")
 			}
-			result, err := f.executeMaterializingRecipient("direct", evt)
+			result, err := f.executeExistingRecipient("direct", evt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1171,7 +1236,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 			if after.CurrentState != "done" || len(after.TransitionHistory) != 1 || after.TransitionHistory[0].From != "ready" || (previewErr == nil && string(preview.Stage) != after.CurrentState) {
 				t.Fatalf("initial preview/execution disagreed: %#v %#v", preview, after)
 			}
-			requireCompiledPreviewAgreement(t, f, evt, WorkflowInstance{}, after, preview, result)
+			requireCompiledPreviewAgreement(t, f, evt, before, after, preview, result)
 		})
 		t.Run(backend+"/foreign_source", func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, ".", "foreign_only", true)

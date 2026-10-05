@@ -1,0 +1,709 @@
+{
+  "schema": 1,
+  "source_reference": "Pre-commit worktree based on c8139aad6; Go source matches 3b9cc94f4 except provider_alias_authority_test.go still had its old replay oracle. Not exact-head qualification.",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "command": "go run ./cmd/swarm-test -- ./internal/serveapp -json -race -count=1 -failfast -run '^(TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores|TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores|TestSelectedForkOptionalReceiverOwnershipExecutionBothStores|TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores|TestSelectedForkReceiverPolicyPermutationExecutionBothStores|TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores)$'",
+  "receipt": "/tmp/agent-e-2496-four-dispositions-served-race-v2.log",
+  "receipt_sha256": "0ef833bffa54841dc22919c44ab0df7a201948d6fac49a68a543f4ebcdceeea5",
+  "exit_code": 1,
+  "first_test_event": "2026-10-03T05:49:52.533379151Z",
+  "last_test_event": "2026-10-03T05:57:34.073443568Z",
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "action": "fail",
+      "elapsed": 461.54
+    }
+  ],
+  "root_results": [
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores",
+      "action": "pass",
+      "elapsed": 154.55
+    },
+    {
+      "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores",
+      "action": "pass",
+      "elapsed": 26.38
+    },
+    {
+      "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores",
+      "action": "pass",
+      "elapsed": 28.1
+    },
+    {
+      "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores",
+      "action": "pass",
+      "elapsed": 38.92
+    },
+    {
+      "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores",
+      "action": "pass",
+      "elapsed": 34.16
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores",
+      "action": "fail",
+      "elapsed": 179.33
+    }
+  ],
+  "cells": [
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/012",
+      "action": "pass",
+      "elapsed": 13.28
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/021",
+      "action": "pass",
+      "elapsed": 11.34
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/102",
+      "action": "pass",
+      "elapsed": 12.61
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/120",
+      "action": "pass",
+      "elapsed": 11.62
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/201",
+      "action": "pass",
+      "elapsed": 11.35
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/recipient_permutations/210",
+      "action": "pass",
+      "elapsed": 11.4
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/materializing_mixed",
+      "action": "pass",
+      "elapsed": 12.51
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/default_sqlite/same_owner_two_events_and_duplicate",
+      "action": "pass",
+      "elapsed": 13.51
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/012",
+      "action": "pass",
+      "elapsed": 10.21
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/021",
+      "action": "pass",
+      "elapsed": 6.53
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/102",
+      "action": "pass",
+      "elapsed": 6.39
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/120",
+      "action": "pass",
+      "elapsed": 6.39
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/201",
+      "action": "pass",
+      "elapsed": 6.45
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/recipient_permutations/210",
+      "action": "pass",
+      "elapsed": 6.44
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/materializing_mixed",
+      "action": "pass",
+      "elapsed": 7.12
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores/explicit_postgres/same_owner_two_events_and_duplicate",
+      "action": "pass",
+      "elapsed": 7.4
+    },
+    {
+      "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores/default_sqlite/empty_fields",
+      "action": "pass",
+      "elapsed": 7.83
+    },
+    {
+      "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores/default_sqlite/existing",
+      "action": "pass",
+      "elapsed": 8.91
+    },
+    {
+      "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores/explicit_postgres/empty_fields",
+      "action": "pass",
+      "elapsed": 4.56
+    },
+    {
+      "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores/explicit_postgres/existing",
+      "action": "pass",
+      "elapsed": 5.08
+    },
+    {
+      "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores/default_sqlite/distinct",
+      "action": "pass",
+      "elapsed": 8.82
+    },
+    {
+      "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores/default_sqlite/entityless_producer",
+      "action": "pass",
+      "elapsed": 8.9
+    },
+    {
+      "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores/explicit_postgres/distinct",
+      "action": "pass",
+      "elapsed": 5.18
+    },
+    {
+      "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores/explicit_postgres/entityless_producer",
+      "action": "pass",
+      "elapsed": 5.2
+    },
+    {
+      "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/default_sqlite",
+      "action": "pass",
+      "elapsed": 25.81
+    },
+    {
+      "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/explicit_postgres",
+      "action": "pass",
+      "elapsed": 13.1
+    },
+    {
+      "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores/default_sqlite",
+      "action": "pass",
+      "elapsed": 21.68
+    },
+    {
+      "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores/explicit_postgres",
+      "action": "pass",
+      "elapsed": 12.48
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 1.08
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.09
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 1.19
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.09
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite",
+      "action": "pass",
+      "elapsed": 10.42
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.37
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.33
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.42
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected",
+      "action": "pass",
+      "elapsed": 16.84
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.78
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.79
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite",
+      "action": "pass",
+      "elapsed": 8.95
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.25
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.22
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres",
+      "action": "pass",
+      "elapsed": 5.26
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only",
+      "action": "pass",
+      "elapsed": 14.21
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.76
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.09
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.61
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite",
+      "action": "pass",
+      "elapsed": 8.19
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.18
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres",
+      "action": "pass",
+      "elapsed": 4.73
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw",
+      "action": "pass",
+      "elapsed": 12.92
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.56
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.15
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.62
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.15
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite",
+      "action": "pass",
+      "elapsed": 8.08
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.23
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres",
+      "action": "pass",
+      "elapsed": 4.73
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss",
+      "action": "pass",
+      "elapsed": 12.81
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.96
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 1.01
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.11
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite",
+      "action": "pass",
+      "elapsed": 12.73
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.28
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.28
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.77
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections",
+      "action": "pass",
+      "elapsed": 19.5
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.93
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.94
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.12
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite",
+      "action": "pass",
+      "elapsed": 12.36
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.24
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.27
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.56
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed",
+      "action": "pass",
+      "elapsed": 18.92
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 1.12
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 1.11
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite",
+      "action": "pass",
+      "elapsed": 10.6
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.33
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.29
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.13
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present",
+      "action": "pass",
+      "elapsed": 16.72
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 3.53
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.11
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 3.49
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.09
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite",
+      "action": "pass",
+      "elapsed": 24
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 1.19
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 1.12
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres",
+      "action": "pass",
+      "elapsed": 11.15
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers",
+      "action": "pass",
+      "elapsed": 35.15
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 1
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.14
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.93
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.13
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite",
+      "action": "pass",
+      "elapsed": 10.1
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.32
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.29
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres",
+      "action": "pass",
+      "elapsed": 5.91
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss",
+      "action": "pass",
+      "elapsed": 16.01
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite/alpha/text",
+      "action": "fail",
+      "elapsed": 3.87
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite",
+      "action": "fail",
+      "elapsed": 16.24
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay",
+      "action": "fail",
+      "elapsed": 16.24
+    }
+  ],
+  "limits": [
+    "Five roots pass, including all four nested-template store cells and their original restart/refusal assertions.",
+    "Provider ordinary consumption and negative source/alias cases passed; replay stopped at its obsolete nonempty-agent-entity oracle.",
+    "PostgreSQL agent replay was not reached because failfast stopped the matrix.",
+    "Internal compiled mock lifecycle with public RPC readback, not real-provider/public-launcher qualification.",
+    "Replay oracle repaired in 3b9cc94f4; exact composed-head rerun remains required."
+  ]
+}

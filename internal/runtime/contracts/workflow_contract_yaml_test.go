@@ -2568,19 +2568,15 @@ source: payload.value
 	t.Fatal("expected legacy source alias to be rejected")
 }
 
-func TestSystemNodeEventHandlerDecode_PreservesCreateEntity(t *testing.T) {
-	var handler SystemNodeEventHandler
-	if err := decodeNodeTestYAML([]byte(`
-create_entity: true
-emit: scoring.requested
-`), &handler); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if !handler.CreateEntity {
-		t.Fatal("expected create_entity to decode as true")
-	}
-	if got := handler.Emit.EventType(); got != "scoring.requested" {
-		t.Fatalf("Emit.EventType() = %q", got)
+func TestSystemNodeEventHandlerDecodeRejectsRetiredConstruction(t *testing.T) {
+	for _, body := range []string{"", "true", "false", "null", "''", "[]", "{}", "[true]", "{value: true}"} {
+		t.Run(body, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := decodeNodeTestYAML([]byte("create_entity: "+body+"\nemit: scoring.requested\n"), &handler)
+			if err == nil || !strings.Contains(err.Error(), `handler field "create_entity" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
+				t.Fatalf("retired handler construction accepted or lacks teaching error: %v", err)
+			}
+		})
 	}
 }
 
@@ -2589,7 +2585,7 @@ func TestSystemNodeEventHandlerDecodeRejectsRetiredReceiverSelectors(t *testing.
 		for _, body := range []string{"null", "{}", "true", "{by: {account_id: payload.account_id}}", "{where: {account_id: payload.account_id}}"} {
 			t.Run(name+"/"+body, func(t *testing.T) {
 				var handler SystemNodeEventHandler
-				err := decodeNodeTestYAML([]byte(name+": "+body+"\ncreate_entity: true\nemit: receiver.ready\n"), &handler)
+				err := decodeNodeTestYAML([]byte(name+": "+body+"\nemit: receiver.ready\n"), &handler)
 				if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "Valid fields:") {
 					t.Fatalf("retired receiver selector accepted or lacks teaching error: %v", err)
 				}

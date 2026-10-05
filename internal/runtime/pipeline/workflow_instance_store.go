@@ -57,6 +57,7 @@ type WorkflowInstance struct {
 	Status             string
 	TerminatedAt       time.Time
 	CurrentState       string
+	StageDefined       bool
 	Revision           int64
 	Config             map[string]any
 	EnteredStageAt     time.Time
@@ -267,8 +268,8 @@ func (o WorkflowEntityCollectionOwner) Owns(record WorkflowEntityStatePersistenc
 }
 
 // WorkflowTargetPersistencePresence is the closed selected-store truth for an
-// exact receiver. State may legitimately precede its lifecycle companion; the
-// reverse ordering is an invariant violation rather than a recoverable form.
+// exact receiver. Imported state alone is not construction authority. A
+// constructed fieldless header is complete without an entity state row.
 type WorkflowTargetPersistencePresence uint8
 
 const (
@@ -277,6 +278,7 @@ const (
 	WorkflowTargetPersistenceStateOnly
 	WorkflowTargetPersistenceComplete
 	WorkflowTargetPersistenceLifecycleOnly
+	WorkflowTargetPersistenceCompleteFieldless
 )
 
 func (p WorkflowTargetPersistencePresence) Valid() bool {
@@ -284,7 +286,8 @@ func (p WorkflowTargetPersistencePresence) Valid() bool {
 	case WorkflowTargetPersistenceAbsent,
 		WorkflowTargetPersistenceStateOnly,
 		WorkflowTargetPersistenceComplete,
-		WorkflowTargetPersistenceLifecycleOnly:
+		WorkflowTargetPersistenceLifecycleOnly,
+		WorkflowTargetPersistenceCompleteFieldless:
 		return true
 	default:
 		return false
@@ -296,7 +299,11 @@ func (p WorkflowTargetPersistencePresence) HasState() bool {
 }
 
 func (p WorkflowTargetPersistencePresence) HasLifecycleCompanion() bool {
-	return p == WorkflowTargetPersistenceComplete || p == WorkflowTargetPersistenceLifecycleOnly
+	return p == WorkflowTargetPersistenceComplete || p == WorkflowTargetPersistenceLifecycleOnly || p == WorkflowTargetPersistenceCompleteFieldless
+}
+
+func (p WorkflowTargetPersistencePresence) Constructed() bool {
+	return p == WorkflowTargetPersistenceComplete || p == WorkflowTargetPersistenceCompleteFieldless
 }
 
 // WorkflowLifecycleCompanionPersistenceRecord is the exact relational
@@ -311,6 +318,8 @@ type WorkflowLifecycleCompanionPersistenceRecord struct {
 	Config          json.RawMessage
 	TerminatedAt    time.Time
 	CreatedAt       time.Time
+	State           WorkflowEntityStatePersistenceRecord
+	StageDefined    bool
 }
 
 // WorkflowTargetPersistenceRecord carries the two independently persisted
@@ -340,10 +349,21 @@ func (r WorkflowTargetPersistenceRecord) Validate(route runtimeflowidentity.Rout
 	}
 	if r.Presence.HasLifecycleCompanion() {
 		companion := r.Lifecycle
+		header := companion.State
 		if strings.TrimSpace(companion.FlowInstance) != route.InstancePath || strings.TrimSpace(companion.WorkflowName) == "" ||
 			strings.TrimSpace(companion.Mode) == "" || strings.TrimSpace(companion.Status) == "" ||
 			len(companion.Config) == 0 || !json.Valid(companion.Config) || companion.CreatedAt.IsZero() {
 			return fmt.Errorf("workflow target lifecycle companion is incomplete or disagrees with exact receiver route")
+		}
+		if header.EntityID != entityID.String() || header.FlowInstance != route.InstancePath || header.CurrentState == "" ||
+			header.Revision <= 0 || header.EnteredStageAt.IsZero() || header.CreatedAt.IsZero() || header.UpdatedAt.IsZero() {
+			return fmt.Errorf("workflow target constructed header requires exact identity and lifecycle progress")
+		}
+		if r.Presence == WorkflowTargetPersistenceComplete && (header.EntityType == "" || r.State.EntityType != header.EntityType) {
+			return fmt.Errorf("workflow target field row disagrees with constructed header contract")
+		}
+		if r.Presence == WorkflowTargetPersistenceCompleteFieldless && (header.EntityType != "" || r.State.EntityID != "") {
+			return fmt.Errorf("fieldless constructed header cannot carry a declared field row")
 		}
 		if strings.TrimSpace(companion.Status) == "terminated" {
 			if companion.TerminatedAt.IsZero() {
@@ -360,16 +380,17 @@ func (r WorkflowTargetPersistenceRecord) DecodeComplete(route runtimeflowidentit
 	if err := r.Validate(route, entityID); err != nil {
 		return WorkflowInstance{}, err
 	}
-	if r.Presence != WorkflowTargetPersistenceComplete {
+	if !r.Presence.Constructed() {
 		return WorkflowInstance{}, fmt.Errorf("complete workflow target persistence is required")
 	}
+	header := r.Lifecycle.State
 	item, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
-		EntityID: r.State.EntityID, WorkflowName: r.Lifecycle.WorkflowName, WorkflowVersion: r.Lifecycle.WorkflowVersion,
+		EntityID: header.EntityID, WorkflowName: r.Lifecycle.WorkflowName, WorkflowVersion: r.Lifecycle.WorkflowVersion,
 		Mode: r.Lifecycle.Mode, Status: r.Lifecycle.Status, TerminatedAt: r.Lifecycle.TerminatedAt,
-		CurrentState: r.State.CurrentState, Revision: r.State.Revision, EnteredStageAt: r.State.EnteredStageAt,
-		Gates: r.State.Gates, Fields: r.State.Fields, Bookkeeping: r.State.Bookkeeping, Accumulator: r.State.Accumulator,
-		Config: r.Lifecycle.Config, FlowInstance: r.State.FlowInstance, EntityType: r.State.EntityType,
-		Slug: r.State.Slug, Name: r.State.Name, CreatedAt: r.State.CreatedAt, UpdatedAt: r.State.UpdatedAt,
+		CurrentState: header.CurrentState, StageDefined: r.Lifecycle.StageDefined, Revision: header.Revision, EnteredStageAt: header.EnteredStageAt,
+		Gates: header.Gates, Fields: r.State.Fields, Bookkeeping: header.Bookkeeping, Accumulator: header.Accumulator,
+		Config: r.Lifecycle.Config, FlowInstance: header.FlowInstance, EntityType: header.EntityType,
+		Slug: header.Slug, Name: header.Name, CreatedAt: header.CreatedAt, UpdatedAt: header.UpdatedAt,
 	})
 	if err != nil {
 		return WorkflowInstance{}, err
@@ -456,6 +477,7 @@ type WorkflowInstancePersistenceRecord struct {
 	Status          string
 	TerminatedAt    time.Time
 	CurrentState    string
+	StageDefined    bool
 	Revision        int64
 	EnteredStageAt  time.Time
 	Gates           json.RawMessage
@@ -474,6 +496,12 @@ type WorkflowInstancePersistenceRecord struct {
 // DecodeWorkflowInstancePersistenceRecord converts one exact selected-store
 // record into the canonical runtime workflow value.
 func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceRecord) (WorkflowInstance, error) {
+	if strings.TrimSpace(record.EntityType) != "" && len(record.Fields) == 0 {
+		return WorkflowInstance{}, fmt.Errorf("constructed workflow %s is missing its declared field row", record.FlowInstance)
+	}
+	if strings.TrimSpace(record.EntityType) == "" && len(record.Fields) != 0 {
+		return WorkflowInstance{}, fmt.Errorf("fieldless workflow %s has an unexpected field row", record.FlowInstance)
+	}
 	route, err := workflowInstanceRouteForPath(record.FlowInstance)
 	if err != nil {
 		return WorkflowInstance{}, fmt.Errorf("decode workflow instance row route: %w", err)
@@ -529,6 +557,7 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 		Status:             strings.TrimSpace(record.Status),
 		TerminatedAt:       record.TerminatedAt.UTC(),
 		CurrentState:       strings.TrimSpace(record.CurrentState),
+		StageDefined:       record.StageDefined,
 		Revision:           record.Revision,
 		EnteredStageAt:     record.EnteredStageAt.UTC(),
 		StateBuckets:       projection.Accumulator,
@@ -565,14 +594,6 @@ func (e *WorkflowInstanceLookupMiss) Error() string {
 	return fmt.Sprintf("workflow instance lookup missed requested key %q", e.RequestedKey)
 }
 
-type WorkflowInitialMaterializationResult uint8
-
-const (
-	WorkflowInitialMaterializationUnknown WorkflowInitialMaterializationResult = iota
-	WorkflowInitialMaterializationCreated
-	WorkflowInitialMaterializationAlreadyExists
-)
-
 type WorkflowTransitionRecord struct {
 	Evidence        runtimeworkflowlifecycle.Transition `json:"evidence"`
 	TransitionID    string                              `json:"transition_id"`
@@ -593,6 +614,7 @@ type workflowInstancePersistedProjection struct {
 }
 
 type workflowInstancePersistedControl struct {
+	WorkflowVersion    string                     `json:"workflow_version"`
 	StorageRef         string                     `json:"storage_ref"`
 	EntityID           string                     `json:"entity_id"`
 	Slug               string                     `json:"slug"`
@@ -633,7 +655,6 @@ type workflowInstanceStore struct {
 	entityStateReader      WorkflowEntityStatePersistenceReader
 	entityCollectionReader WorkflowEntityCollectionPersistenceReader
 	targetReader           WorkflowTargetPersistenceReader
-	initialCommits         WorkflowInitialMaterializationCommitOwner
 	deliverySignalMu       sync.RWMutex
 	deliverySignals        map[runtimedelivery.ExecutionAuthority]func()
 }
@@ -694,7 +715,6 @@ type WorkflowPersistenceOwner interface {
 	WorkflowEntityStatePersistenceReader
 	WorkflowEntityCollectionPersistenceReader
 	WorkflowTargetPersistenceReader
-	WorkflowInitialMaterializationCommitOwner
 }
 
 func NewWorkflowPersistence(owner WorkflowPersistenceOwner) WorkflowPersistence {
@@ -707,7 +727,7 @@ func NewWorkflowPersistence(owner WorkflowPersistenceOwner) WorkflowPersistence 
 		engineMutations: owner, cardMutations: owner, timerOccurrences: owner,
 		fanOutObligations: owner,
 		timerActivations:  owner, readiness: owner, standingServices: owner,
-		decisionRoutes: owner, instanceReader: owner, initialCommits: owner,
+		decisionRoutes: owner, instanceReader: owner,
 		entityStateReader: owner, entityCollectionReader: owner, targetReader: owner,
 	}}
 }
@@ -732,7 +752,7 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.fanOutObligations != nil &&
 		p.store.timerOccurrences != nil && p.store.timerActivations != nil && p.store.readiness != nil &&
 		p.store.standingServices != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
-		p.store.entityStateReader != nil && p.store.entityCollectionReader != nil && p.store.targetReader != nil && p.store.initialCommits != nil
+		p.store.entityStateReader != nil && p.store.entityCollectionReader != nil && p.store.targetReader != nil
 }
 
 // LoadDynamicFlowRuntimeReadiness returns the exact durable readiness owner for
@@ -857,38 +877,6 @@ func (s *workflowInstanceStore) list(ctx context.Context, runID string) ([]Workf
 	return s.instanceReader.ListWorkflowInstances(ctx, runID)
 }
 
-func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
-	if s == nil || s.initialCommits == nil {
-		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow instance lifecycle store is required")
-	}
-	normalized, identity, lifecycle, err := s.prepareInitialEntryLifecycle(ctx, owner, instance, occurredAt)
-	if err != nil {
-		return WorkflowInitialMaterializationUnknown, err
-	}
-	occurredAt = canonicalWorkflowInstancePersistedTime(occurredAt)
-	initialProjection, err := newWorkflowInitialMaterializationProjection(owner, identity, normalized, occurredAt)
-	if err != nil {
-		return WorkflowInitialMaterializationUnknown, err
-	}
-	state, err := workflowEngineStateRecord(owner, normalized, "", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, occurredAt)
-	if err != nil {
-		return WorkflowInitialMaterializationUnknown, err
-	}
-	record, err := workflowInitialMaterializationRecord(state, initialProjection, normalized.RuntimeReadiness)
-	if err != nil {
-		return WorkflowInitialMaterializationUnknown, err
-	}
-	committed, err := s.initialCommits.CommitWorkflowInitialMaterialization(ctx, WorkflowInitialMaterializationCommand{Record: record, Lifecycle: lifecycle})
-	if !committed.Committed {
-		return WorkflowInitialMaterializationUnknown, errors.Join(err, fmt.Errorf("workflow initial materialization has no acknowledged result"))
-	}
-	validationErr := committed.Validate()
-	if committed.Result == WorkflowInitialMaterializationCreated {
-		err = errors.Join(err, s.finalizeInitialEntryLifecycle(context.WithoutCancel(ctx), committed.Lifecycle))
-	}
-	return committed.Result, errors.Join(err, validationErr)
-}
-
 func (s *workflowInstanceStore) prepareInitialEntryLifecycle(
 	ctx context.Context,
 	owner runtimeflowidentity.RunScopedFlowInstance,
@@ -1007,14 +995,17 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	instance.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
 	instance.CurrentState = strings.TrimSpace(instance.CurrentState)
 	instance.EntityType = strings.TrimSpace(instance.EntityType)
-	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.CurrentState == "" || instance.EntityType == "" {
+	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.CurrentState == "" {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, fmt.Errorf(
-			"workflow instance requires instance_id, workflow_name, current_state, and entity_type (id=%q workflow=%q state=%q entity_type=%q)",
+			"workflow instance requires instance_id, workflow_name, and current_state (id=%q workflow=%q state=%q entity_type=%q)",
 			instance.InstanceID,
 			instance.WorkflowName,
 			instance.CurrentState,
 			instance.EntityType,
 		)
+	}
+	if instance.EntityType == "" && len(instance.Fields) != 0 {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, fmt.Errorf("fieldless workflow instance cannot carry entity fields")
 	}
 	if instance.EnteredStageAt.IsZero() {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, fmt.Errorf("workflow instance requires exact entered_stage_at")
@@ -1132,8 +1123,8 @@ func decodeWorkflowInstancePersistedProjection(
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
-	if strings.TrimSpace(control.EntityType) == "" {
-		return workflowInstancePersistedProjection{}, fmt.Errorf("entity_state.entity_type is required")
+	if strings.TrimSpace(control.EntityType) == "" && len(fields) != 0 {
+		return workflowInstancePersistedProjection{}, fmt.Errorf("fieldless workflow header cannot carry entity fields")
 	}
 	return workflowInstancePersistedProjection{
 		Fields:      fields,
@@ -1171,8 +1162,8 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	if persistedIdentity.HasStoredPath {
 		control.FlowPath = strings.TrimSpace(persistedIdentity.InstancePath)
 	}
-	if control.EntityType == "" {
-		return workflowInstancePersistedProjection{}, fmt.Errorf("workflow instance entity_type is required")
+	if control.EntityType == "" && len(instance.Fields) != 0 {
+		return workflowInstancePersistedProjection{}, fmt.Errorf("fieldless workflow header cannot carry entity fields")
 	}
 	if err := validateWorkflowTransitionHistoryFlow(control.TransitionHistory, strings.TrimSpace(instance.WorkflowName)); err != nil {
 		return workflowInstancePersistedProjection{}, err
@@ -1232,6 +1223,17 @@ func WorkflowInstanceConfigPayloadForRoute(
 	workflowVersion string,
 	config map[string]any,
 ) (map[string]any, error) {
+	return WorkflowInstanceConfigPayloadForIdentity(runtimeflowidentity.Instance{
+		ScopeKey: route.ScopeKey, InstanceID: route.InstanceID, InstancePath: route.InstancePath,
+	}, workflowVersion, config)
+}
+
+func WorkflowInstanceConfigPayloadForIdentity(
+	instance runtimeflowidentity.Instance,
+	workflowVersion string,
+	config map[string]any,
+) (map[string]any, error) {
+	route := instance.Route()
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	if !route.Valid() {
 		return nil, fmt.Errorf("workflow instance config payload requires exact route")
@@ -1243,9 +1245,12 @@ func WorkflowInstanceConfigPayloadForRoute(
 	return (workflowInstancePersistedProjection{
 		Config: isolated,
 		Control: workflowInstancePersistedControl{
-			StorageRef: route.InstancePath,
-			InstanceID: route.InstanceID,
-			FlowPath:   route.InstancePath,
+			StorageRef:         route.InstancePath,
+			InstanceID:         route.InstanceID,
+			FlowPath:           route.InstancePath,
+			ParentFlowID:       instance.ParentRoute.FlowID,
+			ParentFlowInstance: instance.ParentRoute.FlowInstance,
+			ParentEntityID:     instance.ParentEntityID,
 		},
 	}).ConfigPayload(workflowVersion), nil
 }
@@ -1308,17 +1313,56 @@ func decodeWorkflowInstanceJSONBoolMap(label string, raw []byte) (map[string]boo
 // WorkflowInstanceBusinessConfigForRoute decodes a recorded config envelope
 // without re-admitting defaults or deriving business keys from route identity.
 func WorkflowInstanceBusinessConfigForRoute(route runtimeflowidentity.Route, raw []byte) (map[string]any, error) {
-	if !route.Valid() {
-		return nil, fmt.Errorf("workflow config readback requires an exact route")
-	}
-	business, control, err := decodeWorkflowInstanceConfigPayload(raw, workflowInstancePersistedControl{StorageRef: route.InstancePath})
+	recorded, err := DecodeWorkflowInstanceRecordedConfig(route, raw)
 	if err != nil {
 		return nil, err
 	}
-	if control.InstanceID != route.InstanceID || control.FlowPath != route.InstancePath {
-		return nil, fmt.Errorf("workflow config readback disagrees with exact route %s", route.InstancePath)
+	return recorded.projection.Config, nil
+}
+
+// Recorded configuration retains runtime controls when historical ownership is
+// projected. It neither re-admits business defaults nor grants execution.
+type WorkflowInstanceRecordedConfig struct {
+	projection workflowInstancePersistedProjection
+}
+
+func DecodeWorkflowInstanceRecordedConfig(route runtimeflowidentity.Route, raw []byte) (WorkflowInstanceRecordedConfig, error) {
+	if !route.Valid() {
+		return WorkflowInstanceRecordedConfig{}, fmt.Errorf("workflow config readback requires an exact route")
 	}
-	return business, nil
+	business, control, err := decodeWorkflowInstanceConfigPayload(raw, workflowInstancePersistedControl{StorageRef: route.InstancePath})
+	if err != nil {
+		return WorkflowInstanceRecordedConfig{}, err
+	}
+	if control.InstanceID != route.InstanceID || control.FlowPath != route.InstancePath {
+		return WorkflowInstanceRecordedConfig{}, fmt.Errorf("workflow config readback disagrees with exact route %s", route.InstancePath)
+	}
+	parent := runtimeflowidentity.ParentRoute{FlowID: control.ParentFlowID, FlowInstance: control.ParentFlowInstance, EntityID: control.ParentEntityID}
+	if !parent.Empty() && !parent.Complete() {
+		return WorkflowInstanceRecordedConfig{}, fmt.Errorf("workflow config readback requires complete parent ownership")
+	}
+	return WorkflowInstanceRecordedConfig{projection: workflowInstancePersistedProjection{Config: business, Control: control}}, nil
+}
+
+func (c WorkflowInstanceRecordedConfig) WorkflowVersion() string {
+	return c.projection.Control.WorkflowVersion
+}
+
+func (c WorkflowInstanceRecordedConfig) ParentRoute() runtimeflowidentity.ParentRoute {
+	control := c.projection.Control
+	return runtimeflowidentity.ParentRoute{FlowID: control.ParentFlowID, FlowInstance: control.ParentFlowInstance, EntityID: control.ParentEntityID}
+}
+
+func (c WorkflowInstanceRecordedConfig) Project(route runtimeflowidentity.Route, parent runtimeflowidentity.ParentRoute) ([]byte, error) {
+	oldParent := c.ParentRoute()
+	if !route.Valid() || c.projection.Config == nil || oldParent.Empty() != parent.Empty() ||
+		(!parent.Empty() && (!parent.Complete() || parent.FlowID != oldParent.FlowID)) {
+		return nil, fmt.Errorf("historical config projection requires exact route and parent ownership")
+	}
+	projection := c.projection
+	projection.Control.StorageRef, projection.Control.FlowPath, projection.Control.InstanceID = route.InstancePath, route.InstancePath, route.InstanceID
+	projection.Control.ParentFlowID, projection.Control.ParentFlowInstance, projection.Control.ParentEntityID = parent.FlowID, parent.FlowInstance, parent.EntityID
+	return canonicaljson.MarshalPreservingNumberKinds(projection.ConfigPayload(c.WorkflowVersion()))
 }
 
 func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePersistedControl) (map[string]any, workflowInstancePersistedControl, error) {
@@ -1336,6 +1380,10 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 		default:
 			return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config contains unknown runtime control %q", key)
 		}
+	}
+	workflowVersion, err := workflowInstanceOptionalString(config, "workflow_version")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
 	}
 	instanceID, err := workflowInstanceOptionalString(config, "instance_id")
 	if err != nil {
@@ -1380,6 +1428,7 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	if err != nil {
 		return nil, workflowInstancePersistedControl{}, err
 	}
+	control.WorkflowVersion = workflowVersion
 	control.InstanceID = strings.TrimSpace(instanceID)
 	control.FlowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
 	if strings.TrimSpace(control.StorageRef) == "" {

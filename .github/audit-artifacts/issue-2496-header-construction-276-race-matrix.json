@@ -1,0 +1,941 @@
+{
+  "source_head": "c407bd61f9a9f3bd5fed9a96c3a7361e4ba910a4",
+  "base": "276d7723f9f6c66458d416a0554c107be373772b",
+  "race": true,
+  "repetitions": 3,
+  "split": "same nine roots and all backend cells, separate jobs; no changed case or package deadlines",
+  "receipts": [
+    {
+      "backend": "sqlite",
+      "receipt": "/tmp/agent-e-2496-construction-header-race-sqlite.log",
+      "packages": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "result": "pass",
+          "seconds": 334.593
+        }
+      ],
+      "roots": [
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldlessSnapshotBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigPublicationContendersBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        }
+      ],
+      "cells": [
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores/sqlite/acknowledged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores/sqlite/commit_before_lost_ack",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores/sqlite/rollback_before_lost_ack",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores/sqlite/native_deferred_rejection",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldlessSnapshotBothStores/sqlite/inert",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldlessSnapshotBothStores/sqlite/staged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/inert",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/template",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/status",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/stage",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/stage_presence",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/entry_clock",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/creation_clock",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/update_clock",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/revision",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/gates",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/bookkeeping",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/accumulator",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/slug",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged/reuse_rejects/name",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded/staged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded_terminal/inert",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fielded_terminal/staged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fieldless_terminal/inert",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/sqlite/fieldless_terminal/staged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/sqlite/exact",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/sqlite/same_key",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/sqlite/numeric_kind_only",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/sqlite/numeric_kind_no_agents",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/sqlite/different_keys",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/sqlite/rollback_first",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigPublicationContendersBothStores/sqlite/cancel_false",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigPublicationContendersBothStores/sqlite/cancel_true",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/sqlite/before_readiness",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/sqlite/creation_mark_rollback",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/sqlite/creation_commit_ack_lost",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/sqlite/numeric_substitution",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/scenario_setup/canonical",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/scenario_setup/upper",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/scenario_setup/compact",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/scenario_setup",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/engine_route_state/canonical",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/engine_route_state/upper",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/engine_route_state/compact",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite/engine_route_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/sqlite",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/sqlite/settlement_receipt_ids",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/sqlite/entity_and_workflow_mutation_ids",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/sqlite",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/initial/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/initial/blank_flow",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/initial/blank_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/initial/duplicate_identical",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/initial/duplicate_flow",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/initial/duplicate_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/initial",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/exact_replay/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/exact_replay/blank_flow",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/exact_replay/blank_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/exact_replay/duplicate_identical",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/exact_replay/duplicate_flow",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/exact_replay/duplicate_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite/exact_replay",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/sqlite",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        }
+      ],
+      "failures": []
+    },
+    {
+      "backend": "postgres",
+      "receipt": "/tmp/agent-e-2496-construction-header-race-postgres.log",
+      "packages": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "result": "pass",
+          "seconds": 119.142
+        }
+      ],
+      "roots": [
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldlessSnapshotBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigPublicationContendersBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        }
+      ],
+      "cells": [
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores/postgres/acknowledged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores/postgres/commit_before_lost_ack",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores/postgres/rollback_before_lost_ack",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestA2JoinNativeCommitBoundaryOnBothStores/postgres/native_deferred_rejection",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldlessSnapshotBothStores/postgres/inert",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldlessSnapshotBothStores/postgres/staged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/inert",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/template",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/status",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/stage",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/stage_presence",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/entry_clock",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/creation_clock",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/update_clock",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/revision",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/gates",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/bookkeeping",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/accumulator",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/slug",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged/reuse_rejects/name",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded/staged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded_terminal/inert",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fielded_terminal/staged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fieldless_terminal/inert",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores/postgres/fieldless_terminal/staged",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/postgres/exact",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/postgres/same_key",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/postgres/numeric_kind_only",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/postgres/numeric_kind_no_agents",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/postgres/different_keys",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigActivationRaceAndRollbackBothStores/postgres/rollback_first",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigPublicationContendersBothStores/postgres/cancel_false",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigPublicationContendersBothStores/postgres/cancel_true",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/postgres/before_readiness",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/postgres/creation_mark_rollback",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/postgres/creation_commit_ack_lost",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores/postgres/numeric_substitution",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/scenario_setup/canonical",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/scenario_setup/upper",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/scenario_setup/compact",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/scenario_setup",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/engine_route_state/canonical",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/engine_route_state/upper",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/engine_route_state/compact",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/engine_route_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/postgres/settlement_receipt_ids",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/postgres/entity_and_workflow_mutation_ids",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/postgres",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/initial/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/initial/blank_flow",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/initial/blank_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/initial/duplicate_identical",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/initial/duplicate_flow",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/initial/duplicate_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/initial",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/exact_replay/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/exact_replay/blank_flow",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/exact_replay/blank_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/exact_replay/duplicate_identical",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/exact_replay/duplicate_flow",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/exact_replay/duplicate_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres/exact_replay",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        },
+        {
+          "test": "TestRunForkSnapshotOwnershipInvalidMetadataBothStores/postgres",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0
+        }
+      ],
+      "failures": []
+    }
+  ]
+}

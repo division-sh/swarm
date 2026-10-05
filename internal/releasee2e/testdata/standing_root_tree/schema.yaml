@@ -1,0 +1,24 @@
+name: standing-root-tree
+activation: standing
+stages: []
+imports:
+  provider_trigger_events:
+    - {provider: telegram, event: inbound.telegram.text_message}
+    - {provider: telegram, event: inbound.telegram.callback_action}
+pins:
+  inputs:
+    - inbound.telegram
+    - inbound.telegram.text_message
+    - inbound.telegram.callback_action
+  outputs:
+    - inbound.telegram.text_message
+    - inbound.telegram.callback_action
+ingress:
+  alias: alpha
+  providers:
+    - {provider: telegram, signing_secret: webhook_signing.alpha}
+connect:
+  - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}
+  - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}
+  - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}
+  - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}

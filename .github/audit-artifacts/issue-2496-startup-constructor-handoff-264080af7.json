@@ -1,0 +1,92 @@
+{
+  "roots": [
+    {
+      "status": "pass",
+      "elapsed_seconds": 46.66
+    },
+    {
+      "status": "pass",
+      "elapsed_seconds": 40.99
+    },
+    {
+      "status": "pass",
+      "elapsed_seconds": 41.07
+    }
+  ],
+  "cells": [
+    {
+      "test": "TestComposedStartupCreationPublicationHandoffOnBothStores/postgres/ordinary_async",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestComposedStartupCreationPublicationHandoffOnBothStores/postgres/recovery_disabled",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestComposedStartupCreationPublicationHandoffOnBothStores/postgres/startup_recovery",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestComposedStartupCreationPublicationHandoffOnBothStores/postgres/unknown_dispatch_mode",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestComposedStartupCreationPublicationHandoffOnBothStores/sqlite/ordinary_async",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestComposedStartupCreationPublicationHandoffOnBothStores/sqlite/recovery_disabled",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestComposedStartupCreationPublicationHandoffOnBothStores/sqlite/startup_recovery",
+      "status": "pass",
+      "repetitions": 3
+    },
+    {
+      "test": "TestComposedStartupCreationPublicationHandoffOnBothStores/sqlite/unknown_dispatch_mode",
+      "status": "pass",
+      "repetitions": 3
+    }
+  ],
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "status": "pass",
+      "elapsed_seconds": 129.77
+    }
+  ],
+  "failures": [],
+  "skips": [],
+  "source_head": "264080af7c99b6ce28eb2de4d79fe9030ce7b4ec",
+  "master_base": "276d7723f9f6c66458d416a0554c107be373772b",
+  "command": "go run ./cmd/swarm-test -- -json -race -count=3 -run '^TestComposedStartupCreationPublicationHandoffOnBothStores$' ./internal/serveapp",
+  "receipt": "/tmp/agent-e-2496-startup-constructor-exact-input.log",
+  "proof_surface": "Compiled in-process mock lifecycle; canonical causal ledger precondition, real constructor/activation/startup/dispatch; not public-launcher or real-provider qualification.",
+  "known_red_attempts": [
+    {
+      "source_head": "6e52b986e",
+      "result": "RED",
+      "receipt": "/tmp/agent-e-2496-startup-fixture-baseline-6e52b986e.log",
+      "manifestation": "Unchanged SQLite unknown_dispatch_mode leaf refuses missing canonical source-root header before activation."
+    },
+    {
+      "source_head": "1c7c80dd4",
+      "result": "RED",
+      "receipt": "/tmp/agent-e-2496-startup-constructor-1c7c80dd4.log",
+      "manifestation": "Initial fixture respelling removed the worker.requested declared input; all cells refuse lexical source admission, not evidence of activation repair."
+    },
+    {
+      "source_head": "506905555",
+      "result": "RED",
+      "receipt": "/tmp/agent-e-2496-startup-constructor-preserve-inputs.log",
+      "manifestation": "Extra flow.created input lacks a connected catalog producer; refused by lexical admission, not an accepted qualification workaround."
+    }
+  ]
+}

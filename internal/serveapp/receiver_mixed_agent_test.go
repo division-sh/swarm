@@ -64,31 +64,44 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 				}
 				t.Fatalf("mixed real execution agents/nodes/turns=%d/%d/%d\n%s", agents, nodes, turns, servedEventPublishDebugSummary(t, db, backend, published.RunID))
 			}
-			rows, err := db.Query(`SELECT CAST(d.delivery_target_route AS TEXT) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='work.completed'`, published.RunID)
+			rows, err := db.Query(`SELECT d.subscriber_type,CAST(d.delivery_target_route AS TEXT) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='work.completed'`, published.RunID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			owners := 0
+			nodeOwners, agentOwners := 0, 0
 			for rows.Next() {
-				var raw string
+				var subscriberType, raw string
 				var owner events.DeliveryTargetOwnership
-				if err := rows.Scan(&raw); err != nil {
+				if err := rows.Scan(&subscriberType, &raw); err != nil {
 					t.Fatal(err)
 				}
 				if err := json.Unmarshal([]byte(raw), &owner); err != nil {
 					t.Fatal(err)
 				}
-				if owner.Route().FlowID != "sink" || owner.Route().EntityID != childID || owner.Code() != "existing_entity" {
-					t.Fatalf("mixed recipient did not preserve actual child ownership: %s", raw)
+				if owner.Route().FlowID != "sink" || owner.Route().FlowInstance != "sink" {
+					t.Fatalf("mixed %s recipient borrowed another flow: %s", subscriberType, raw)
 				}
-				owners++
+				switch subscriberType {
+				case "node":
+					if owner.Route().EntityID != childID || owner.Code() != "existing_entity" {
+						t.Fatalf("node lost its constructed child ownership: %s", raw)
+					}
+					nodeOwners++
+				case "agent":
+					if owner.Route().EntityID != "" || owner.Code() != "entityless_receiver" {
+						t.Fatalf("agent borrowed the node's constructed ownership: %s", raw)
+					}
+					agentOwners++
+				default:
+					t.Fatalf("unexpected mixed subscriber type %q", subscriberType)
+				}
 			}
 			if err := rows.Err(); err != nil {
 				t.Fatal(err)
 			}
 			rows.Close()
-			if owners != 2 {
-				t.Fatalf("mixed event has %d owners, want node and agent", owners)
+			if nodeOwners != 1 || agentOwners != 1 {
+				t.Fatalf("mixed event owners node/agent=%d/%d, want 1/1", nodeOwners, agentOwners)
 			}
 			requireReceiverPublicReadback(t, servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backend, Runtime: runtime, BundleHash: bundle}, published.RunID)
 		})

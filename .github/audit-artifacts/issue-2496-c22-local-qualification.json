@@ -1,0 +1,4359 @@
+{
+  "schema": 1,
+  "candidate_source_head": "6dfc1ffe71fe6e710eb226a4283ebfcf5baf5b25",
+  "base": "e63f4bdb197e473fe35e94f65ff3c77655957123",
+  "status": "local working batch; native source-set handoff and failed-transition retirement unproven; no push, rebase, full-suite or CI claim",
+  "measurement_boundary": "Earlier receipts execute working content while constructing this batch. They are not post-rebase/exact-head CI qualification. The served-template receipt and load-budget control run after the production commit.",
+  "gate": "https://github.com/division-sh/swarm/issues/2496#issuecomment-5969425820",
+  "pending_disposition": "https://github.com/division-sh/swarm/issues/2496#issuecomment-5970534024",
+  "production_go_size": {
+    "files": 230,
+    "additions": 8731,
+    "deletions": 8356,
+    "net": 375
+  },
+  "production_go_size_method": "no-renames; all non-_test.go Go files, including moved/generated/test-support production lines",
+  "readiness_core_lines": 387,
+  "complexity": {
+    "receipt": "/tmp/agent-e-2496-c22-complexity/delta.json",
+    "sha256": "fde51a703a4dce2149ea242f6094b09c81a5bb058ca5a3c30e14d9fb1c67aafe",
+    "head": "6dfc1ffe71fe6e710eb226a4283ebfcf5baf5b25",
+    "base": "e63f4bdb197e473fe35e94f65ff3c77655957123",
+    "head_summary": {
+      "cognit": {
+        "callables": 19694,
+        "at_least_30": 570,
+        "at_least_50": 193,
+        "maximum": 302
+      },
+      "cyclo": {
+        "callables": 19694,
+        "at_least_30": 260,
+        "at_least_50": 55,
+        "maximum": 185
+      }
+    },
+    "base_summary": {
+      "cognit": {
+        "callables": 19694,
+        "at_least_30": 573,
+        "at_least_50": 193,
+        "maximum": 302
+      },
+      "cyclo": {
+        "callables": 19694,
+        "at_least_30": 264,
+        "at_least_50": 53,
+        "maximum": 185
+      }
+    },
+    "hotspot_count_increased": false
+  },
+  "receipts": [
+    {
+      "receipt": "/tmp/agent-e-2496-c22-independent-owner-packages-final.log",
+      "sha256": "d3d2c148b3299a60ee5f76c15f99e36a1ba5be5083e994dd2f7215e360f319c2",
+      "boundary": "whole packages; RED preserved, three packages pass",
+      "exit_code": 1,
+      "first_event": "2026-10-03T15:33:22.967122081Z",
+      "last_event": "2026-10-03T15:35:35.512512846Z",
+      "managed_command": "Test slot acquired after 9ms. Starting go test -json -count=1 ./internal/runtime/runforkexecution ./internal/runtime/runforkadmission ./internal/runtime/runforkreadiness ./internal/runtime/manager",
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "action": "pass",
+          "elapsed": 3.992
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "action": "pass",
+          "elapsed": 4.452
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 21.169
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "action": "fail",
+          "elapsed": 132.545
+        }
+      ],
+      "test_event_counts": {
+        "pass": 1867,
+        "fail": 2,
+        "skip": 1
+      },
+      "failures": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedContractWorkflowStateProjectionRejectsInvalidPlatformActivitySource/out_of_scope",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedContractWorkflowStateProjectionRejectsInvalidPlatformActivitySource",
+          "elapsed": 0
+        }
+      ],
+      "skipped": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedWorkspacePreparationRealDockerBothStores"
+        }
+      ],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEndpoint",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.02
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.03
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryConnectRejectsUnrelatedTemplateSameLeaf",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.04
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.02
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryRequiresCanonicalFrontier",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedReadinessRequiresCompleteConstruction",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.59
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.06
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.18
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowReadinessPassUsesAtMostTwoPublicLoads",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.17
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedConstructedAgentInputExecutesBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.36
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReceiverAgentRevisionPreservesNamespaceAndNumberKinds",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.02
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.88
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestReceiverConfigRecoverySourceRevisionDoesNotReadmitDefaults",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.08
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            7.07
+          ]
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-execution-package-accepted.log",
+      "sha256": "ad1b1e745ac7db8b8f166bd7a011da383a1d1874edede7992a7e76e66a288077",
+      "boundary": "whole selected-execution package after exact source-run fixture repair; optional Docker proof not opted in",
+      "exit_code": 0,
+      "first_event": "2026-10-03T15:39:13.505636216Z",
+      "last_event": "2026-10-03T15:41:19.251179412Z",
+      "managed_command": "Test slot acquired after 39ms. Starting go test -json -count=1 ./internal/runtime/runforkexecution",
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "action": "pass",
+          "elapsed": 125.746
+        }
+      ],
+      "test_event_counts": {
+        "pass": 849,
+        "fail": 0,
+        "skip": 1
+      },
+      "failures": [],
+      "skipped": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedWorkspacePreparationRealDockerBothStores"
+        }
+      ],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedConstructedAgentInputExecutesBothStores/sqlite",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.73
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedConstructedAgentInputExecutesBothStores/postgres",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.62
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedConstructedAgentInputExecutesBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.35
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores/sqlite/fieldless",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            2.11
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores/sqlite/field_bearing",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            2.37
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores/postgres/fieldless",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.58
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores/postgres/field_bearing",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.59
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            7.66
+          ]
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-final-independent-race.log",
+      "sha256": "162fc1eef5148579d25b22660353e3839529a695c773acfe50ecc36fb66c28a4",
+      "boundary": "managed race/count3; aggregate RED preserved, selected execution/admission/handler packages pass",
+      "exit_code": 1,
+      "first_event": "2026-10-03T15:24:32.577191306Z",
+      "last_event": "2026-10-03T15:26:55.774405234Z",
+      "managed_command": "Test slot acquired after 16ms. Starting go test -json -race -count=3 -run ^(TestSelectedConstructedActorProjectionCompleteCensus|TestSelectedConstructedActorProjectionRejects|TestSelectedConstructedAgentInputExecutesBothStores|TestSelectedNestedConstructedAgentInputExecutesBothStores|TestAdmitSelectedContractRouteHistory|TestSelectedAgentConstruction|TestSelectedReadinessRequiresCompleteConstruction|TestHandlerSelectionCanonicalRead) ./internal/runtime/runforkreadiness ./internal/runtime/runforkadmission ./internal/runtime/runforkexecution ./internal/store/internal/backend/delivery",
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "action": "pass",
+          "elapsed": 3.141
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "action": "fail",
+          "elapsed": 10.656
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "action": "pass",
+          "elapsed": 20.092
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "action": "pass",
+          "elapsed": 135.18
+        }
+      ],
+      "test_event_counts": {
+        "pass": 426,
+        "fail": 27,
+        "skip": 0
+      },
+      "failures": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader",
+          "elapsed": 0.08
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader",
+          "elapsed": 0.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader",
+          "elapsed": 0.08
+        }
+      ],
+      "skipped": [],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedReadinessRequiresCompleteConstruction",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            3.95,
+            2.25,
+            2.2
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader",
+          "pass": 0,
+          "fail": 3,
+          "skip": 0,
+          "elapsed": [
+            0.08,
+            0.07,
+            0.08
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.01,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/attachment_duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/attachment_delivery_association",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/attachment_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/attachment_actor_revision",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/attachment_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/valid/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/valid/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/valid/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/valid",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/missing/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/missing/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/missing/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/duplicate/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/duplicate/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/duplicate/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_declaration/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_declaration/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_declaration/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_mode/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_mode/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_mode/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_entity/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_entity/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_entity/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/missing_parent/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/missing_parent/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/missing_parent/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/foreign_parent/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/foreign_parent/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/foreign_parent/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/malformed_config/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/malformed_config/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/malformed_config/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/foreign_route/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/foreign_route/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/foreign_route/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_type/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_type/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_type/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless/wrong_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/fieldless",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.4,
+            0.3,
+            0.33
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/attachment_duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/attachment_delivery_association",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/attachment_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/attachment_actor_revision",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/attachment_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/valid/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/valid/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/valid/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/valid",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/missing/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/missing/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/missing/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/duplicate/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/duplicate/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/duplicate/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_declaration/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_declaration/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_declaration/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_mode/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_mode/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_mode/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_entity/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_entity/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_entity/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/missing_parent/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/missing_parent/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/missing_parent/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/foreign_parent/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/foreign_parent/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/foreign_parent/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/malformed_config/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/malformed_config/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/malformed_config/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/foreign_route/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/foreign_route/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/foreign_route/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_type/agent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_type/node",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_type/activity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing/wrong_type",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus/field_bearing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.37,
+            0.3,
+            0.31
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedConstructedActorProjectionCompleteCensus",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.77,
+            0.59,
+            0.64
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEndpoint",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.38,
+            0.06,
+            0.06
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.06,
+            0.06,
+            0.06
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryConnectRejectsUnrelatedTemplateSameLeaf",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.07,
+            0.06,
+            0.07
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.06,
+            0.06,
+            0.06
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "test": "TestAdmitSelectedContractRouteHistoryRequiresCanonicalFrontier",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "test": "TestHandlerSelectionCanonicalReadWriterBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            4.32,
+            0.23,
+            0.21
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "test": "TestHandlerSelectionCanonicalReadRollbackAndCorruptionBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.19,
+            0.19,
+            0.2
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "test": "TestHandlerSelectionCanonicalReadConcurrentBothStores/sqlite/equal",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.06,
+            1.07,
+            1.07
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "test": "TestHandlerSelectionCanonicalReadConcurrentBothStores/sqlite/conflict",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.07,
+            1.07,
+            1.05
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "test": "TestHandlerSelectionCanonicalReadConcurrentBothStores/postgres/equal",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.16,
+            0.17,
+            0.15
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "test": "TestHandlerSelectionCanonicalReadConcurrentBothStores/postgres/conflict",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.15,
+            0.16,
+            0.16
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "test": "TestHandlerSelectionCanonicalReadConcurrentBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            2.45,
+            2.47,
+            2.43
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedConstructedAgentInputExecutesBothStores/sqlite",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            7.23,
+            4.57,
+            4.56
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "test": "TestHandlerSelectionCanonicalReadSQLiteHeldRawWriter",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.07,
+            1.06,
+            1.06
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "test": "TestHandlerSelectionCanonicalReadSQLiteNativeBusyRetry",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.08,
+            1.06,
+            1.06
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedConstructedAgentInputExecutesBothStores/postgres",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            4.89,
+            1.88,
+            1.89
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedConstructedAgentInputExecutesBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            12.12,
+            6.45,
+            6.45
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores/sqlite/fieldless",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            11.05,
+            10.96,
+            14.25
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores/sqlite/field_bearing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            11.24,
+            11.15,
+            16
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores/postgres/fieldless",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            5.3,
+            5.22,
+            6.91
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores/postgres/field_bearing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            5.27,
+            5.29,
+            6.46
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "test": "TestSelectedNestedConstructedAgentInputExecutesBothStores",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            32.86,
+            32.63,
+            43.62
+          ]
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-direct-header-race-three.log",
+      "sha256": "90ed73ae8fc6d94c2390b98b20a77773a405b6f866e05c76e9603981c1870a03",
+      "boundary": "focused race/count3 after complete valid-header fixture correction",
+      "exit_code": 0,
+      "first_event": "2026-10-03T15:26:55.714852281Z",
+      "last_event": "2026-10-03T15:26:59.151589098Z",
+      "managed_command": null,
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "action": "pass",
+          "elapsed": 3.437
+        }
+      ],
+      "test_event_counts": {
+        "pass": 315,
+        "fail": 0,
+        "skip": 0
+      },
+      "failures": [],
+      "skipped": [],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/duplicate_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/missing_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/missing_entered",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.03,
+            0.02,
+            0.02
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/duplicate_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/missing_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/missing_entered",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/child/leaf",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.04,
+            0.02,
+            0.02
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/duplicate_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/missing_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/missing_entered",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.02,
+            0.03,
+            0.02
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/duplicate_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/missing_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/missing_entered",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/one/audit/leaf",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.03,
+            0.02,
+            0.04
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/duplicate_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/missing_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/missing_entered",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.05,
+            0.02,
+            0.03
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/duplicate_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/missing_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/missing_entered",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/child/leaf",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.03,
+            0.02,
+            0.02
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/duplicate_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/missing_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/missing_entered",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.05,
+            0.02,
+            0.02
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/missing",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/duplicate",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/duplicate_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/wrong_declaration",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/wrong_mode",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/wrong_entity",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/missing_state",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/missing_entered",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/missing_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/foreign_parent",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/malformed_config",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf/foreign_route",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader/templ/two/audit/leaf",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.03,
+            0.03,
+            0.05
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "test": "TestSelectedAgentConstructionUsesExactFixedHeader",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.74,
+            0.31,
+            0.35
+          ]
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-constructed-catalog-journeys.log",
+      "sha256": "0dc021df67678287479a810f1a511c17da66ba450170cb5b9ecf0faa21d966d9",
+      "boundary": "six integrated catalog journeys, both stores; compiled internal mock/public RPC fixtures, not public publication or real provider",
+      "exit_code": 0,
+      "first_event": "2026-10-03T15:28:55.333279833Z",
+      "last_event": "2026-10-03T15:30:32.308476266Z",
+      "managed_command": "Test slot acquired after 1m22s. Starting go test -json -count=1 -run ^(TestReceiverInitializationNestedGeometryBothStores|TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores|TestReceiverMaterializationSelectedForkExecutionBothStores|TestReceiverMaterializationSelectedForkPublicationFrontierBothStores|TestSelectedForkPendingRootAgentInputBothStores|TestSelectedForkFlowOwnedReadinessBothStoresInitial)$ ./internal/runtime/cataloge2e",
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "action": "pass",
+          "elapsed": 96.975
+        }
+      ],
+      "test_event_counts": {
+        "pass": 200,
+        "fail": 0,
+        "skip": 0
+      },
+      "failures": [],
+      "skipped": [],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverInitializationNestedGeometryBothStores/sqlite",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.72
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverInitializationNestedGeometryBothStores/postgres",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            2.25
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverInitializationNestedGeometryBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            3.97
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            4.53
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverMaterializationSelectedForkExecutionBothStores/sqlite",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.23
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverMaterializationSelectedForkExecutionBothStores/postgres",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.08
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverMaterializationSelectedForkExecutionBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            2.31
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverMaterializationSelectedForkPublicationFrontierBothStores/sqlite",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.38
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverMaterializationSelectedForkPublicationFrontierBothStores/postgres",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.19
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestReceiverMaterializationSelectedForkPublicationFrontierBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            2.57
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestSelectedForkFlowOwnedReadinessBothStoresInitial",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            80.2
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestSelectedForkPendingRootAgentInputBothStores/sqlite",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.74
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestSelectedForkPendingRootAgentInputBothStores/postgres",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.63
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+          "test": "TestSelectedForkPendingRootAgentInputBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            3.38
+          ]
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-native-restart-separated.log",
+      "sha256": "3f2d449e66cc815130f2601e9d2eb929f0298a3501d64a2f395ecb8984bc9782",
+      "boundary": "managed race/count1; native construction/attachment/restart, four backend/field cells",
+      "exit_code": 0,
+      "first_event": "2026-10-03T15:41:34.605554539Z",
+      "last_event": "2026-10-03T15:42:21.168933521Z",
+      "managed_command": "Test slot acquired after 5s. Starting go test -json -race -count=1 -run ^TestRuntimeConstructedActorCensusRestartBothStores$ ./internal/runtime",
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 46.563
+        }
+      ],
+      "test_event_counts": {
+        "pass": 5,
+        "fail": 0,
+        "skip": 0
+      },
+      "failures": [],
+      "skipped": [],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/sqlite/fields_false",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            16.27
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/sqlite/fields_true",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            13.58
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/postgres/fields_false",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            9.46
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/postgres/fields_true",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            6.21
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            45.52
+          ]
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-native-readiness-adjacent-binding.log",
+      "sha256": "a20135627584fb6d41100fae9a708d3b6544ec428c841d5055a0bc194e17b079",
+      "boundary": "stopped-cell native adjacent-grant control, both stores; not aggregate refresh or shutdown proof",
+      "exit_code": 1,
+      "first_event": "2026-10-03T15:20:11.26518319Z",
+      "last_event": "2026-10-03T15:20:13.069150746Z",
+      "managed_command": "Test slot acquired after 19ms. Starting go test -json -count=1 -run ^TestAgentLifecycleReadinessSourceSetRebindBothStores$ ./internal/store/internal/runtimepersistence",
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "fail",
+          "elapsed": 1.804
+        }
+      ],
+      "test_event_counts": {
+        "pass": 0,
+        "fail": 3,
+        "skip": 0
+      },
+      "failures": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores/sqlite",
+          "elapsed": 0.73
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores/postgres",
+          "elapsed": 1.07
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores",
+          "elapsed": 1.79
+        }
+      ],
+      "skipped": [],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores/sqlite",
+          "pass": 0,
+          "fail": 1,
+          "skip": 0,
+          "elapsed": [
+            0.73
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores/postgres",
+          "pass": 0,
+          "fail": 1,
+          "skip": 0,
+          "elapsed": [
+            1.07
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores",
+          "pass": 0,
+          "fail": 1,
+          "skip": 0,
+          "elapsed": [
+            1.79
+          ]
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-native-source-set-admitted-fixture.log",
+      "sha256": "ea99fd3b259f92a5264c4d8d2a187e6453f999cb3b74fb40acfd450229ff58a5",
+      "boundary": "native aggregate refresh refuses, then live-loop cleanup reaches unchanged ten-minute Go timeout",
+      "exit_code": 1,
+      "first_event": "2026-10-03T15:01:03.071881724Z",
+      "last_event": "2026-10-03T15:11:03.087629636Z",
+      "managed_command": "Test slot acquired after 9ms. Starting go test -json -count=1 -run ^TestRuntimeConstructedActorCensusRestartBothStores$ ./internal/runtime",
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "fail",
+          "elapsed": 600.016
+        }
+      ],
+      "test_event_counts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      },
+      "failures": [],
+      "skipped": [],
+      "incomplete_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores"
+        }
+      ],
+      "relevant_test_results": []
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-describe-accepted.log",
+      "sha256": "3116b14be1149396cd1f5566a21698a2644f243046bd5af382b21072c61d326a",
+      "boundary": "fresh 45-cell compiled describe after provenance-only baseline reconciliation",
+      "exit_code": 0,
+      "first_event": "2026-10-03T15:35:43.15713717Z",
+      "last_event": "2026-10-03T15:37:14.791196882Z",
+      "managed_command": "Test slot acquired after 2m22s. Starting go test -json -count=1 -run ^TestReadProofFactoringCompiledDescribe$ ./internal/cliapp",
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "action": "pass",
+          "elapsed": 91.634
+        }
+      ],
+      "test_event_counts": {
+        "pass": 46,
+        "fail": 0,
+        "skip": 0
+      },
+      "failures": [],
+      "skipped": [],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.3
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            5.06
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            5.92
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            10.27
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-no-color",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            10.95
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            15.48
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            16.09
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            20.7
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            21.45
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/routes-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            22.31
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/routes-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            22.85
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/routes-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            23.39
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-no-color",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            19.42
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            19.13
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            25.09
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            15.35
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            14.68
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            10.11
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            10.72
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/routes-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            10.43
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/routes-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            10
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/routes-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            13.55
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/routes-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            12.47
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-no-color",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            13.37
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            16.26
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            16.87
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            21.18
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            20.86
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/routes-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            20.92
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            20.62
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            20.7
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/routes-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            16
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/routes-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            15.77
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-no-color",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            11.63
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/routes-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            11.4
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/routes-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            11.61
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            6.56
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-no-color",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            6.78
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.94
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            2.01
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-text",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.99
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.98
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-json",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.96
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            1.98
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/routes-quiet",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            5.79
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            38.42
+          ]
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-readiness-load-budget.log",
+      "sha256": "c29d5c00f2b3b462018ba6c6a729c3e2c26057107ea3a96e848d0743f88b2b5c",
+      "boundary": "focused race/count3; at most two public readiness loads per pass",
+      "exit_code": 0,
+      "first_event": "2026-10-03T15:48:48.57749879Z",
+      "last_event": "2026-10-03T15:48:57.10720621Z",
+      "managed_command": null,
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 8.53
+        }
+      ],
+      "test_event_counts": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 0
+      },
+      "failures": [],
+      "skipped": [],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowReadinessPassUsesAtMostTwoPublicLoads/retry",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            3.13,
+            1.42,
+            0.45
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowReadinessPassUsesAtMostTwoPublicLoads/ensure",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.35,
+            0.39,
+            0.42
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowReadinessPassUsesAtMostTwoPublicLoads/committed_callback",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            0.58,
+            0.19,
+            0.46
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestFlowReadinessPassUsesAtMostTwoPublicLoads",
+          "pass": 3,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            4.07,
+            2,
+            1.33
+          ]
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/agent-e-2496-c22-served-template-qualification.log",
+      "sha256": "3f2136312021e9c0d951c3df49f7655fa908869cf3b0efb9a3e5a915a6872b28",
+      "boundary": "managed normal/count1; unchanged two served-template journey roots on committed production batch",
+      "exit_code": 0,
+      "first_event": "2026-10-03T15:53:21.555214614Z",
+      "last_event": "2026-10-03T15:53:38.288734971Z",
+      "managed_command": "Test slot acquired after 5m30s. Starting go test -json -count=1 -run ^(TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores|TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores)$ ./internal/serveapp",
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "action": "pass",
+          "elapsed": 16.734
+        }
+      ],
+      "test_event_counts": {
+        "pass": 6,
+        "fail": 0,
+        "skip": 0
+      },
+      "failures": [],
+      "skipped": [],
+      "incomplete_roots": [],
+      "relevant_test_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/default_sqlite",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            4.27
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores/explicit_postgres",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            4.81
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            9.08
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores/default_sqlite",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            3.82
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores/explicit_postgres",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            3.82
+          ]
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores",
+          "pass": 1,
+          "fail": 0,
+          "skip": 0,
+          "elapsed": [
+            7.63
+          ]
+        }
+      ]
+    }
+  ]
+}

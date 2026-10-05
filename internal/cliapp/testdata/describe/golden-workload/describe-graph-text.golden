@@ -6,6 +6,7 @@ events:
   - scout.requested (fields: candidate_ids, query)
   - search.requested (fields: candidate_ids, query)
 root primary entity: search_batch
+root constructor: (no arguments)
 flows:
   - candidate (template)
     events:
@@ -14,11 +15,13 @@ flows:
       - candidate.work.requested (fields: batch_id, candidate_id)
     primary entity: candidate_analysis
     instance: field=candidate_id identity=run + flow + instance_key
+    constructor: candidate.requested key=candidate_id supplied=[]
   - scout (static)
     events:
       - scout.completed (fields: batch_id, candidate_ids)
       - scout.work.requested (fields: candidate_ids, query)
     primary entity: scout_task
+    constructor: (no arguments)
     singleton coordinator: primary_entity=scout_task contained_fields=1
 routing topology: routing-topology/v1
   source authority: projection_only_existing_contract_owners
@@ -77,9 +80,11 @@ stage graph:
       - collecting -> collecting (handler.advances_to Lg.c2NvdXQtY29sbGVjdG9y on scout.completed)
       - collecting -> complete (handler.join.on_complete Lg.Y2FuZGlkYXRlLWNvbGxlY3Rvcg on candidate.completed)
       - collecting -> failed (handler.join.on_deadline Lg.Y2FuZGlkYXRlLWNvbGxlY3Rvcg on platform.join_timeout after 2m timer collecting)
+      - collecting -> scouting (handler.advances_to Lg.c2VhcmNoLWludGFrZQ on search.requested)
       - pending -> collecting (handler.advances_to Lg.c2NvdXQtY29sbGVjdG9y on scout.completed)
       - pending -> scouting (handler.advances_to Lg.c2VhcmNoLWludGFrZQ on search.requested)
       - scouting -> collecting (handler.advances_to Lg.c2NvdXQtY29sbGVjdG9y on scout.completed)
+      - scouting -> scouting (handler.advances_to Lg.c2VhcmNoLWludGFrZQ on search.requested)
     joins:
       - collecting stage collecting members state.candidate_ids by payload.candidate_id output payload.summary deadline 2m from stage_entry (candidate-collector on candidate.completed)
     fan_out:
@@ -100,6 +105,7 @@ stage graph:
       - active
       - complete [terminal]
     edges:
+      - active -> active (handler.advances_to c2NvdXQ.c2NvdXQtaW50YWtl on scout.requested)
       - active -> complete (handler.advances_to c2NvdXQ.c2NvdXQtY29tcGxldGlvbg on scout.completed)
       - pending -> active (handler.advances_to c2NvdXQ.c2NvdXQtaW50YWtl on scout.requested)
       - pending -> complete (handler.advances_to c2NvdXQ.c2NvdXQtY29tcGxldGlvbg on scout.completed)

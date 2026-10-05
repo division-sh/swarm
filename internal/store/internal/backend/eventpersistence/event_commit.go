@@ -278,7 +278,7 @@ func commitPublication(
 	if !acknowledged {
 		return runtimebus.CommittedPublication{}, outcome.Err()
 	}
-	result.Acknowledged = true
+	result = result.WithCommitAcknowledgment()
 	if err := result.Validate(); err != nil {
 		return result, errors.Join(outcome.Err(), fmt.Errorf("validate committed publication: %w", err))
 	}
@@ -439,6 +439,7 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 		return result, outcome.Err()
 	}
 	result.Acknowledged = true
+	result.Publication = result.Publication.WithCommitAcknowledgment()
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
@@ -536,6 +537,7 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 		return result, outcome.Err()
 	}
 	result.Acknowledged = true
+	result.Publication = result.Publication.WithCommitAcknowledgment()
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 

@@ -12,6 +12,15 @@ import (
 )
 
 func TestDynamicFlowLegacyExecutionAuthorityAPIsAbsent(t *testing.T) {
+	retiredConstructors := map[string]bool{
+		"MaterializeInitialEntry": true, "CommitWorkflowInitialMaterialization": true,
+		"commitWorkflowInitialMaterialization": true, "WorkflowInitialMaterializationResult": true,
+		"WorkflowInitialMaterializationUnknown": true, "WorkflowInitialMaterializationCreated": true,
+		"WorkflowInitialMaterializationAlreadyExists": true, "WorkflowInitialMaterializationCommand": true,
+		"WorkflowInitialMaterializationRecord": true, "CommittedWorkflowInitialMaterialization": true,
+		"WorkflowInitialMaterializationCommitOwner": true, "workflowInitialMaterializationRecord": true,
+		"newWorkflowInitialMaterializationProjection": true, "initialCommits": true,
+	}
 	forbidden := map[string]bool{
 		"dynamicFlowRuntimeReadinessStillEligible": true,
 		"MarkDynamicFlowRuntimeTopologyReady":      true,
@@ -21,14 +30,22 @@ func TestDynamicFlowLegacyExecutionAuthorityAPIsAbsent(t *testing.T) {
 		"AddFlowInstanceRouteContext":              true,
 		"RemoveFlowInstanceRouteContext":           true,
 	}
+	for name := range retiredConstructors {
+		forbidden[name] = true
+	}
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
-	for _, dir := range []string{"internal/runtime", "internal/store"} {
+	for _, dir := range []string{"internal/runtime", "internal/store", "internal/testutil"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
-			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") {
 				return nil
+			}
+			fileForbidden := forbidden
+			isTest := strings.HasSuffix(path, "_test.go")
+			if isTest {
+				fileForbidden = retiredConstructors
 			}
 			parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
 			if err != nil {
@@ -38,14 +55,28 @@ func TestDynamicFlowLegacyExecutionAuthorityAPIsAbsent(t *testing.T) {
 				switch declaration := node.(type) {
 				case *ast.FuncDecl:
 					name := declaration.Name.Name
-					if forbidden[name] || (eventBusMethod(declaration) && (name == "AddFlowInstanceRoute" || name == "RemoveFlowInstanceRoute")) {
+					if fileForbidden[name] || (!isTest && eventBusMethod(declaration) && (name == "AddFlowInstanceRoute" || name == "RemoveFlowInstanceRoute")) {
 						t.Errorf("retired flow execution authority %s reintroduced in %s", name, path)
 					}
 				case *ast.Field:
 					for _, name := range declaration.Names {
-						if forbidden[name.Name] {
+						if fileForbidden[name.Name] {
 							t.Errorf("retired flow execution authority %s reintroduced in %s", name.Name, path)
 						}
+					}
+				case *ast.TypeSpec:
+					if fileForbidden[declaration.Name.Name] {
+						t.Errorf("retired flow execution authority %s reintroduced in %s", declaration.Name.Name, path)
+					}
+				case *ast.ValueSpec:
+					for _, name := range declaration.Names {
+						if fileForbidden[name.Name] {
+							t.Errorf("retired flow execution authority %s reintroduced in %s", name.Name, path)
+						}
+					}
+				case *ast.SelectorExpr:
+					if fileForbidden[declaration.Sel.Name] {
+						t.Errorf("retired flow execution authority %s consumed in %s", declaration.Sel.Name, path)
 					}
 				}
 				return true
@@ -109,31 +140,33 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		})
 	}
 	requireStaticReadinessCalls(t, calls, "reconcileDynamicFlowRuntimeReadiness", map[string]int{
-		"flow_runtime_readiness.go": 1,
+		"flow_readiness_startup.go": 1,
 	})
 	requireStaticReadinessCalls(t, calls, "reconcileDynamicFlowRuntimeReadinessPlan", map[string]int{
-		"flow_activation.go":        1,
-		"flow_runtime_readiness.go": 1,
+		"flow_readiness_plan.go": 1,
 	})
 	requireStaticReadinessCalls(t, calls, "dynamicFlowRuntimeReadinessSource", map[string]int{
-		"flow_activation.go":        3, // Includes process-only standing preparation before executable publication.
-		"flow_runtime_readiness.go": 9,
-		"runtime.go":                1,
+		"flow_activation.go":          3, // Includes process-only standing preparation before executable publication.
+		"flow_readiness_admission.go": 4,
+		"flow_readiness_plan.go":      2,
+		"flow_readiness_startup.go":   4,
+		"runtime.go":                  1,
 	})
 	requireStaticReadinessCalls(t, calls, "dynamicFlowRuntimeReadinessSourceCoordinate", map[string]int{
-		"flow_activation.go":        1,
-		"flow_runtime_readiness.go": 1,
+		"flow_activation.go": 1,
 	})
 	requireStaticReadinessCalls(t, calls, "validateDynamicFlowRuntimeReadinessCallbackSource", map[string]int{
-		"flow_runtime_readiness.go": 7,
+		"flow_readiness_admission.go": 3,
+		"flow_readiness_startup.go":   3,
+		"flow_runtime_readiness.go":   1,
 	})
 	requireStaticReadinessCalls(t, calls, "registerExecutableAgentLifecycle", map[string]int{
 		"agent_manager.go": 2,
 	})
 	requireStaticReadinessCalls(t, calls, "ensureExecutableAgentLifecycle", map[string]int{
-		"agent_manager.go":          1,
-		"flow_runtime_readiness.go": 2,
-		"static_topology.go":        3,
+		"agent_manager.go":             1,
+		"flow_attachment_resources.go": 2,
+		"static_topology.go":           1,
 	})
 	requireStaticReadinessCalls(t, calls, "registerExecutionWithTopology", map[string]int{
 		"agent_manager.go":         1,
@@ -142,8 +175,14 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	requireStaticReadinessCalls(t, calls, "registerExecution", map[string]int{
 		"agent_manager.go": 1,
 	})
+	requireStaticReadinessCalls(t, calls, "LoadDynamicFlowRuntimeReadiness", map[string]int{
+		"flow_attachment_execution.go": 1,
+		"flow_readiness_admission.go":  2,
+		"flow_readiness_plan.go":       1,
+		"flow_readiness_startup.go":    1,
+		"flow_runtime_readiness.go":    1,
+	})
 	for _, ownerCall := range []string{
-		"LoadDynamicFlowRuntimeReadiness",
 		"MarkDynamicFlowRuntimeTopologyReady",
 		"CommitDynamicFlowRuntimeCreationOccurrence",
 	} {
@@ -161,6 +200,13 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	}
 	if got := calls["AddFlowInstanceRouteContext"]; len(got) != 0 {
 		t.Fatalf("legacy route publication consumers remain in manager: %#v", got)
+	}
+	body, err := os.ReadFile("flow_runtime_readiness.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Count(string(body), "\n"); lines >= 500 {
+		t.Fatalf("phase reconciler is %d lines; it must stay below 500", lines)
 	}
 }
 

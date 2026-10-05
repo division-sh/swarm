@@ -8,7 +8,6 @@ validator:
     g_validated: gate set when validation completes
   event_handlers:
     validate.start:
-      create_entity: true
       advances_to: done
       sets_gate: g_validated
       emit:

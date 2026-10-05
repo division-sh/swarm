@@ -121,7 +121,6 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		wantFrontier      []string
 		wantHistory       []string
 		wantHistoryEvents int
-		wantDynamic       []string
 		wantFrontierCodes []string
 		wantHistoryCodes  []string
 		wantRouteFacts    bool
@@ -137,7 +136,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true,
 			source:           runforkadmission.ContractFrontierTemplateConnectSourceForTest,
-			wantHistory:      []string{consumerNode}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
+			wantHistory:      []string{consumerNode}, wantHistoryEvents: 1,
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
 		{
@@ -146,7 +145,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			eventName:     "producer/inst-1/scan.requested",
 			sourceRoute:   events.RouteIdentity{FlowID: " producer ", FlowInstance: " /producer/inst-1/ ", EntityID: " 11111111-1111-4111-8111-111111111111 "},
 			source:        runforkadmission.ContractFrontierTemplateConnectSourceForTest,
-			wantHistory:   []string{consumerNode}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
+			wantHistory:   []string{consumerNode}, wantHistoryEvents: 1,
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
 		{
@@ -156,7 +155,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true, deliveryStatus: "completed",
 			source:      runforkadmission.ContractFrontierTemplateConnectSourceForTest,
-			wantHistory: []string{consumerNode}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
+			wantHistory: []string{consumerNode}, wantHistoryEvents: 1,
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
 		{
@@ -165,8 +164,8 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			eventName:        "producer/inst-1/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true, deliveryStatus: "pending",
-			source:       runforkadmission.ContractFrontierTemplateConnectSourceForTest,
-			wantFrontier: []string{consumerNode}, wantDynamic: []string{"producer/inst-1"},
+			source:            runforkadmission.ContractFrontierTemplateConnectSourceForTest,
+			wantFrontier:      []string{consumerNode},
 			wantFrontierCodes: []string{runfork.RunForkBlockerContractFrontierExecutionUnsupported},
 			wantHistoryCodes:  []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
@@ -286,8 +285,10 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 					t.Fatalf("selected route event = %#v, want fork point evidence-only disposition", event)
 				}
 			}
-			if strings.Join(history.DynamicFlowInstances, "\x00") != strings.Join(tc.wantDynamic, "\x00") {
-				t.Fatalf("dynamic instances = %v, want %v", history.DynamicFlowInstances, tc.wantDynamic)
+			// This matrix captures event/source-route facts, not construction.
+			// Neither the fork point nor a delivery path can invent a header.
+			if len(plan.Entities) != 0 || len(history.DynamicFlowInstances) != 0 {
+				t.Fatalf("event-only snapshot invented construction: entities=%+v dynamic=%v", plan.Entities, history.DynamicFlowInstances)
 			}
 			if got := blockerCodes(history.UnsupportedBlockers); strings.Join(got, "\x00") != strings.Join(tc.wantHistoryCodes, "\x00") {
 				t.Fatalf("history blocker codes = %v, want %v", got, tc.wantHistoryCodes)

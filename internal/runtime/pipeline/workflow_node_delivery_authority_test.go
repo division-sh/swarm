@@ -345,8 +345,8 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			})
 			configurePipelineTestDeliveryOwner(t, pc)
 
-			entityID := uuid.NewString()
 			runID := runtimecorrelation.RunIDFromContext(ctx)
+			entityID := runID
 			evt := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), events.EventType("source.evt"), "src", "", []byte(`{}`), 0,
 				runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC(),
@@ -480,7 +480,7 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 
 func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) events.Event {
 	t.Helper()
-	entityID := uuid.NewString()
+	entityID := testPipelineRunID
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("source.evt"),

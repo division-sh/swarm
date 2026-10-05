@@ -148,6 +148,7 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					seedWorkflowHeaderProjectionFixture(t, ctx, fixture.db, childRun, effect.EntityID, effect.FlowInstance, effect.FlowID, "default", "operating", string(raw), now)
 					if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state
 				(run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, entered_state_at, created_at, updated_at)
 				VALUES ($1,$2,$3,'default','operating','{}','{}',$4,$5,$5,$5)`, childRun, effect.EntityID, effect.FlowInstance, string(raw), now); err != nil {

@@ -1,0 +1,342 @@
+{
+  "source_head": "9427a3f92",
+  "production_source": "a609c1102",
+  "command": [
+    "go",
+    "run",
+    "./cmd/swarm-test",
+    "--",
+    "-json",
+    "-count=1",
+    "-run",
+    "^TestReadProofFactoringCompiledDescribe$",
+    "./internal/cliapp"
+  ],
+  "baseline": "issue-2496-C21-construction-source-master-0fa24140a",
+  "result": "PASS",
+  "package_seconds": 91.765,
+  "cells": 45,
+  "internal_repetitions_per_cell": 2,
+  "failures": [],
+  "skips": [],
+  "receipt": "/tmp/agent-e-2496-9427a3f92-describe.log",
+  "receipt_sha256": "7e1dd240f92660b725eb6e8836a52a351e86a5c39e1ab99b150874c0267d6726",
+  "results": [
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-text",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "action": "pass",
+      "elapsed": 0.31
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-json",
+      "stdout_sha256": "93e874ca56481a843ca8f9f1aa93e365e8dbf6c753519aa934980fb343b9f6b0",
+      "action": "pass",
+      "elapsed": 7.36
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-quiet",
+      "stdout_sha256": "eca9a9c76db7a4488e37e236e8467b4992e078a234075eee6e5274557f850118",
+      "action": "pass",
+      "elapsed": 9.3
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "action": "pass",
+      "elapsed": 7.54
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "93e874ca56481a843ca8f9f1aa93e365e8dbf6c753519aa934980fb343b9f6b0",
+      "action": "pass",
+      "elapsed": 9.28
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-no-color",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "action": "pass",
+      "elapsed": 7.77
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-text",
+      "stdout_sha256": "4e85f66b68b3428055ca54c5d1ff3146aeb08d4c1923d57b1efd64cb1b0c39f1",
+      "action": "pass",
+      "elapsed": 13.71
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-json",
+      "stdout_sha256": "cdd9f1199c913404f4c983cd6a88227df286be69db2028735ee6b91236fd89ee",
+      "action": "pass",
+      "elapsed": 2.74
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-quiet",
+      "stdout_sha256": "0b978d387a2f9408ea2af84988014b80e51acf3e53e239742206db0475919b0d",
+      "action": "pass",
+      "elapsed": 3.4
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-text",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "action": "pass",
+      "elapsed": 6.66
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-json",
+      "stdout_sha256": "635d999f95799de0f4b179655711c1241502a342495b2e26bea0a2c525dd28a3",
+      "action": "pass",
+      "elapsed": 8.74
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-quiet",
+      "stdout_sha256": "e0e08278e2acaf3e8638fe233c9da5a6aeddc1dff4ff5eab647578efb627945f",
+      "action": "pass",
+      "elapsed": 11.71
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "action": "pass",
+      "elapsed": 6.57
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "635d999f95799de0f4b179655711c1241502a342495b2e26bea0a2c525dd28a3",
+      "action": "pass",
+      "elapsed": 12.16
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-no-color",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "action": "pass",
+      "elapsed": 11.5
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-text",
+      "stdout_sha256": "68d31678f5be68a3ea45990ee04e35dcb077a4b1a49de9e73dc1beb6e3fbcd67",
+      "action": "pass",
+      "elapsed": 11.69
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-json",
+      "stdout_sha256": "638ec5e423f1f39f9c76c6b8b4d833402b5642eba3f21003a82de374a6b2eb67",
+      "action": "pass",
+      "elapsed": 12.55
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-quiet",
+      "stdout_sha256": "c6f4a60511ce8f17e6ae3c384537fb41f82c2f287d8eba09a43379fc2b83f561",
+      "action": "pass",
+      "elapsed": 12.21
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-text",
+      "stdout_sha256": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "action": "pass",
+      "elapsed": 7.32
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-json",
+      "stdout_sha256": "db53982d54c569123b299cfb539a75fa13b40d6cc66259c3077865b5c93fda04",
+      "action": "pass",
+      "elapsed": 15.6
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-quiet",
+      "stdout_sha256": "744111e5fccbae512336302c6b0baf0ef2eb159842070ea72e4f98ceac7a4837",
+      "action": "pass",
+      "elapsed": 11.85
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "e293ed51bb5790be27ffe0ba6fbd0b0809b509ae84867f4888df701611e36c86",
+      "action": "pass",
+      "elapsed": 11.98
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "5b160e6016fa9e2e5595ad2b0a9bb6db7487c86e5175446d5c1c73c0b7a9118c",
+      "action": "pass",
+      "elapsed": 7.26
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-no-color",
+      "stdout_sha256": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "action": "pass",
+      "elapsed": 4.2
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-text",
+      "stdout_sha256": "5be2d5444abf97675937143f5723b788a4aba5e01b124e8a5364053dacd5a0ff",
+      "action": "pass",
+      "elapsed": 11.76
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-json",
+      "stdout_sha256": "179e7404c4aed757ef09f9a8743dd90df016565639c5335ef6c0bb2e17225e32",
+      "action": "pass",
+      "elapsed": 20.46
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-quiet",
+      "stdout_sha256": "47f733bd1d9d366934c2a518160cbba27df3b47068252025bd75df338d9b01b3",
+      "action": "pass",
+      "elapsed": 16.64
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-text",
+      "stdout_sha256": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "action": "pass",
+      "elapsed": 16.35
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-json",
+      "stdout_sha256": "c9f4ac558504780b106125efde971b2ae9c892ccdcbbf725cccb82669b2c8f44",
+      "action": "pass",
+      "elapsed": 16.02
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-quiet",
+      "stdout_sha256": "ec7cb0781f201870ae6f6b76e14a9936c687b8fbe6e8f0d9d327dc918cc2bb31",
+      "action": "pass",
+      "elapsed": 26.5
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "126e635b670c0a83830a0b31bbff5961f7d7e4196e03e0055dfd3ec1e681f7c5",
+      "action": "pass",
+      "elapsed": 16.73
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "3bf9fadf4e4de4c912a3605608812463c594f2ab7e046e48cdc9f9685d966b67",
+      "action": "pass",
+      "elapsed": 19.05
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-no-color",
+      "stdout_sha256": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "action": "pass",
+      "elapsed": 21.62
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-text",
+      "stdout_sha256": "bfead8a7c6742f825ae536c1ee1089df440966f920efed6a344c60da7e96ac0a",
+      "action": "pass",
+      "elapsed": 24.23
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-json",
+      "stdout_sha256": "6993774157618225d8ada629158d8d5501e0f6cf4bba8c2d8876441b3b9ae6ac",
+      "action": "pass",
+      "elapsed": 1.38
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-quiet",
+      "stdout_sha256": "995e660da9c0a68dead683d6cb3319333555e168e31d416e22bb9a0d3200b2ee",
+      "action": "pass",
+      "elapsed": 27.01
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-text",
+      "stdout_sha256": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620",
+      "action": "pass",
+      "elapsed": 27.92
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-json",
+      "stdout_sha256": "c9fce50c44af3072276db3b34b36d069722270d21575548caa83354f63933e6b",
+      "action": "pass",
+      "elapsed": 26.6
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-quiet",
+      "stdout_sha256": "1fdddbc98da8f20c1e269ce9af09276b0c9390143c8977a9caa940b7ffcb9688",
+      "action": "pass",
+      "elapsed": 23.08
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "7c82c5b9b78c78b523d873a40399ced58a8bd87df4cf8ba06d6cfdc19aec624d",
+      "action": "pass",
+      "elapsed": 20.94
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-json",
+      "stdout_sha256": "89d413c025b8e2c542103dc956b83b5b65583bfdaee8299a21887719786b89f3",
+      "action": "pass",
+      "elapsed": 17.68
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-no-color",
+      "stdout_sha256": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620",
+      "action": "pass",
+      "elapsed": 15.62
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-text",
+      "stdout_sha256": "1b5fc30037ca171c7d94ff4c8719020e836bc3a9738badf6d2730a3ecbe13b1b",
+      "action": "pass",
+      "elapsed": 12.31
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-json",
+      "stdout_sha256": "20c679a9e1947d5ea64d2735281ab90ad7905a3188ea51a693b6aaf2c81ba7dc",
+      "action": "pass",
+      "elapsed": 9.97
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-quiet",
+      "stdout_sha256": "9511636c853ebd7b3f45207c6de487346217f313816b7d7bceb617bca2b70289",
+      "action": "pass",
+      "elapsed": 6.86
+    }
+  ],
+  "boundary": "Accepted compiled-describe regression only. Earlier default and catalog receipts remain RED; C22 and contention disposition still pending. No current-master rebase or composed qualification claimed."
+}

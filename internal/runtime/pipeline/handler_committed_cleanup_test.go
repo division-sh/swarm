@@ -35,7 +35,7 @@ func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T)
 			pc.workflowStore = store
 			owner := configurePipelineTestDeliveryOwner(t, pc)
 			runID := correlation.RunIDFromContext(ctx)
-			entityID := uuid.NewString()
+			entityID := runID
 			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
@@ -102,7 +102,8 @@ func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *
 			})
 			pc.workflowStore = store
 			owner := configurePipelineTestDeliveryOwner(t, pc)
-			runID, entityID := correlation.RunIDFromContext(ctx), uuid.NewString()
+			runID := correlation.RunIDFromContext(ctx)
+			entityID := runID
 			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {

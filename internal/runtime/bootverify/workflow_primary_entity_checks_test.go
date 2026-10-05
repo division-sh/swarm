@@ -71,7 +71,7 @@ name: scoring
 }
 
 func TestRun_RequiresPrimaryEntityForActualOperation(t *testing.T) {
-	for _, handler := range []string{"create_entity: true", "advances_to: done", "data_accumulation: {writes: [{target_field: entity.count, value: payload.count}]}"} {
+	for _, handler := range []string{"advances_to: done", "data_accumulation: {writes: [{target_field: entity.count, value: payload.count}]}"} {
 		t.Run(handler, func(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: operation-demand\n")

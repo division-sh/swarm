@@ -134,19 +134,19 @@ func (eb *EventBus) prepareJoinRouteAdmission(ctx context.Context, runID, event 
 }
 
 func (eb *EventBus) loadJoinAdmissionInstance(ctx context.Context, runID string, target events.RouteIdentity) (*pipeline.WorkflowInstance, error) {
-	reader, canRead := eb.store.(pipeline.WorkflowEntityStatePersistenceReader)
+	reader, canRead := eb.store.(pipeline.WorkflowTargetPersistenceReader)
 	if !canRead {
-		return nil, fmt.Errorf("selected store lacks exact join receiver state reader")
+		return nil, fmt.Errorf("selected store lacks complete join receiver persistence reader")
 	}
 	owner, err := pipeline.WorkflowJoinAdmissionOwner(eb.semanticSource, runID, target)
 	if err != nil {
 		return nil, err
 	}
-	record, found, err := reader.LoadWorkflowEntityState(ctx, owner, identity.EntityID(target.EntityID))
-	if err != nil || !found {
+	record, err := reader.LoadWorkflowTargetPersistence(ctx, owner, identity.EntityID(target.EntityID))
+	if err != nil || record.Presence == pipeline.WorkflowTargetPersistenceAbsent {
 		return nil, err
 	}
-	item, err := pipeline.DecodeWorkflowEntityStatePersistenceRecord(record, owner.Route, target.FlowID, "", "standard")
+	item, err := record.DecodeComplete(owner.Route, identity.EntityID(target.EntityID))
 	return &item, err
 }
 

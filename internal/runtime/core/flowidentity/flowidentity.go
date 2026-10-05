@@ -134,10 +134,21 @@ func (i RunScopedFlowInstance) Key() string {
 	return i.RunID + "\x00" + i.Route.InstancePath
 }
 
+func (i RunScopedFlowInstance) MatchesAgentRoute(agent runtimeagentidentity.Identity) bool {
+	if i.Validate() != nil || agent.Validate() != nil {
+		return false
+	}
+	route, err := i.Route.AgentIdentityRoute()
+	return err == nil && agent.RunID == i.RunID && agent.Route == route
+}
+
 func (r Route) AgentIdentityRoute() (runtimeagentidentity.Route, error) {
 	r = StoredRoute(r.ScopeKey, r.InstanceID, r.InstancePath)
 	if !r.Valid() {
 		return runtimeagentidentity.Route{}, fmt.Errorf("flow route is incomplete")
+	}
+	if r.ScopeKey == "." {
+		return runtimeagentidentity.RootRoute(), nil
 	}
 	return runtimeagentidentity.PresentRoute(r.ScopeKey, r.InstanceID, r.InstancePath)
 }
@@ -234,6 +245,55 @@ func StandingServiceID(flowPath string) string {
 
 func StandingForService(source semanticview.Source, flowID, serviceID string) Instance {
 	return Derive(source, strings.TrimSpace(flowID), strings.TrimSpace(serviceID))
+}
+
+// Service identity is descriptive; only the selected generation supplies the
+// root's concrete construction coordinate. Keyless descendants keep their paths.
+func StandingForGeneration(source semanticview.Source, flowID, runID string) (Instance, error) {
+	if source == nil || strings.TrimSpace(flowID) != flowID {
+		return Instance{}, fmt.Errorf("standing generation requires its exact admitted flow")
+	}
+	schema, found := source.FlowSchemaByID(flowID)
+	if !found || !schema.Instance.Empty() {
+		return Instance{}, fmt.Errorf("standing generation flow %s is absent from its admitted source", flowID)
+	}
+	instance := Derive(source, flowID, runID)
+	instanceID, entityID, err := StandingGenerationCoordinates(flowID, instance.InstanceID, instance.EntityID, runID)
+	if err != nil {
+		return Instance{}, err
+	}
+	if flowID == semanticview.RootExecutionFlowID(source) {
+		return Stored(source, flowID, runID, instanceID, entityID, ""), nil
+	}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		return Instance{}, fmt.Errorf("standing generation requires its admitted root tree")
+	}
+	view, found := bundle.FlowViewByID(flowID)
+	if !found || view.Parent == nil {
+		return Instance{}, fmt.Errorf("standing generation flow %s has no admitted parent", flowID)
+	}
+	parent, err := StandingForGeneration(source, view.Parent.Paths.FlowPath, runID)
+	if err != nil {
+		return Instance{}, err
+	}
+	return KeylessChild(source, parent, flowID)
+}
+
+// The canonical root flow is '.', never an inferred UUID-shaped path. Its
+// execution coordinate belongs to the selected run, not the service declaration.
+func StandingGenerationCoordinates(flowID, instanceID, entityID, runID string) (string, string, error) {
+	run, err := uuid.Parse(runID)
+	if err != nil || run == uuid.Nil || run.String() != runID {
+		return "", "", fmt.Errorf("standing generation requires its exact selected run UUID")
+	}
+	if flowID == "." {
+		return runID, EntityID(runID), nil
+	}
+	if flowID == "" || strings.TrimSpace(flowID) != flowID || instanceID == "" || entityID == "" {
+		return "", "", fmt.Errorf("standing generation requires its exact declared coordinate")
+	}
+	return instanceID, entityID, nil
 }
 
 func StandingGenerationRunID(serviceID string, generation int64) string {
@@ -342,7 +402,7 @@ func Stored(
 		scopeKey = normalizeRef(ScopeKey(source, workflowName))
 		instancePath = scopeKey
 	} else {
-		scopeKey = normalizeRef(storedScopeKey(source, workflowName, instancePath))
+		scopeKey = normalizeRef(ScopeKey(source, workflowName))
 	}
 	if strings.TrimSpace(instanceID) == "" && materializedPath != "" {
 		instanceID = LogicalInstanceID(materializedPath)
@@ -424,16 +484,4 @@ func OwnedByScope(ownerScope, targetInstancePath string) bool {
 		return true
 	}
 	return ownerScope == targetScope
-}
-
-func storedScopeKey(source semanticview.Source, workflowName, instancePath string) string {
-	instancePath = normalizeRef(instancePath)
-	if instancePath != "" {
-		expectedScope := normalizeRef(ScopeKey(source, workflowName))
-		if expectedScope != "" && (instancePath == expectedScope || strings.HasPrefix(instancePath, expectedScope+"/")) {
-			return expectedScope
-		}
-		return SemanticScope(instancePath)
-	}
-	return normalizeRef(ScopeKey(source, workflowName))
 }

@@ -24,7 +24,9 @@ import (
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/google/uuid"
 )
 
@@ -1219,9 +1221,9 @@ func (s *DecisionSQLiteOwner) ExpireDecisionCardInputDrafts(ctx context.Context,
 
 func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	mutationCtx := runtimecorrelation.WithRunID(ctx, runID)
-	query := `SELECT entity_id, accumulator FROM entity_state WHERE run_id = ? ORDER BY entity_id`
+	query := `SELECT entity_id, instance_path, flow_template, revision, accumulator FROM flow_instances WHERE run_id = ? ORDER BY entity_id`
 	if postgres {
-		query = `SELECT entity_id::text, accumulator FROM entity_state WHERE run_id = $1::uuid ORDER BY entity_id FOR UPDATE`
+		query = `SELECT entity_id::text, instance_path, flow_template, revision, accumulator FROM flow_instances WHERE run_id = $1::uuid ORDER BY entity_id FOR UPDATE`
 	}
 	rows, err := tx.QueryContext(ctx, query, runID)
 	if err != nil {
@@ -1229,14 +1231,17 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 	}
 	type update struct {
 		entityID    string
+		instance    string
+		revision    int64
 		before      map[string]any
 		accumulator map[string]any
 	}
 	updates := []update{}
 	for rows.Next() {
-		var entityID string
+		var entityID, instance, flowTemplate string
+		var revision int64
 		var raw any
-		if err := rows.Scan(&entityID, &raw); err != nil {
+		if err := rows.Scan(&entityID, &instance, &flowTemplate, &revision, &raw); err != nil {
 			rows.Close()
 			return err
 		}
@@ -1257,6 +1262,10 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 		}
 		changed := false
 		for _, activation := range activations {
+			if activation.FlowID != flowTemplate {
+				rows.Close()
+				return fmt.Errorf("run gate activation disagrees with its constructed header owner")
+			}
 			if activation.Status == gateruntime.StatusDecisionCommitted && !includeCommitted {
 				rows.Close()
 				return fmt.Errorf("run %s cannot terminate while decision card %s has a committed verdict awaiting its frozen route", runID, activation.CardID)
@@ -1270,7 +1279,7 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 			}
 		}
 		if changed {
-			updates = append(updates, update{entityID: strings.TrimSpace(entityID), before: accumulator, accumulator: carrier.PersistedStateBuckets()})
+			updates = append(updates, update{entityID: strings.TrimSpace(entityID), instance: instance, revision: revision, before: accumulator, accumulator: carrier.PersistedStateBuckets()})
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -1293,14 +1302,21 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 	}
 	mutationCtx = runtimecorrelation.WithSourceArtifactFact(mutationCtx, fact)
 	for _, item := range updates {
+		header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, runID, item.entityID, item.instance)
+		if err != nil {
+			return fmt.Errorf("validate run gate activation header: %w", err)
+		}
+		if !found || header.Revision != item.revision {
+			return fmt.Errorf("run gate activation header changed before supersession")
+		}
 		raw, err := json.Marshal(item.accumulator)
 		if err != nil {
 			return err
 		}
-		query := `UPDATE entity_state SET accumulator = ?, updated_at = ? WHERE run_id = ? AND entity_id = ?`
-		args := []any{string(raw), now, runID, item.entityID}
+		query := `UPDATE flow_instances SET accumulator = ?, revision = revision + 1, updated_at = ? WHERE run_id = ? AND entity_id = ? AND instance_path = ? AND revision = ?`
+		args := []any{string(raw), now, runID, item.entityID, item.instance, item.revision}
 		if postgres {
-			query = `UPDATE entity_state SET accumulator = $1::jsonb, updated_at = $2 WHERE run_id = $3::uuid AND entity_id = $4::uuid`
+			query = `UPDATE flow_instances SET accumulator = $1::jsonb, revision = revision + 1, updated_at = $2 WHERE run_id = $3::uuid AND entity_id = $4::uuid AND instance_path = $5 AND revision = $6`
 		}
 		result, err := tx.ExecContext(ctx, query, args...)
 		if err != nil {
@@ -1308,6 +1324,9 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 		}
 		if affected, err := result.RowsAffected(); err != nil || affected != 1 {
 			return fmt.Errorf("persist run gate activation supersession for entity %s affected %d rows: %w", item.entityID, affected, err)
+		}
+		if err := attempt.AddFact(runID, privaterunforkrevision.FamilyEntityMetadata, item.entityID); err != nil {
+			return fmt.Errorf("record superseded gate header metadata: %w", err)
 		}
 		writer := runtimemutationlog.Writer{Type: "platform", ID: "decision_card", HandlerStep: "run_supersession"}
 		before := runtimemutationlog.EntityStateProjection{Accumulator: item.before}

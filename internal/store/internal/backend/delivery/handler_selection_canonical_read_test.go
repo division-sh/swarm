@@ -25,8 +25,8 @@ import (
 type selectionSQLProbe struct {
 	mu               sync.Mutex
 	selects, inserts int
-	beforeInsert     func()
 	commitFailure    func(error)
+	rollbackComplete func(error)
 }
 
 func (p *selectionSQLProbe) observe(query string) {
@@ -35,18 +35,13 @@ func (p *selectionSQLProbe) observe(query string) {
 		return
 	}
 	p.mu.Lock()
-	var hook func()
 	if strings.HasPrefix(q, "SELECT ") {
 		p.selects++
 	}
 	if strings.HasPrefix(q, "INSERT ") {
 		p.inserts++
-		hook = p.beforeInsert
 	}
 	p.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
 }
 
 func (p *selectionSQLProbe) counts() (int, int) {
@@ -99,6 +94,17 @@ func (c *selectionConn) BeginTx(ctx context.Context, opts driver.TxOptions) (dri
 type selectionTx struct {
 	driver.Tx
 	probe *selectionSQLProbe
+}
+
+func (tx *selectionTx) Rollback() error {
+	err := tx.Tx.Rollback()
+	tx.probe.mu.Lock()
+	hook := tx.probe.rollbackComplete
+	tx.probe.mu.Unlock()
+	if hook != nil {
+		hook(err)
+	}
+	return err
 }
 
 func (tx *selectionTx) Commit() error {
@@ -304,43 +310,147 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 				if err := a.persistHandlerRuleSelectionSQL(ctx, tx, id, fact); err != nil {
 					t.Fatal(err)
 				}
-				entered := make(chan struct{})
-				var once sync.Once
-				probe.mu.Lock()
-				probe.beforeInsert = func() { once.Do(func() { close(entered) }) }
-				probe.mu.Unlock()
 				other := fact
 				if !equal {
 					other = selectionFact(t, "second")
 				}
 				done := make(chan error, 1)
+				released := make(chan struct{})
+				busy := make(chan error, 1)
+				type rollbackEvidence struct{ rollback, heldCommit error }
+				rolledBack := make(chan rollbackEvidence, 1)
+				pid := make(chan int, 1)
+				var releaseOnce, rollbackOnce sync.Once
+				joined := false
+				defer func() {
+					cancel()
+					_ = tx.Rollback()
+					releaseOnce.Do(func() { close(released) })
+					if !joined {
+						<-done
+					}
+				}()
+				if backend == "sqlite" {
+					probe.mu.Lock()
+					probe.rollbackComplete = func(err error) {
+						rollbackOnce.Do(func() {
+							evidence := rollbackEvidence{rollback: err}
+							// Release the native blocker after rollback, before the
+							// retry owner starts its budget, not on observer scheduling.
+							if err == nil {
+								evidence.heldCommit = tx.Commit()
+								if evidence.heldCommit == nil {
+									releaseOnce.Do(func() { close(released) })
+								}
+							}
+							rolledBack <- evidence
+						})
+					}
+					probe.mu.Unlock()
+				}
+				attempts := 0
+				type attemptSQL struct{ selects, inserts int }
+				var calls []attemptSQL
 				go func() {
-					tx, err := db.BeginTx(ctx, nil)
+					if backend == "sqlite" {
+						owner, err := sqlitebackend.New(db)
+						if err != nil {
+							done <- err
+							return
+						}
+						done <- owner.RunTransaction(ctx, "handler selection insert contention", func(ctx context.Context, contender *sql.Tx) error {
+							attempts++
+							if attempts > 1 {
+								select {
+								case <-released:
+								case <-ctx.Done():
+									return ctx.Err()
+								}
+							}
+							beforeSelects, beforeInserts := probe.counts()
+							err := a.persistHandlerRuleSelectionSQL(ctx, contender, id, other)
+							afterSelects, afterInserts := probe.counts()
+							calls = append(calls, attemptSQL{afterSelects - beforeSelects, afterInserts - beforeInserts})
+							if attempts == 1 {
+								busy <- err
+							}
+							return err
+						})
+						return
+					}
+					contender, err := db.BeginTx(ctx, nil)
 					if err != nil {
 						done <- err
 						return
 					}
-					defer tx.Rollback()
-					err = a.persistHandlerRuleSelectionSQL(ctx, tx, id, other)
+					defer contender.Rollback()
+					var backendPID int
+					if err := contender.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&backendPID); err != nil {
+						done <- err
+						return
+					}
+					pid <- backendPID
+					attempts++
+					beforeSelects, beforeInserts := probe.counts()
+					err = a.persistHandlerRuleSelectionSQL(ctx, contender, id, other)
+					afterSelects, afterInserts := probe.counts()
+					calls = append(calls, attemptSQL{afterSelects - beforeSelects, afterInserts - beforeInserts})
 					if err == nil {
-						err = tx.Commit()
+						err = contender.Commit()
 					}
 					done <- err
 				}()
-				select {
-				case <-entered:
-				case <-ctx.Done():
-					t.Fatal(ctx.Err())
+				if backend == "sqlite" {
+					// The evidence observer must not be needed for native retry progress.
+					select {
+					case err = <-done:
+						joined = true
+					case <-ctx.Done():
+						t.Fatal(ctx.Err())
+					}
+					select {
+					case err := <-busy:
+						var native *sqlite.Error
+						if !errors.As(err, &native) || native.Code()&255 != 5 {
+							t.Fatalf("held writer did not produce native SQLITE_BUSY: %v", err)
+						}
+					case <-ctx.Done():
+						t.Fatal(ctx.Err())
+					}
+					select {
+					case evidence := <-rolledBack:
+						if evidence.rollback != nil || evidence.heldCommit != nil {
+							t.Fatalf("native rollback/held-writer commit: %+v", evidence)
+						}
+					case <-ctx.Done():
+						t.Fatal(ctx.Err())
+					}
+				} else {
+					var backendPID int
+					select {
+					case backendPID = <-pid:
+					case <-ctx.Done():
+						t.Fatal(ctx.Err())
+					}
+					// Observe native PostgreSQL lock waiting, not a pre-INSERT callback.
+					for {
+						var blocked bool
+						if err := db.QueryRowContext(ctx, `SELECT cardinality(pg_blocking_pids($1)) > 0`, backendPID).Scan(&blocked); err != nil {
+							t.Fatal(err)
+						}
+						if blocked {
+							break
+						}
+					}
+					if err := tx.Commit(); err != nil {
+						t.Fatal(err)
+					}
+					releaseOnce.Do(func() { close(released) })
 				}
-				select {
-				case err := <-done:
-					t.Fatalf("contender escaped uncommitted first insert: %v", err)
-				case <-time.After(20 * time.Millisecond):
+				if !joined {
+					err = <-done
+					joined = true
 				}
-				if err := tx.Commit(); err != nil {
-					t.Fatal(err)
-				}
-				err = <-done
 				if equal {
 					if err != nil {
 						t.Fatal(err)
@@ -351,12 +461,100 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 					}
 				}
 				selects, inserts := probe.counts()
-				wantSelects := 2
-				if selects != wantSelects || inserts != 2 {
+				wantAttempts, wantInserts := 1, 2
+				if backend == "sqlite" {
+					wantAttempts, wantInserts = 2, 3
+					if len(calls) != 2 || calls[0] != (attemptSQL{0, 1}) || calls[1] != (attemptSQL{1, 1}) {
+						t.Fatalf("native contention per-attempt SQL: %+v", calls)
+					}
+				} else if len(calls) != 1 || calls[0] != (attemptSQL{1, 1}) {
+					t.Fatalf("native PostgreSQL contention SQL: %+v", calls)
+				}
+				if attempts != wantAttempts || selects != 2 || inserts != wantInserts {
 					t.Fatalf("concurrent SQL selects=%d inserts=%d", selects, inserts)
+				}
+				readTx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer readTx.Rollback()
+				stored, err := a.handlerRuleSelection(ctx, readTx, id)
+				if err != nil || stored != fact {
+					t.Fatalf("canonical selection readback = %+v, %v", stored, err)
+				}
+				var count int
+				if err := readTx.QueryRowContext(ctx, `SELECT count(*) FROM event_delivery_handler_rule_selections`).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("committed selection count=%d err=%v", count, err)
+				}
+				if reads, writes := probe.counts(); reads != 4 || writes != wantInserts {
+					t.Fatalf("complete readback SQL selects=%d inserts=%d", reads, writes)
 				}
 			})
 		}
+	}
+}
+
+func TestHandlerSelectionCanonicalReadSQLiteHeldRawWriter(t *testing.T) {
+	db, a, probe := selectionWriterFixture(t, "sqlite")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, fact := uuid.NewString(), selectionFact(t, "held-first")
+	first, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback()
+	if err := a.persistHandlerRuleSelectionSQL(ctx, first, id, fact); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	joined := false
+	defer func() {
+		cancel()
+		_ = first.Rollback()
+		if !joined {
+			<-done
+		}
+	}()
+	go func() {
+		contender, err := db.BeginTx(ctx, nil)
+		if err == nil {
+			err = a.persistHandlerRuleSelectionSQL(ctx, contender, id, fact)
+			err = errors.Join(err, contender.Rollback())
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		joined = true
+		var native *sqlite.Error
+		if !errors.As(err, &native) || native.Code()&255 != 5 {
+			t.Fatalf("held raw writer did not cause native insertion contention: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if reads, writes := probe.counts(); reads != 1 || writes != 2 {
+		t.Fatalf("held raw writer SQL selects=%d inserts=%d", reads, writes)
+	}
+	if err := first.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	read, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer read.Rollback()
+	stored, err := a.handlerRuleSelection(ctx, read, id)
+	if err != nil || !stored.Equal(fact) {
+		t.Fatalf("held writer canonical readback=%+v err=%v", stored, err)
+	}
+	var count int
+	if err := read.QueryRowContext(ctx, `SELECT count(*) FROM event_delivery_handler_rule_selections`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("held writer committed count=%d err=%v", count, err)
+	}
+	if reads, writes := probe.counts(); reads != 3 || writes != 2 {
+		t.Fatalf("held writer complete SQL selects=%d inserts=%d", reads, writes)
 	}
 }
 

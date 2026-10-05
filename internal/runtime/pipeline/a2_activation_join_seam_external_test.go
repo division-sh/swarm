@@ -28,24 +28,36 @@ import (
 )
 
 // Exercise the existing E carrier through the real manager planner, activation
-// transaction and readiness finalizer. This is not eager recursive construction.
+// transaction and readiness finalizer, including recursively constructed sources.
 func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) gateRecoveryStoreCase
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
 		for _, scenario := range []struct {
-			name  string
-			count int
-			fault bool
-		}{{"arrival", 1, false}, {"zero", 0, false}, {"rollback_retry", 1, true}, {"restart_before_arrival", 1, false}} {
+			name       string
+			count      int
+			fault      bool
+			descendant string
+		}{{"arrival", 1, false, ""}, {"zero", 0, false, ""}, {"rollback_retry", 1, true, ""}, {"restart_before_arrival", 1, false, ""},
+			{"nested_arrival", 1, false, "orders/child"}, {"nested_zero", 0, false, "orders/child/leaf"},
+			{"nested_rollback_retry", 1, true, "orders/child/leaf"}, {"nested_restart_before_arrival", 1, false, "orders/child/leaf"},
+			{"nested_two_parents", 1, false, "orders/child/leaf"}, {"nested_two_parents_restart_before_arrival", 1, false, "orders/child/leaf"}} {
 			t.Run(backend.name+"/"+scenario.name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
 				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, a2ActivationJoinFiles(scenario.count)))
-				node := externalPipelineSourceNode(t, source, "orders", "collector")
+				files := a2ActivationJoinFiles(scenario.count)
+				if scenario.descendant != "" {
+					files = a2ConstructedDescendantJoinFiles(scenario.count, scenario.descendant)
+				}
+				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
+				targetFlow := "orders"
+				if scenario.descendant != "" {
+					targetFlow = scenario.descendant
+				}
+				node := externalPipelineSourceNode(t, source, targetFlow, "collector")
 				module := proposedEffectProofModule{source: source, nodes: []pipeline.WorkflowNode{
 					{Node: node, Subscriptions: []events.EventType{"item.completed"}, ExecutionType: contracts.SystemNodeExecutionType},
 				}}
@@ -58,7 +70,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				}
 				schedules, driver := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 				pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-					Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe,
+					Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe, FlowRoutes: bus,
 				})
 				bus.SetInterceptors(pc)
 				newManager := a2ActivationJoinManagerFactory(t, ctx, selected, source)
@@ -73,19 +85,36 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				}
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				req := pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: identity,
-					Config: map[string]any{"order_id": identity.InstanceID},
-					Fields: map[string]any{"order_id": identity.InstanceID, "final_count": int64(-1)}, OccurredAt: now}
+					ConstructorInput: "order.created", ResolvedKey: identity.InstanceID,
+					Config:       map[string]any{"order_id": identity.InstanceID},
+					TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "order.created", "operator", "", []byte(`{"order_id":"order-1"}`), 0, runID, events.EventEnvelope{}, now), OccurredAt: now}
 				plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 				if err != nil {
 					t.Fatalf("manager activation preparation: %v", err)
 				}
-				entry, found, err := workflowlifecycle.LoadStageEntry(plan.Instance.Bookkeeping)
-				plannedArm := exactJoinPersistedArm(t, plan.Instance)
-				if err != nil || !found || entry.Cause != "construction" || entry.FlowScope != "orders" ||
+				targetPlan := plan
+				if scenario.descendant != "" {
+					for _, construction := range plan.ConstructionPlans() {
+						if construction.Identity.TemplateID == scenario.descendant {
+							targetPlan = construction
+						}
+					}
+					if targetPlan.Identity.TemplateID != scenario.descendant {
+						t.Fatal("recursive constructor omitted descendant")
+					}
+					identity = targetPlan.Identity
+					owner, err = flowidentity.NewRunScopedFlowInstance(runID, identity.Route())
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				entry, found, err := workflowlifecycle.LoadStageEntry(targetPlan.Instance.Bookkeeping)
+				plannedArm := exactJoinPersistedArmForOwner(t, targetPlan.Instance, owner)
+				if err != nil || !found || entry.Cause != "construction" || entry.FlowScope != identity.ScopeKey ||
 					entry.InstancePath != identity.InstancePath || entry.EntityID != identity.EntityID ||
-					plan.Lifecycle.StageEntry == nil || *plan.Lifecycle.StageEntry != entry ||
-					plannedArm.JoinRef().StageEntry() != entry || len(plan.Lifecycle.Schedules) != 1 {
-					t.Fatalf("activation omitted exact initial lifecycle: entry=%#v arm=%#v plan=%#v err=%v", entry, plannedArm, plan.Lifecycle, err)
+					targetPlan.Lifecycle.StageEntry == nil || *targetPlan.Lifecycle.StageEntry != entry ||
+					plannedArm.JoinRef().StageEntry() != entry || len(targetPlan.Lifecycle.Schedules) != 1 {
+					t.Fatalf("activation omitted exact initial lifecycle: entry=%#v arm=%#v plan=%#v err=%v", entry, plannedArm, targetPlan.Lifecycle, err)
 				}
 				count := func(table string) int {
 					t.Helper()
@@ -126,16 +155,58 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					return instance
 				}
 				persisted := load()
-				if arm := exactJoinPersistedArm(t, persisted); !reflect.DeepEqual(arm, plannedArm) {
+				wantTimers := 1
+				var siblingOwner flowidentity.RunScopedFlowInstance
+				var siblingBefore pipeline.WorkflowInstance
+				var siblingCommit pipeline.CommittedFlowInstanceActivation
+				if strings.HasPrefix(scenario.name, "nested_two_parents") {
+					siblingReq := req
+					siblingReq.Instance = flowidentity.Derive(source, "orders", "order-2")
+					siblingReq.ResolvedKey = "order-2"
+					siblingReq.Config = map[string]any{"order_id": "order-2"}
+					siblingReq.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "order.created", "operator", "", []byte(`{"order_id":"order-2"}`), 0, runID, events.EventEnvelope{}, now)
+					siblingPlan, err := am.PrepareFlowInstanceActivation(ctx, siblingReq)
+					if err != nil {
+						t.Fatalf("prepare independently keyed sibling tree: %v", err)
+					}
+					for _, construction := range siblingPlan.ConstructionPlans() {
+						if construction.Identity.TemplateID == scenario.descendant {
+							siblingOwner, err = flowidentity.NewRunScopedFlowInstance(runID, construction.Identity.Route())
+							if err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+					if siblingOwner.RunID == "" || siblingOwner == owner {
+						t.Fatal("second keyed parent lost its independent descendant")
+					}
+					siblingCommit, err = bus.CommitFlowInstanceActivation(ctx, siblingPlan)
+					if err != nil || !siblingCommit.Acknowledged || !siblingCommit.Created {
+						t.Fatalf("commit sibling tree: result=%#v err=%v", siblingCommit, err)
+					}
+					siblingBefore, found, err = pc.Load(ctx, siblingOwner)
+					if err != nil || !found {
+						t.Fatalf("load sibling descendant: found=%v err=%v", found, err)
+					}
+					assertA2ConstructedGateSources(t, ctx, selected, siblingPlan)
+					if err := am.FinalizeCommittedFlowInstanceActivation(ctx, siblingCommit); err != nil {
+						t.Fatalf("attach sibling tree: %v", err)
+					}
+					wantTimers++
+				}
+				if scenario.descendant != "" {
+					assertA2ConstructedGateSources(t, ctx, selected, plan)
+				}
+				if arm := exactJoinPersistedArmForOwner(t, persisted, owner); !reflect.DeepEqual(arm, plannedArm) {
 					t.Fatalf("activation changed prepared membership/entry: actual=%#v planned=%#v", arm, plannedArm)
 				}
 				readiness, found, err := pc.LoadDynamicFlowRuntimeReadiness(ctx, runID, identity.Route())
-				if err != nil || !found || readiness.PlanRevision != committed.ReadinessRevision || !readiness.TopologyReadyAt.IsZero() {
+				if err != nil || !found || readiness.AttemptOrdinal != committed.ReadinessAttemptOrdinal || readiness.Phase != pipeline.FlowAttachmentPlanned {
 					t.Fatalf("commit did not retain unfinalized readiness: found=%v readiness=%#v err=%v", found, readiness, err)
 				}
 				history := count("entity_mutations")
 				replayed, err := bus.CommitFlowInstanceActivation(ctx, plan)
-				if err != nil || !replayed.Acknowledged || replayed.Created || count("timers") != 1 || count("entity_mutations") != history ||
+				if err != nil || !replayed.Acknowledged || replayed.Created || count("timers") != wantTimers || count("entity_mutations") != history ||
 					!reflect.DeepEqual(load(), persisted) {
 					t.Fatalf("exact activation replay reapplied initial lifecycle: result=%#v err=%v", replayed, err)
 				}
@@ -146,10 +217,10 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					t.Fatalf("duplicate readiness finalization: %v", err)
 				}
 				readiness, found, err = pc.LoadDynamicFlowRuntimeReadiness(ctx, runID, identity.Route())
-				if err != nil || !found || readiness.TopologyReadyAt.IsZero() || !bus.HasFlowInstanceRoute(owner) || count("timers") != 1 {
+				if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady || !bus.HasFlowInstanceRoute(owner) || count("timers") != wantTimers {
 					t.Fatalf("readiness/route did not converge once: found=%v readiness=%#v err=%v", found, readiness, err)
 				}
-				if scenario.name == "restart_before_arrival" {
+				if strings.HasSuffix(scenario.name, "restart_before_arrival") {
 					before := load()
 					if err := am.Shutdown(); err != nil {
 						t.Fatal(err)
@@ -165,21 +236,36 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					}
 					schedules, driver = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 					pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-						Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe,
+						Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe, FlowRoutes: bus,
 					})
 					bus.SetInterceptors(pc)
 					am = newManager(pc, bus)
 					if err := am.FinalizeCommittedFlowInstanceActivation(ctx, replayed); err != nil {
 						t.Fatalf("reconstruct exact activation readiness: %v", err)
 					}
-					if !reflect.DeepEqual(load(), before) || !bus.HasFlowInstanceRoute(owner) || count("timers") != 1 {
+					if siblingOwner.RunID != "" {
+						if err := am.FinalizeCommittedFlowInstanceActivation(ctx, siblingCommit); err != nil {
+							t.Fatalf("reconstruct sibling readiness: %v", err)
+						}
+					}
+					if !reflect.DeepEqual(load(), before) || !bus.HasFlowInstanceRoute(owner) || count("timers") != wantTimers {
 						t.Fatal("reconstruction reminted initial entry, membership or deadline")
+					}
+					if scenario.descendant != "" {
+						assertA2ConstructedGateSources(t, ctx, selected, plan)
 					}
 				}
 				var arrival events.Event
 				if scenario.count != 0 {
-					arrival = eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "orders/order-1/item.completed", "operator", "", []byte(`{"order_id":"order-1","member_id":"a","result":"accepted"}`), 0, runID,
-						events.EnvelopeForEntityID(events.EventEnvelope{}, identity.EntityID), eventtest.ConcreteTemplateRoutingSource("orders", identity.InstancePath, identity.EntityID), now)
+					producer := eventtest.ConcreteTemplateRoutingSource(identity.TemplateID, identity.InstancePath, identity.EntityID)
+					if scenario.descendant != "" {
+						producer, err = events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID})
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					arrival = eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(identity.InstancePath+"/item.completed"), "operator", "", []byte(`{"order_id":"order-1","member_id":"a","result":"accepted"}`), 0, runID,
+						events.EnvelopeForEntityID(events.EventEnvelope{}, identity.EntityID), producer, now)
 					if err := bus.PublishAcknowledged(ctx, arrival); err != nil {
 						t.Fatal(err)
 					}
@@ -190,7 +276,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 						t.Fatalf("first publication omitted activation-owned binding: found=%v routes=%#v err=%v", found, publication.DeliveryRoutes, err)
 					}
 				}
-				closed := exactJoinPersistedArm(t, load())
+				closed := exactJoinPersistedArmForOwner(t, load(), owner)
 				if closed.Status != joinruntime.StatusClosed || !closed.OutcomePending || closed.Completed() != scenario.count || !closed.JoinRef().Equal(plannedArm.JoinRef()) {
 					t.Fatalf("first delivery failed to use activated arm: %#v", closed)
 				}
@@ -206,9 +292,29 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				}
 				assertExactJoinDeliveryStatus(t, selected, ctx, completionID, node.Key(), "delivered")
 				final := load()
-				if arm := exactJoinPersistedArm(t, final); !arm.OutcomeFired || arm.OutcomePending ||
+				if siblingOwner.RunID != "" {
+					siblingAfter, found, err := pc.Load(ctx, siblingOwner)
+					if err != nil || !found || !reflect.DeepEqual(siblingAfter, siblingBefore) {
+						t.Fatalf("target delivery changed equal-named sibling beneath a second parent: found=%v sibling=%#v err=%v", found, siblingAfter, err)
+					}
+				}
+				if arm := exactJoinPersistedArmForOwner(t, final, owner); !arm.OutcomeFired || arm.OutcomePending ||
 					!arm.JoinRef().Equal(plannedArm.JoinRef()) || final.Fields["final_count"] != int64(scenario.count) {
 					t.Fatalf("activated continuation lost exact entry/result: arm=%#v fields=%#v", arm, final.Fields)
+				}
+				// The untouched sibling retains a future deadline. Join the clock
+				// before run-wide quiescence, without cancelling its durable arm.
+				if err := schedules.Stop(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if siblingOwner.RunID != "" {
+					arm := exactJoinPersistedArmForOwner(t, siblingBefore, siblingOwner)
+					pending := exactJoinPendingSchedule(t, selected, ctx, arm)
+					if pending.Status != "active" || pending.Command.RoutingSource.Route() != (events.RouteIdentity{
+						FlowID: siblingBefore.WorkflowName, FlowInstance: siblingOwner.Route.InstancePath, EntityID: siblingBefore.EntityID,
+					}) {
+						t.Fatalf("joining clock changed the exact sibling deadline/source: %#v", pending)
+					}
 				}
 				quiet, cancelQuiet := context.WithTimeout(ctx, 5*time.Second)
 				err = bus.WaitForQuiescence(quiet)
@@ -239,9 +345,6 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 						t.Fatalf("duplicate activated work reexecuted: %v", err)
 					}
 					assertExactJoinDeliveryCount(t, selected, ctx, duplicate.ID(), node.Key(), 1)
-				}
-				if err := schedules.Stop(ctx); err != nil {
-					t.Fatal(err)
 				}
 			})
 		}
@@ -324,9 +427,9 @@ func a2ActivationJoinScheduleFault(t *testing.T, ctx context.Context, selected g
 func a2ActivationJoinFiles(count int) map[string]string {
 	return map[string]string{
 		"schema.yaml":          "name: a2-activation-join\nstages:\n  active: {initial: true}\n",
-		"orders/schema.yaml":   "name: orders\ninstance: order_id\nstages:\n  awaiting: {initial: true}\n",
-		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  final_count: integer\n",
-		"orders/events.yaml":   "item.completed:\n  order_id: text\n  member_id: text\n  result: text\n",
+		"orders/schema.yaml":   "name: orders\ninstance: order_id\npins:\n  inputs:\n    - order.created\nstages:\n  awaiting: {initial: true}\n",
+		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  final_count: {type: integer, initial: -1}\n",
+		"orders/events.yaml":   "order.created:\n  order_id: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: text\n",
 		"orders/nodes.yaml": fmt.Sprintf(`collector:
   execution_type: system_node
   event_handlers:

@@ -23,10 +23,10 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 		t.Fatalf("unsupported runtime agent-memory variant %d", variant)
 	}
 
-	writeClosedVariantFile(t, root, "entities.yaml", "item:\n  item_id:\n    type: string\n    _unused_reason: startup scope fixture field\n")
+	writeClosedVariantFile(t, root, "entities.yaml", "item:\n  item_id:\n    type: string\n    initial: ''\n    _unused_reason: startup scope fixture field\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "name: session-scope-validation\n")
 	removeClosedVariantFiles(t, root, "events.yaml")
-	writeClosedVariantFile(t, root, "support/entities.yaml", "support_item:\n  entity_id:\n    type: string\n    _unused_reason: startup scope fixture field\n")
+	writeClosedVariantFile(t, root, "support/entities.yaml", "support_item:\n  entity_id:\n    type: string\n    initial: ''\n    _unused_reason: startup scope fixture field\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "item.created:\n  entity_id: string?\n")
 	agentBody := "backend:\n  role: backend\n  intent: prompts/backend.md\n  model: regular\n  memory: true\n  subscriptions:\n    - item.created\n  emit_events:\n    - item.created\n"
 	if variant == RuntimeAgentMemoryDirectFlow {
@@ -237,7 +237,7 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 		timerHandler = "    " + timerHandlerKey + ":\n      advances_to: done\n"
 		timerSubscription = "    - timer.reminder\n"
 	}
-	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  execution_type: system_node\n  subscribes_to:\n    - ticket.opened\n    - ticket.closed\n"+timerSubscription+"  timers:\n"+timerBlock+"  event_handlers:\n    ticket.opened:\n      create_entity: true\n      advances_to: active\n    ticket.closed:\n      advances_to: done\n"+timerHandler)
+	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  execution_type: system_node\n  subscribes_to:\n    - ticket.opened\n    - ticket.closed\n"+timerSubscription+"  timers:\n"+timerBlock+"  event_handlers:\n    ticket.opened:\n      advances_to: active\n    ticket.closed:\n      advances_to: done\n"+timerHandler)
 	return root
 }
 
@@ -298,16 +298,10 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 
 	removeClosedVariantFiles(t, root, "entities.yaml")
-	writeClosedVariantFile(t, root, "support/entities.yaml", "ticket:\n  ticket_id: string\n")
+	writeClosedVariantFile(t, root, "support/entities.yaml", "ticket: {}\n")
 	inputs := []string{"ticket.opened"}
 	if settings.includeClosePath {
 		inputs = append(inputs, "ticket.closed")
-	}
-	if settings.includeGlobalDonePath {
-		inputs = append(inputs, "admin.done")
-	}
-	if settings.includeGlobalReviewPath {
-		inputs = append(inputs, "admin.review")
 	}
 	pinList := strings.Join(inputs, ", ")
 	connections := ""
@@ -315,12 +309,22 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 		connections += "  - {event: " + event + ", from: ., to: support}\n"
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-state-cancel-reachability\npins:\n  inputs: ["+pinList+"]\n  outputs: ["+pinList+"]\nconnect:\n"+connections)
-	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\nticket.closed:\n  entity_id: string\nadmin.done:\nadmin.review:\n")
+	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\nticket.closed:\n  entity_id: string\n")
 	reviewMetadata := "{}"
 	if settings.treatReviewAsTerminalActivation {
 		reviewMetadata = "{terminal: true}"
 	}
-	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {initial: true}\n  active: {}\n  review: "+reviewMetadata+"\n  done: {terminal: true}\npins:\n  inputs: ["+pinList+"]\n")
+	waiting := "  waiting:\n    initial: true\n"
+	if settings.includeGlobalDonePath || settings.includeGlobalReviewPath {
+		waiting += "    timers:\n"
+		if settings.includeGlobalDonePath {
+			waiting += "      - {id: global_done, after: 1h, advances_to: done}\n"
+		}
+		if settings.includeGlobalReviewPath {
+			waiting += "      - {id: global_review, after: 1h, advances_to: review}\n"
+		}
+	}
+	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n"+waiting+"  active: {}\n  review: "+reviewMetadata+"\n  done: {terminal: true}\npins:\n  inputs: ["+pinList+"]\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "timer.reminder:\n")
 	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {
@@ -330,16 +334,10 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	if settings.includeEventStartReviewBranch {
 		handlers += "    ticket.opened:\n      rules:\n        - id: active_path\n          when: |-\n                  true\n          advances_to: active\n        - id: review_path\n          when: |-\n                  true\n          advances_to: review\n        - id: unmatched\n          else: true\n"
 	} else {
-		handlers += "    ticket.opened:\n      create_entity: true\n      advances_to: active\n"
+		handlers += "    ticket.opened:\n      advances_to: active\n"
 	}
 	if settings.includeClosePath {
 		handlers += "    ticket.closed:\n      advances_to: done\n"
-	}
-	if settings.includeGlobalDonePath {
-		handlers += "    admin.done:\n      create_entity: true\n      advances_to: done\n"
-	}
-	if settings.includeGlobalReviewPath {
-		handlers += "    admin.review:\n      create_entity: true\n      advances_to: review\n"
 	}
 	if settings.includeTimerFireHandler {
 		handlers += "    timer.reminder:\n      advances_to: done\n"

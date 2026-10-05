@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -373,6 +374,91 @@ func TestRuntimeContextManagerRetriesShutdownAfterPriorFailure(t *testing.T) {
 	}
 	if !entry.shutdownComplete {
 		t.Fatal("successful shutdown retry was not marked complete")
+	}
+}
+
+func TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet(t *testing.T) {
+	first := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	second := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	manager, err := newTestRuntimeContextManager(t, nil, first, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{
+		{BundleHash: runtimeContextTestHashA}, {BundleHash: runtimeContextTestHashB},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission, err := newRuntimeSourceSetTransitionAdmission(plan.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.pendingSourceSetTransition = admission
+	if result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded); result.ShutdownErr == nil {
+		t.Fatal("individual retirement bypassed aggregate transition ownership")
+	}
+	active, release, admitted := first.Runtime.shutdownGate.BeginContext(testAuthorActivityContext(context.Background()))
+	if !admitted {
+		t.Fatal("accepted request was refused")
+	}
+	defer release()
+	// Retained preparation excludes terminal withdrawal just as a live Commit
+	// does. Shutdown must not publish its drain signal while this owner exists.
+	manager.sourceSetMu.Lock()
+	started := make(chan struct{})
+	done := make(chan []RuntimeContextDeactivationResult, 1)
+	go func() {
+		close(started)
+		done <- manager.DeactivateAllWithOptions(RuntimeContextCauseUnloaded, ShutdownOptions{Grace: time.Second})
+	}()
+	<-started
+	select {
+	case <-active.Done():
+		manager.sourceSetMu.Unlock()
+		t.Fatal("shutdown crossed preparation exclusion")
+	case <-admission.TerminalDrain():
+		manager.sourceSetMu.Unlock()
+		t.Fatal("terminal drain published before preparation settled")
+	case <-time.After(20 * time.Millisecond):
+	}
+	manager.sourceSetMu.Unlock()
+	select {
+	case <-admission.TerminalDrain():
+	case <-time.After(5 * time.Second):
+		t.Fatal("aggregate terminal owner did not release drain waiters")
+	}
+	for _, definition := range []BundleContext{first, second} {
+		if !definition.Runtime.shutdownAdmissionClosed() || manager.LookupBundleHashStatus(definition.SourceArtifactFact.BundleHash()).Loaded() {
+			t.Fatal("terminal drain preceded whole-set admission fencing")
+		}
+	}
+	select {
+	case <-admission.Done():
+		t.Fatal("terminal drain falsely completed the refresh")
+	default:
+	}
+	if retry, err := manager.PreparePendingSourceSetTransition(context.Background(), plan); err == nil || retry != nil {
+		t.Fatalf("terminal refresh resumed: retry=%v err=%v", retry, err)
+	}
+	select {
+	case <-done:
+		t.Fatal("terminal drain discarded the accepted request")
+	default:
+	}
+	release()
+	select {
+	case results := <-done:
+		if len(results) != 2 || results[0].ShutdownErr != nil || results[1].ShutdownErr != nil {
+			t.Fatalf("aggregate settlement results=%+v", results)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("aggregate shutdown did not join accepted settlement")
+	}
+	select {
+	case <-admission.Done():
+		t.Fatal("retirement joins falsely completed the refresh")
+	default:
 	}
 }
 

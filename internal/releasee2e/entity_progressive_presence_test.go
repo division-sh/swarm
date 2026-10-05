@@ -162,7 +162,6 @@ func writePresenceLastFieldFixture(t *testing.T, root string) {
   produces: [work.consume, work.completed]
   event_handlers:
     work.opened:
-      create_entity: true
       advances_to: assess
     work.annotated:
       guard: {check: _entity.current_state == 'assess'}

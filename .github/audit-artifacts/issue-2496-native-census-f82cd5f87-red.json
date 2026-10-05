@@ -1,0 +1,55 @@
+{
+  "source": "f82cd5f87",
+  "base": "ee9b091526f89154a425c1f1d1321085aa9b832b",
+  "receipt": "/tmp/agent-e-2496-native-ci-revalidation-repaired.log",
+  "claim": "RED receipt retained; no aggregate qualification or failure waiver",
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "result": "fail",
+      "seconds": 134.628
+    }
+  ],
+  "roots": 114,
+  "passing_roots": 112,
+  "failed_roots": [
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    }
+  ],
+  "leaf_failures": [
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/engine_route_state/upper",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:27: construct prepared component aggregate: acknowledged=false created=false err=exact revision projection returned duplicate or unrequested fact f195813e-6ddc-4ff8-af6b-cc5a256747f3"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsEntityIDSpellingsBothStores/postgres/engine_route_state/compact",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:27: construct prepared component aggregate: acknowledged=false created=false err=exact revision projection returned duplicate or unrequested fact cbc463c3-dbf0-4920-af1c-249b507613a2"
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/sqlite/entity_and_workflow_mutation_ids",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:205: construct prepared component aggregate: acknowledged=false created=false err=commit flow activation 0: flow identity instance_id \"exact-fact/785b65bc-4147-4f3f-afcf-b4e5418242cd\" disagrees with flow_instance_path \"exact-fact/785b65bc-4147-4f3f-afcf-b4e5418242cd\""
+      ]
+    },
+    {
+      "test": "TestRunForkExactFactsGeneratedWriterIDsBothStores/postgres/entity_and_workflow_mutation_ids",
+      "evidence": [
+        "run_fork_exact_fact_generated_writer_test.go:205: construct prepared component aggregate: acknowledged=false created=false err=commit flow activation 0: flow identity instance_id \"exact-fact/7534c19f-cf09-41eb-8d0c-27976d4718e0\" disagrees with flow_instance_path \"exact-fact/7534c19f-cf09-41eb-8d0c-27976d4718e0\""
+      ]
+    }
+  ]
+}

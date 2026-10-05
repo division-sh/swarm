@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
-	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
+	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
 		Produces: []string{"task.started"}, SubscribesTo: []string{"task.started"},
 	})
 	owned, err := runtimecorrelation.NewSourceArtifactFact(sourceartifactfixture.BundleHash)
@@ -30,14 +31,16 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("review", "inst-1"))
-	req := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}
+	req := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}
 	binding := runtimeprocessbinding.Binding{
 		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "publication-test", ProcessBootID: uuid.NewString(),
 		GenerationGrantID: uuid.NewString(), BundleHash: owned.BundleHash(),
 		RuntimeInstanceID: runtimeID, RuntimeGeneration: 1,
 	}
+	var ordinal uint64
 	newAttempt := func() runtimepipeline.DynamicFlowRuntimeActivationAttempt {
-		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+		ordinal++
+		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(strconv.FormatUint(ordinal, 10), identity.RunID, identity.Route.InstancePath, binding)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +61,17 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 	if !eb.RouteTable().HasFlowInstanceRoute(identity) {
 		t.Fatal("predecessor route disappeared during rejected successor publication")
 	}
-	if err := firstHandle.Retire(); err != nil {
+	// Losing the publication response still leaves an exact identity/attempt
+	// cleanup obligation, not permission to infer a route from its path.
+	foreign := identity
+	foreign.RunID = uuid.NewString()
+	if err := eb.RetireFlowInstanceRouteForAttempt(foreign, first); err == nil {
+		t.Fatal("foreign identity retired an admitted publication")
+	}
+	if !eb.RouteTable().HasFlowInstanceRoute(identity) {
+		t.Fatal("refused foreign retirement removed the admitted publication")
+	}
+	if err := eb.RetireFlowInstanceRouteForAttempt(identity, first); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), req, first); err == nil {
@@ -69,6 +82,9 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := firstHandle.Retire(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eb.RetireFlowInstanceRouteForAttempt(identity, first); err != nil {
 		t.Fatal(err)
 	}
 	if !eb.RouteTable().HasFlowInstanceRoute(identity) {
@@ -82,7 +98,7 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 	}
 	wrongBinding := binding
 	wrongBinding.BundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	wrongAttempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, wrongBinding)
+	wrongAttempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", identity.RunID, identity.Route.InstancePath, wrongBinding)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +107,7 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 	}
 	wrongBinding = binding
 	wrongBinding.RuntimeInstanceID = uuid.NewString()
-	wrongAttempt, err = runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, wrongBinding)
+	wrongAttempt, err = runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", identity.RunID, identity.Route.InstancePath, wrongBinding)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +120,7 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 }
 
 func TestFlowRoutePublicationFenceBeforePublish(t *testing.T) {
-	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
+	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
 		Produces: []string{"task.started"}, SubscribesTo: []string{"task.started"},
 	})
 	owned, err := runtimecorrelation.NewSourceArtifactFact(sourceartifactfixture.BundleHash)
@@ -124,14 +140,14 @@ func TestFlowRoutePublicationFenceBeforePublish(t *testing.T) {
 		GenerationGrantID: uuid.NewString(), BundleHash: owned.BundleHash(),
 		RuntimeInstanceID: runtimeID, RuntimeGeneration: 1,
 	}
-	attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+	attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", identity.RunID, identity.Route.InstancePath, binding)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := eb.RetireCommittedFlowInstanceRoute(runtimepipeline.WorkflowEngineRouteRetirement{Identity: identity, ActivationAttemptID: attempt.ID()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}, attempt); err == nil {
+	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}, attempt); err == nil {
 		t.Fatal("publication succeeded after attempt was fenced")
 	}
 	if eb.RouteTable().HasFlowInstanceRoute(identity) {
@@ -140,7 +156,7 @@ func TestFlowRoutePublicationFenceBeforePublish(t *testing.T) {
 }
 
 func TestCommittedFlowRouteRetirementCannotRemoveSuccessor(t *testing.T) {
-	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
+	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
 		Produces: []string{"task.started"}, SubscribesTo: []string{"task.started"},
 	})
 	owned, err := runtimecorrelation.NewSourceArtifactFact(sourceartifactfixture.BundleHash)
@@ -159,15 +175,17 @@ func TestCommittedFlowRouteRetirementCannotRemoveSuccessor(t *testing.T) {
 		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "terminal-route-test", ProcessBootID: uuid.NewString(),
 		GenerationGrantID: uuid.NewString(), BundleHash: owned.BundleHash(), RuntimeInstanceID: runtimeID, RuntimeGeneration: 1,
 	}
+	var ordinal uint64
 	newAttempt := func() runtimepipeline.DynamicFlowRuntimeActivationAttempt {
-		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+		ordinal++
+		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(strconv.FormatUint(ordinal, 10), identity.RunID, identity.Route.InstancePath, binding)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return attempt
 	}
 	first := newAttempt()
-	firstHandle, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}, first)
+	firstHandle, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}, first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +196,7 @@ func TestCommittedFlowRouteRetirementCannotRemoveSuccessor(t *testing.T) {
 		t.Fatal("committed predecessor route remained visible")
 	}
 	second := newAttempt()
-	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}, second); err != nil {
+	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}, second); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstHandle.Retire(); err != nil {
@@ -193,7 +211,7 @@ func TestCommittedFlowRouteRetirementCannotRemoveSuccessor(t *testing.T) {
 }
 
 func TestFlowRoutePublicationRejectsForeignSourceContext(t *testing.T) {
-	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
+	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
 		Produces: []string{"task.started"}, SubscribesTo: []string{"task.started"},
 	})
 	owned, err := runtimecorrelation.NewSourceArtifactFact(sourceartifactfixture.BundleHash)
@@ -217,12 +235,12 @@ func TestFlowRoutePublicationRejectsForeignSourceContext(t *testing.T) {
 		GenerationGrantID: uuid.NewString(), BundleHash: owned.BundleHash(),
 		RuntimeInstanceID: runtimeID, RuntimeGeneration: 1,
 	}
-	attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+	attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", identity.RunID, identity.Route.InstancePath, binding)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), foreign)
-	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}, attempt); err == nil {
+	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}, attempt); err == nil {
 		t.Fatal("foreign source published an activation route")
 	}
 	if eb.RouteTable().HasFlowInstanceRoute(identity) {

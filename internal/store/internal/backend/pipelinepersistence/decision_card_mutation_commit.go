@@ -144,6 +144,9 @@ func commitDecisionCardOperation(
 		return runtimepipeline.CommittedDecisionCardMutation{}, outcome.Err()
 	}
 	result.Acknowledged = true
+	if result.HasPublication {
+		result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
+	}
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
@@ -180,9 +183,9 @@ func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 	if err != nil {
 		return err
 	}
-	query := sqliteWorkflowInstanceSelect + ` WHERE es.run_id = ? AND es.entity_id = ? AND es.flow_instance = ?`
+	query := sqliteWorkflowInstanceSelect + ` WHERE fi.run_id = ? AND fi.entity_id = ? AND fi.instance_path = ?`
 	if postgres {
-		query = postgresWorkflowInstanceSelect + ` WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid AND es.flow_instance = $3 FOR UPDATE OF es, fi`
+		query = postgresWorkflowInstanceSelect + ` WHERE fi.run_id = $1::uuid AND fi.entity_id = $2::uuid AND fi.instance_path = $3 FOR UPDATE OF fi`
 	}
 	rows, err := tx.QueryContext(ctx, query, card.RunID, anchor.EntityID, anchor.Route.InstancePath)
 	if err != nil {

@@ -29,6 +29,7 @@ type Plan struct {
 	State                  string
 	CurrentRenderID        string
 	CurrentReceiptID       string
+	RecoveryPending        bool
 	Bounds                 packs.PresentationBounds
 	ActionPageIndex        int
 }
@@ -70,20 +71,20 @@ func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool)
 	}
 	query := `SELECT delivery_id, source_kind, source_id, COALESCE(request_activation_id, ''), COALESCE(summary_count, 0), principal_id, interface_key, binding_revision, delivery_epoch,
 		external_account_reference, conversation_reference, conversation_scope, state,
-		COALESCE(current_render_id, ''), COALESCE(current_receipt_operation_id, ''), action_capacity, text_capacity, label_capacity, action_page_index
-		FROM channel_delivery_plans WHERE delivery_id = ?`
+		COALESCE(current_render_id, ''), COALESCE(current_receipt_operation_id, ''), action_capacity, text_capacity, label_capacity, action_page_index, ` + AcceptedEffectPredicate(false) + `
+		FROM channel_delivery_plans p WHERE delivery_id = ?`
 	if postgres {
 		query = `SELECT delivery_id::text, source_kind, source_id::text, COALESCE(request_activation_id::text, ''), COALESCE(summary_count, 0), principal_id::text, interface_key, binding_revision, delivery_epoch,
 			external_account_reference, conversation_reference, conversation_scope, state,
-			COALESCE(current_render_id::text, ''), COALESCE(current_receipt_operation_id::text, ''), action_capacity, text_capacity, label_capacity, action_page_index
-			FROM channel_delivery_plans WHERE delivery_id = $1::uuid`
+			COALESCE(current_render_id::text, ''), COALESCE(current_receipt_operation_id::text, ''), action_capacity, text_capacity, label_capacity, action_page_index, ` + AcceptedEffectPredicate(true) + `
+			FROM channel_delivery_plans p WHERE delivery_id = $1::uuid`
 	}
 	var plan Plan
 	var scope string
 	err := db.QueryRowContext(ctx, query, deliveryID).Scan(&plan.DeliveryID, &plan.SourceKind, &plan.SourceID, &plan.RequestActivationID, &plan.SummaryCount,
 		&plan.PrincipalID, &plan.InterfaceKey, &plan.BindingRevision, &plan.DeliveryEpoch, &plan.ExternalAccountRef,
 		&plan.ConversationRef, &scope, &plan.State, &plan.CurrentRenderID, &plan.CurrentReceiptID,
-		&plan.Bounds.Actions, &plan.Bounds.TextRunes, &plan.Bounds.LabelRunes, &plan.ActionPageIndex)
+		&plan.Bounds.Actions, &plan.Bounds.TextRunes, &plan.Bounds.LabelRunes, &plan.ActionPageIndex, &plan.RecoveryPending)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Plan{}, false, nil
 	}

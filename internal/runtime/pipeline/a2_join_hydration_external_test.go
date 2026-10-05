@@ -29,13 +29,13 @@ func TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores(t *testing.T) {
 			bucketKey := "handler_joins:" + node.Key()
 			var original []byte
 			if err := p.selected.db.QueryRowContext(p.ctx,
-				"SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$1", p.runID).Scan(&original); err != nil {
+				"SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1", p.runID).Scan(&original); err != nil {
 				t.Fatal(err)
 			}
 			write := func(raw []byte) {
 				t.Helper()
 				result, err := p.selected.db.ExecContext(p.ctx,
-					"UPDATE entity_state SET accumulator=$1 WHERE run_id=$2 AND entity_id=$2", string(raw), p.runID)
+					"UPDATE flow_instances SET accumulator=$1 WHERE run_id=$2 AND entity_id=$2", string(raw), p.runID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -64,6 +64,9 @@ func TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					key := arm.Key()
+					if len(buckets[bucketKey]) == 0 {
+						t.Fatalf("hostile setup lacks exact node bucket %q in %s", bucketKey, original)
+					}
 					switch corruption {
 					case "foreign_node_bucket":
 						buckets[bucketKey+"-foreign"] = buckets[bucketKey]

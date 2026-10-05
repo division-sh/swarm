@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -662,24 +663,24 @@ func validateEventPublication(ctx context.Context, opts EventPublicationOptions,
 			"declared_events": declaredEventNames(opts.Source),
 		})
 	}
-	createEntityHandler := (params.PayloadEntityIDPresent || params.TargetRouteSet) &&
-		eventPublicationHasCreateEntityHandler(opts.Source, params.EventName, params.TargetRoute, params.RunID)
-	if params.PayloadEntityIDPresent && createEntityHandler {
+	constructorOwnsIdentity := (params.PayloadEntityIDPresent || params.TargetRouteSet) &&
+		eventPublicationHasKeyedConstructor(opts.Source, params.EventName, params.TargetRoute, params.RunID)
+	if params.PayloadEntityIDPresent && constructorOwnsIdentity {
 		return params, NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
 			"violations": []map[string]any{{
 				"field_path": "$.entity_id",
-				"rule":       "create_entity_mints_entity_id",
-				"message":    "caller-supplied entity_id is not allowed for a create-entity event",
+				"rule":       "constructor_owns_entity_id",
+				"message":    "caller-supplied entity_id is not allowed for a creating input",
 			}},
 			"event_name": params.EventName,
 		})
 	}
-	if params.TargetRouteSet && createEntityHandler {
+	if params.TargetRouteSet && constructorOwnsIdentity {
 		return params, NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
 			"violations": []map[string]any{{
 				"field_path": "$.target.entity_id",
-				"rule":       "create_entity_mints_entity_id",
-				"message":    "caller-supplied target entity_id is not allowed for create-entity event.publish",
+				"rule":       "constructor_owns_entity_id",
+				"message":    "caller-supplied target entity_id is not allowed for a creating input",
 			}},
 			"event_name": params.EventName,
 		})
@@ -894,15 +895,19 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 	return nil
 }
 
-func eventPublicationHasCreateEntityHandler(source semanticview.Source, eventName string, target events.RouteIdentity, runID string) bool {
+func eventPublicationHasKeyedConstructor(source semanticview.Source, eventName string, target events.RouteIdentity, runID string) bool {
 	if source == nil {
 		return false
 	}
 	eventName = runtimeeventidentity.Normalize(eventName)
 	target = target.Normalized()
-	if (target.Empty() || target.FlowID == "." && target.FlowInstance == runID) &&
-		eventPublicationFlowHasCreateEntityHandler(source, ".", eventName) {
-		return true
+	if target.Empty() || target.FlowID == "." && target.FlowInstance == runID {
+		if pin, found := semanticview.SelectedRootInputPin(source, eventName); found {
+			constructor, err := pipeline.CompileFlowConstructor(source, ".", pin.EventType())
+			if err == nil && constructor.Eligible() {
+				return true
+			}
+		}
 	}
 	outputPin, ok := semanticview.SelectedRootOutputPin(source, eventName)
 	if !ok {
@@ -912,23 +917,12 @@ func eventPublicationHasCreateEntityHandler(source semanticview.Source, eventNam
 		if !plan.AcceptsReceiverTarget(target, runID) {
 			continue
 		}
-		flowID := plan.ReceiverRoute("", "").FlowID
-		if eventPublicationFlowHasCreateEntityHandler(source, flowID, string(plan.ReceiverLocalEvent())) {
-			return true
-		}
-	}
-	return false
-}
-
-func eventPublicationFlowHasCreateEntityHandler(source semanticview.Source, flowID, eventName string) bool {
-	flowPath := source.FlowPath(flowID)
-	for _, record := range source.ExecutableNodeRecords() {
-		node, err := record.Identity()
-		if err != nil || node.FlowPath() != flowPath {
+		key := plan.InstanceKey()
+		if key == nil || key.Mode() != runtimecontracts.FlowInputResolutionModeCreate {
 			continue
 		}
-		resolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventName)
-		if resolution.Matched && resolution.Handler.CreateEntity {
+		constructor, err := pipeline.CompileFlowConstructor(source, plan.ReceiverRoute("", "").FlowID, string(plan.ReceiverLocalEvent()))
+		if err == nil && constructor.Eligible() {
 			return true
 		}
 	}

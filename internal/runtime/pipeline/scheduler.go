@@ -286,61 +286,53 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 		ctx = context.Background()
 	}
 
-	s.mu.Lock()
-	if s.stopped {
-		s.mu.Unlock()
-		return errors.New("scheduler stopped")
-	}
-	if s.owner == nil {
-		s.mu.Unlock()
-		return errors.New("scheduler requires a runtime work occurrence")
-	}
-	if projection.kind == scheduledProjectionWorkflowTimer && s.onWorkflowTimer == nil {
-		s.mu.Unlock()
-		return errors.New("workflow timer lifecycle is not bound to scheduler")
-	}
-	if projection.kind == scheduledProjectionGenericActivation && s.onGenericActivation == nil {
-		s.mu.Unlock()
-		return errors.New("generic schedule lifecycle is not bound to scheduler")
-	}
 	key := projection.key()
-	if key == "" {
-		s.mu.Unlock()
-		return errors.New("scheduled projection identity is required")
-	}
-	if _, reserved := s.reservations[key]; reserved {
-		s.mu.Unlock()
-		return errors.New("schedule key is reserved by a standing replacement transition")
-	}
-	owner := s.owner
-	if contextual, ok := worklifetime.OccurrenceFromContext(ctx); ok {
-		owner = contextual
-	}
-	lease, err := owner.Begin(context.WithoutCancel(ctx))
-	if err != nil {
-		s.mu.Unlock()
-		return fmt.Errorf("admit scheduled task: %w", err)
-	}
-	if existing, ok := s.tasks[key]; ok {
-		taskPrior := existing.done
-		s.retireTaskLocked(key, existing)
+	var task *scheduledTask
+	err := func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.stopped {
+			return errors.New("scheduler stopped")
+		}
+		if s.owner == nil {
+			return errors.New("scheduler requires a runtime work occurrence")
+		}
+		if projection.kind == scheduledProjectionWorkflowTimer && s.onWorkflowTimer == nil {
+			return errors.New("workflow timer lifecycle is not bound to scheduler")
+		}
+		if projection.kind == scheduledProjectionGenericActivation && s.onGenericActivation == nil {
+			return errors.New("generic schedule lifecycle is not bound to scheduler")
+		}
+		if key == "" {
+			return errors.New("scheduled projection identity is required")
+		}
+		if _, reserved := s.reservations[key]; reserved {
+			return errors.New("schedule key is reserved by a standing replacement transition")
+		}
+		owner := s.owner
+		if contextual, ok := worklifetime.OccurrenceFromContext(ctx); ok {
+			owner = contextual
+		}
+		lease, err := owner.Begin(context.WithoutCancel(ctx))
+		if err != nil {
+			return fmt.Errorf("admit scheduled task: %w", err)
+		}
+		var prior <-chan struct{}
+		if existing, ok := s.tasks[key]; ok {
+			prior = existing.done
+			s.retireTaskLocked(key, existing)
+		}
 		standingOwner, _ := worklifetime.StandingProjection(owner)
-		task := &scheduledTask{
-			stop: make(chan struct{}), done: make(chan struct{}), prior: taskPrior, lease: lease,
+		task = &scheduledTask{
+			stop: make(chan struct{}), done: make(chan struct{}), prior: prior, lease: lease,
 			owner: owner, standingOwner: standingOwner, projection: projection.clone(),
 		}
 		s.tasks[key] = task
-		s.mu.Unlock()
-		s.startTask(key, task)
 		return nil
+	}()
+	if err != nil {
+		return err
 	}
-	standingOwner, _ := worklifetime.StandingProjection(owner)
-	task := &scheduledTask{
-		stop: make(chan struct{}), done: make(chan struct{}), lease: lease,
-		owner: owner, standingOwner: standingOwner, projection: projection.clone(),
-	}
-	s.tasks[key] = task
-	s.mu.Unlock()
 	s.startTask(key, task)
 	return nil
 }

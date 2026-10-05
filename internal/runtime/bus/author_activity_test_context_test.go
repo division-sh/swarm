@@ -27,7 +27,7 @@ const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
-func exactTestFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact, runID string) []ActiveFlowInstanceDescriptor {
+func exactTestFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact, runID string, sources ...semanticview.Source) []ActiveFlowInstanceDescriptor {
 	if sourceFact.Validate() != nil {
 		sourceFact = authorActivityTestSourceArtifactFact
 	}
@@ -45,6 +45,12 @@ func exactTestFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflo
 		}
 		if strings.TrimSpace(out[idx].WorkflowVersion) == "" {
 			out[idx].WorkflowVersion = strings.TrimSpace(workflowVersion)
+		}
+		if out[idx].Identity == (runtimeflowidentity.Instance{}) && len(sources) == 1 {
+			out[idx].Identity = ConstructedFlowInstanceIdentityFixture(sources[0], out[idx].FlowTemplate, runtimeflowidentity.LogicalInstanceID(out[idx].FlowInstance), out[idx].RunID)
+			if out[idx].EntityID == "" {
+				out[idx].EntityID = out[idx].Identity.EntityID
+			}
 		}
 	}
 	return out
@@ -88,7 +94,11 @@ func newTestFlowInstanceActivationOwner(activate runtimepipeline.FlowInstanceAct
 	}
 }
 
-func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+	fields, err := testFlowActivationConstructorFields(req)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
 	if req.OccurredAt.IsZero() {
 		req.OccurredAt = req.TriggerEvent.CreatedAt()
 	}
@@ -104,6 +114,9 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 		WorkflowVersion: req.ContractBundle.WorkflowVersion(),
 		ExecutionMode:   "live",
 	}
+	if readiness.RunID == "" {
+		readiness.RunID = runtimecorrelation.RunIDFromContext(ctx)
+	}
 	instance := runtimepipeline.WorkflowInstance{
 		InstanceID:       req.Instance.InstanceID,
 		StorageRef:       req.Instance.InstancePath,
@@ -112,7 +125,7 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 		WorkflowVersion:  req.ContractBundle.WorkflowVersion(),
 		CurrentState:     req.InitialState,
 		Config:           req.Config,
-		Fields:           req.Fields,
+		Fields:           fields,
 		Bookkeeping:      req.Bookkeeping,
 		EnteredStageAt:   req.OccurredAt,
 		CreatedAt:        req.OccurredAt,
@@ -121,7 +134,8 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: instance, Identity: req.Instance, Readiness: readiness,
-		OccurredAt: req.OccurredAt, ActivationVariables: connectRoutePlanActivationVariables(req),
+		CreatingInput: runtimepipeline.FlowConstructionInput{EventID: req.TriggerEvent.ID(), Input: req.ConstructorInput},
+		OccurredAt:    req.OccurredAt, ActivationVariables: connectRoutePlanActivationVariables(req),
 	}
 	if err := plan.Validate(); err != nil {
 		return runtimepipeline.FlowInstanceActivationPlan{}, err
@@ -130,6 +144,18 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 	o.pending[req.Instance.Route()] = req
 	o.mu.Unlock()
 	return plan, nil
+}
+
+func testFlowActivationConstructorFields(req runtimepipeline.FlowInstanceActivationRequest) (map[string]any, error) {
+	constructor, err := runtimepipeline.CompileFlowConstructor(req.ContractBundle, req.Instance.TemplateID, req.ConstructorInput)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := req.ConstructorPayload()
+	if err != nil {
+		return nil, err
+	}
+	return constructor.InitialFields(payload, req.ResolvedKey)
 }
 
 func (o *testFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceActivation(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
@@ -197,6 +223,11 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	}
 	if err := ensureTestEventBusSourceArtifact(store, opts.ContractBundle, opts.SourceArtifactFact); err != nil {
 		return nil, err
+	}
+	if receiver, ok := store.(interface {
+		setTestConstructionSource(semanticview.Source)
+	}); ok {
+		receiver.setTestConstructionSource(opts.ContractBundle)
 	}
 	if receiver, ok := store.(interface {
 		setTestSemanticSource(runtimecorrelation.SourceArtifactFact, string)

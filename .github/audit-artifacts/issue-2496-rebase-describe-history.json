@@ -1,0 +1,41 @@
+{
+  "boundary": "Characterization REDs only. No baseline acceptance, current-master, clean-tier or closure credit.",
+  "receipts": [
+    {
+      "file": "issue-2496-rebase-describe-capture-red.jsonl.gz",
+      "source": "bb37c5ddcf582c019c28f49426d7b28d2a91cc1d",
+      "dirty_generated_input": false,
+      "sha256": "f842da20aa40efaa4bf2233e9f6a816e6786b53fc700032181368e9878226f37",
+      "cells": {
+        "pass": 35,
+        "fail": 10
+      },
+      "packages": [
+        {
+          "Time": "2026-10-03T21:04:33.734049482Z",
+          "Action": "fail",
+          "Package": "github.com/division-sh/swarm/internal/cliapp",
+          "Elapsed": 89.719
+        }
+      ]
+    },
+    {
+      "file": "issue-2496-rebase-describe-master-capture-red.jsonl.gz",
+      "source": "bb37c5ddcf582c019c28f49426d7b28d2a91cc1d",
+      "dirty_generated_input": true,
+      "sha256": "203fb690c75dd90fcd4baaef4f824c23672d7a8fbcb3fa582d34ebfe2c35bb2d",
+      "cells": {
+        "fail": 31,
+        "pass": 14
+      },
+      "packages": [
+        {
+          "Time": "2026-10-03T21:12:41.49000751Z",
+          "Action": "fail",
+          "Package": "github.com/division-sh/swarm/internal/cliapp",
+          "Elapsed": 101.471
+        }
+      ]
+    }
+  ]
+}

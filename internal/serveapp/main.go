@@ -28,6 +28,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -2043,6 +2044,13 @@ func reconcileServeRuntimeStandingTargets(
 		if !ok {
 			return nil, nil, fmt.Errorf("standing service %s has no startup reconciliation", targets[i].ServiceID)
 		}
+		instance, err := runtimeflowidentity.StandingForGeneration(rt.Options.WorkflowModule.SemanticSource(), reconciliation.FlowPath, reconciliation.RunID)
+		if err != nil {
+			return nil, nil, err
+		}
+		targets[i].InstanceID = instance.InstanceID
+		targets[i].EntityID = instance.EntityID
+		targets[i].FlowInstance = instance.InstancePath
 		targets[i].RunID = reconciliation.RunID
 		targets[i].Generation = reconciliation.Generation
 		targets[i].PublicationSequence = reconciliation.PublicationSequence
@@ -2057,9 +2065,9 @@ func reconcileServeRuntimeStandingTargets(
 			RunID:               reconciliation.RunID,
 			Generation:          reconciliation.Generation,
 			PublicationSequence: reconciliation.PublicationSequence,
-			InstanceID:          reconciliation.InstanceID,
+			InstanceID:          instance.InstanceID,
 			FlowInstance:        targets[i].FlowInstance,
-			EntityID:            reconciliation.EntityID,
+			EntityID:            instance.EntityID,
 			EffectiveState:      reconciliation.EffectiveState,
 			RestartDisposition:  reconciliation.RestartDisposition,
 			Created:             reconciliation.Transition == "created",

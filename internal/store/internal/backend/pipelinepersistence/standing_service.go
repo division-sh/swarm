@@ -360,6 +360,10 @@ func (s *standingServiceAdapter) LoadReconciledStandingService(ctx context.Conte
 		if err != nil || !exists {
 			return err
 		}
+		candidate.InstanceID, candidate.EntityID, err = runtimeflowidentity.StandingGenerationCoordinates(candidate.FlowPath, candidate.InstanceID, candidate.EntityID, current.RunID)
+		if err != nil {
+			return err
+		}
 		if current.FlowPath != candidate.FlowPath || current.InstanceID != candidate.InstanceID || current.EntityID != candidate.EntityID {
 			return fmt.Errorf("standing service identity conflict for %s", candidate.ServiceID)
 		}
@@ -670,6 +674,10 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		}
 		nextGeneration := current.Generation + 1
 		nextRunID := runtimeflowidentity.StandingGenerationRunID(current.ServiceID, nextGeneration)
+		nextInstanceID, nextEntityID, err := runtimeflowidentity.StandingGenerationCoordinates(current.FlowPath, current.InstanceID, current.EntityID, nextRunID)
+		if err != nil {
+			return err
+		}
 		origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(current.ServiceID, nextGeneration)
 		if err != nil {
 			return err
@@ -694,7 +702,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			if _, err := tx.ExecContext(txctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_at) VALUES (?, ?, ?, ?)`, current.ServiceID, nextGeneration, nextRunID, now); err != nil {
 				return err
 			}
-			updated, err := tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = ?, current_run_id = ?, effective_state = ?, publication_state = 'pending', updated_at = ? WHERE service_id = ? AND current_generation = ? AND current_run_id = ?`, nextGeneration, nextRunID, effectiveState, now, current.ServiceID, current.Generation, current.RunID)
+			updated, err := tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = ?, current_run_id = ?, instance_id = ?, entity_id = ?, effective_state = ?, publication_state = 'pending', updated_at = ? WHERE service_id = ? AND current_generation = ? AND current_run_id = ?`, nextGeneration, nextRunID, nextInstanceID, nextEntityID, effectiveState, now, current.ServiceID, current.Generation, current.RunID)
 			if err != nil {
 				return err
 			}
@@ -710,7 +718,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			if _, err := tx.ExecContext(txctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_at) VALUES ($1::uuid, $2, $3::uuid, $4)`, current.ServiceID, nextGeneration, nextRunID, now); err != nil {
 				return err
 			}
-			updated, err := tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = $2, current_run_id = $3::uuid, effective_state = $4, publication_state = 'pending', updated_at = $5 WHERE service_id = $1::uuid AND current_generation = $6 AND current_run_id = $7::uuid`, current.ServiceID, nextGeneration, nextRunID, effectiveState, now, current.Generation, current.RunID)
+			updated, err := tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = $2, current_run_id = $3::uuid, instance_id = $8, entity_id = $9::uuid, effective_state = $4, publication_state = 'pending', updated_at = $5 WHERE service_id = $1::uuid AND current_generation = $6 AND current_run_id = $7::uuid`, current.ServiceID, nextGeneration, nextRunID, effectiveState, now, current.Generation, current.RunID, nextInstanceID, nextEntityID)
 			if err != nil {
 				return err
 			}
@@ -724,7 +732,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 				return err
 			}
 		}
-		candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: current.ServiceID, FlowPath: current.FlowPath, InstanceID: current.InstanceID, EntityID: current.EntityID, Source: declarationSource}
+		candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: current.ServiceID, FlowPath: current.FlowPath, InstanceID: nextInstanceID, EntityID: nextEntityID, Source: declarationSource}
 		result = standingResult(candidate, nextRunID, nextGeneration, current.PublicationSequence, "reset", effectiveState, operation.Reason)
 		result.TimerCancellations = cancellations
 		result.CommittedMutation = runtimerunlifecycle.MutationApplied
@@ -767,7 +775,7 @@ func (s *standingServiceAdapter) admitStandingServiceRunTx(ctx context.Context, 
 		UNION ALL SELECT 1 FROM decision_cards WHERE run_id = ? AND status = 'pending' AND execution_mode = 'live'
 		UNION ALL SELECT 1 FROM activity_attempts WHERE run_id = ? AND status IN ('started', 'uncertain') AND execution_mode = 'live'
 		UNION ALL SELECT 1 FROM flow_instance_runtime_readiness
-			WHERE run_id = ? AND (topology_ready_at IS NULL OR creation_event_emitted_at IS NULL)
+			WHERE run_id = ? AND (phase != 'ready' OR creation_event_emitted_at IS NULL)
 			AND json_extract(plan, '$.execution_mode') = 'live'
 		UNION ALL SELECT 1 FROM events e
 			LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id
@@ -793,7 +801,7 @@ func (s *standingServiceAdapter) admitStandingServiceRunTx(ctx context.Context, 
 			UNION ALL SELECT 1 FROM decision_cards WHERE run_id = $1::uuid AND status = 'pending' AND execution_mode = 'live'
 			UNION ALL SELECT 1 FROM activity_attempts WHERE run_id = $1::uuid AND status IN ('started', 'uncertain') AND execution_mode = 'live'
 			UNION ALL SELECT 1 FROM flow_instance_runtime_readiness
-				WHERE run_id = $1::uuid AND (topology_ready_at IS NULL OR creation_event_emitted_at IS NULL)
+				WHERE run_id = $1::uuid AND (phase != 'ready' OR creation_event_emitted_at IS NULL)
 				AND plan->>'execution_mode' = 'live'
 			UNION ALL SELECT 1 FROM events e
 				LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id
@@ -832,6 +840,10 @@ func (s *standingServiceAdapter) reconcileStandingServiceTx(ctx context.Context,
 			return standingResult(candidate, "", 0, 0, state, state, candidate.BindingBlockReason.QuiescenceReason()), nil
 		}
 		return s.createStandingServiceTx(ctx, tx, candidate)
+	}
+	candidate.InstanceID, candidate.EntityID, err = runtimeflowidentity.StandingGenerationCoordinates(candidate.FlowPath, candidate.InstanceID, candidate.EntityID, current.RunID)
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	if current.FlowPath != candidate.FlowPath || current.InstanceID != candidate.InstanceID || current.EntityID != candidate.EntityID {
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service identity conflict for %s", candidate.ServiceID)
@@ -1118,6 +1130,11 @@ func (s *standingServiceAdapter) loadAllStandingServicesTx(ctx context.Context, 
 func (s *standingServiceAdapter) createStandingServiceTx(ctx context.Context, tx *sql.Tx, candidate runtimepipeline.StandingServiceCandidate) (runtimepipeline.StandingServiceReconciliation, error) {
 	generation := int64(1)
 	runID := runtimeflowidentity.StandingGenerationRunID(candidate.ServiceID, generation)
+	var err error
+	candidate.InstanceID, candidate.EntityID, err = runtimeflowidentity.StandingGenerationCoordinates(candidate.FlowPath, candidate.InstanceID, candidate.EntityID, runID)
+	if err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
 	now := time.Now().UTC()
 	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(candidate.ServiceID, generation)
 	if err != nil {

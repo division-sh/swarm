@@ -34,28 +34,13 @@ func workflowInstanceRouteForExecution(source semanticview.Source, flowID, expli
 	rootRunScope := source != nil && flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source))
 	if rootRunScope {
 		if _, err := uuid.Parse(instancePath); err == nil {
-			return runtimeflowidentity.StoredRoute(instancePath, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath), nil
+			return runtimeflowidentity.Stored(source, flowID, instancePath, runtimeflowidentity.LogicalInstanceID(instancePath), "", "").Route(), nil
 		}
 	}
 	if expectedScope == "" || (instancePath != expectedScope && !strings.HasPrefix(instancePath, expectedScope+"/")) {
 		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route %q is outside flow scope %q", instancePath, expectedScope)
 	}
 	return runtimeflowidentity.StoredRoute(expectedScope, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath), nil
-}
-
-func workflowInstanceRouteForPersisted(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Route, error) {
-	instancePath := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
-	if instancePath == "" {
-		return runtimeflowidentity.Route{}, fmt.Errorf("persisted workflow instance is missing its canonical route")
-	}
-	route, err := workflowInstanceRouteForExecution(source, instance.WorkflowName, instancePath)
-	if err != nil {
-		return runtimeflowidentity.Route{}, fmt.Errorf("persisted workflow instance is missing its canonical route: %w", err)
-	}
-	if err := validateWorkflowInstanceRouteFacts(route, instance); err != nil {
-		return runtimeflowidentity.Route{}, err
-	}
-	return route, nil
 }
 
 func validateWorkflowInstanceRouteFacts(route runtimeflowidentity.Route, instance WorkflowInstance) error {
@@ -123,6 +108,21 @@ func requireWorkflowInstanceIdentity(route runtimeflowidentity.Route, entityID i
 
 type FlowInstanceIdentity struct {
 	runtimeflowidentity.Instance
+}
+
+// ConstructionIdentity preserves the exact header, including its parent. The
+// caller still binds source, run and execution admission through the owner.
+func (instance WorkflowInstance) ConstructionIdentity(owner runtimeflowidentity.RunScopedFlowInstance) (runtimeflowidentity.Instance, error) {
+	if err := owner.Validate(); err != nil {
+		return runtimeflowidentity.Instance{}, err
+	}
+	parent := runtimeflowidentity.ParentRoute{FlowID: instance.ParentFlowID, FlowInstance: instance.ParentFlowInstance, EntityID: instance.ParentEntityID}
+	if parent != parent.Normalized() || instance.StorageRef != owner.Route.InstancePath ||
+		instance.InstanceID != owner.Route.InstanceID || instance.EntityID != strings.TrimSpace(instance.EntityID) ||
+		instance.WorkflowName != strings.TrimSpace(instance.WorkflowName) {
+		return runtimeflowidentity.Instance{}, fmt.Errorf("constructed header contains noncanonical owner facts")
+	}
+	return requireWorkflowInstanceIdentity(owner.Route, identity.NormalizeEntityID(instance.EntityID), instance)
 }
 
 func DeriveFlowInstanceIdentity(source semanticview.Source, flowID, instanceID string) FlowInstanceIdentity {

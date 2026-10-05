@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -128,7 +129,7 @@ func selectedContractTestProcessCapability(
 		}
 	}
 	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "selected-contract-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+		OwnerID: "selected-contract-test", BootID: uuid.NewString(), RuntimeInstanceID: runForkTestRuntimeInstanceID,
 	})
 	if err != nil {
 		t.Fatalf("acquire selected-contract process capability: %v", err)
@@ -549,7 +550,7 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	}
 }
 
-func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *testing.T) {
+func TestSelectedContractConstructedAgentRecordsIncludeInferredFlowRequiredAgents(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
 		Path:   "analysis",
 		Events: map[string]runtimecontracts.EventCatalogEntry{"analysis.requested": {}, "analysis.done": {}},
@@ -601,19 +602,35 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatal(err)
 	}
-
-	records, err := selectedContractStaticAgentRecords(selectedContractAgentTestRunID, semanticview.Wrap(bundle))
+	root := bundle.FlowTree.Root
+	root.Paths.FlowPath = "."
+	bundle.FlowTree.ByID["."], bundle.FlowTree.ByID["analysis"].Parent = root, root
+	bundle.FlowSchemas["."] = runtimecontracts.FlowSchemaDocument{}
+	source := semanticview.Wrap(bundle)
+	declarations, err := runforkreadiness.StaticAgentBlueprints(source)
 	if err != nil {
-		t.Fatalf("selectedContractStaticAgentRecords: %v", err)
+		t.Fatalf("root declaration owner: %v", err)
+	}
+	if len(declarations) != 0 {
+		t.Fatalf("source-only plan admitted unconstructed flow actors: %+v", declarations)
+	}
+	parent := runtimeflowidentity.Stored(source, ".", selectedContractAgentTestRunID, selectedContractAgentTestRunID, runtimeflowidentity.EntityID(selectedContractAgentTestRunID), "")
+	instance, err := runtimeflowidentity.KeylessChild(source, parent, "analysis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	constructed, err := runtimemanager.ConstructedFlowMaterialization(source, selectedContractAgentTestRunID, instance, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
 	}
 	count := 0
-	for _, record := range records {
-		if strings.TrimSpace(record.Config.ID) == "analyzer" {
+	for _, actor := range constructed.Agents {
+		if strings.TrimSpace(actor.Config.ID) == "analyzer" {
 			count++
 		}
 	}
-	if count < 2 {
-		t.Fatalf("records = %#v, want analyzer from static-agent and inferred flow-required-agent materialization paths", records)
+	if count != 1 || len(source.FlowRequiredAgents("analysis")) != 1 {
+		t.Fatalf("actors = %#v, want one exact actor shared by declaration and inferred required agent", constructed.Agents)
 	}
 }
 

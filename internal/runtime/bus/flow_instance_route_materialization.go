@@ -8,6 +8,7 @@ import (
 
 type FlowInstanceRouteMaterializationRequest struct {
 	Identity            runtimeflowidentity.RunScopedFlowInstance
+	Instance            runtimeflowidentity.Instance
 	ActivationVariables map[string]string
 }
 

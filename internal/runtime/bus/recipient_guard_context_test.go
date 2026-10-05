@@ -30,6 +30,7 @@ func TestRecipientGuardObservesEffectiveDeliveryContext(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
+			store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1", EntityID: eventtest.UUID("review-entity")})
 			node := testFlowNode(t, "review", "target-node")
 			refusal := errors.New("effective reply context refused")
 			calls := 0

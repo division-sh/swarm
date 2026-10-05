@@ -1,0 +1,959 @@
+{
+  "schema": 1,
+  "source_head": "471a0cd06",
+  "source_boundary": "The served test binary started at 06:13:00 before the 06:13:42 fixture-only commit and the 06:16 activity patch. Its production/test source matches 471a0cd06. No descendant/default/paid-provider qualification is claimed.",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "command": "go run ./cmd/swarm-test -- ./internal/serveapp -json -race -count=1 -failfast -run '^TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores$'",
+  "receipt": "/tmp/agent-e-2496-provider-alias-disposition-race-v3.log",
+  "receipt_sha256": "a02ea123ea9b3ecc2002965635eba2fa18f48e7a477e1b0c43252257f4d24574",
+  "exit_code": 0,
+  "first_test_event": "2026-10-03T06:13:00.350079262Z",
+  "last_test_event": "2026-10-03T06:17:28.956661982Z",
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "action": "pass",
+      "elapsed": 268.607
+    }
+  ],
+  "root_count": 1,
+  "named_subtest_count": 154,
+  "fail_count": 0,
+  "skip_count": 0,
+  "root_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores",
+      "action": "pass",
+      "elapsed": 267.52
+    }
+  ],
+  "named_cells": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 1.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.4
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 1.93
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/default_sqlite",
+      "action": "pass",
+      "elapsed": 13.89
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.55
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.47
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected/explicit_postgres",
+      "action": "pass",
+      "elapsed": 10.57
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected",
+      "action": "pass",
+      "elapsed": 24.46
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.8
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.11
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.9
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.13
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/default_sqlite",
+      "action": "pass",
+      "elapsed": 9.59
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.26
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.26
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only/explicit_postgres",
+      "action": "pass",
+      "elapsed": 5.69
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/raw-connected-only",
+      "action": "pass",
+      "elapsed": 15.28
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.63
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.59
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/default_sqlite",
+      "action": "pass",
+      "elapsed": 8.3
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.18
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw/explicit_postgres",
+      "action": "pass",
+      "elapsed": 4.68
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-raw",
+      "action": "pass",
+      "elapsed": 12.99
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 1.57
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.9
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.63
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.15
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/default_sqlite",
+      "action": "pass",
+      "elapsed": 10.68
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.18
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss/explicit_postgres",
+      "action": "pass",
+      "elapsed": 4.8
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/consumerless-ack-loss",
+      "action": "pass",
+      "elapsed": 15.48
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.99
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.93
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.09
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/default_sqlite",
+      "action": "pass",
+      "elapsed": 12.63
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.29
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.28
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.82
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-and-provider-connections",
+      "action": "pass",
+      "elapsed": 19.44
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.91
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.09
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.98
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/default_sqlite",
+      "action": "pass",
+      "elapsed": 12.42
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.24
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.28
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.64
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/provider-edge-removed",
+      "action": "pass",
+      "elapsed": 19.06
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.88
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.09
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.92
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/default_sqlite",
+      "action": "pass",
+      "elapsed": 9.61
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.31
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.27
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.02
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present/explicit_postgres",
+      "action": "pass",
+      "elapsed": 5.88
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-present",
+      "action": "pass",
+      "elapsed": 15.49
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 2.94
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 3
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.12
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/default_sqlite",
+      "action": "pass",
+      "elapsed": 19.61
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 1.15
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 1.13
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers/explicit_postgres",
+      "action": "pass",
+      "elapsed": 10.95
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-consumers",
+      "action": "pass",
+      "elapsed": 30.56
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 1.11
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.16
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 1.37
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.17
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/default_sqlite",
+      "action": "pass",
+      "elapsed": 12.15
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.36
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.05
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.31
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.58
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/ack-loss",
+      "action": "pass",
+      "elapsed": 18.73
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 4.46
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 4.64
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/default_sqlite",
+      "action": "pass",
+      "elapsed": 21.92
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 1.67
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 1.63
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay/explicit_postgres",
+      "action": "pass",
+      "elapsed": 11.92
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/agent-replay",
+      "action": "pass",
+      "elapsed": 33.84
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.93
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.97
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.09
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/default_sqlite",
+      "action": "pass",
+      "elapsed": 9.34
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.31
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.27
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent/explicit_postgres",
+      "action": "pass",
+      "elapsed": 5.52
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/root-absent",
+      "action": "pass",
+      "elapsed": 14.86
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 0.91
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.12
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 0.95
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/default_sqlite",
+      "action": "pass",
+      "elapsed": 9.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.24
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.27
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed/explicit_postgres",
+      "action": "pass",
+      "elapsed": 5.15
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-removed",
+      "action": "pass",
+      "elapsed": 14.25
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 1.12
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 1.18
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/default_sqlite",
+      "action": "pass",
+      "elapsed": 11.06
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.34
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.35
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.81
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-redirected",
+      "action": "pass",
+      "elapsed": 17.87
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/default_sqlite/alpha/text",
+      "action": "pass",
+      "elapsed": 1.09
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/default_sqlite/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/default_sqlite/beta/text",
+      "action": "pass",
+      "elapsed": 1.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/default_sqlite/beta/callback",
+      "action": "pass",
+      "elapsed": 0.1
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/default_sqlite",
+      "action": "pass",
+      "elapsed": 9.93
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/explicit_postgres/alpha/text",
+      "action": "pass",
+      "elapsed": 0.29
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/explicit_postgres/alpha/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/explicit_postgres/beta/text",
+      "action": "pass",
+      "elapsed": 0.25
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/explicit_postgres/beta/callback",
+      "action": "pass",
+      "elapsed": 0.03
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root/explicit_postgres",
+      "action": "pass",
+      "elapsed": 5.27
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores/edge-to-root",
+      "action": "pass",
+      "elapsed": 15.2
+    }
+  ],
+  "failures": [],
+  "skipped": []
+}

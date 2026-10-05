@@ -158,10 +158,10 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"entityruntime/persistence.go", "insertPostgresEntityStateDiff", []string{"uuid.NewString()", "mutation.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
 		{"entityruntime/persistence.go", "insertSQLiteEntityStateDiff", []string{"uuid.NewString()", "addFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
 		{"entityruntime/persistence.go", "insertSQLiteEntityStateDiffAttempt", []string{"insertSQLiteEntityStateDiff(ctx, tx, runID, entityID, before, after, writer, createdAt, mutation.AddFact, mutation.Record)"}},
-		{"entityruntime/persistence.go", "EntityPostgresOwner.CreateEntity", []string{"mutation.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)"}},
-		{"entityruntime/persistence.go", "EntitySQLiteOwner.CreateEntity", []string{"mutation.AddFact(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, rec.EntityID)"}},
-		{"pipelinepersistence/scenario_setup.go", "PipelinePostgresOwner.SetupScenarioEntities", []string{"attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)"}},
-		{"pipelinepersistence/scenario_setup.go", "PipelineSQLiteOwner.SetupScenarioEntities", []string{"attempt.AddFact(req.RunID, privaterunforkrevision.FamilyEntityMetadata, entity.EntityID)"}},
+		{"pipelinepersistence/scenario_setup.go", "PipelinePostgresOwner.SetupScenarioEntities", []string{"s.CommitScenarioSetup(ctx, runtimebus.ScenarioSetupCommand{Setup: req})"}},
+		{"pipelinepersistence/scenario_setup.go", "PipelineSQLiteOwner.SetupScenarioEntities", []string{"s.CommitScenarioSetup(ctx, runtimebus.ScenarioSetupCommand{Setup: req})"}},
+		{"pipelinepersistence/scenario_setup.go", "PipelinePostgresOwner.CommitScenarioSetup", []string{"attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)"}},
+		{"pipelinepersistence/scenario_setup.go", "PipelineSQLiteOwner.CommitScenarioSetup", []string{"attempt.AddFact(req.RunID, privaterunforkrevision.FamilyEntityMetadata, entity.EntityID)"}},
 		{"runforkpersistence/run_fork_materializer.go", "materializeRunForkEntityState", []string{"attempt.AddFact(forkRunID, privaterunforkrevision.FamilyEntityMetadata, entityID)"}},
 		{"replycontext/owner.go", "createPostgresReplyContext", []string{
 			"record.Normalized()", "record.Validate()", "resolveReplyContextCreateConflict(record, existing, loadErr)",
@@ -302,8 +302,6 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"delivery/lifecycle.go", "DeliverySQLiteOwner.renewClaimTx", []string{"sqliteDeliveryAdapter.RenewClaim(ctx, attempt, claim, lease)"}},
 		{"delivery/lifecycle.go", "DeliveryPostgresOwner.TerminalizeRunDeliveriesTx", []string{"postgresDeliveryAdapter.TerminalizeRun(ctx, attempt, runID, reason)", "s.RecordDeadLetterTx(ctx, attempt, diagnostic, false)"}},
 		{"delivery/lifecycle.go", "DeliverySQLiteOwner.TerminalizeRunDeliveriesTx", []string{"sqliteDeliveryAdapter.TerminalizeRun(ctx, attempt, runID, reason)", "s.RecordDeadLetterTx(ctx, attempt, diagnostic, false)"}},
-		{"delivery/receiver_materialization.go", "Adapter.TerminalizeMaterializationDependents", []string{"a.terminalizeMaterializationDependentsTx(ctx, tx, attempt, materializer)"}},
-		{"delivery/receiver_materialization.go", "Adapter.terminalizeMaterializationDependentsTx", []string{"a.publicationRecords(ctx, tx, materializer.EventID)", "validateMaterializerAuthority(materializer, record.Snapshot)", "a.terminalizeDeliveries(ctx, tx, attempt, ids, reason, failure)"}},
 		{"pipelinepersistence/publication_settlement_kernel.go", "settlePipelineMemberTx", []string{
 			"writePipelineDispositionTx(ctx, tx, attempt, claim.EventID(), claim.Purpose(), disposition, postgres, now)",
 			"postgresDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())",

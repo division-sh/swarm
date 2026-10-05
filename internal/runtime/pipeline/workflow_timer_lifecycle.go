@@ -132,11 +132,11 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if err != nil {
 		return true, false, err
 	}
-	prepared, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, address, runtimeengine.StateMutation{
+	prepared, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, runtimeengine.EngineMutation{Address: address, State: runtimeengine.StateMutation{
 		Transition: &cause,
 		NextState:  nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
 		TriggeredAt: evt.CreatedAt(), StateCarrier: carrier,
-	})
+	}})
 	if err != nil {
 		return true, false, err
 	}

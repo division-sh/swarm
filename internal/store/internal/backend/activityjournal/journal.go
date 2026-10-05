@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/google/uuid"
 )
 
@@ -44,7 +45,7 @@ func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun Re
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	metadata, stateBuckets, found, err := loadLoopState(ctx, tx, dialect, record.RunID, record.FlowInstance)
+	metadata, stateBuckets, found, err := loadLoopState(ctx, tx, dialect, record.RunID, record.EntityID, record.FlowInstance, record.Generation.FlowID)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
@@ -383,31 +384,29 @@ func scan(row interface{ Scan(...any) error }) (runtimepipeline.ActivityAttemptR
 	return runtimepipeline.NormalizeActivityAttemptRecord(record), nil
 }
 
-func loadLoopState(ctx context.Context, tx *sql.Tx, dialect Dialect, runID, flowInstance string) (map[string]any, map[string]any, bool, error) {
-	query := `SELECT fields, gates, accumulator FROM entity_state WHERE run_id = ? AND flow_instance = ?`
-	if dialect == DialectPostgres {
-		query = `SELECT fields, gates, accumulator FROM entity_state WHERE run_id = $1::uuid AND flow_instance = $2 FOR UPDATE`
+func loadLoopState(ctx context.Context, tx *sql.Tx, dialect Dialect, runID, entityID, flowInstance, flowID string) (map[string]any, map[string]any, bool, error) {
+	header, found, err := workflowheader.LoadForMutation(ctx, tx, dialect == DialectPostgres, runID, entityID, flowInstance)
+	if err != nil || !found {
+		return nil, nil, found, err
 	}
-	var fieldsRaw, gatesRaw, accumulatorRaw any
-	err := tx.QueryRowContext(ctx, query, runID, strings.Trim(strings.TrimSpace(flowInstance), "/")).Scan(&fieldsRaw, &gatesRaw, &accumulatorRaw)
-	if err == sql.ErrNoRows {
-		return nil, nil, false, nil
+	if header.FlowTemplate != flowID {
+		return nil, nil, false, fmt.Errorf("activity generation disagrees with its constructed flow owner")
 	}
-	if err != nil {
-		return nil, nil, false, err
+	metadata := map[string]any{}
+	if header.EntityType != "" {
+		metadata, err = decodeMap(header.Fields, "entity_state.fields")
+		if err != nil {
+			return nil, nil, false, err
+		}
 	}
-	metadata, err := decodeMap(fieldsRaw, "entity_state.fields")
-	if err != nil {
-		return nil, nil, false, err
-	}
-	gates, err := decodeMap(gatesRaw, "entity_state.gates")
+	gates, err := decodeMap(header.Gates, "flow_instances.gates")
 	if err != nil {
 		return nil, nil, false, err
 	}
 	if len(gates) > 0 {
 		metadata["gates"] = gates
 	}
-	stateBuckets, err := decodeMap(accumulatorRaw, "entity_state.accumulator")
+	stateBuckets, err := decodeMap(header.Accumulator, "flow_instances.accumulator")
 	if err != nil {
 		return nil, nil, false, err
 	}

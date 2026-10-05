@@ -436,6 +436,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 				RunID: parent.RunID(),
 				Route: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
 			},
+			Instance: runtimeflowidentity.Derive(source, "account", instanceID),
 		}); err != nil {
 			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 		}

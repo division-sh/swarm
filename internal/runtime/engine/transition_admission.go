@@ -26,6 +26,24 @@ func (e *Executor) validateSourceStage(flowID, stage string) error {
 // ValidateTransitionEvidence binds one selected execution fact to its state and
 // lifecycle projections before the selected-store mutation acquires effects.
 func (m EngineMutation) ValidateTransitionEvidence() error {
+	if preserved := m.PreserveConstructedState; preserved != nil {
+		if m.State.Transition != nil || m.State.NextState != "" || m.State.SetGate != "" || len(m.State.ClearGates) != 0 ||
+			m.State.DataAccumulation.HasWrites() || m.State.DataAccumulation.SourceEvent != "" ||
+			len(m.EmitIntents) != 0 || len(m.ActivityIntents) != 0 || len(m.EmitPrerequisites.Fields) != 0 ||
+			m.FanOutIntent != nil || m.FanOutBarrier != nil || m.FanOutBarrierCompletion != nil {
+			return fmt.Errorf("preserved constructed state rejects executable mutation intents")
+		}
+		if len(m.LifecycleEffects) != 1 {
+			return fmt.Errorf("preserved constructed state requires one accepted-event effect")
+		}
+		effect := m.LifecycleEffects[0]
+		_, transition := effect.Transition()
+		if effect.Kind() != workflowlifecycle.KindAcceptedEvent || transition || effect.Route() != m.Address.FlowInstance.Route ||
+			effect.EntityID() != m.Address.EntityID || preserved.EntityID != m.Address.EntityID ||
+			effect.EventID() != m.State.TriggerEventID || effect.EventType() != m.State.TriggerEventType || !effect.OccurredAt().Equal(m.State.TriggeredAt) {
+			return fmt.Errorf("preserved constructed state requires its exact accepted event without transition")
+		}
+	}
 	transition := m.State.Transition
 	if transition != nil {
 		if err := transition.Validate(); err != nil {

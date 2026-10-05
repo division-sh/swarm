@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -90,7 +91,7 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 					continue
 				}
 				metadata := entity.MaterializationMetadata
-				if metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState || metadata.FlowInstance != guarded.StorageRef {
+				if metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || metadata.EntityType != guarded.EntityType || metadata.FlowInstance != guarded.StorageRef {
 					t.Fatalf("guard history lacks exact snapshot ownership: %+v", entity)
 				}
 				preserved = entity.CurrentState == "killed"
@@ -110,13 +111,18 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 					continue
 				}
 				metadata := entity.MaterializationMetadata
-				if metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState || metadata.FlowInstance != guarded.StorageRef {
+				if metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || metadata.FlowInstance != guarded.StorageRef || metadata.EntityType != guarded.EntityType {
 					t.Fatalf("historical guard cause lacks exact source ownership: %+v", entity)
+				}
+				fields, err := json.Marshal(entity.Fields)
+				if err != nil {
+					t.Fatalf("encode recorded guard fields: %v", err)
 				}
 				instance, err := pipeline.DecodeWorkflowInstancePersistenceRecord(pipeline.WorkflowInstancePersistenceRecord{
 					EntityID: entity.EntityID, FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType,
 					Slug: metadata.Slug, Name: metadata.Name, WorkflowName: guarded.WorkflowName,
-					CurrentState: entity.CurrentState, Config: metadata.FlowConfig,
+					CurrentState: entity.CurrentState, Config: metadata.FlowConfig, Fields: fields,
+					StageDefined: metadata.StageDefined,
 				})
 				if err != nil {
 					t.Fatalf("decode source-at-revision guard evidence: %v", err)

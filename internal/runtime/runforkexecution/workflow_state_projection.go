@@ -64,6 +64,7 @@ func prepareSelectedContractWorkflowReadiness(
 		return agentRuntime, runforkreadiness.Admission{}, err
 	}
 	agentRuntime, err = prepareSelectedContractAgentRuntimeMaterialization(ctx, loaded, planning, prepared.Blueprints, options)
+	agentRuntime.SourceRunID = plan.SourceRunID
 	agentRuntime.Flows = prepared.Flows
 	return agentRuntime, admitted, err
 }
@@ -81,7 +82,7 @@ func bindRecoveredSelectedContractAgentRuntime(
 	topologies := make([]runfork.RunForkSelectedContractAgentTopology, 0)
 	seen := make(map[runtimeagentidentity.Identity]struct{})
 	for _, state := range states {
-		if state.Mode != "template" {
+		if state.AddressKind != runfork.RunForkSelectedContractWorkflowStateExact {
 			continue
 		}
 		owner, err := runtimeflowidentity.NewRunScopedFlowInstance(forkRunID, state.Route)

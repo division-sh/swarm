@@ -82,16 +82,18 @@ type EmitPersistenceVerifier interface {
 }
 
 type EngineMutation struct {
-	Address                 StateAddress
-	State                   StateMutation
-	HandlerRuleSelection    handlerselection.HandlerRuleSelectionFact
-	LifecycleEffects        []runtimeworkflowlifecycle.Effect
-	ActivityIntents         []ActivityIntent
-	EmitIntents             []EmitIntent
-	EmitPrerequisites       EmitPersistencePrerequisites
-	FanOutIntent            *fanoutobligation.IntentRequest
-	FanOutBarrier           *fanoutbarrier.Registration
-	FanOutBarrierCompletion *fanoutbarrier.Completion
+	Address StateAddress
+	State   StateMutation
+	// PreserveConstructedState admits accepted-event reactions, not state writes.
+	PreserveConstructedState *StateSnapshot
+	HandlerRuleSelection     handlerselection.HandlerRuleSelectionFact
+	LifecycleEffects         []runtimeworkflowlifecycle.Effect
+	ActivityIntents          []ActivityIntent
+	EmitIntents              []EmitIntent
+	EmitPrerequisites        EmitPersistencePrerequisites
+	FanOutIntent             *fanoutobligation.IntentRequest
+	FanOutBarrier            *fanoutbarrier.Registration
+	FanOutBarrierCompletion  *fanoutbarrier.Completion
 }
 
 // DurablePublicationPlan is an immutable, already-admitted publication plan.

@@ -78,12 +78,25 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 
 	writers := wave1EntityWriterCoverageByFlow(c.source)
 	for _, contract := range wave1DeclaredEntityContracts(c.source) {
+		constructorFields := map[string]bool{}
+		for _, constructor := range c.constructorContracts(contract.FlowID) {
+			if !constructor.Eligible() {
+				continue
+			}
+			constructorFields[constructor.KeyField()] = true
+			for _, field := range constructor.SuppliedFields() {
+				constructorFields[field] = true
+			}
+		}
 		for fieldName, fieldDecl := range contract.Contract.Fields {
 			fieldName = strings.TrimSpace(fieldName)
 			if fieldName == "" {
 				continue
 			}
 			if fieldDecl.Initial != nil {
+				continue
+			}
+			if constructorFields[fieldName] {
 				continue
 			}
 			if strings.TrimSpace(fieldDecl.MaterializeFrom) != "" {
@@ -98,7 +111,7 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 			c.entityWriterCoverageFindings = append(c.entityWriterCoverageFindings, Finding{
 				CheckID:  "entity_writer_coverage",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s entity_type %s declares field %s without authored writer coverage, initial, or _unused_reason", defaultFlowLabel(contract.FlowID), contract.EntityType, fieldName),
+				Message:  fmt.Sprintf("flow %s entity_type %s declares field %s without constructor supply, authored writer coverage, initial, or _unused_reason", defaultFlowLabel(contract.FlowID), contract.EntityType, fieldName),
 				Location: defaultFlowLabel(contract.FlowID),
 			})
 		}

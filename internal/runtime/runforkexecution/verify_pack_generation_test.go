@@ -83,8 +83,8 @@ func TestPublicVerifyRetainedForkUsesConfiguredPackGeneration(t *testing.T) {
 	}
 	s := storetest.StartSQLiteRuntimeStore(t)
 	db := storetest.Database(s)
-	sourceID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	seedSelectedOperationSource(t, ctx, "sqlite", db, s, loaded, sourceID, eventID, entityID)
+	sourceID, eventID := uuid.NewString(), uuid.NewString()
+	seedSelectedOperationSource(t, ctx, "sqlite", db, s, loaded, sourceID, eventID)
 	capability := selectedContractTestProcessCapability(t, ctx, s)
 	owner := selectedContractSQLiteExecutionOwnerForTest(t, s)
 	fork, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{

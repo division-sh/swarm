@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -47,7 +48,7 @@ func TestReceiverCompositionSharedChildJourney(t *testing.T) {
 						if err := json.Unmarshal([]byte(rawOwner), &owner); err != nil {
 							t.Fatal(err)
 						}
-						if !owner.EntitylessReceiver() || owner.Route().EntityID != "" || owner.Route().FlowInstance != "sink" {
+						if !owner.ExistingEntity() || owner.Route() != (events.RouteIdentity{EntityID: flowidentity.EntityID("sink"), FlowInstance: "sink", FlowID: "sink"}) {
 							t.Fatalf("optional child borrowed source ownership: %s", rawOwner)
 						}
 						sinkDelivered = true
@@ -60,13 +61,7 @@ func TestReceiverCompositionSharedChildJourney(t *testing.T) {
 					t.Fatal("shared static child has no successful execution")
 				}
 				rows.Close()
-				var states int
-				if err := rt.DB.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id=$1 AND flow_instance='sink'`, started.RunID).Scan(&states); err != nil {
-					t.Fatal(err)
-				}
-				if states != 0 {
-					t.Fatal("optional child fabricated receiving state")
-				}
+				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 2, map[string]any{})
 				requireReceiverPublicReadback(t, rt, started.RunID)
 			})
 		}

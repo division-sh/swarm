@@ -142,8 +142,6 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.Description = strings.TrimSpace(out.Description)
 		case "_note":
 			continue
-		case "create_entity":
-			out.CreateEntity, err = nodeValueBool(field, "handler.create_entity")
 		case "advances_to":
 			if field.Presence() == yamlsource.PresenceSequence || field.Presence() == yamlsource.PresenceEmptySequence {
 				return SystemNodeEventHandler{}, fmt.Errorf("DIALECT-ADV-LIST: advances_to at %s is list, must be string", field.Location())

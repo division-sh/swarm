@@ -5,6 +5,11 @@
   "source_hash": "\u003cadmitted-bundle\u003e",
   "source_authority": "projection_only_existing_contract_owners",
   "root": {
+    "constructors": [
+      {
+        "no_arguments": true
+      }
+    ],
     "source_files": {
       "schema": "schema.yaml"
     },
@@ -34,6 +39,11 @@
   },
   "flows": [
     {
+      "constructors": [
+        {
+          "no_arguments": true
+        }
+      ],
       "id": "ingress",
       "path": "ingress",
       "mode": "static",
@@ -85,6 +95,13 @@
       ]
     },
     {
+      "constructors": [
+        {
+          "input": "operating.report.requested",
+          "no_arguments": false,
+          "key_field": "operating_instance_id"
+        }
+      ],
       "id": "operating",
       "path": "operating",
       "mode": "template",
@@ -150,6 +167,18 @@
       ]
     },
     {
+      "constructors": [
+        {
+          "input": "operating.reported",
+          "no_arguments": false,
+          "key_field": "portfolio_id"
+        },
+        {
+          "input": "portfolio.setup",
+          "no_arguments": false,
+          "key_field": "portfolio_id"
+        }
+      ],
       "id": "portfolio",
       "path": "portfolio",
       "mode": "template",
@@ -243,6 +272,25 @@
       ]
     },
     {
+      "constructors": [
+        {
+          "input": "period.reported",
+          "no_arguments": false,
+          "key_field": "period_id",
+          "supplied_fields": [
+            "portfolio_id"
+          ]
+        },
+        {
+          "input": "period.setup",
+          "no_arguments": false,
+          "key_field": "period_id",
+          "supplied_fields": [
+            "expected_operating_ids",
+            "portfolio_id"
+          ]
+        }
+      ],
       "id": "portfolio/period",
       "path": "portfolio/period",
       "mode": "template",

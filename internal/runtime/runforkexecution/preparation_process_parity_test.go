@@ -45,7 +45,7 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			sourceRun, eventID := uuid.NewString(), uuid.NewString()
-			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID, uuid.NewString())
+			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
 			request := SelectedContractExecutionRequest{
 				Owner: owner, SourceRunID: sourceRun, At: eventID,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),

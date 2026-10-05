@@ -65,6 +65,9 @@ func TestProjectSelectedContractSourceEventPreservesProducerAndIsIdempotent(t *t
 	}{
 		{"root", eventtest.RootRoutingSource("source-run"), eventtest.RootRoutingSource("child-run")},
 		{"already child root", eventtest.RootRoutingSource("child-run"), eventtest.RootRoutingSource("child-run")},
+		{"constructed root execution", eventtest.StaticFlowRoutingSource(".", "source-run", "source-run"), eventtest.StaticFlowRoutingSource(".", "child-run", "child-run")},
+		{"already projected root execution", eventtest.StaticFlowRoutingSource(".", "child-run", "child-run"), eventtest.StaticFlowRoutingSource(".", "child-run", "child-run")},
+		{"entityless root execution", eventtest.StaticFlowRoutingSource(".", "source-run", ""), eventtest.StaticFlowRoutingSource(".", "child-run", "")},
 		{"external root preserves authority", external, childExternal},
 		{"static producer", eventtest.StaticFlowRoutingSource("producer", "producer", "entity-one"), eventtest.StaticFlowRoutingSource("producer", "producer", "entity-one")},
 		{"template producer", eventtest.ConcreteTemplateRoutingSource("producer", "producer/one", "entity-one"), eventtest.ConcreteTemplateRoutingSource("producer", "producer/one", "entity-one")},
@@ -143,6 +146,10 @@ func TestProjectSelectedContractSourceEventRejectsInvalidIdentity(t *testing.T) 
 		{"foreign root", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.RootRoutingSource("entity-one")}},
 		{"nonroot claiming source root entity", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.StaticFlowRoutingSource("producer", "producer", "source-run")}},
 		{"nonroot claiming child root entity", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.StaticFlowRoutingSource("producer", "producer", "child-run")}},
+		{"root execution with foreign run", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.StaticFlowRoutingSource(".", "foreign-run", "")}},
+		{"root execution with foreign entity", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.StaticFlowRoutingSource(".", "source-run", "foreign-entity")}},
+		{"nonroot claiming source execution coordinate", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.StaticFlowRoutingSource("producer", "source-run", "producer-entity")}},
+		{"nonroot claiming child execution coordinate", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.ConcreteTemplateRoutingSource("producer", "child-run", "producer-entity")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := sourceOwnershipJSON(t, tc.event)
@@ -172,7 +179,10 @@ func TestProjectSelectedContractSourceEventPreservesAbsentSource(t *testing.T) {
 }
 
 func TestProjectSelectedContractSourceEventActivityPreservesExactNumericBytes(t *testing.T) {
-	for _, root := range []bool{false, true} {
+	for _, shape := range []struct {
+		root, constructed bool
+	}{{}, {root: true}, {root: true, constructed: true}} {
+		root := shape.root
 		name, flow := "nonroot", "producer/one"
 		input := RunForkSelectedContractSourceEvent{
 			SourceEventID: "activity", EventName: RunForkSelectedContractPlatformActivityEvent,
@@ -182,6 +192,10 @@ func TestProjectSelectedContractSourceEventActivityPreservesExactNumericBytes(t 
 			name, flow = "root", "source-run"
 			input = sourceOwnershipRootEvent()
 			input.EventName = RunForkSelectedContractPlatformActivityEvent
+			if shape.constructed {
+				name = "constructed_root"
+				input.RoutingSource = eventtest.StaticFlowRoutingSource(".", "source-run", "source-run")
+			}
 		}
 		t.Run(name, func(t *testing.T) {
 			input.Payload = json.RawMessage(`{"entity_id":"` + input.RoutingSource.Route().EntityID + `","flow_instance":"` + flow + `","large":9007199254740993,"decimal":1.2300e+09,"negative_zero":-0,"nested":{"precise":123456789012345678901234567890},"business_root":"source-run"}`)
@@ -208,6 +222,9 @@ func TestProjectSelectedContractSourceEventActivityPreservesExactNumericBytes(t 
 			want.Payload = got.Payload
 			if root {
 				want.RoutingSource = eventtest.RootRoutingSource("child-run")
+				if shape.constructed {
+					want.RoutingSource = eventtest.StaticFlowRoutingSource(".", "child-run", "child-run")
+				}
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("activity producer fields changed: got=%#v want=%#v", got, want)

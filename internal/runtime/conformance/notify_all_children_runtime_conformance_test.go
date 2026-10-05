@@ -130,6 +130,7 @@ func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteTopology(
 }
 
 type notifyAllChildrenRuntime struct {
+	db                 *sql.DB
 	bus                *runtimebus.EventBus
 	diagnostics        *fanInBarrierDiagnosticBus
 	manager            *runtimemanager.AgentManager
@@ -1243,15 +1244,15 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}); err != nil {
 		t.Fatalf("revise run to v2 source artifact: %v", err)
 	}
+	startupV2, err := runtimeV2.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctxV2, runtimeV2.sourceArtifactFact, true)
+	if err != nil {
+		t.Fatalf("canonicalize revised source topology: %v", err)
+	}
 	if err := runtimeV2.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV2, "dynamic-flow-source-v2", runtimeV2.sourceArtifactFact)); err != nil {
 		t.Fatalf("run v2 manager: %v", err)
 	}
-	reconcileCtx := worklifetime.WithOccurrence(ctxV2, runtimeV2.workOwner)
-	revisionErr := runtimeV2.pipeline.CommitDynamicFlowRuntimeReadinessReconciliation(
-		reconcileCtx, time.Now().UTC(), runtimeV2.manager,
-	)
-	if revisionErr != nil && !strings.Contains(revisionErr.Error(), "retains predecessor retirement") {
-		t.Fatalf("reconcile revised source: %v", revisionErr)
+	if err := runtimeV2.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV2, startupV2); err != nil {
+		t.Fatalf("attach revised source topology: %v", err)
 	}
 	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctxV2, runtimeV2.pipeline, runID, descriptor.FlowInstance)
 
@@ -1333,15 +1334,15 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}); err != nil {
 		t.Fatalf("revise run to v3 source artifact: %v", err)
 	}
+	startupV4, err := runtimeV4.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctxV3, runtimeV4.sourceArtifactFact, true)
+	if err != nil {
+		t.Fatalf("canonicalize reintroduced source topology: %v", err)
+	}
 	if err := runtimeV4.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV3, "dynamic-flow-source-v3", runtimeV4.sourceArtifactFact)); err != nil {
 		t.Fatalf("run v3 manager: %v", err)
 	}
-	if err := runtimeV4.pipeline.CommitDynamicFlowRuntimeReadinessReconciliation(
-		worklifetime.WithOccurrence(ctxV3, runtimeV4.workOwner),
-		time.Now().UTC(),
-		runtimeV4.manager,
-	); err != nil && !strings.Contains(err.Error(), "retains predecessor retirement") {
-		t.Fatalf("reconcile reintroduced source: %v", err)
+	if err := runtimeV4.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV3, startupV4); err != nil {
+		t.Fatalf("attach reintroduced source topology: %v", err)
 	}
 	waitNotifyAllChildrenRuntimeReadiness(t, ctxV3, runtimeV4.pipeline, runID, descriptor.FlowInstance)
 	v3Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
@@ -1652,6 +1653,14 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 			}
 		}
 	}
+}
+
+type notifyAllChildrenConstructionLoader struct {
+	persistence runtimepipeline.WorkflowPersistence
+}
+
+func (l notifyAllChildrenConstructionLoader) Load(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
+	return l.persistence.LoadWorkflowInstance(ctx, owner)
 }
 
 func assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t testing.TB, ctx context.Context, db *sql.DB, backend, runID, agentID, flowInstance string) {
@@ -2105,6 +2114,13 @@ func newNotifyAllChildrenRuntime(
 		sessionStore runtimesessions.Registry
 		llmBackend   string
 	)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
+	switch sqliteStore := backend.(type) {
+	case *store.SQLiteRuntimeStore:
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
+	case *failingNotifyAllChildrenSQLiteStore:
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
+	}
 	if opts.realMockAgents {
 		if bundle, ok := semanticview.Bundle(source); !ok || bundle == nil {
 			t.Fatal("notify-all-children mock runtime requires a bundle-backed source")
@@ -2149,6 +2165,7 @@ func newNotifyAllChildrenRuntime(
 			ModelRuntimes:     modelRuntimes,
 			AuthorityProvider: authority,
 			EmitRegistry:      emitRegistry,
+			WorkflowInstances: notifyAllChildrenConstructionLoader{workflowPersistence},
 		})
 		agentFactory = runtimeagents.NewLLMAgentFactory(
 			modelRuntimes,
@@ -2159,13 +2176,6 @@ func newNotifyAllChildrenRuntime(
 			agentFactory = opts.agentGate.wrapFactory(agentFactory)
 		}
 		llmBackend = cfg.LLM.Backend
-	}
-	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
-	switch sqliteStore := backend.(type) {
-	case *store.SQLiteRuntimeStore:
-		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
-	case *failingNotifyAllChildrenSQLiteStore:
-		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
@@ -2325,6 +2335,7 @@ func newNotifyAllChildrenRuntime(
 		<-maintenanceDone
 	})
 	return notifyAllChildrenRuntime{
+		db:      db,
 		posture: posture,
 		bus:     eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
 		workOwner: workOwner, selected: backend, sourceArtifactFact: sourceArtifactFact, genericSchedules: genericSchedules,
@@ -2417,7 +2428,7 @@ func waitNotifyAllChildrenRuntimeReadiness(
 	)
 	for time.Now().Before(deadline) {
 		last, found, err = workflow.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instancePath))
-		if err == nil && found && !last.TopologyReadyAt.IsZero() {
+		if err == nil && found && (last.Phase == runtimepipeline.FlowAttachmentReady) {
 			return last
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -2666,6 +2677,7 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 	defer ticker.Stop()
 	for {
 		if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
+			logNotifyAllChildrenDrainFailure(t, runtime.db, runID)
 			readCtx, stopRead := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), 5*time.Second)
 			if summary, readErr := runtime.selected.FanOutRunSummary(readCtx, runID, time.Now().UTC()); readErr == nil {
 				t.Logf("quiescence failure durable fan-out summary=%#v active_work=%d", summary, runtime.workOwner.ActiveCount())

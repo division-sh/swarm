@@ -95,7 +95,6 @@ pins:
   subscribes_to: [work.requested]
   event_handlers:
     work.requested:
-      create_entity: true
       data_accumulation:
         writes:
           - {target_field: detail, value: payload.detail}

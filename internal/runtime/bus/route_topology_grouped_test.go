@@ -66,7 +66,7 @@ func TestGroupedMaterializedRouteSetsMatchPerOwnerScan(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rt.instanceOwners[identity] = identity
+			rt.instanceOwners[identity] = runtimeflowidentity.Stored(nil, identity.Route.ScopeKey, identity.Route.InstancePath, identity.Route.InstanceID, runtimeflowidentity.EntityID(identity.Route.InstancePath), "")
 			identities = append(identities, identity)
 			for _, recipientID := range []string{"alpha", "beta", "alpha"} {
 				rt.patterns = append(rt.patterns, routePattern{

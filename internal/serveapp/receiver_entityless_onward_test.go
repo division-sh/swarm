@@ -46,12 +46,12 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 					switch owner.Route().FlowInstance {
 					case "sink":
 						child = true
-						if !owner.EntitylessReceiver() || owner.Route().EntityID != "" {
+						if !owner.ExistingEntity() || owner.Route() != (events.RouteIdentity{EntityID: flowidentity.EntityID("sink"), FlowInstance: "sink", FlowID: "sink"}) {
 							t.Errorf("child inherited an entity: %s", raw)
 						}
 					case "sink/tail":
 						grandchild = true
-						if !owner.MaterializingEntity() || owner.Route().EntityID != flowidentity.EntityID("sink/tail") {
+						if !owner.ExistingEntity() || owner.Route() != (events.RouteIdentity{EntityID: flowidentity.EntityID("sink/tail"), FlowInstance: "sink/tail", FlowID: "sink/tail"}) {
 							t.Errorf("grandchild lacks canonical materialization: %s", raw)
 						}
 					}
@@ -63,13 +63,8 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				if !child || !grandchild {
 					t.Fatalf("missing nested execution child=%t grandchild=%t", child, grandchild)
 				}
-				var childStates int
-				if err := rt.DB.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id=$1 AND flow_instance='sink'`, started.RunID).Scan(&childStates); err != nil {
-					t.Fatal(err)
-				}
-				if childStates != 0 {
-					t.Fatal("entityless child fabricated state")
-				}
+				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 2, map[string]any{})
+				requireReceiverConstructedInstance(t, rt, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"), "receipt", "done", "sink", "ready", 2, map[string]any{"result": "emitted"})
 				var rawFields string
 				if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='sink/tail' AND current_state='done'`, started.RunID).Scan(&rawFields); err != nil {
 					t.Fatal(err)
@@ -103,7 +98,7 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 					if err := json.Unmarshal([]byte(rawSource), &source); err != nil {
 						t.Fatal(err)
 					}
-					if source.FlowID != "sink" || source.FlowInstance != "sink" || source.EntityID != "" {
+					if source != (events.RouteIdentity{FlowID: "sink", FlowInstance: "sink", EntityID: flowidentity.EntityID("sink")}) {
 						t.Fatalf("entityless emitter borrowed ancestor identity: %s", rawSource)
 					}
 				}

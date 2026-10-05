@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -36,31 +35,53 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 				}
 				t.Run(name, func(t *testing.T) {
 					opened := backend.open(t)
-					f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: uuid.NewString(), entityID: uuid.NewString()}
 					flowID, path := "owner", "owner/one"
+					files := map[string]string{
+						"schema.yaml":         "name: fork-entry-history\n",
+						"owner/schema.yaml":   "name: owner\ninstance: owner_key\nstages:\n  active: {initial: true}\npins:\n  inputs:\n    - construct.requested\n",
+						"owner/entities.yaml": "review_item:\n  owner_key: text\n",
+						"owner/events.yaml":   "construct.requested:\n",
+					}
 					if root {
-						f.entityID, flowID, path = f.runID, ".", f.runID
+						flowID, path = ".", "."
+						files = map[string]string{
+							"schema.yaml":   "name: fork-entry-history\nstages:\n  active: {initial: true}\n",
+							"entities.yaml": "review_item:\n  owner_key: {type: text, initial: one}\n",
+						}
 					}
-					f.ctx = correlation.WithRunID(testAuthorActivityContext(), f.runID)
-					requireDefaultSourceArtifactForTest(t, f.ctx, opened.store)
+					construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
+					f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, ctx: construction.ctx, runID: correlation.RunIDFromContext(construction.ctx)}
 					at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-					if _, err := f.store.SetupScenarioEntities(f.ctx, pipeline.ScenarioSetupRequest{RunID: f.runID, CreatedAt: at,
-						Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "subject", EntityID: f.entityID, FlowInstance: path, EntityType: "review_item", CurrentState: "active"}},
-					}); err != nil {
-						t.Fatal(err)
+					instanceID := "one"
+					if root {
+						instanceID = f.runID
 					}
-					owner, err := flowidentity.NewRunScopedFlowInstance(f.runID, flowidentity.RouteForInstancePath(path))
+					req := sqliteFlowActivationRequest(construction.bundle, flowID, instanceID, "", path)
+					req.OccurredAt = at
+					if root {
+						req.Instance = flowidentity.Stored(req.ContractBundle, ".", f.runID, f.runID, f.runID, "")
+					} else {
+						req.Config = map[string]any{"owner_key": "one"}
+						req.ConstructorInput, req.ResolvedKey = "construct.requested", "one"
+						req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, at)
+					}
+					activation, err := construction.manager.PrepareFlowInstanceActivation(f.ctx, req)
 					if err != nil {
 						t.Fatal(err)
 					}
-					effect, err := workflowlifecycle.NewInitialEntry(owner.Route, identity.NormalizeEntityID(f.entityID), "active", executionmode.Live, at)
+					committed, err := (agentFixtureFlowActivationCommitter{store: construction.store}).CommitFlowInstanceActivation(f.ctx, activation)
+					if err != nil || !committed.Acknowledged || !committed.Created {
+						t.Fatalf("construct fork source: %+v %v", committed, err)
+					}
+					persisted, err := activation.PersistenceRecord()
 					if err != nil {
 						t.Fatal(err)
 					}
-					entry, found, err := effect.StageEntry(owner)
-					if err != nil || !found || entry.OriginRunID != "" {
-						t.Fatalf("fresh construction = %#v %v", entry, err)
+					f.entityID = persisted.State.EntityID
+					if activation.Lifecycle.StageEntry == nil || activation.Lifecycle.StageEntry.OriginRunID != "" {
+						t.Fatalf("fresh construction = %#v", activation.Lifecycle)
 					}
+					entry := *activation.Lifecycle.StageEntry
 					bookkeeping := map[string]any{}
 					if err := workflowlifecycle.StoreStageEntry(bookkeeping, entry); err != nil {
 						t.Fatal(err)
@@ -117,20 +138,11 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					buckets[node.Key()] = map[string]any{"handler_accumulators": map[string]any{bucket.Key(): accValue}}
-					f.state = stateOnlyWorkflowEngineMutationRecord(t, f.runID, flowID, path, f.entityID, "active", 1, at)
-					f.state.Identity, f.state.CurrentState = owner, "active"
+					f.state = persisted.State
+					f.state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+					f.state.ExpectedState, f.state.ExpectedRevision = "active", 1
+					f.state.UpdatedAt = at.Add(3 * time.Second)
 					f.state.Slug, f.state.Name = "entry-subject", "Entry Subject"
-					if root {
-						f.state.Mode = "static"
-					}
-					config, err := pipeline.WorkflowInstanceConfigPayloadForRoute(owner.Route, "1", nil)
-					if err != nil {
-						t.Fatal(err)
-					}
-					f.state.Config, err = json.Marshal(config)
-					if err != nil {
-						t.Fatal(err)
-					}
 					f.state.Bookkeeping, err = json.Marshal(bookkeeping)
 					if err != nil {
 						t.Fatal(err)
@@ -166,7 +178,7 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					want := entry
 					want.RunID, want.OriginRunID = result.ForkRunID, f.runID
 					if root {
-						want.EntityID, want.FlowScope, want.InstanceID, want.InstancePath = result.ForkRunID, result.ForkRunID, result.ForkRunID, result.ForkRunID
+						want.EntityID, want.InstanceID, want.InstancePath = result.ForkRunID, result.ForkRunID, result.ForkRunID
 					}
 					if err != nil || !found || inherited != want {
 						t.Fatalf("persisted inherited owner = %#v want %#v: %v", inherited, want, err)

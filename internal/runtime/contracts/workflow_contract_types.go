@@ -244,7 +244,6 @@ type HandlerTransitionSemantic struct {
 	ID               string
 	Node             runtimeidentity.ExecutableNode
 	EventType        string
-	CreateEntity     bool
 	Activity         ActivitySpec
 	Guard            *GuardSpec
 	AdvancesTo       string

@@ -1,0 +1,426 @@
+{
+  "source_head": "2abec8556117d30c61f892e23ebb213fe8d6b74f",
+  "baseline_source": "a609c110230db16711afbde5f45e473450d9092e",
+  "before_receipt": "/tmp/agent-e-2496-a609c1102-catalog-required-verify.log",
+  "receipt": "/tmp/agent-e-2496-2abec8556-describe.log",
+  "receipt_sha256": "677c75a709af298a01c9ee8befddc145777e2420684bbe5ba76f8c23d01c6c19",
+  "old_spec_sha256": "88994b4d2e083affcaee233e000711874e7a90bb5544e9b71cc81b65c5d008d1",
+  "new_spec_sha256": "a23090723699f3df17b82726e8543874c1c4b0169b09fc396f8a724638c6c970",
+  "changed": 10,
+  "unchanged": 35,
+  "spec_hunks": [
+    {
+      "old": 394,
+      "removed": 0,
+      "next": 395,
+      "added": 8
+    },
+    {
+      "old": 16899,
+      "removed": 0,
+      "next": 16908,
+      "added": 2
+    },
+    {
+      "old": 16905,
+      "removed": 1,
+      "next": 16915,
+      "added": 3
+    },
+    {
+      "old": 23360,
+      "removed": 0,
+      "next": 23373,
+      "added": 4
+    },
+    {
+      "old": 23470,
+      "removed": 4,
+      "next": 23486,
+      "added": 17
+    },
+    {
+      "old": 23475,
+      "removed": 1,
+      "next": 23504,
+      "added": 1
+    },
+    {
+      "old": 23484,
+      "removed": 2,
+      "next": 23513,
+      "added": 1
+    },
+    {
+      "old": 23492,
+      "removed": 0,
+      "next": 23521,
+      "added": 12
+    },
+    {
+      "old": 23519,
+      "removed": 0,
+      "next": 23560,
+      "added": 8
+    },
+    {
+      "old": 23694,
+      "removed": 1,
+      "next": 23742,
+      "added": 2
+    },
+    {
+      "old": 23756,
+      "removed": 4,
+      "next": 23805,
+      "added": 7
+    },
+    {
+      "old": 23783,
+      "removed": 1,
+      "next": 23835,
+      "added": 2
+    },
+    {
+      "old": 39245,
+      "removed": 0,
+      "next": 39299,
+      "added": 4
+    },
+    {
+      "old": 39271,
+      "removed": 1,
+      "next": 39328,
+      "added": 6
+    },
+    {
+      "old": 39322,
+      "removed": 1,
+      "next": 39384,
+      "added": 4
+    }
+  ],
+  "rows": [
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-text",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "93e874ca56481a843ca8f9f1aa93e365e8dbf6c753519aa934980fb343b9f6b0",
+      "after": "bd4235fe0dfc5e63dfbd03b2653baebee5594eb8a53d34a55cd08946317d73dc",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-quiet",
+      "stdout_sha256": "eca9a9c76db7a4488e37e236e8467b4992e078a234075eee6e5274557f850118",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "93e874ca56481a843ca8f9f1aa93e365e8dbf6c753519aa934980fb343b9f6b0",
+      "after": "bd4235fe0dfc5e63dfbd03b2653baebee5594eb8a53d34a55cd08946317d73dc",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-no-color",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-text",
+      "stdout_sha256": "4e85f66b68b3428055ca54c5d1ff3146aeb08d4c1923d57b1efd64cb1b0c39f1",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-json",
+      "stdout_sha256": "cdd9f1199c913404f4c983cd6a88227df286be69db2028735ee6b91236fd89ee",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-quiet",
+      "stdout_sha256": "0b978d387a2f9408ea2af84988014b80e51acf3e53e239742206db0475919b0d",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-text",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "635d999f95799de0f4b179655711c1241502a342495b2e26bea0a2c525dd28a3",
+      "after": "f98540d0a078ce19462064311950fc11d1eab2f461aae1b9464168d90061cf88",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-quiet",
+      "stdout_sha256": "e0e08278e2acaf3e8638fe233c9da5a6aeddc1dff4ff5eab647578efb627945f",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "635d999f95799de0f4b179655711c1241502a342495b2e26bea0a2c525dd28a3",
+      "after": "f98540d0a078ce19462064311950fc11d1eab2f461aae1b9464168d90061cf88",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-no-color",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-text",
+      "stdout_sha256": "68d31678f5be68a3ea45990ee04e35dcb077a4b1a49de9e73dc1beb6e3fbcd67",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-json",
+      "stdout_sha256": "638ec5e423f1f39f9c76c6b8b4d833402b5642eba3f21003a82de374a6b2eb67",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-quiet",
+      "stdout_sha256": "c6f4a60511ce8f17e6ae3c384537fb41f82c2f287d8eba09a43379fc2b83f561",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-text",
+      "stdout_sha256": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "db53982d54c569123b299cfb539a75fa13b40d6cc66259c3077865b5c93fda04",
+      "after": "c27e00d505979aa072004105b2ce637448ac2dc97130ffc52282b3a9960ac4dc",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-quiet",
+      "stdout_sha256": "744111e5fccbae512336302c6b0baf0ef2eb159842070ea72e4f98ceac7a4837",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "e293ed51bb5790be27ffe0ba6fbd0b0809b509ae84867f4888df701611e36c86",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "5b160e6016fa9e2e5595ad2b0a9bb6db7487c86e5175446d5c1c73c0b7a9118c",
+      "after": "c694cae2d0a8b54dc911bc2045559eb9057ecddb21a757c595c1b5a38d609298",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-no-color",
+      "stdout_sha256": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-text",
+      "stdout_sha256": "5be2d5444abf97675937143f5723b788a4aba5e01b124e8a5364053dacd5a0ff",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-json",
+      "stdout_sha256": "179e7404c4aed757ef09f9a8743dd90df016565639c5335ef6c0bb2e17225e32",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-quiet",
+      "stdout_sha256": "47f733bd1d9d366934c2a518160cbba27df3b47068252025bd75df338d9b01b3",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-text",
+      "stdout_sha256": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "c9f4ac558504780b106125efde971b2ae9c892ccdcbbf725cccb82669b2c8f44",
+      "after": "11046a8f47b6264ff3bec9a3822d1f54f67889439351765f5f157f721c8e1fd3",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-quiet",
+      "stdout_sha256": "ec7cb0781f201870ae6f6b76e14a9936c687b8fbe6e8f0d9d327dc918cc2bb31",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "126e635b670c0a83830a0b31bbff5961f7d7e4196e03e0055dfd3ec1e681f7c5",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "3bf9fadf4e4de4c912a3605608812463c594f2ab7e046e48cdc9f9685d966b67",
+      "after": "121fc7d524dcfe09832f0a535241afee594d321250857adb8e9fe1be10805ddb",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-no-color",
+      "stdout_sha256": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-text",
+      "stdout_sha256": "bfead8a7c6742f825ae536c1ee1089df440966f920efed6a344c60da7e96ac0a",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-json",
+      "stdout_sha256": "6993774157618225d8ada629158d8d5501e0f6cf4bba8c2d8876441b3b9ae6ac",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-quiet",
+      "stdout_sha256": "995e660da9c0a68dead683d6cb3319333555e168e31d416e22bb9a0d3200b2ee",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-text",
+      "stdout_sha256": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "c9fce50c44af3072276db3b34b36d069722270d21575548caa83354f63933e6b",
+      "after": "de15a5e75ff20f19c96034bbe9e3a46b2336c90fd3795e771e2906e2ce3fa446",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-quiet",
+      "stdout_sha256": "1fdddbc98da8f20c1e269ce9af09276b0c9390143c8977a9caa940b7ffcb9688",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "7c82c5b9b78c78b523d873a40399ced58a8bd87df4cf8ba06d6cfdc19aec624d",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "89d413c025b8e2c542103dc956b83b5b65583bfdaee8299a21887719786b89f3",
+      "after": "abee6724d5f6cdffb9e999cfe6229a357b543de4b2df53da756531018b9130ee",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 1071
+      }
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-no-color",
+      "stdout_sha256": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-text",
+      "stdout_sha256": "1b5fc30037ca171c7d94ff4c8719020e836bc3a9738badf6d2730a3ecbe13b1b",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-json",
+      "stdout_sha256": "20c679a9e1947d5ea64d2735281ab90ad7905a3188ea51a693b6aaf2c81ba7dc",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-quiet",
+      "stdout_sha256": "9511636c853ebd7b3f45207c6de487346217f313816b7d7bceb617bca2b70289",
+      "status": "unchanged"
+    }
+  ],
+  "boundary": "Post-rebase 45-cell characterization; ten JSON cells differ only in exact merged upstream spec provenance. No accepted rerun or full-suite credit is implied by classification."
+}

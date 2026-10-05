@@ -946,8 +946,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 		t.Fatalf("seed selected binding: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_branch_divergences (fork_run_id, source_run_id, fork_event_id, owner, policy, source_run_status_at_activation, source_run_status_after_activation)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'test', 'selected_contract_source_advanced_branch', 'running', 'completed')
+		INSERT INTO run_fork_selected_contract_branch_divergences (fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, owner, policy, source_run_status_at_activation, source_run_status_after_activation)
+		VALUES ($1::uuid, $2::uuid, 'event', 1, $3::uuid, 'test', 'selected_contract_source_advanced_branch', 'running', 'completed')
 	`, cleanupRunID, preservedSourceRunID, cleanupEventID); err != nil {
 		t.Fatalf("seed selected branch divergence: %v", err)
 	}
@@ -1442,8 +1442,8 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed selected binding: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_branch_divergences (fork_run_id, source_run_id, fork_event_id, owner, policy, source_run_status_at_activation, source_run_status_after_activation)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'test', 'selected_contract_source_advanced_branch', 'running', 'completed')
+		INSERT INTO run_fork_selected_contract_branch_divergences (fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, owner, policy, source_run_status_at_activation, source_run_status_after_activation)
+		VALUES ($1::uuid, $2::uuid, 'event', 1, $3::uuid, 'test', 'selected_contract_source_advanced_branch', 'running', 'completed')
 	`, runB, runA, forkEvent); err != nil {
 		t.Fatalf("seed selected branch divergence: %v", err)
 	}
@@ -1545,7 +1545,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`); err != nil {
 		t.Fatalf("seed runtime ingress: %v", err)
 	}
-	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode) VALUES ($1::uuid, 'flow/a', 'flow', 'static')`, runA); err != nil {
+	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, 'flow/a', $2::uuid, 'reset_fixture', 'flow', 'static', TRUE, 'active', '{}', '{}', '{}', 1, now(), now(), now())`, runA, entityID); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `

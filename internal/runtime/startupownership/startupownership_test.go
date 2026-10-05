@@ -146,6 +146,10 @@ func (s *retainedSessionProbe) CommitAgentLifecycleTransition(ctx context.Contex
 	return runtimemanager.AgentLifecycleTransitionResult{OperationID: req.OperationID, Identity: req.Identity, AgentID: req.AgentID, RuntimeEpoch: req.TargetEpoch, Generation: req.TargetGeneration, Phase: req.TargetPhase, Topology: req.Topology}, nil
 }
 
+func (*retainedSessionProbe) RebindFlowReadinessSourceSet(context.Context, runtimemanager.FlowReadinessSourceSetRebindRequest, runtimemanager.ProcessExecutionBinding) (runtimemanager.FlowReadinessSourceSetRebindResult, error) {
+	return runtimemanager.FlowReadinessSourceSetRebindResult{}, errors.New("not implemented by this session probe")
+}
+
 func (s *retainedSessionProbe) Release(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

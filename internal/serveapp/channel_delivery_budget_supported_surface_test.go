@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 			if err := os.WriteFile(h.opts.ConfigPath, append(body, []byte("\nbudget:\n  system_monthly_cap: 1\n")...), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			var providerCalls atomic.Int32
 			llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				var body struct {
 					Messages []json.RawMessage `json:"messages"`
@@ -43,6 +45,7 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 					http.Error(w, "invalid managed request", http.StatusBadRequest)
 					return
 				}
+				providerCalls.Add(1)
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"model": "claude-test", "usage": map[string]int{"input_tokens": 1_000_000, "output_tokens": 1},
@@ -89,6 +92,7 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 					break
 				}
 				if err != sql.ErrNoRows || time.Now().After(deadline) {
+					logBudgetNoticeFailure(t, db, providerCalls.Load())
 					t.Fatalf("actual managed spend did not produce an emergency notice: %v", err)
 				}
 				time.Sleep(20 * time.Millisecond)
@@ -106,5 +110,25 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 				t.Fatalf("budget notice lacks committed live completion spend: count=%d err=%v", completions, err)
 			}
 		})
+	}
+}
+
+// Only scalar lifecycle/accounting evidence is logged, never requests,
+// responses, credentials, provider references or authority blobs.
+func logBudgetNoticeFailure(t *testing.T, db *sql.DB, providerCalls int32) {
+	t.Helper()
+	t.Logf("budget notice diagnostic provider_calls=%d", providerCalls)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, query := range []struct{ name, sql string }{
+		{"spend", `SELECT execution_mode, CAST(cost_usd AS TEXT) AS cost_usd, agent_id, transport FROM spend_ledger LIMIT 20`},
+		{"effects", `SELECT effect_kind, state, COUNT(*) AS count FROM runtime_external_effect_operations GROUP BY effect_kind,state`},
+		{"agents", `SELECT agent_id,lifecycle_phase,lifecycle_run_mode,turn_count FROM agents LIMIT 20`},
+		{"deliveries", `SELECT subscriber_type,subscriber_id,status,reason_code,retry_count FROM event_deliveries ORDER BY created_at DESC LIMIT 20`},
+		{"budget_events", `SELECT event_name,COUNT(*) AS count FROM events WHERE event_name='platform.budget_threshold_crossed' GROUP BY event_name`},
+		{"notices", `SELECT item_type,status,severity,COUNT(*) AS count FROM mailbox GROUP BY item_type,status,severity`},
+	} {
+		rows, err := readChannelDeliveryDiagnosticRows(ctx, db, query.sql)
+		t.Logf("budget notice diagnostic %s=%v err=%v", query.name, rows, err)
 	}
 }

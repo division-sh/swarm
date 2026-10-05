@@ -67,6 +67,7 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	}
 	allowed[historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical timer-revision witness stays with the canonical ledger owner; no payload decoding or caller selector"}
 	allowed["store/internal/runtimepersistence::ObserveWorkflowTimerReplayStorageForTest/reference:"+historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest"] = historicalBoundaryAllowance{1, "exact selected read transaction delegates physical ledger observation to its canonical owner"}
+	allowed[historicalBoundaryOwner+"validateSelectedForkBranchDivergenceTx/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "typed branch evidence verifies its bound point through the canonical contextual resolver; it neither decodes payloads nor grants replay"}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
 		"RunForkPostgresOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers", "RunForkSQLiteOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers",
@@ -536,20 +537,8 @@ func (arbitrary *unexpectedReader) mintOrigin() {
 func (arbitrary *unexpectedReader) admitOrigin(other bus.PublicationCommand) error {
     return other.ValidateFanOut()
 }
-func (arbitrary *unexpectedReader) mintReceiverPlan() {
-    mint := events.AdmitReceiverMaterializationPlan
-    alias := mint
-    _ = alias
-}
-func (arbitrary *unexpectedReader) restoreReceiverPlan() {
-    restore := events.RestoreDeliveryMaterialization
-    alias := restore
-    _ = alias
-}
 func (arbitrary *unexpectedReader) mintInitializer() {
-    node := events.AdmitNodeReceiverInitialization
     flow := events.AdmitFlowReceiverInitialization
-    _ = node
     _ = flow
 }
 func (arbitrary *unexpectedReader) restoreInitializer() {
@@ -610,9 +599,6 @@ func ordinaryBusiness(raw []byte) error {
 	got := historicalBoundaryProblems(findings, historicalBoundaryAllowances(), false)
 	want := []string{
 		historicalBoundaryOwner + "unexpectedReader.stealTimerRevisionObservation/reference:" + historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest",
-		historicalBoundaryOwner + "unexpectedReader.mintReceiverPlan/reference:events::AdmitReceiverMaterializationPlan",
-		historicalBoundaryOwner + "unexpectedReader.restoreReceiverPlan/reference:events::RestoreDeliveryMaterialization",
-		historicalBoundaryOwner + "unexpectedReader.mintInitializer/reference:events::AdmitNodeReceiverInitialization",
 		historicalBoundaryOwner + "unexpectedReader.mintInitializer/reference:events::AdmitFlowReceiverInitialization",
 		historicalBoundaryOwner + "unexpectedReader.restoreInitializer/reference:events::RestoreReceiverMaterializationRecord",
 		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:events::NewInheritedFanOutOrigin",

@@ -1,0 +1,62 @@
+{
+  "executed_head": "3e06dc2b5",
+  "receipt": "/tmp/agent-e-2496-managed-suite-constructed-consumers.log",
+  "command": "go run ./cmd/swarm-test",
+  "completed_units": 1,
+  "unexecuted_units": 13,
+  "failed_package_count": 2,
+  "failed_root_count": 38,
+  "failed_root_and_subtest_records": 129,
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "elapsed": 179.599,
+      "failed_roots": [
+        "TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutation",
+        "TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentRecipientWithoutHandlerMaterializer",
+        "TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRuntime",
+        "TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCleanup",
+        "TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames",
+        "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation",
+        "TestSelectedForkReceiverOwnershipBoundary"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "elapsed": 268.648,
+      "failed_roots": [
+        "TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores",
+        "TestCompiledTransitionPreviewExecutionAgreementOnBothStores",
+        "TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations",
+        "TestDeliveryTargetApplicationCarriesScenarioPreStateThroughFirstMutationOnSQLiteAndPostgres",
+        "TestDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgres",
+        "TestDeliveryTargetApplicationProjectsExactOwnerIntoEmptyPreviewAndRejectsConflict",
+        "TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleWithoutMutation",
+        "TestDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMutation",
+        "TestDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBothStores",
+        "TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler",
+        "TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgres",
+        "TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores",
+        "TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue",
+        "TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity",
+        "TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads",
+        "TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureReturn",
+        "TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler",
+        "TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext",
+        "TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity",
+        "TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions",
+        "TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores",
+        "TestPausedHandedNodeParksUntilContinueBothStores",
+        "TestPipelineCompiledTransitionInitialAdmissionOnBothStores",
+        "TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyContextOnBothStores",
+        "TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores",
+        "TestReceiverCompositionActivationReuseAndConflictBothStores",
+        "TestRetainedNodeContractHandlerUsesRuntimeEnginePath",
+        "TestSelectedForkReceiverSupportedDeliveryBothStores",
+        "TestSelectionRetryAfterRealCASConflictBothStores",
+        "TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnBothStores",
+        "TestWorkflowEngineFirstMaterializationRejectsMissingOrContradictoryEntityContractOnBothStores"
+      ]
+    }
+  ]
+}

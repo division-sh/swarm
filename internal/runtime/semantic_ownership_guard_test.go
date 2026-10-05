@@ -370,6 +370,7 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 	actualCompiledResultCalls := map[string]int{}
 	expectedSchemaRelationCalls := map[string]int{
 		"internal/packs/channel_relation.go":                1,
+		"internal/runtime/contracts/schema_registry.go":     2,
 		"internal/runtime/contracts/tool_http_execution.go": 1,
 	}
 	actualSchemaRelationCalls := map[string]int{}

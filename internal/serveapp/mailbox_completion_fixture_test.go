@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -96,7 +97,7 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 		}
 		t.Log("proof_surface=H in-process retained mock lifecycle with real authenticated HTTP/WS; not public serve/test")
 		process = startRuntimeTestProcessWithRunner(t, repoRootForTest(), opts, func(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
-			code, err := runOwnedMockLifecycle(ctx, repo, retained, opts, apiv1.AuthTokenResolution{Tokens: tokens, Explicit: true, Source: "internal-lifecycle-parent"})
+			code, err := runOwnedLifecycle(ctx, repo, retained, opts, apiv1.AuthTokenResolution{Tokens: tokens, Explicit: true, Source: "internal-lifecycle-parent"}, executionposture.MockOnly, "")
 			if err != nil {
 				fmt.Fprintf(opts.ErrorOutput, "internal mailbox lifecycle setup: %v\n", err)
 			}

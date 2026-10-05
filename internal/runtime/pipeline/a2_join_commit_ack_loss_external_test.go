@@ -110,14 +110,12 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			schedules, _ := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 			pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe})
 			owner := testRunScopedWorkflowInstanceForRun(runID, runID)
-			if _, err := pc.MaterializeInitialEntry(ctx, owner, pipeline.WorkflowInstance{
+			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, pipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 				CurrentState: "awaiting", EntityType: "count_state", Fields: map[string]any{
 					"final_expected": int64(0), "final_completed": int64(0), "final_results": []any{}, "final_reason": "",
 				},
-			}, time.Now().UTC()); err != nil {
-				t.Fatal(err)
-			}
+			}, time.Now().UTC())
 			load := func() pipeline.WorkflowInstance {
 				t.Helper()
 				instance, found, err := pc.Load(ctx, owner)

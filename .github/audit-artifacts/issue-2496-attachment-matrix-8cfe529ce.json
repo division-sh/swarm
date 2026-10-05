@@ -1,0 +1,72 @@
+{
+  "head": "8cfe529ce",
+  "receipt": "/tmp/agent-e-2496-attachment-acquisition-cleanup-current.log",
+  "command": "go run ./cmd/swarm-test -- ./internal/store/internal/runtimepersistence -run '^TestFlowAttachment.*' -race -count=3 -timeout=20m -json",
+  "result": "GREEN",
+  "managed_exit_code": 0,
+  "elapsed_seconds": 646.076,
+  "passed_roots": [
+    {
+      "test": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+      "elapsed": 159.33
+    },
+    {
+      "test": "TestFlowAttachmentPhaseFailureRetainsConstructionBothStores",
+      "elapsed": 50.53
+    },
+    {
+      "test": "TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores",
+      "elapsed": 2.65
+    },
+    {
+      "test": "TestFlowAttachmentConditionalPhaseProgressBothStores",
+      "elapsed": 2.93
+    },
+    {
+      "test": "TestFlowAttachmentPlanABARetainsPredecessorUntilSettlementBothStores",
+      "elapsed": 2.82
+    },
+    {
+      "test": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+      "elapsed": 153.56
+    },
+    {
+      "test": "TestFlowAttachmentPhaseFailureRetainsConstructionBothStores",
+      "elapsed": 50.35
+    },
+    {
+      "test": "TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores",
+      "elapsed": 2.54
+    },
+    {
+      "test": "TestFlowAttachmentConditionalPhaseProgressBothStores",
+      "elapsed": 2.81
+    },
+    {
+      "test": "TestFlowAttachmentPlanABARetainsPredecessorUntilSettlementBothStores",
+      "elapsed": 2.76
+    },
+    {
+      "test": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+      "elapsed": 153.46
+    },
+    {
+      "test": "TestFlowAttachmentPhaseFailureRetainsConstructionBothStores",
+      "elapsed": 53.08
+    },
+    {
+      "test": "TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores",
+      "elapsed": 2.61
+    },
+    {
+      "test": "TestFlowAttachmentConditionalPhaseProgressBothStores",
+      "elapsed": 2.81
+    },
+    {
+      "test": "TestFlowAttachmentPlanABARetainsPredecessorUntilSettlementBothStores",
+      "elapsed": 2.76
+    }
+  ],
+  "failed_records": 0,
+  "skipped_records": 0
+}

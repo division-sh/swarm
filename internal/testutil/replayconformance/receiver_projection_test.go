@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
-func TestReceiverProjectionPreservesSupplierAndDependencySemantics(t *testing.T) {
+func TestReceiverProjectionPreservesConstructionAndDeliverySemantics(t *testing.T) {
 	for _, flow := range []bool{false, true} {
 		first, routes := receiverProjectionFixture(t, "first", flow, "initializer", "receiver")
 		second, replay := receiverProjectionFixture(t, "second", flow, "initializer", "receiver")
@@ -33,6 +33,9 @@ func TestReceiverProjectionPreservesSupplierAndDependencySemantics(t *testing.T)
 			t.Fatal("comparison mutated durable routes")
 		}
 		for _, change := range []string{"supplier", "target", "publication"} {
+			if !flow && change == "supplier" {
+				continue // No observer exists in the agent-only publication.
+			}
 			node, target := "initializer", "receiver"
 			if change == "supplier" {
 				node = "other-initializer"
@@ -50,7 +53,7 @@ func TestReceiverProjectionPreservesSupplierAndDependencySemantics(t *testing.T)
 				t.Fatalf("flow=%v: comparison lost %s: %v", flow, change, err)
 			}
 		}
-		for _, corrupt := range []string{"event", "supplier", "dependency", "target", "missing_node"} {
+		for _, corrupt := range []string{"event", "supplier", "target"} {
 			copy := append([]events.DeliveryRoute(nil), routes...)
 			event := first
 			switch corrupt {
@@ -58,22 +61,15 @@ func TestReceiverProjectionPreservesSupplierAndDependencySemantics(t *testing.T)
 				event = second
 			case "supplier":
 				copy[1].Initialization = events.ReceiverInitialization{}
-			case "dependency":
-				if flow {
-					continue
-				}
-				copy[1].Materialization = events.ReceiverMaterializationPlan{}
 			case "target":
 				copy[1].Target = events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: "wrong"})
-			case "missing_node":
-				if flow {
-					continue
-				}
-				copy = copy[1:]
 			}
 			if _, err := projectReceiverRoutes(event, copy, "generated:exact-causal-key"); err == nil {
 				t.Fatalf("comparison normalized away %s corruption", corrupt)
 			}
+		}
+		if _, err := projectReceiverRoutes(first, routes[1:], "generated:exact-causal-key"); err != nil {
+			t.Fatalf("ordinary observer became a construction dependency: %v", err)
 		}
 	}
 }
@@ -85,11 +81,7 @@ func receiverProjectionFixture(t *testing.T, eventName string, flow bool, nodeNa
 	target := events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: entity})
 	owner := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: target}
 	var err error
-	if flow {
-		owner.Initialization, err = events.AdmitFlowReceiverInitialization(event, target)
-	} else {
-		owner.Initialization, err = events.AdmitNodeReceiverInitialization(event, target, node)
-	}
+	owner.Initialization, err = events.AdmitFlowReceiverInitialization(event, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,16 +112,7 @@ func receiverProjectionFixture(t *testing.T, eventName string, flow bool, nodeNa
 		publication = append(publication, agent)
 	}
 	if !flow {
-		plan, err := events.AdmitReceiverMaterializationPlan(event, owner, publication[1:], publication)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i := 1; i < len(publication); i++ {
-			publication[i], err = plan.BindDependent(publication[i])
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
+		publication = publication[1:]
 	}
 	return event, publication
 }

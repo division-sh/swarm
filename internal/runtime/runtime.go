@@ -2102,6 +2102,11 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	if err != nil {
 		return err
 	}
+	if rt.Manager != nil {
+		if err := rt.Manager.CheckShutdownAdmission(); err != nil {
+			return err
+		}
+	}
 	rt.shutdownGate.Close()
 	if rt.workOccurrence != nil {
 		_ = rt.workOccurrence.Fence()

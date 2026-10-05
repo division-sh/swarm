@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -27,6 +28,7 @@ type scriptedLLMRuntime struct {
 
 type scriptedDeliveryCall struct {
 	RunID, EventID, AgentID, EntityID, TargetEntityID string
+	AgentIdentity                                     agentidentity.Identity
 }
 
 func newScriptedLLMRuntime() *scriptedLLMRuntime {
@@ -141,7 +143,11 @@ func (r *scriptedLLMRuntime) ContinueManagedSession(ctx context.Context, session
 	}
 	key := strings.TrimSpace(message.Content)
 	r.mu.Lock()
-	r.deliveryCalls = append(r.deliveryCalls, scriptedDeliveryCall{frame.Turn.Event.RunID, frame.Turn.Event.ID, agentID, frame.Turn.Event.EntityID, frame.Turn.Event.Target.EntityID})
+	r.deliveryCalls = append(r.deliveryCalls, scriptedDeliveryCall{
+		RunID: frame.Turn.Event.RunID, EventID: frame.Turn.Event.ID, AgentID: agentID,
+		EntityID: frame.Turn.Event.EntityID, TargetEntityID: frame.Turn.Event.Target.EntityID,
+		AgentIdentity: frame.Session.AgentIdentity.Normalize(),
+	})
 	response, ok := r.responses[agentID+"::"+key]
 	steps := append([]scriptedAgentFixtureStep(nil), r.agentEventFlow[agentID]...)
 	barrier := r.runBarriers[strings.TrimSpace(frame.Turn.Event.RunID)]

@@ -7,12 +7,9 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 // DeliveryTargetOwnerCandidate is exact selected-run evidence available before
@@ -156,24 +153,6 @@ func (h DeliveryTargetHandler) resolve(source semanticview.Source, eventType eve
 	return resolved.Handler, resolved.Matched
 }
 
-// MaterializesReceiver consumes the same handler compatibility policy used by
-// target classification and execution. A select-only observer never becomes a
-// materializer merely because another same-plan owner is future-valued.
-func (h DeliveryTargetHandler) MaterializesReceiver(source semanticview.Source, eventType events.EventType) (bool, error) {
-	handler, found := h.resolve(source, eventType)
-	if !found {
-		return false, fmt.Errorf("receiver materializer lacks an admitted handler")
-	}
-	if h.eventType != "" {
-		eventType = h.eventType
-	}
-	policy, err := CompileDeliveryTargetCompatibilityPolicy(source, h.Node(), h.ExecutionFlowID(source), eventType, handler)
-	if err != nil {
-		return false, err
-	}
-	return policy.Dependency.materializes(), nil
-}
-
 // AdmitDeliveryTargetHandler admits one exact authored declaration owner. The
 // concrete event is resolved later so wildcard subscriptions remain bounded by
 // the same owner without freezing a pattern as an executable handler.
@@ -198,45 +177,6 @@ type DeliveryTargetOwnershipRequest struct {
 	Blueprint  events.RouteIdentity
 	Handler    DeliveryTargetHandler
 	Candidates []DeliveryTargetOwnerCandidate
-}
-
-// DeliveryTargetEntityDependency is the closed execution-semantic state
-// dependency of one admitted handler. It is deliberately independent from how
-// a receiver entity is acquired.
-type DeliveryTargetEntityDependency uint8
-
-const (
-	DeliveryTargetEntityOptional DeliveryTargetEntityDependency = iota
-	DeliveryTargetExistingEntityRequired
-	DeliveryTargetEntityMaterializing
-)
-
-func (d DeliveryTargetEntityDependency) Valid() bool {
-	return d <= DeliveryTargetEntityMaterializing
-}
-
-func (d DeliveryTargetEntityDependency) merge(other DeliveryTargetEntityDependency) DeliveryTargetEntityDependency {
-	if other > d {
-		return other
-	}
-	return d
-}
-
-func (d DeliveryTargetEntityDependency) materializes() bool {
-	return d == DeliveryTargetEntityMaterializing
-}
-
-// DeliveryTargetCompatibilityPolicy is the canonical receiver contract shared
-// by routing admission, boot verification, and stamped execution.
-type DeliveryTargetCompatibilityPolicy struct {
-	Dependency DeliveryTargetEntityDependency
-}
-
-func (p DeliveryTargetCompatibilityPolicy) Validate() error {
-	if !p.Dependency.Valid() {
-		return fmt.Errorf("invalid delivery target compatibility policy")
-	}
-	return nil
 }
 
 // ClassifyDeliveryTargetOwnership is the single receiver-side owner for exact
@@ -269,14 +209,10 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver %s requires an exact admitted target handler for event %s", req.Recipient.ID(), req.Event.Type())
 	}
 	flowID := req.Handler.ExecutionFlowID(req.Source)
-	handlerEventType := req.Event.Type()
-	if req.Handler.eventType != "" {
-		handlerEventType = req.Handler.eventType
-	}
-	policy, err := CompileDeliveryTargetCompatibilityPolicy(req.Source, req.Handler.Node(), flowID, handlerEventType, handler)
-	if err != nil {
+	if err := ValidateExecutionHandlerDeclaration(req.Source, req.Handler.Node(), handler); err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
+	var err error
 	if strings.TrimSpace(flowID) == strings.TrimSpace(semanticview.RootExecutionFlowID(req.Source)) {
 		blueprint, err = selectedRunRootTargetBlueprint(req.Source, req.Event, blueprint, req.Event.HasTargetRoute())
 		if err != nil {
@@ -297,41 +233,15 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		return events.DeliveryTargetOwnership{}, ambiguousDeliveryTargetOwnerError(blueprint.FlowInstance, existing, materializing)
 	}
 	if len(materializing) == 1 && len(existing) == 0 {
-		planned, err := canonicalHandlerMaterializationTarget(req.Source, flowID, handler, req.Event, blueprint)
-		if err != nil {
-			return events.DeliveryTargetOwnership{}, err
-		}
-		if planned != materializing[0] {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("materializing target evidence disagrees with canonical handler identity: evidence=%#v planned=%#v", materializing[0], planned)
+		if materializing[0].EntityID != FlowInstanceEntityID(materializing[0].FlowInstance) {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("constructor target evidence disagrees with canonical instance identity")
 		}
 		return events.NewMaterializingEntityTarget(materializing[0])
 	}
 	if len(existing) == 1 && len(materializing) == 0 {
-		if handler.CreateEntity {
-			planned, err := canonicalHandlerMaterializationTarget(req.Source, flowID, handler, req.Event, blueprint)
-			if err != nil {
-				return events.DeliveryTargetOwnership{}, err
-			}
-			if planned != existing[0] {
-				return events.DeliveryTargetOwnership{}, fmt.Errorf("existing target evidence disagrees with canonical handler identity: evidence=%#v planned=%#v", existing[0], planned)
-			}
-		}
 		return events.NewExistingEntityTarget(existing[0])
 	}
-	if policy.Dependency == DeliveryTargetEntityMaterializing {
-		planned, err := canonicalHandlerMaterializationTarget(req.Source, flowID, handler, req.Event, blueprint)
-		if err != nil {
-			return events.DeliveryTargetOwnership{}, err
-		}
-		return events.NewMaterializingEntityTarget(planned)
-	}
-	if policy.Dependency == DeliveryTargetEntityOptional {
-		if blueprint.EntityID != "" {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("exact receiver entity %q is missing for flow instance %q", blueprint.EntityID, blueprint.FlowInstance)
-		}
-		return events.NewEntitylessReceiverTarget(blueprint)
-	}
-	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q", blueprint.FlowInstance)
+	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q; construct it before handler delivery", blueprint.FlowInstance)
 }
 
 func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, blueprint events.RouteIdentity, exactTarget bool) (events.RouteIdentity, error) {
@@ -397,88 +307,34 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 	} else if routeFlowID := route.FlowID; routeFlowID != "" && routeFlowID != flowID {
 		return fmt.Errorf("stamped delivery target flow %q disagrees with handler flow %q", routeFlowID, flowID)
 	}
-	handlerEventType := evt.Type()
-	if handlerFact.eventType != "" {
-		handlerEventType = handlerFact.eventType
-	}
-	policy, err := CompileDeliveryTargetCompatibilityPolicy(source, handlerFact.Node(), flowID, handlerEventType, handler)
-	if err != nil {
+	if err := ValidateExecutionHandlerDeclaration(source, handlerFact.Node(), handler); err != nil {
 		return err
 	}
-	switch {
-	case owner.EntitylessReceiver():
-		if policy.Dependency != DeliveryTargetEntityOptional {
-			return fmt.Errorf("entityless_receiver ownership disagrees with entity-scoped handler %s", recipient.ID())
-		}
-	case owner.MaterializingEntity():
-		planned, err := canonicalHandlerMaterializationTarget(source, flowID, handler, evt, owner.Route())
-		if err != nil {
-			return err
-		}
-		if planned != owner.Route() {
-			return fmt.Errorf("materializing_entity ownership disagrees with canonical future identity: stamped=%#v planned=%#v", owner.Route(), planned)
-		}
-	case owner.ExistingEntity():
-		if handler.CreateEntity {
-			planned, err := canonicalHandlerMaterializationTarget(source, flowID, handler, evt, owner.Route())
-			if err != nil {
-				return err
-			}
-			if planned != owner.Route() {
-				return fmt.Errorf("existing_entity ownership disagrees with canonical handler identity: stamped=%#v planned=%#v", owner.Route(), planned)
-			}
-		}
-	default:
+	if owner.EntitylessReceiver() {
+		return fmt.Errorf("entityless_receiver cannot authorize handler execution; every flow requires a constructed lifecycle header")
+	}
+	if !owner.ExistingEntity() && !owner.MaterializingEntity() {
 		return fmt.Errorf("delivery target ownership kind is unsupported")
+	}
+	if owner.MaterializingEntity() && route.EntityID != FlowInstanceEntityID(route.FlowInstance) {
+		return fmt.Errorf("materializing_entity ownership disagrees with canonical instance identity")
 	}
 	return nil
 }
 
-// CompileDeliveryTargetCompatibilityPolicy is the shared verifier/runtime
-// policy owner. Composition has already selected the receiving instance;
-// handler fields describe only its state dependency and initialization.
-func CompileDeliveryTargetCompatibilityPolicy(source semanticview.Source, node runtimeidentity.ExecutableNode, flowID string, eventType events.EventType, handler SystemNodeEventHandler) (DeliveryTargetCompatibilityPolicy, error) {
-	flowID = strings.TrimSpace(flowID)
-	if source != nil && !node.Valid() {
-		return DeliveryTargetCompatibilityPolicy{}, fmt.Errorf("delivery target compatibility requires exact executable node identity")
+// ValidateExecutionHandlerDeclaration does not infer construction from effects
+// or field references. Every handler executes against an already constructed flow.
+func ValidateExecutionHandlerDeclaration(source semanticview.Source, node runtimeidentity.ExecutableNode, handler SystemNodeEventHandler) error {
+	if source == nil || !node.Valid() {
+		return fmt.Errorf("handler execution requires admitted source and exact executable node identity")
 	}
-	policy := DeliveryTargetCompatibilityPolicy{
-		Dependency: handlerExecutionEntityRequirementForNode(source, node, eventType, flowID, handler),
+	if _, found := source.ExecutableNode(node); !found {
+		return fmt.Errorf("handler execution requires its exact admitted declaration")
 	}
-	if err := policy.Validate(); err != nil {
-		return DeliveryTargetCompatibilityPolicy{}, err
+	if handler.CreateEntity {
+		return fmt.Errorf("handler create_entity is retired; use the canonical flow constructor")
 	}
-	return policy, nil
-}
-
-func decodeDeliveryTargetWorkflowEntityState(source semanticview.Source, flowID, runID string, record WorkflowEntityStatePersistenceRecord) (WorkflowInstance, error) {
-	selectionOwner, err := AdmitWorkflowEntityStateSelectionOwner(source, flowID, runID)
-	if err != nil {
-		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state owner: %w", err)
-	}
-	if !selectionOwner.Owns(record.FlowInstance) {
-		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state route %q is not owned by flow %s", strings.TrimSpace(record.FlowInstance), strings.TrimSpace(flowID))
-	}
-	route, err := workflowInstanceRouteForExecution(source, flowID, record.FlowInstance)
-	if err != nil {
-		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state route: %w", err)
-	}
-	workflowVersion := ""
-	if source != nil {
-		workflowVersion = source.WorkflowVersion()
-	}
-	mode := workflowPersistedFlowMode(source, flowID)
-	if mode == "" {
-		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state: flow %s has unsupported persistence mode", strings.TrimSpace(flowID))
-	}
-	instance, err := DecodeWorkflowEntityStatePersistenceRecord(record, route, strings.TrimSpace(flowID), workflowVersion, mode)
-	if err != nil {
-		return WorkflowInstance{}, err
-	}
-	if err := validateWorkflowEntityType(source, flowID, instance.EntityType); err != nil {
-		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity contract: %w", err)
-	}
-	return instance, nil
+	return nil
 }
 
 func deliveryTargetWorkflowInstanceUnavailable(source semanticview.Source, flowID string, instance WorkflowInstance) bool {
@@ -550,381 +406,6 @@ func ambiguousDeliveryTargetOwnerError(flowInstance string, groups ...[]events.R
 	}
 	sort.Strings(candidates)
 	return fmt.Errorf("receiver target owner is ambiguous for flow instance %q; candidates: %s", flowInstance, strings.Join(candidates, ", "))
-}
-
-type handlerEntityFieldClassifier func(semanticview.Source, string, SystemNodeEventHandler) DeliveryTargetEntityDependency
-
-// Every executable handler field has one explicit execution-semantic
-// disposition. The result owns both routing admission and engine preparation.
-var systemNodeEventHandlerEntityClassifiers = map[string]handlerEntityFieldClassifier{
-	"Activity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return activityEntityRequirement(handler.Activity)
-	},
-	"CreateEntity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return materializingWhen(handler.CreateEntity)
-	},
-	"Description": noHandlerEntityRequirement,
-	"Emit": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return materializingWhen(emitSpecReferencesEntity(handler.Emit))
-	},
-	"OnSuccess": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(emitSpecReferencesEntity(handler.OnSuccess.Emit))
-	},
-	"Guard": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return guardEntityRequirement(handler.Guard)
-	},
-	"AdvancesTo": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return materializingWhen(strings.TrimSpace(handler.AdvancesTo) != "")
-	},
-	"SetsGate": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return materializingWhen(gateSpecName(handler.SetsGate) != "")
-	},
-	"ClearGates": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return materializingWhen(len(handler.ClearGates) != 0)
-	},
-	"DataAccumulation": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		if workflowDataWritesEntityFields(handler.DataAccumulation, workflowEntitySchemaFields(source, flowID)) {
-			return DeliveryTargetEntityMaterializing
-		}
-		return existingWhen(dataAccumulationReferencesEntity(handler.DataAccumulation))
-	},
-	"Condition": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(expressionReferencesEntity(handler.Condition))
-	},
-	"Logic": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(expressionReferencesEntity(handler.Logic))
-	},
-	"Loop": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(handler.Loop != nil)
-	},
-	"OnComplete": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return completionRulesEntityRequirement(source, flowID, handler.OnComplete)
-	},
-	"Rules": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return selectableRulesEntityRequirement(source, flowID, handler.Rules)
-	},
-	"Accumulate": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(handler.Accumulate != nil)
-	},
-	"Join": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(handler.Join != nil)
-	},
-	"JoinUntilPlans": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(len(handler.JoinUntilPlans) != 0)
-	},
-	"Compute": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		if computeStoresEntityField(handler.Compute, workflowEntitySchemaFields(source, flowID)) {
-			return DeliveryTargetEntityMaterializing
-		}
-		return existingWhen(computeReferencesEntity(handler.Compute))
-	},
-	"Query": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(queryReferencesEntity(handler.Query))
-	},
-	"FanOut": noHandlerEntityRequirement,
-	"GroupBy": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(groupByReferencesEntity(handler.GroupBy))
-	},
-	"Filter": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(filterReferencesEntity(handler.Filter))
-	},
-	"Reduce": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(reduceReferencesEntity(handler.Reduce))
-	},
-	"Count": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(countReferencesEntity(handler.Count))
-	},
-	"Clear": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return existingWhen(handler.Clear != nil && len(handler.Clear.Targets) != 0)
-	},
-}
-
-type handlerRuleEntityFieldClassifier func(semanticview.Source, string, runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency
-
-var handlerRuleEntryEntityClassifiers = map[string]handlerRuleEntityFieldClassifier{
-	"ID":          noHandlerRuleEntityRequirement,
-	"Description": noHandlerRuleEntityRequirement,
-	"Condition": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-		return existingWhen(expressionReferencesEntity(rule.Condition))
-	},
-	"PolicyRow": noHandlerRuleEntityRequirement,
-	"AdvancesTo": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-		return materializingWhen(strings.TrimSpace(rule.AdvancesTo) != "")
-	},
-	"Emit": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-		return materializingWhen(emitSpecReferencesEntity(rule.Emit))
-	},
-	"Activity": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-		return activityEntityRequirement(rule.Activity)
-	},
-	"DataAccumulation": func(source semanticview.Source, flowID string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-		if workflowDataWritesEntityFields(rule.DataAccumulation, workflowEntitySchemaFields(source, flowID)) {
-			return DeliveryTargetEntityMaterializing
-		}
-		return existingWhen(dataAccumulationReferencesEntity(rule.DataAccumulation))
-	},
-	"Compute": func(source semanticview.Source, flowID string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-		if computeStoresEntityField(rule.Compute, workflowEntitySchemaFields(source, flowID)) {
-			return DeliveryTargetEntityMaterializing
-		}
-		return existingWhen(computeReferencesEntity(rule.Compute))
-	},
-	"FanOut":              noHandlerRuleEntityRequirement,
-	"declarationIdentity": noHandlerRuleEntityRequirement,
-	"authored":            noHandlerRuleEntityRequirement,
-	"admissionProvenance": noHandlerRuleEntityRequirement,
-}
-
-func handlerExecutionEntityRequirement(source semanticview.Source, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-	requirement := DeliveryTargetEntityOptional
-	for _, classify := range systemNodeEventHandlerEntityClassifiers {
-		requirement = requirement.merge(classify(source, flowID, handler))
-	}
-	return requirement
-}
-
-func handlerExecutionEntityRequirementForNode(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType events.EventType, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-	requirement := handlerExecutionEntityRequirement(source, flowID, handler)
-	requirement = requirement.merge(compiledFanOutEntityRequirement(source, node, eventType))
-	return requirement
-}
-
-func noHandlerEntityRequirement(semanticview.Source, string, SystemNodeEventHandler) DeliveryTargetEntityDependency {
-	return DeliveryTargetEntityOptional
-}
-
-func noHandlerRuleEntityRequirement(semanticview.Source, string, runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-	return DeliveryTargetEntityOptional
-}
-
-func selectableRulesEntityRequirement(source semanticview.Source, flowID string, rules []runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-	return rulesEntityRequirement(source, flowID, rules, true)
-}
-
-func completionRulesEntityRequirement(source semanticview.Source, flowID string, rules []runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-	return rulesEntityRequirement(source, flowID, rules, false)
-}
-
-func rulesEntityRequirement(source semanticview.Source, flowID string, rules []runtimecontracts.HandlerRuleEntry, effectsSelectable bool) DeliveryTargetEntityDependency {
-	requirement := DeliveryTargetEntityOptional
-	for _, rule := range rules {
-		for field, classify := range handlerRuleEntryEntityClassifiers {
-			if !effectsSelectable && field == "Activity" {
-				continue
-			}
-			requirement = requirement.merge(classify(source, flowID, rule))
-		}
-	}
-	return requirement
-}
-
-func existingWhen(required bool) DeliveryTargetEntityDependency {
-	if required {
-		return DeliveryTargetExistingEntityRequired
-	}
-	return DeliveryTargetEntityOptional
-}
-
-func materializingWhen(required bool) DeliveryTargetEntityDependency {
-	if required {
-		return DeliveryTargetEntityMaterializing
-	}
-	return DeliveryTargetEntityOptional
-}
-
-func activityEntityRequirement(activity runtimecontracts.ActivitySpec) DeliveryTargetEntityDependency {
-	return existingWhen((activity.Approval != nil && strings.TrimSpace(activity.Approval.Decision) != "") || expressionValueMapReferencesEntity(activity.Input))
-}
-
-func guardEntityRequirement(guard *runtimecontracts.GuardSpec) DeliveryTargetEntityDependency {
-	if guard == nil {
-		return DeliveryTargetEntityOptional
-	}
-	failure, err := guard.FailureSpec()
-	return existingWhen((err == nil && failure.Action == runtimecontracts.GuardFailureActionKill) || guardReferencesEntity(guard))
-}
-
-func compiledFanOutEntityRequirement(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType events.EventType) DeliveryTargetEntityDependency {
-	if source == nil || !node.Valid() {
-		return DeliveryTargetEntityOptional
-	}
-	requirement := DeliveryTargetEntityOptional
-	for _, plan := range source.FanOutPlansForHandler(node, strings.TrimSpace(string(eventType))) {
-		if emitSpecReferencesEntity(plan.Emit) {
-			requirement = requirement.merge(DeliveryTargetEntityMaterializing)
-			continue
-		}
-		referencesEntity := plan.ItemsPath.Root == paths.RootEntity || pathReferencesEntity(plan.Identity) || emitSpecReferencesEntity(plan.Emit)
-		requirement = requirement.merge(existingWhen(referencesEntity))
-	}
-	return requirement
-}
-
-func guardReferencesEntity(guard *runtimecontracts.GuardSpec) bool {
-	if guard == nil {
-		return false
-	}
-	for _, check := range guard.EffectiveChecks() {
-		if expressionReferencesEntity(check.Check) {
-			return true
-		}
-	}
-	return emitSpecReferencesEntity(guard.OnFailSpec.Escalation)
-}
-
-func queryReferencesEntity(query *runtimecontracts.QuerySpec) bool {
-	if query == nil {
-		return false
-	}
-	if typedPathReferencesEntity(query.Source, query.SourcePath) ||
-		typedPathReferencesEntity(query.StoreAs, query.StorePath) ||
-		typedPathReferencesEntity(query.Entities, query.EntitiesPath) ||
-		expressionReferencesEntity(query.Filter) ||
-		typedPathReferencesEntity(query.GroupBy, query.GroupByPath) {
-		return true
-	}
-	return false
-}
-
-func dataAccumulationReferencesEntity(spec runtimecontracts.WorkflowDataAccumulation) bool {
-	for _, write := range spec.Writes {
-		if typedPathReferencesEntity(write.Source(), write.SourcePath) ||
-			typedPathReferencesEntity(write.Target(), write.TargetPath) ||
-			expressionValueReferencesEntity(write.Value) ||
-			expressionValueReferencesEntity(write.Key) ||
-			expressionValueReferencesEntity(write.Index) {
-			return true
-		}
-	}
-	return false
-}
-
-func emitSpecReferencesEntity(spec runtimecontracts.EmitSpec) bool {
-	return pathReferencesEntity(spec.From) || expressionValueMapReferencesEntity(spec.Fields)
-}
-
-func groupByReferencesEntity(spec *runtimecontracts.GroupBySpec) bool {
-	if spec == nil {
-		return false
-	}
-	return typedPathReferencesEntity(spec.ItemsFrom, spec.ItemsPath) ||
-		typedPathReferencesEntity(spec.Key, spec.KeyPath) ||
-		typedPathReferencesEntity(spec.StoreAs, spec.StorePath)
-}
-
-func filterReferencesEntity(spec *runtimecontracts.FilterSpec) bool {
-	if spec == nil {
-		return false
-	}
-	return collectionSourceReferencesEntity(spec.Source, spec.SourcePath, spec.ItemsFrom, spec.ItemsPath) ||
-		expressionReferencesEntity(spec.Condition) ||
-		typedPathReferencesEntity(spec.StoreAs, spec.StorePath)
-}
-
-func reduceReferencesEntity(spec *runtimecontracts.ReduceSpec) bool {
-	if spec == nil {
-		return false
-	}
-	return collectionSourceReferencesEntity(spec.Source, spec.SourcePath, spec.ItemsFrom, spec.ItemsPath) ||
-		typedPathReferencesEntity(spec.StoreAs, spec.StorePath)
-}
-
-func countReferencesEntity(spec *runtimecontracts.CountSpec) bool {
-	if spec == nil {
-		return false
-	}
-	return collectionSourceReferencesEntity(spec.Source, spec.SourcePath, spec.ItemsFrom, spec.ItemsPath) ||
-		expressionReferencesEntity(spec.Condition) ||
-		typedPathReferencesEntity(spec.StoreAs, spec.StorePath)
-}
-
-func collectionSourceReferencesEntity(source string, sourcePath paths.Path, itemsFrom string, itemsPath paths.Path) bool {
-	if strings.TrimSpace(itemsFrom) != "" {
-		return typedPathReferencesEntity(itemsFrom, itemsPath)
-	}
-	return typedPathReferencesEntity(source, sourcePath)
-}
-
-func computeReferencesEntity(spec *runtimecontracts.ComputeSpec) bool {
-	if spec == nil {
-		return false
-	}
-	if pathReferencesEntity(spec.StoreAs) {
-		return true
-	}
-	if spec.Lookup != nil {
-		for index, raw := range spec.Lookup.On {
-			var path paths.Path
-			if index < len(spec.Lookup.OnPaths) {
-				path = spec.Lookup.OnPaths[index]
-			}
-			if typedPathReferencesEntity(raw, path) {
-				return true
-			}
-		}
-	}
-	for _, inputPaths := range []map[string]paths.Path{computeValidationInputPaths(spec), computeModuleInputPaths(spec)} {
-		for _, path := range inputPaths {
-			if path.Root == paths.RootEntity {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func computeValidationInputPaths(spec *runtimecontracts.ComputeSpec) map[string]paths.Path {
-	if spec.Validation == nil {
-		return nil
-	}
-	return spec.Validation.InputPaths
-}
-
-func computeModuleInputPaths(spec *runtimecontracts.ComputeSpec) map[string]paths.Path {
-	if spec.Module == nil {
-		return nil
-	}
-	return spec.Module.InputPaths
-}
-
-func expressionValueMapReferencesEntity(values map[string]runtimecontracts.ExpressionValue) bool {
-	for _, value := range values {
-		if expressionValueReferencesEntity(value) {
-			return true
-		}
-	}
-	return false
-}
-
-func expressionValueReferencesEntity(value runtimecontracts.ExpressionValue) bool {
-	return typedPathReferencesEntity(value.Ref, value.RefPath) || expressionReferencesEntity(value.CEL)
-}
-
-func typedPathReferencesEntity(raw string, path paths.Path) bool {
-	if path.Root == paths.RootEntity {
-		return true
-	}
-	return pathReferencesEntity(raw)
-}
-
-func expressionReferencesEntity(expression string) bool {
-	expression = strings.TrimSpace(expression)
-	if workflowexpr.ExpressionReferencesEntity(expression) {
-		return true
-	}
-	for _, ref := range workflowexpr.PlatformEntityReferences(expression) {
-		head, _, _ := strings.Cut(strings.TrimSpace(ref), ".")
-		switch head {
-		case "id", "current_state", "gates":
-			return true
-		}
-	}
-	return false
-}
-
-func pathReferencesEntity(path string) bool {
-	path = strings.TrimSpace(path)
-	return path == "entity" || strings.HasPrefix(path, "entity.")
 }
 
 func stampedDeliveryTargetOwnership(ctx context.Context) (events.DeliveryTargetOwnership, bool) {

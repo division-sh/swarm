@@ -214,6 +214,8 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	seedWorkflowHeaderProjectionFixture(t, ctx, tx, runID, entityID, "flow-a/1", "flow-a", "fork_entity", "ready", "{}", at)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE flow_instances SET name='Snapshot Entity' WHERE run_id=$1 AND instance_path='flow-a/1'`, runID)
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `
 		INSERT INTO events (
 			event_class,event_id,run_id,event_name,entity_id,scope,payload,payload_bytes,execution_mode,

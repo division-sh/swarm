@@ -6,6 +6,7 @@ events:
   - scout.requested (fields: candidate_ids, query)
   - search.requested (fields: candidate_ids, query)
 root primary entity: search_batch
+root constructor: (no arguments)
 flows:
   - candidate (template)
     events:
@@ -14,11 +15,13 @@ flows:
       - candidate.work.requested (fields: batch_id, candidate_id)
     primary entity: candidate_analysis
     instance: field=candidate_id identity=run + flow + instance_key
+    constructor: candidate.requested key=candidate_id supplied=[]
   - scout (static)
     events:
       - scout.completed (fields: batch_id, candidate_ids)
       - scout.work.requested (fields: candidate_ids, query)
     primary entity: scout_task
+    constructor: (no arguments)
     singleton coordinator: primary_entity=scout_task contained_fields=1
 routing topology: routing-topology/v1
   source authority: projection_only_existing_contract_owners

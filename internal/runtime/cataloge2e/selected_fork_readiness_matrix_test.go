@@ -65,7 +65,7 @@ func TestTerminalCommittedUnwindBothStores(t *testing.T) {
 			t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 				h := newRuntimeHarnessForBackend(t, selectedForkReadinessCatalogFixture(t, 0, "node"), backend, true)
 				path := "worker-flow/worker-001"
-				materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+				materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.inspect.requested")
 				ctx, cancel := context.WithCancel(catalogRunContext(h, catalogRuntimeRunID))
 				defer cancel()
 				probe := &terminalUnwindProbe{mode: mode, cancel: cancel}
@@ -173,7 +173,7 @@ func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
 				root := selectedForkReadinessCatalogFixture(t, 2, "agent")
 				h := newRuntimeHarnessForBackend(t, root, backend, true)
 				path := "worker-flow/worker-001"
-				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")
 				probe := newConcurrentTerminalProbe()
 				probe.firstAuthor = firstAuthor
 				h.rt.Pipeline.SetTestLifecycleProbe(probe)
@@ -312,7 +312,7 @@ func TestStageTimerTerminalJoinsAgentsWithoutJoiningItsCallbackBothStores(t *tes
 				}
 			})
 			path := "worker-flow/worker-001"
-			materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+			materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")
 			select {
 			case err := <-completed:
 				if err != nil {
@@ -525,10 +525,12 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								}
 							}
 						} else if frontier == "activity_rejected" {
+							t.Logf("rejected activity execution evidence: %v", err)
 							if err == nil || !strings.Contains(err.Error(), "fork activity lineage") || result.ExecutedEventCount != 1 || activityCalls.Load() != 1 {
 								t.Fatalf("failed final validation lost execution evidence: count=%d calls=%d err=%v", result.ExecutedEventCount, activityCalls.Load(), err)
 							}
 						} else if frontier == "mixed" {
+							t.Logf("fenced mixed execution evidence: %v", err)
 							if err == nil || !strings.Contains(err.Error(), "authoritative_delivery_incomplete") || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || result.Activation.Activated || fencedAgentCalls.Load() != 0 {
 								t.Fatalf("terminal-node fence must refuse agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, fencedAgentCalls.Load(), err)
 							}
@@ -568,11 +570,18 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							t.Fatalf("fork flow: %#v found=%t err=%v", forkState, found, err)
 						}
 						readiness, found, err := h.rt.Pipeline.LoadDynamicFlowRuntimeReadiness(ctx, forkRun, owner.Route)
-						if err != nil || !found || len(readiness.Plan.Agents) != declarations {
+						if err != nil || (fenced && found) || (!fenced && (!found || len(readiness.Plan.Agents) != declarations)) {
 							t.Fatalf("complete readiness: %#v %t %v", readiness, found, err)
 						}
-						if fenced && (readiness.RunStatus != "cancelled" || readiness.InstanceStatus != "terminated" || readiness.InstanceTerminatedAt.IsZero()) {
-							t.Fatalf("fenced mixed frontier left live durable authority: %+v", readiness)
+						if fenced {
+							terminal, err := selected.LoadRunLifecycleSnapshot(ctx, forkRun)
+							if err != nil || terminal.Status != "cancelled" || terminal.EndedAt == nil {
+								t.Fatalf("fenced frontier lost its terminal tombstone: %+v err=%v", terminal, err)
+							}
+							routes, err := selected.ListFlowInstanceRouteRecords(ctx, forkOwner)
+							if err != nil || len(routes) != 0 {
+								t.Fatalf("discard left materialized fork routes: %+v err=%v", routes, err)
+							}
 						}
 						observed, err := catalogRunScopedOperatorEvents(h, forkRun)
 						if err != nil || (!refused && !fenced && len(observed) == 0) || ((refused || fenced) && len(observed) != 0) {

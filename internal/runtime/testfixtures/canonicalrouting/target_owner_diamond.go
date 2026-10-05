@@ -81,8 +81,7 @@ pins:
 		"branch/worker/result/nodes.yaml": `singleton-result-node:
   execution_type: system_node
   event_handlers:
-    work.ready:
-      create_entity: true
+    work.ready: {}
 `,
 		"decoy/schema.yaml": `name: decoy
 pins:

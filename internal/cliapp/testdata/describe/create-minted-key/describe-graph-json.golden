@@ -5,6 +5,11 @@
   "source_hash": "\u003cadmitted-bundle\u003e",
   "source_authority": "projection_only_existing_contract_owners",
   "root": {
+    "constructors": [
+      {
+        "no_arguments": true
+      }
+    ],
     "source_files": {
       "schema": "schema.yaml"
     },
@@ -23,6 +28,11 @@
   },
   "flows": [
     {
+      "constructors": [
+        {
+          "no_arguments": true
+        }
+      ],
       "id": "producer",
       "path": "producer",
       "mode": "static",
@@ -83,6 +93,13 @@
       ]
     },
     {
+      "constructors": [
+        {
+          "input": "validation.requested",
+          "no_arguments": false,
+          "key_field": "validation_case_id"
+        }
+      ],
       "id": "validator",
       "path": "validator",
       "mode": "template",

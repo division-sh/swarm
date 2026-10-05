@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -29,7 +30,10 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:intent-propagation"}}
 	ctx := events.WithDeliveryContext(context.Background(), deliveryContext)
 	frame := executionFrame{
-		req: ExecutionRequest{EntityID: identity.EntityID("entity-a")},
+		req: ExecutionRequest{
+			EntityID: identity.EntityID("entity-a"),
+			Handler:  runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "work.noted"}},
+		},
 		result: ExecutionResult{
 			HandlerRuleSelection: handlerselection.Resolved(handlerselection.NotApplicable()),
 			EmitIntents:          []EmitIntent{{}},

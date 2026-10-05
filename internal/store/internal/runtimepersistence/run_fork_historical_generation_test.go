@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -64,12 +65,21 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					seedWorkflowTargetStateForTransition(t, backend.name, fixture.db, runID, runID, runID, "initial", 1, at)
-					if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET entity_type='root' WHERE run_id=$1`, runID); err != nil {
+					bundle, ok := semanticview.Bundle(source)
+					if !ok {
+						t.Fatal("historical generation requires its admitted source")
+					}
+					req := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
+					req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
+					req.OccurredAt = at
+					constructed := constructHistoricalSourceFixture(t, ctx, fixture.store.(agentFixtureFlowStore), req)
+					persisted, err := constructed.PersistenceRecord()
+					if err != nil {
 						t.Fatal(err)
 					}
-					record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "initial", 1, at)
-					record.CurrentState, record.EntityType, record.Mode = "pending", "root", "static"
+					record := persisted.State
+					record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+					record.ExpectedState, record.ExpectedRevision = "pending", 1
 					record.Accumulator = json.RawMessage(forkTestJSON(t, buckets))
 					if _, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
 						t.Fatal(err)

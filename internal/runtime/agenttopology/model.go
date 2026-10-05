@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +40,7 @@ type FlowReadinessPlan struct {
 	InstancePath    string `json:"instance_path"`
 	PlanFingerprint string `json:"plan_fingerprint"`
 	AttemptID       string `json:"activation_attempt_id,omitempty"`
-	PlanRevision    uint64 `json:"plan_revision,omitempty"`
+	Preparation     bool   `json:"preparation,omitempty"`
 }
 
 type EphemeralExecution struct {
@@ -109,26 +111,26 @@ func FlowReadinessAdmission(runID, instancePath, planFingerprint string) (Admiss
 	return admission, admission.Validate()
 }
 
-func (a Admission) WithFlowActivationAttempt(attemptID string, revision uint64) (Admission, error) {
+func (a Admission) WithFlowActivationAttempt(attemptID string) (Admission, error) {
 	if a.Authority.Kind != AuthorityFlowReadinessPlan || a.Authority.Readiness == nil {
 		return Admission{}, errors.New("flow activation attempt requires readiness topology authority")
 	}
 	bound := a
 	readiness := *a.Authority.Readiness
 	readiness.AttemptID = strings.TrimSpace(attemptID)
-	readiness.PlanRevision = revision
+	readiness.Preparation = false
 	bound.Authority.Readiness = &readiness
 	return bound, bound.Validate()
 }
 
-func (a Admission) WithFlowPreparationRevision(revision uint64) (Admission, error) {
-	if a.Authority.Kind != AuthorityFlowReadinessPlan || a.Authority.Readiness == nil || revision == 0 {
-		return Admission{}, errors.New("flow preparation requires readiness topology and a positive plan revision")
+func (a Admission) WithFlowPreparationAttempt(ordinal uint64) (Admission, error) {
+	if a.Authority.Kind != AuthorityFlowReadinessPlan || a.Authority.Readiness == nil || ordinal == 0 {
+		return Admission{}, errors.New("flow preparation requires readiness topology and an exact attempt")
 	}
 	bound := a
 	readiness := *a.Authority.Readiness
-	readiness.AttemptID = ""
-	readiness.PlanRevision = revision
+	readiness.AttemptID = strconv.FormatUint(ordinal, 10)
+	readiness.Preparation = true
 	bound.Authority.Readiness = &readiness
 	return bound, bound.Validate()
 }
@@ -209,9 +211,12 @@ func (a Authority) Validate() error {
 			return errors.New("flow readiness topology authority is incomplete")
 		}
 		if a.Readiness.AttemptID != "" {
-			if _, err := uuid.Parse(a.Readiness.AttemptID); err != nil || a.Readiness.PlanRevision == 0 {
+			if _, err := runtimeflowidentity.ParseActivationAttemptID(a.Readiness.AttemptID); err != nil {
 				return errors.New("flow readiness activation attempt coordinate is invalid")
 			}
+		}
+		if a.Readiness.Preparation && a.Readiness.AttemptID == "" {
+			return errors.New("flow readiness preparation requires an exact attempt coordinate")
 		}
 	case AuthorityEphemeralExecution:
 		if a.Ephemeral == nil || a.Static != nil || a.Readiness != nil {

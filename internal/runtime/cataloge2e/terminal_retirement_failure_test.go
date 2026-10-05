@@ -28,17 +28,17 @@ func TestTerminalMiddleMemberFailureRetainsSuffixBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, selectedForkReadinessCatalogFixture(t, 3, "agent"), backend, true)
 			path := "worker-flow/worker-001"
-			entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+			entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")
 			unrelatedPath := "worker-flow/worker-002"
 			ctx := catalogRunContext(h, catalogRuntimeRunID)
 			unrelatedEntity := uuid.NewString()
 			activationCtx := runtimeeffects.WithExecutionMode(worklifetime.WithOccurrence(ctx, h.rt.WorkOccurrence()), executionmode.Live)
 			at := time.Now().UTC()
-			trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "catalog.selected_fork_source_admitted", "cataloge2e", "", nil, 0, catalogRuntimeRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, unrelatedEntity), at)
+			trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "worker.ready.requested", "cataloge2e", "", []byte(`{"worker_id":"worker-002"}`), 0, catalogRuntimeRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, unrelatedEntity), at)
 			if err := h.rt.Manager.ActivateFlowInstance(activationCtx, runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: semanticview.Wrap(h.bundle),
 				Instance:       flowidentity.Stored(semanticview.Wrap(h.bundle), "worker-flow", unrelatedPath, "worker-002", unrelatedEntity, ""),
-				Config:         map[string]any{"worker_id": "worker-002"}, Fields: map[string]any{"worker_id": "worker-002"}, TriggerEvent: trigger, OccurredAt: at,
+				Config:         map[string]any{"worker_id": "worker-002"}, ConstructorInput: "worker.ready.requested", ResolvedKey: "worker-002", TriggerEvent: trigger, OccurredAt: at,
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -157,7 +157,7 @@ func proveDirectTerminalCommitUnwind(t *testing.T, mode string) {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, selectedForkReadinessCatalogFixture(t, 2, "agent"), backend, true)
 			path := "worker-flow/worker-001"
-			entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+			entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")
 			ctx := catalogRunContext(h, catalogRuntimeRunID)
 			configs := h.rt.Manager.ListAgentConfigs()
 			callerCtx, cancel := context.WithCancel(ctx)

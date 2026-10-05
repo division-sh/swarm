@@ -1,0 +1,150 @@
+{
+  "schema": 1,
+  "source_head": "cb8b83ef9722bccb83a097d821bda70b4f274184",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "command": "go run ./cmd/swarm-test -- -json -race -count=1 -run '^(TestReleaseCompiledLifecycleJourneysBothStores|TestServedLifecycleEmitterCompetingExitPublication)$' ./internal/serveapp",
+  "receipt": "/tmp/agent-e-2496-header-process-contention-proof.log",
+  "receipt_sha256": "e6500b5d40c68052a3f7767bcebd3cf36f05cf75702b805a0e974d659ad9b845",
+  "exit_code": 0,
+  "first_test_event": "2026-10-03T03:39:20.979406329Z",
+  "last_test_event": "2026-10-03T03:41:18.920270713Z",
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "action": "pass",
+      "elapsed": 117.941
+    }
+  ],
+  "root_results": [
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication",
+      "action": "pass",
+      "elapsed": 66.07
+    },
+    {
+      "test": "TestReleaseCompiledLifecycleJourneysBothStores",
+      "action": "pass",
+      "elapsed": 50.82
+    }
+  ],
+  "cells": [
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/default_sqlite/ordinary/gate_first",
+      "action": "pass",
+      "elapsed": 7.58
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/default_sqlite/ordinary/exit_first",
+      "action": "pass",
+      "elapsed": 5.27
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/default_sqlite/ordinary/contended",
+      "action": "pass",
+      "elapsed": 5.67
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/default_sqlite/ordinary",
+      "action": "pass",
+      "elapsed": 18.52
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/default_sqlite/timer/gate_first",
+      "action": "pass",
+      "elapsed": 6.07
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/default_sqlite/timer/exit_first",
+      "action": "pass",
+      "elapsed": 6.36
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/default_sqlite/timer/contended",
+      "action": "pass",
+      "elapsed": 6.82
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/default_sqlite/timer",
+      "action": "pass",
+      "elapsed": 19.26
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/default_sqlite",
+      "action": "pass",
+      "elapsed": 37.78
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/explicit_postgres/ordinary/gate_first",
+      "action": "pass",
+      "elapsed": 6.54
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/explicit_postgres/ordinary/exit_first",
+      "action": "pass",
+      "elapsed": 3.31
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/explicit_postgres/ordinary/contended",
+      "action": "pass",
+      "elapsed": 3.39
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/explicit_postgres/ordinary",
+      "action": "pass",
+      "elapsed": 13.24
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/explicit_postgres/timer/gate_first",
+      "action": "pass",
+      "elapsed": 5.02
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/explicit_postgres/timer/exit_first",
+      "action": "pass",
+      "elapsed": 4.94
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/explicit_postgres/timer/contended",
+      "action": "pass",
+      "elapsed": 5.1
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/explicit_postgres/timer",
+      "action": "pass",
+      "elapsed": 15.06
+    },
+    {
+      "test": "TestServedLifecycleEmitterCompetingExitPublication/explicit_postgres",
+      "action": "pass",
+      "elapsed": 28.3
+    },
+    {
+      "test": "TestReleaseCompiledLifecycleJourneysBothStores/default_sqlite/nested_gate",
+      "action": "pass",
+      "elapsed": 11.53
+    },
+    {
+      "test": "TestReleaseCompiledLifecycleJourneysBothStores/default_sqlite/connected_loop",
+      "action": "pass",
+      "elapsed": 16.15
+    },
+    {
+      "test": "TestReleaseCompiledLifecycleJourneysBothStores/explicit_postgres/nested_gate",
+      "action": "pass",
+      "elapsed": 8.48
+    },
+    {
+      "test": "TestReleaseCompiledLifecycleJourneysBothStores/explicit_postgres/connected_loop",
+      "action": "pass",
+      "elapsed": 8.78
+    }
+  ],
+  "failed_cells": [],
+  "skipped_cells": [],
+  "limits": [
+    "Two roots, 22 named subtest receipts and 16 leaf scenarios execute once under race/count1 on both stores: four public release journeys plus 12 gate/ordinary-or-timer exit/order scenarios.",
+    "The release journey builds cmd/swarm with -race, executes public verify and serve, and completes connected-loop and nested-gate public RPC readback. Paid provider keys are unset; this is not real-provider qualification.",
+    "The contention journey retains its explicitly labeled in-process mock lifecycle boundary and the real timer/HTTP contender ordering. Native deadlines, authentic timer evidence, exact terminal winner/history/publication and shutdown joins are unchanged.",
+    "These are source-attributed sibling-consumption proofs, not closure of the pending nested-template or optional/provider/joined failure-discard classes, final composed-head default or hosted CI."
+  ]
+}

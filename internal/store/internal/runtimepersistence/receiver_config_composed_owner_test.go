@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -105,8 +106,16 @@ func (f *receiverComposedFixture) prepareEngine(t *testing.T, keys []string, lab
 	if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, f.postgres)) {
 		t.Fatal("typed publication preparation mutated durable state")
 	}
-	state := stateOnlyWorkflowEngineMutationRecord(t, f.seed.runID, ".", f.seed.runID, f.seed.runID, "review", 2, f.seed.createdAt)
-	state.EntityType, state.Mode = "root", "static"
+	owner, err := flowidentity.NewRunScopedFlowInstance(f.seed.runID, flowidentity.StoredRoute(".", f.seed.runID, f.seed.runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, found, err := f.workflows.Load(f.ctx, owner)
+	if err != nil || !found {
+		t.Fatalf("load constructed parent before mutation: found=%t err=%v", found, err)
+	}
+	state := stateOnlyWorkflowEngineMutationRecord(t, f.seed.runID, ".", f.seed.runID, f.seed.runID, instance.CurrentState, instance.Revision, instance.CreatedAt)
+	state.EntityType, state.Mode, state.StageDefined = instance.EntityType, instance.Mode, instance.StageDefined
 	state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	return pipeline.WorkflowEngineMutationCommand{State: state, Publications: f.plans, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: f.claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()}}
 }

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -22,9 +21,8 @@ func TestCompositionSelectedSingletonInputDoesNotRequireAnotherInitializer(t *te
 		if !handler.Matched || handler.Handler.CreateEntity {
 			t.Fatalf("fixture must retain noninitializing handler %s", event)
 		}
-		policy, err := pipeline.CompileDeliveryTargetCompatibilityPolicy(source, node, "portfolio", events.EventType(event), handler.Handler)
-		if err != nil || policy.Dependency == pipeline.DeliveryTargetEntityMaterializing {
-			t.Fatalf("noninitializing handler %s: %#v %v", event, policy, err)
+		if err := pipeline.ValidateExecutionHandlerDeclaration(source, node, handler.Handler); err != nil {
+			t.Fatalf("ordinary handler %s must not require construction authority: %v", event, err)
 		}
 	}
 	report := Run(context.Background(), source, Options{})

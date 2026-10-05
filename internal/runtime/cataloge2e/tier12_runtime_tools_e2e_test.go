@@ -8,9 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
@@ -28,26 +26,13 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 	fixtureRoot := fixtures[0].Root
 
 	h := newRuntimeHarness(t, fixtureRoot, true)
-	bundleHash := h.rt.Options.SourceArtifactFact.BundleHash()
-	desired, err := h.rt.Manager.CompileStaticTopologyDesiredAgents(h.rt.Options.WorkflowModule.SemanticSource(), runtimeagenttopology.SourceCoordinate{
-		BundleHash: bundleHash,
-	})
+	h.seedInitialState(catalogRuntimeRunID)
+	identity, err := runScopedCatalogStore(t, h).ResolveOperatorAgentIdentity(h.ctx, catalogRuntimeRunID, "reference-agent", "support")
 	if err != nil {
-		t.Fatalf("compile flow-data agent topology: %v", err)
-	}
-	var identity runtimeagentidentity.Identity
-	for _, candidate := range desired {
-		if candidate.Identity.AgentID() != "reference-agent" {
-			continue
-		}
-		identity, err = candidate.Identity.Live(catalogRuntimeRunID)
-		if err != nil {
-			t.Fatalf("materialize flow-data agent identity: %v", err)
-		}
-		break
+		t.Fatalf("resolve constructed flow-data agent identity: %v", err)
 	}
 	if err := identity.Validate(); err != nil {
-		t.Fatalf("flow-data fixture has no reference-agent declaration: %v", err)
+		t.Fatalf("flow-data fixture has no admitted reference-agent identity: %v", err)
 	}
 	readinessEvent := eventtest.ExistingRunRootIngress(
 		eventtest.UUID("flow-data-readiness"), "support.requested", "cataloge2e", "", []byte(`{}`), 0,

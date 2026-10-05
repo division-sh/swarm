@@ -1,0 +1,728 @@
+{
+  "master_412194d72_reconciliation": {
+    "head": "df581f1cadb1fdd553025153fcf268a110cbce5c",
+    "base": "412194d721cfbbcda889780e6c864b3abedb1051",
+    "receipt": "/tmp/agent-e-2496-describe-412194d72-fresh.log",
+    "initial_result": "RED95.428s: ten JSON surface hashes changed only by merged spec provenance",
+    "changed_rows": 10,
+    "unchanged_rows": 35,
+    "normalization": "repository and isolated CLI scope absolute paths only; characterization code unchanged",
+    "comparison": "All non-provenance fields and provenance row counts match the prior receipt exactly. Each changed JSON cell has 1309 spec-filename digest changes and 1071 source-line increments after master rule6607; no other change survives the structural comparison.",
+    "changes": [
+      {
+        "fixture": "examples/routing/template-select-or-create",
+        "surface": "describe-json",
+        "before": "3a4b375d7e0aeae97e5cd94470112f085b23e94a06d02e49ff2df8149422103d",
+        "after": "e25f61b4be0144d1e058233ffb3dab1a9647019de3ca6d4d0d1a0fe9d4d3881f"
+      },
+      {
+        "fixture": "examples/routing/template-select-or-create",
+        "surface": "describe-graph-json",
+        "before": "3a4b375d7e0aeae97e5cd94470112f085b23e94a06d02e49ff2df8149422103d",
+        "after": "e25f61b4be0144d1e058233ffb3dab1a9647019de3ca6d4d0d1a0fe9d4d3881f"
+      },
+      {
+        "fixture": "examples/routing/template-create-minted-key",
+        "surface": "describe-json",
+        "before": "9c12746501b3e13c7c76e5ede34da285d3ff6f7e62ba3a9f1fde0492e4046b4a",
+        "after": "41c164e924c78519846521e9c1518d01a37fb623ddd7c08482a6a995a5a8df82"
+      },
+      {
+        "fixture": "examples/routing/template-create-minted-key",
+        "surface": "describe-graph-json",
+        "before": "9c12746501b3e13c7c76e5ede34da285d3ff6f7e62ba3a9f1fde0492e4046b4a",
+        "after": "41c164e924c78519846521e9c1518d01a37fb623ddd7c08482a6a995a5a8df82"
+      },
+      {
+        "fixture": "examples/integrations/telegram-agent",
+        "surface": "describe-json",
+        "before": "983986edb1d570670498be345201b0ea4c02f48371672d1527954d70bc2836d6",
+        "after": "316a33968fc6b23cfed907acd34fba68db0a9b1f2bdb2437053248a9bb2facfc"
+      },
+      {
+        "fixture": "examples/integrations/telegram-agent",
+        "surface": "describe-graph-json",
+        "before": "f665f720d62757a439e99d4e854fda9edaa8f8282b0484498a5763f1a4e50a5c",
+        "after": "e16a85196c290a7c00d5abfbb2b4058a5fe42c077f5dbe23696f8e90300c7eaa"
+      },
+      {
+        "fixture": "examples/routing/fan-in/barrier",
+        "surface": "describe-json",
+        "before": "3b453cf7d7dbd8807a04ad8ba12dbe213f459a718cba0fe5dfcd207bd2a89e1a",
+        "after": "8dc9ff0d4daee36572cfa1531b90ac800f3668f8ef631d4a4bdfbf0764f819f6"
+      },
+      {
+        "fixture": "examples/routing/fan-in/barrier",
+        "surface": "describe-graph-json",
+        "before": "11bab69c9be8606beb3fcf85f34eda7d52b6b8034e38a08951226d8b3484c0c6",
+        "after": "4a7f12d51864df5b441bc79ce72ac3a178cea721d634c27b06232672a80be291"
+      },
+      {
+        "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+        "surface": "describe-json",
+        "before": "9af85b89377825c250b862ff7635cbc4fa921d220c0c8265f339ddff82821ca9",
+        "after": "65a76b9f3daed0b34500ab4cbbe383803e6acb5c31e206939d2a29797fe414b3"
+      },
+      {
+        "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+        "surface": "describe-graph-json",
+        "before": "6c61e744179f187d0578be96be5a58fca2f4a224942d119e38f19a4d858070f2",
+        "after": "2aaae2ebf8256bda1ad8cf9126c89cd8e0561636e67703acfe7fd6b72b913355"
+      }
+    ],
+    "accepted_receipt": {
+      "head": "1da1364b7",
+      "receipt": "/tmp/agent-e-2496-describe-412194d72-accepted.log",
+      "result": "PASS94.817s",
+      "cells": 45,
+      "repetitions_per_cell": 2
+    }
+  },
+  "master_provenance_reconciliation": {
+    "head": "e7dc25131e32024a28e210db51b8b0e5af76111e",
+    "base": "f805cdb7f0df6a24038b83e78bc1c93fe6e745f9",
+    "receipt": "/tmp/agent-e-2496-describe-combined.log",
+    "initial_result": "RED89.615s: ten JSON surfaces require newly merged pack/platform source provenance",
+    "changed_rows": 10,
+    "unchanged_rows": 35,
+    "normalization": "repository and isolated CLI scope absolute paths only",
+    "comparison": "Removing only the newly added platform.*, packs.*, packs[...], and pack_sources[...] effective_provenance entries reproduces every previous exact stdout hash. The new baseline retains all new provenance.",
+    "added_provenance_rows_per_json_surface": 2488,
+    "changes": [
+      {
+        "fixture": "examples/routing/template-select-or-create",
+        "surface": "describe-json",
+        "before": "15e785406d903934802320d47cb71169f1cd4818e6d29bbe055cae9125398d8e",
+        "after": "7be8400a11c091de4d0c084a7106f4d3d605c67ee80f3795335adb319e8d14ed",
+        "added_provenance": 2488
+      },
+      {
+        "fixture": "examples/routing/template-select-or-create",
+        "surface": "describe-graph-json",
+        "before": "15e785406d903934802320d47cb71169f1cd4818e6d29bbe055cae9125398d8e",
+        "after": "7be8400a11c091de4d0c084a7106f4d3d605c67ee80f3795335adb319e8d14ed",
+        "added_provenance": 2488
+      },
+      {
+        "fixture": "examples/routing/template-create-minted-key",
+        "surface": "describe-json",
+        "before": "bde9f6b3089f3f8a7fe3b83e2631d92e4558f2132d74b189eb228ca44c66cc3e",
+        "after": "046835f9efe0fbaf4c941cb95aee10d3eb2e4e3e920230ba557f82ad3d7c111f",
+        "added_provenance": 2488
+      },
+      {
+        "fixture": "examples/routing/template-create-minted-key",
+        "surface": "describe-graph-json",
+        "before": "bde9f6b3089f3f8a7fe3b83e2631d92e4558f2132d74b189eb228ca44c66cc3e",
+        "after": "046835f9efe0fbaf4c941cb95aee10d3eb2e4e3e920230ba557f82ad3d7c111f",
+        "added_provenance": 2488
+      },
+      {
+        "fixture": "examples/integrations/telegram-agent",
+        "surface": "describe-json",
+        "before": "e1e78b1624aa93cff6a3a6b790adf928cd9a3f38806f12b2569544ba08b5db7f",
+        "after": "93e1344d6912e87bba325982b4b6d0a824f5c271e53de00ad9372b9c27d889b9",
+        "added_provenance": 2488
+      },
+      {
+        "fixture": "examples/integrations/telegram-agent",
+        "surface": "describe-graph-json",
+        "before": "d4251ea2c66a52bf693245d1088815bcdcbe8f080deb9886048c023ef53e39bf",
+        "after": "8293d5c0c4bf367da85ec1ca1de7106bcfd9a910a0b064be0773c313407af563",
+        "added_provenance": 2488
+      },
+      {
+        "fixture": "examples/routing/fan-in/barrier",
+        "surface": "describe-json",
+        "before": "037772f51210101f947169a10bc9a02d3535504e8c4842edf0ee43e5bd74e74c",
+        "after": "99dfce4b7282de2d8177b160c9dd23022072dca180e2de865d06e64dbd77a444",
+        "added_provenance": 2488
+      },
+      {
+        "fixture": "examples/routing/fan-in/barrier",
+        "surface": "describe-graph-json",
+        "before": "0eb55ccb41b412b2625d54aca9fe3a9f7a426c854523703955f55b8af3b46a02",
+        "after": "a65e174b93ce5efcea42e94f6e0613ad565be17388eb600cabf8a231928691b5",
+        "added_provenance": 2488
+      },
+      {
+        "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+        "surface": "describe-json",
+        "before": "105337581f85e7e7e07db83c84696915ef9ff7fb75d0cd0593b5329a7f8de445",
+        "after": "5784ea99117057c572f0ed2c9dc70d4035fc73e2758042cc7463399e052442ac",
+        "added_provenance": 2488
+      },
+      {
+        "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+        "surface": "describe-graph-json",
+        "before": "4cc2de48837b89575cbea88277da93f760cb5ad2277402c7bf5e4c7c6c4a03a4",
+        "after": "b798d03dcd138a22fa7f822d3f7dbe1e465047b3d40aea9b0583aa0a6738f4c8",
+        "added_provenance": 2488
+      }
+    ]
+  },
+  "measured_head": "26574aad1eadbce74ac82044b4b851073ca79ca9",
+  "receipt": "/tmp/agent-e-2496-default-schema-sequence-repair.log",
+  "previous_baseline": "1c4cce2094bdaf48dd4d5faf6dbfe33da662bc0f",
+  "changed_rows": 30,
+  "unchanged_rows": 15,
+  "normalization": "repository absolute path only",
+  "merged_constructor_revision": {
+    "measured_head": "4b5c9356a",
+    "receipt": "/tmp/agent-e-2496-merged-public-construction-proof.log",
+    "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+    "context": "Remove two retired handler create_entity flags; preserve merged A2 join grammar and all public output assertions.",
+    "changed_rows": 7,
+    "unchanged_rows": 38,
+    "normalization": "repository absolute path only",
+    "changes": [
+      {
+        "surface": "describe-text",
+        "before": "cdada9aef16e7224bd85ad3e72e0949006e5487cd78ac65e1479a72cece89423",
+        "after": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620"
+      },
+      {
+        "surface": "describe-json",
+        "before": "f607df6c219cc189d77df183715ea1f9af3690c37addb44124c74b1f8d8a6058",
+        "after": "105337581f85e7e7e07db83c84696915ef9ff7fb75d0cd0593b5329a7f8de445"
+      },
+      {
+        "surface": "describe-quiet",
+        "before": "35f244e264187b08c0967dd01b6a38c4fe6716b560a7b3b3650fa61f1ca17bde",
+        "after": "1fdddbc98da8f20c1e269ce9af09276b0c9390143c8977a9caa940b7ffcb9688"
+      },
+      {
+        "surface": "describe-graph-text",
+        "before": "2ebb675610161cd7f98598fb2b5e06cf0c9bbd6a1056959de72d6d9cdafce915",
+        "after": "7c82c5b9b78c78b523d873a40399ced58a8bd87df4cf8ba06d6cfdc19aec624d"
+      },
+      {
+        "surface": "describe-graph-json",
+        "before": "3599a9509731805a549e27a4cadbd2d383896a49ae7536f73166e935532b2c31",
+        "after": "4cc2de48837b89575cbea88277da93f760cb5ad2277402c7bf5e4c7c6c4a03a4"
+      },
+      {
+        "surface": "describe-no-color",
+        "before": "cdada9aef16e7224bd85ad3e72e0949006e5487cd78ac65e1479a72cece89423",
+        "after": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620"
+      },
+      {
+        "surface": "routes-json",
+        "before": "66657ffd552bf164408ada1094026268e10cff40b748160bb91222efbfbd2ce6",
+        "after": "20c679a9e1947d5ea64d2735281ab90ad7905a3188ea51a693b6aaf2c81ba7dc"
+      }
+    ]
+  },
+  "changes": [
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-text",
+      "before": "455d23c5e737c96e712e3c89dd30f5a85b9834382ff17e5e555aa47470bfa780",
+      "after": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-json",
+      "before": "0d5815fb3ff5c5fdd92ee8e3ed0394830bc7553c73d435e5c3ddd1caa7edd7e8",
+      "after": "15e785406d903934802320d47cb71169f1cd4818e6d29bbe055cae9125398d8e",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-text",
+      "before": "455d23c5e737c96e712e3c89dd30f5a85b9834382ff17e5e555aa47470bfa780",
+      "after": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-json",
+      "before": "0d5815fb3ff5c5fdd92ee8e3ed0394830bc7553c73d435e5c3ddd1caa7edd7e8",
+      "after": "15e785406d903934802320d47cb71169f1cd4818e6d29bbe055cae9125398d8e",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-no-color",
+      "before": "455d23c5e737c96e712e3c89dd30f5a85b9834382ff17e5e555aa47470bfa780",
+      "after": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-text",
+      "before": "3455b0f11e9a010abd516c95fd0d75b2134bf87ebb4b2b5183b71490686d51ca",
+      "after": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-json",
+      "before": "24bb93541cce788fc67f56d859ef80bc2afb72af0d59dcbf646719962a7dba3a",
+      "after": "bde9f6b3089f3f8a7fe3b83e2631d92e4558f2132d74b189eb228ca44c66cc3e",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-text",
+      "before": "3455b0f11e9a010abd516c95fd0d75b2134bf87ebb4b2b5183b71490686d51ca",
+      "after": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-json",
+      "before": "24bb93541cce788fc67f56d859ef80bc2afb72af0d59dcbf646719962a7dba3a",
+      "after": "bde9f6b3089f3f8a7fe3b83e2631d92e4558f2132d74b189eb228ca44c66cc3e",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-no-color",
+      "before": "3455b0f11e9a010abd516c95fd0d75b2134bf87ebb4b2b5183b71490686d51ca",
+      "after": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-text",
+      "before": "4e6c0338612b5729b950b06560cad6a0493d97e64419f2b215d0672d4fb505e4",
+      "after": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-json",
+      "before": "376aaf60263019e6c89f51350a8a24efcaaab1c1687b3d3caab70606c10e616f",
+      "after": "e1e78b1624aa93cff6a3a6b790adf928cd9a3f38806f12b2569544ba08b5db7f",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-text",
+      "before": "c4dfa1b9046c40a5788579bda7034e3fb7628d36f7e695731c65130c332b053b",
+      "after": "e293ed51bb5790be27ffe0ba6fbd0b0809b509ae84867f4888df701611e36c86",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-json",
+      "before": "d0c52b906df9b001d6fa47ba6e72cd1195f99e2660f365cc7a13a45e48c2a801",
+      "after": "d4251ea2c66a52bf693245d1088815bcdcbe8f080deb9886048c023ef53e39bf",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-no-color",
+      "before": "4e6c0338612b5729b950b06560cad6a0493d97e64419f2b215d0672d4fb505e4",
+      "after": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "context": "#2496 canonical constructor projection"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-text",
+      "before": "22b42b2f522c2d49499cb3141e2a58b811c7037b492ab70c5ef51b91c563ad25",
+      "after": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-json",
+      "before": "dd2fb2131bed4567be43f9be405db9ed9df9156808670391a56e9029b3af006f",
+      "after": "037772f51210101f947169a10bc9a02d3535504e8c4842edf0ee43e5bd74e74c",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-quiet",
+      "before": "8b4e9a65689032ab226954778ac6d7b2bbcfbb90d4b84358f56d1cb634c49f4b",
+      "after": "ec7cb0781f201870ae6f6b76e14a9936c687b8fbe6e8f0d9d327dc918cc2bb31",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-text",
+      "before": "494d25613ae1ffc476417b4af83eda1c6809bb7cc2222199c6b886a2f21117ab",
+      "after": "126e635b670c0a83830a0b31bbff5961f7d7e4196e03e0055dfd3ec1e681f7c5",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-json",
+      "before": "52b5f998f4687bbab72f275a2e7d03a632fd31690eaa186b7ec1cd8c0e75e89f",
+      "after": "0eb55ccb41b412b2625d54aca9fe3a9f7a426c854523703955f55b8af3b46a02",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-no-color",
+      "before": "22b42b2f522c2d49499cb3141e2a58b811c7037b492ab70c5ef51b91c563ad25",
+      "after": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-text",
+      "before": "d3e250d2a3b8952ae087ead88f777251eb3bf4383e3752183d7bb78f3c38ce7f",
+      "after": "bfead8a7c6742f825ae536c1ee1089df440966f920efed6a344c60da7e96ac0a",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-json",
+      "before": "2cba1e986e79a4714ec647d8810709df9d876dae3e9ea34b9ebfab90dd72297b",
+      "after": "6993774157618225d8ada629158d8d5501e0f6cf4bba8c2d8876441b3b9ae6ac",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-quiet",
+      "before": "a1b8ef669368cd7502ff5c2d8a42e709550067814a48f39fcc946c5e70d48360",
+      "after": "995e660da9c0a68dead683d6cb3319333555e168e31d416e22bb9a0d3200b2ee",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-text",
+      "before": "3eb7558d11fa879dd47caaae09c783499b5269bd4fe9ec5d44b3de55fbd9e0ec",
+      "after": "cdada9aef16e7224bd85ad3e72e0949006e5487cd78ac65e1479a72cece89423",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-json",
+      "before": "de4a3a76d5e07259c5a0b2d1583c35d96c9fb7b761b2ca4fccfea732eae9b806",
+      "after": "f607df6c219cc189d77df183715ea1f9af3690c37addb44124c74b1f8d8a6058",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-quiet",
+      "before": "8dc818075f836ded1472564b2ab95cd567779164778ef3d10a1eb84573aad47a",
+      "after": "35f244e264187b08c0967dd01b6a38c4fe6716b560a7b3b3650fa61f1ca17bde",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-text",
+      "before": "1074146407b78d32036cfb9ee17d4530e2817049c5fd4e559f2fdd6c1f385cb7",
+      "after": "2ebb675610161cd7f98598fb2b5e06cf0c9bbd6a1056959de72d6d9cdafce915",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-json",
+      "before": "578d5c0cf69cacb345d3c5fd10a7e266b660cba273699c619b2dae10feb20eb1",
+      "after": "3599a9509731805a549e27a4cadbd2d383896a49ae7536f73166e935532b2c31",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-no-color",
+      "before": "3eb7558d11fa879dd47caaae09c783499b5269bd4fe9ec5d44b3de55fbd9e0ec",
+      "after": "cdada9aef16e7224bd85ad3e72e0949006e5487cd78ac65e1479a72cece89423",
+      "context": "#2496 constructor projection plus pinned #1994 join grammar/artifact changes"
+    }
+  ],
+  "rebased_master_reconciliation": {
+    "base": "c3f38293e",
+    "measured_source_head": "97767efea",
+    "receipt": "/tmp/agent-e-2496-describe-comparison-97767efea/differences.json",
+    "verified_base_rows": 45,
+    "changed_rows": 27,
+    "unchanged_rows": 18,
+    "normalization": "Repository and isolated CLI-scope absolute paths only.",
+    "constructors": "Every flow now renders its canonical constructor: no arguments or exact input/key/supplied fields. Four unchanged fixture sources differ semantically only by this added projection.",
+    "golden_fixture": "The golden workload deletes exactly two retired create_entity flags. The resulting hash is measured from that exact source; its existing stages, handlers, connects and payload assertions are retained.",
+    "stage_graph": "Deleting the handler-construction interpreter also deletes its implicit initial-stage-only scope. Ordinary handler graph edges now use the existing explicit stage/loop eligibility owner. The golden graph shows those exact additional declared-stage edges, not a restored lazy constructor.",
+    "provenance": "Path-keyed comparison preserves all semantic provenance facts. Only source file/line/column coordinates differ; the golden removes exactly the two deleted create_entity paths and adds none.",
+    "qualification": "Independent serial compiled public CLI measurement. Managed compiled-describe regression and end-to-end golden/barrier execution still require current-source qualification."
+  },
+  "typed_branch_point_reconciliation": {
+    "head": "c9f8cc2c7",
+    "base": "1da1364b7",
+    "governing_ruling": "https://github.com/division-sh/swarm/issues/2496#issuecomment-5959962669",
+    "receipt": "/tmp/agent-e-2496-typed-branch-describe-red.log",
+    "initial_result": "RED90.061s: ten JSON surface hashes changed only by authorized typed branch spec provenance",
+    "changed_rows": 10,
+    "unchanged_rows": 35,
+    "normalization": "repository and isolated CLI scope absolute paths only; characterization code and two repetitions unchanged",
+    "comparison": "Exact SHA-verified structural comparison: all non-provenance fields and provenance row counts identical. Each changed JSON cell has 1309 source_file digest changes and 610 source_line changes, all accounted for by the four bounded spec diff hunks. No other leaf change is admitted.",
+    "spec_hunks": [
+      {
+        "old": 16417,
+        "removed": 1,
+        "next": 16417,
+        "added": 1
+      },
+      {
+        "old": 16420,
+        "removed": 2,
+        "next": 16420,
+        "added": 25
+      },
+      {
+        "old": 19129,
+        "removed": 1,
+        "next": 19152,
+        "added": 1
+      },
+      {
+        "old": 19141,
+        "removed": 1,
+        "next": 19164,
+        "added": 5
+      }
+    ],
+    "changes": [
+      {
+        "fixture": "examples/routing/template-select-or-create",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "e25f61b4be0144d1e058233ffb3dab1a9647019de3ca6d4d0d1a0fe9d4d3881f",
+        "after": "c649a3e750b9a92ccf2f4df5a196c88b74f606ae4d1c833f375f7a3a86950d02",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      },
+      {
+        "fixture": "examples/routing/template-select-or-create",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "e25f61b4be0144d1e058233ffb3dab1a9647019de3ca6d4d0d1a0fe9d4d3881f",
+        "after": "c649a3e750b9a92ccf2f4df5a196c88b74f606ae4d1c833f375f7a3a86950d02",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      },
+      {
+        "fixture": "examples/routing/template-create-minted-key",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "41c164e924c78519846521e9c1518d01a37fb623ddd7c08482a6a995a5a8df82",
+        "after": "1beb93a252777ad73c6b82b6be043d50bd7566ef441a0446b31188af35e5cc19",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      },
+      {
+        "fixture": "examples/routing/template-create-minted-key",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "41c164e924c78519846521e9c1518d01a37fb623ddd7c08482a6a995a5a8df82",
+        "after": "1beb93a252777ad73c6b82b6be043d50bd7566ef441a0446b31188af35e5cc19",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      },
+      {
+        "fixture": "examples/integrations/telegram-agent",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "316a33968fc6b23cfed907acd34fba68db0a9b1f2bdb2437053248a9bb2facfc",
+        "after": "b0eb511375980f2bf67fd7b26c59c67c69476ed336bcd37c0adae829c5c022fd",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      },
+      {
+        "fixture": "examples/integrations/telegram-agent",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "e16a85196c290a7c00d5abfbb2b4058a5fe42c077f5dbe23696f8e90300c7eaa",
+        "after": "0bffaaf07a490769c56ca9b4aa20386c8456bde441b8f493e7454c0c7f8b55ad",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      },
+      {
+        "fixture": "examples/routing/fan-in/barrier",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "8dc9ff0d4daee36572cfa1531b90ac800f3668f8ef631d4a4bdfbf0764f819f6",
+        "after": "c7d087c4b24dd255a6c4a2f75a31b3966ac775f3f2074fc890a1ea88c719128d",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      },
+      {
+        "fixture": "examples/routing/fan-in/barrier",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "4a7f12d51864df5b441bc79ce72ac3a178cea721d634c27b06232672a80be291",
+        "after": "08b75b8b0e546b89ea3ed7cb3832c4e73d65c6d059cfe68d4952212b858a121c",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      },
+      {
+        "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "65a76b9f3daed0b34500ab4cbbe383803e6acb5c31e206939d2a29797fe414b3",
+        "after": "8fbf3434cc5d3423b4c6fd06e0b0174e0dee20bb61178a332331da3978b380f0",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      },
+      {
+        "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "2aaae2ebf8256bda1ad8cf9126c89cd8e0561636e67703acfe7fd6b72b913355",
+        "after": "ebb4c7f2f543e69f0b951097d29827a691ef8bf90a540cbd0e17ddc92449991c",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 610
+        }
+      }
+    ],
+    "accepted_receipt": {
+      "head": "92e732fee",
+      "receipt": "/tmp/agent-e-2496-describe-typed-accepted.log",
+      "result": "PASS91.821s",
+      "cells": 45,
+      "repetitions_per_cell": 2,
+      "qualification_boundary": "Typed branch production/spec and exact baseline are identical in the later fixture-only candidate. This is not that candidate's default-suite or CI receipt."
+    }
+  },
+  "master_ee9b09152_reconciliation": {
+    "head": "e230f3b97",
+    "base": "ee9b09152",
+    "receipt": "/tmp/agent-e-2496-describe-ee9-fresh.log",
+    "initial_result": "RED107.164s: ten JSON hashes reflect only master one-line rule provenance",
+    "changed_rows": 10,
+    "unchanged_rows": 35,
+    "normalization": "repository and isolated CLI scope absolute paths only; compiled characterization unchanged",
+    "comparison": "SHA-verified output preserves all non-provenance fields and provenance row counts. Each changed JSON cell has1309 spec-file digest changes and1071 source-line increments matching the sole addition at6676. No other structural difference.",
+    "changes": [
+      {
+        "fixture": "examples/routing/template-select-or-create",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "c649a3e750b9a92ccf2f4df5a196c88b74f606ae4d1c833f375f7a3a86950d02",
+        "after": "28452120334371b640ff75dcaf16c896a43ed24aea06c1a3d9f981e7873151e2",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      },
+      {
+        "fixture": "examples/routing/template-select-or-create",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "c649a3e750b9a92ccf2f4df5a196c88b74f606ae4d1c833f375f7a3a86950d02",
+        "after": "28452120334371b640ff75dcaf16c896a43ed24aea06c1a3d9f981e7873151e2",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      },
+      {
+        "fixture": "examples/routing/template-create-minted-key",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "1beb93a252777ad73c6b82b6be043d50bd7566ef441a0446b31188af35e5cc19",
+        "after": "3f9757fb12787b7bac37add353bc0bf373b36ac6098921fe800f8c20689984f2",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      },
+      {
+        "fixture": "examples/routing/template-create-minted-key",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "1beb93a252777ad73c6b82b6be043d50bd7566ef441a0446b31188af35e5cc19",
+        "after": "3f9757fb12787b7bac37add353bc0bf373b36ac6098921fe800f8c20689984f2",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      },
+      {
+        "fixture": "examples/integrations/telegram-agent",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "b0eb511375980f2bf67fd7b26c59c67c69476ed336bcd37c0adae829c5c022fd",
+        "after": "4052f4b87f97615766822abff0c7d4d39b3594c7ebdd2c547f79d06213f27384",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      },
+      {
+        "fixture": "examples/integrations/telegram-agent",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "0bffaaf07a490769c56ca9b4aa20386c8456bde441b8f493e7454c0c7f8b55ad",
+        "after": "f239228cdc36b062f8a1a53b906841e1e889952d1d2d2b4c45df46342388118a",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      },
+      {
+        "fixture": "examples/routing/fan-in/barrier",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "c7d087c4b24dd255a6c4a2f75a31b3966ac775f3f2074fc890a1ea88c719128d",
+        "after": "791ee54286c0f242addb63ecf49d810c3fc7c21570aa0f51b84482236ad7e2c7",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      },
+      {
+        "fixture": "examples/routing/fan-in/barrier",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "08b75b8b0e546b89ea3ed7cb3832c4e73d65c6d059cfe68d4952212b858a121c",
+        "after": "e173d1e534a4f0ff3fb461ad6fda20a5c8b97a2a22e376a77aeea041100f2507",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      },
+      {
+        "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+        "surface": "describe-json",
+        "status": "changed",
+        "before": "8fbf3434cc5d3423b4c6fd06e0b0174e0dee20bb61178a332331da3978b380f0",
+        "after": "74966b6817b6b98b0cba7a323faff8fdb045a1d79d9798aba8cfc7799ac5a297",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      },
+      {
+        "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+        "surface": "describe-graph-json",
+        "status": "changed",
+        "before": "ebb4c7f2f543e69f0b951097d29827a691ef8bf90a540cbd0e17ddc92449991c",
+        "after": "4c14a4fdd763d2f114aa3984854fc0c9aa66532023a65be6c7b211d6ed6f2f6c",
+        "counts": {
+          "source_file": 1309,
+          "source_line": 1071
+        }
+      }
+    ],
+    "accepted_receipt": {
+      "head": "4b68a14af",
+      "receipt": "/tmp/agent-e-2496-describe-ee9-accepted.log",
+      "result": "PASS138.331s",
+      "cells": 45,
+      "repetitions_per_cell": 2
+    }
+  }
+}

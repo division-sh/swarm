@@ -100,7 +100,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		if err := sourceIntent.Request.ValidateSourceProjection(); err != nil {
 			return fmt.Errorf("fixed fork fan-out source/plan agreement: %w", err)
 		}
-		projectedCapsule, _, err := projectRunForkFanOutCapsule(ctx, tx, forkRunID, plan, obligation, original)
+		projectedCapsule, _, err := projectRunForkFanOutCapsule(ctx, tx, postgres, forkRunID, plan, obligation, original)
 		if err != nil {
 			return err
 		}
@@ -311,7 +311,7 @@ func materializeRunForkFanOutObligations(
 			continue
 		}
 		intent := obligation.Intent
-		capsuleProjection, generation, err := projectRunForkFanOutCapsule(ctx, tx, forkRunID, plan, obligation, original)
+		capsuleProjection, generation, err := projectRunForkFanOutCapsule(ctx, tx, postgres, forkRunID, plan, obligation, original)
 		if err != nil {
 			return 0, err
 		}

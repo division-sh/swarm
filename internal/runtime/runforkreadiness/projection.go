@@ -10,18 +10,54 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type Projection struct {
-	States     []runfork.RunForkSelectedContractWorkflowState
-	Blueprints []runtimemanager.AgentMaterializationBlueprint
-	Flows      []runtimemanager.TemplateFlowMaterializationPlan
+	States []runfork.RunForkSelectedContractWorkflowState
+	// Attachments carry known construction, not additional delivery frontiers.
+	Attachments []runfork.RunForkSelectedContractWorkflowState
+	Blueprints  []runtimemanager.AgentMaterializationBlueprint
+	Flows       []runtimemanager.FlowInstanceMaterializationPlan
+}
+
+// MaterializationStates joins attachment evidence with the actual dispatch
+// associations. Known actors outside the frontier do not invent deliveries.
+func (p Projection) MaterializationStates() ([]runfork.RunForkSelectedContractWorkflowState, error) {
+	out := append([]runfork.RunForkSelectedContractWorkflowState(nil), p.States...)
+	byEntity := make(map[string]runfork.RunForkSelectedContractWorkflowState, len(out))
+	for _, state := range out {
+		if _, duplicate := byEntity[state.EntityID]; duplicate {
+			return nil, fmt.Errorf("selected readiness repeats a dispatch state")
+		}
+		byEntity[state.EntityID] = state
+	}
+	attachments := make(map[string]struct{}, len(p.Attachments))
+	for _, attachment := range p.Attachments {
+		if _, duplicate := attachments[attachment.EntityID]; duplicate {
+			return nil, fmt.Errorf("selected readiness repeats a construction attachment")
+		}
+		attachments[attachment.EntityID] = struct{}{}
+		if attachment.SourceEventID != "" || len(attachment.SourceEvents) != 0 {
+			return nil, fmt.Errorf("construction attachment cannot carry delivery associations")
+		}
+		if selected, exists := byEntity[attachment.EntityID]; exists {
+			attachment.ExecutionMode = selected.ExecutionMode
+			if !selectedContractWorkflowStatesEqual(selected, attachment) {
+				return nil, fmt.Errorf("selected dispatch state disagrees with its construction attachment")
+			}
+			continue
+		}
+		out = append(out, attachment)
+		byEntity[attachment.EntityID] = attachment
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].EntityID < out[j].EntityID })
+	return out, nil
 }
 
 func Project(
@@ -34,7 +70,11 @@ func Project(
 	if source == nil {
 		return nil, fmt.Errorf("selected-contract workflow state projection requires semantic source")
 	}
-	if err := validateSelectedContractReadinessEntityMetadata(plan.Entities); err != nil {
+	if !modelOptions.ExecutionPosture.Valid() {
+		return nil, fmt.Errorf("selected-contract readiness requires an admitted process execution posture")
+	}
+	instances, err := runforkadmission.ConstructedInstances(source, plan)
+	if err != nil {
 		return nil, err
 	}
 	blueprints, err := StaticAgentBlueprints(source)
@@ -49,6 +89,45 @@ func Project(
 		}
 		prepared.Blueprints = append(prepared.Blueprints, resolved)
 	}
+	// The complete fixed header census, not the dispatch frontier, owns all known
+	// concrete actors. Keyless descendants keep static mode and exact parents.
+	flows := make(map[string]runtimemanager.FlowInstanceMaterializationPlan, len(plan.Entities))
+	for _, instance := range instances {
+		route := instance.Route()
+		_, entity, found, err := runforkadmission.FixedConstructionForRoute(source, plan, route)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, fmt.Errorf("selected fixed actor census missing constructed header for %s", instance.InstancePath)
+		}
+		config, err := runtimepipeline.WorkflowInstanceBusinessConfigForRoute(route, entity.MaterializationMetadata.FlowConfig)
+		if err != nil {
+			return nil, err
+		}
+		flow, err := runtimemanager.ConstructedFlowMaterialization(source, plan.SourceRunID, instance, config)
+		if err != nil {
+			return nil, err
+		}
+		for i := range flow.Agents {
+			flow.Agents[i], err = runtimemanager.ResolveAgentMaterializationBlueprint(modelOptions, flow.Agents[i])
+			if err != nil {
+				return nil, err
+			}
+			prepared.Blueprints = append(prepared.Blueprints, flow.Agents[i])
+		}
+		flows[entity.EntityID] = flow
+		prepared.Flows = append(prepared.Flows, flow)
+		attachment, err := selectedContractReadinessState(source, "", instance.TemplateID, entity)
+		if err != nil {
+			return nil, err
+		}
+		attachment.ExecutionMode = modelOptions.ExecutionPosture.RootMode()
+		if err := bindConstructedWorkflowState(&attachment, flow); err != nil {
+			return nil, err
+		}
+		prepared.Attachments = append(prepared.Attachments, attachment)
+	}
 	byEntity := make(map[string]runfork.RunForkSelectedContractWorkflowState)
 	recordState := func(state runfork.RunForkSelectedContractWorkflowState) error {
 		eventID := strings.TrimSpace(state.SourceEventID)
@@ -58,41 +137,18 @@ func Project(
 		}
 		state.SourceEvents = []runfork.RunForkSelectedContractWorkflowStateSourceEvent{{SourceEventID: eventID, ExecutionMode: mode}}
 		if state.Mode == "template" {
-			if state.Config == nil {
-				return fmt.Errorf("selected-contract template flow %s requires exact fixed-revision receiver configuration for entity %s; entity fields and route keys are not configuration evidence", state.Route.InstancePath, state.EntityID)
-			}
 			state.ExecutionMode = mode
-			flow, err := runtimemanager.TemplateFlowMaterialization(source, state.FlowID, state.Route.InstancePath, state.EntityID, state.Config)
-			if err != nil {
-				return err
-			}
-			if flow.Instance.Route() != state.Route {
+		} else {
+			state.ExecutionMode = modelOptions.ExecutionPosture.RootMode()
+		}
+		if state.AddressKind == runfork.RunForkSelectedContractWorkflowStateExact {
+			flow, found := flows[state.EntityID]
+			if !found || flow.Instance.Route() != state.Route {
 				return fmt.Errorf("selected-contract workflow %s disagrees with exact declaration route", state.Route.InstancePath)
 			}
-			state.Config = flow.Config
-			if _, exists := byEntity[state.EntityID]; !exists {
-				prepared.Flows = append(prepared.Flows, flow)
+			if err := bindConstructedWorkflowState(&state, flow); err != nil {
+				return err
 			}
-			for _, unresolved := range flow.Agents {
-				blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(modelOptions, unresolved)
-				if err != nil {
-					return err
-				}
-				plan := blueprint.Identity.Normalize()
-				revision, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, plan)
-				if err != nil {
-					return fmt.Errorf("selected-contract workflow agent %s revision: %w", plan.Description(), err)
-				}
-				state.Agents = append(state.Agents, runfork.RunForkSelectedContractAgentExpectation{
-					Plan: plan, ConfigRevision: revision,
-				})
-				if _, exists := byEntity[state.EntityID]; !exists {
-					prepared.Blueprints = append(prepared.Blueprints, blueprint)
-				}
-			}
-			sort.Slice(state.Agents, func(i, j int) bool {
-				return runtimeagentidentity.LessPlan(state.Agents[i].Plan, state.Agents[j].Plan)
-			})
 		}
 		if existing, ok := byEntity[state.EntityID]; ok {
 			if !selectedContractWorkflowStatesEqual(existing, state) {
@@ -145,7 +201,7 @@ func Project(
 				return nil, err
 			}
 			if recipient.Recipient.IsAgent() {
-				state, required, err := selectedContractTemplateAgentWorkflowState(source, plan, eventID, recipient)
+				state, required, err := selectedContractAgentWorkflowState(source, plan, eventID, recipient)
 				if err != nil {
 					return nil, err
 				}
@@ -179,6 +235,7 @@ func Project(
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].EntityID < out[j].EntityID })
 	prepared.States = out
+	sort.Slice(prepared.Attachments, func(i, j int) bool { return prepared.Attachments[i].EntityID < prepared.Attachments[j].EntityID })
 	prepared.Blueprints, err = PreparedActorCensus(prepared.Blueprints)
 	if err != nil {
 		return nil, err
@@ -186,7 +243,23 @@ func Project(
 	return prepared, nil
 }
 
-func selectedContractTemplateAgentWorkflowState(
+func bindConstructedWorkflowState(state *runfork.RunForkSelectedContractWorkflowState, flow runtimemanager.FlowInstanceMaterializationPlan) error {
+	state.Config = flow.Config
+	for _, blueprint := range flow.Agents {
+		plan := blueprint.Identity.Normalize()
+		revision, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, plan)
+		if err != nil {
+			return fmt.Errorf("selected-contract workflow agent %s revision: %w", plan.Description(), err)
+		}
+		state.Agents = append(state.Agents, runfork.RunForkSelectedContractAgentExpectation{Plan: plan, ConfigRevision: revision})
+	}
+	sort.Slice(state.Agents, func(i, j int) bool {
+		return runtimeagentidentity.LessPlan(state.Agents[i].Plan, state.Agents[j].Plan)
+	})
+	return nil
+}
+
+func selectedContractAgentWorkflowState(
 	source semanticview.Source,
 	plan runfork.RunForkPlan,
 	eventID string,
@@ -197,26 +270,27 @@ func selectedContractTemplateAgentWorkflowState(
 	}
 	agentPlan := recipient.AgentPlan.Normalize()
 	path := agentPlan.FlowInstance()
-	flowID, template, err := selectedContractTemplateFlowForPlan(source, plan.SourceRunID, agentPlan)
+	instance, err := AgentConstruction(source, plan, agentPlan)
 	if err != nil {
 		return runfork.RunForkSelectedContractWorkflowState{}, false, err
 	}
-	if !template {
+	if agentPlan.Route.Presence == runtimeagentidentity.RouteRoot {
 		return runfork.RunForkSelectedContractWorkflowState{}, false, nil
 	}
+	flowID := instance.TemplateID
 	if path != recipient.Path {
-		return runfork.RunForkSelectedContractWorkflowState{}, true, fmt.Errorf("selected-contract template agent recipient requires an exact declaration plan for %s", path)
+		return runfork.RunForkSelectedContractWorkflowState{}, true, fmt.Errorf("selected-contract constructed agent recipient requires an exact declaration plan for %s", path)
 	}
 	entity, found, err := selectedContractReadinessEntityForRoute(source, plan, flowID, path)
 	if err != nil {
 		return runfork.RunForkSelectedContractWorkflowState{}, true, err
 	}
 	if !found {
-		return runfork.RunForkSelectedContractWorkflowState{}, true, fmt.Errorf("selected-contract template agent %s has no fixed-revision receiving state", agentPlan.Description())
+		return runfork.RunForkSelectedContractWorkflowState{}, true, fmt.Errorf("selected-contract constructed agent %s has no fixed-revision receiving state", agentPlan.Description())
 	}
 	route := runtimeflowidentity.StoredRoute(agentPlan.Route.ScopeKey, agentPlan.Route.InstanceID, agentPlan.Route.InstancePath)
 	if !route.Valid() || route.InstancePath != path {
-		return runfork.RunForkSelectedContractWorkflowState{}, true, fmt.Errorf("selected-contract template agent %s has invalid flow route", agentPlan.Description())
+		return runfork.RunForkSelectedContractWorkflowState{}, true, fmt.Errorf("selected-contract constructed agent %s has invalid flow route", agentPlan.Description())
 	}
 	state, err := selectedContractReadinessState(source, eventID, flowID, entity)
 	if err != nil {
@@ -226,36 +300,6 @@ func selectedContractTemplateAgentWorkflowState(
 		return runfork.RunForkSelectedContractWorkflowState{}, true, fmt.Errorf("selected-contract agent plan disagrees with fixed receiving route")
 	}
 	return state, true, nil
-}
-
-func selectedContractTemplateFlowForPlan(source semanticview.Source, runID string, plan runtimeagentidentity.Plan) (string, bool, error) {
-	plan = plan.Normalize()
-	if err := plan.Validate(); err != nil {
-		return "", false, err
-	}
-	if plan.Route.Presence == runtimeagentidentity.RouteRoot {
-		return "", false, nil
-	}
-	path := plan.FlowInstance()
-	flowID := ""
-	for _, scope := range source.FlowScopes() {
-		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") ||
-			runtimeflowidentity.ScopeKey(source, scope.ID) != plan.Route.ScopeKey {
-			continue
-		}
-		owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(source, scope.ID, runID)
-		if err != nil {
-			return "", false, err
-		}
-		if !owner.Owns(path) {
-			return "", false, fmt.Errorf("selected-contract agent plan route %s is outside declared scope %s", path, scope.ID)
-		}
-		if flowID != "" {
-			return "", false, fmt.Errorf("selected-contract agent path %s has multiple selected workflow owners", path)
-		}
-		flowID = strings.TrimSpace(scope.ID)
-	}
-	return flowID, flowID != "", nil
 }
 
 func selectedContractPlatformActivityWorkflowState(
@@ -332,8 +376,7 @@ func selectedContractNodeWorkflowState(
 	if !handler.Matched {
 		return runfork.RunForkSelectedContractWorkflowState{}, false, fmt.Errorf("selected-contract node %s has no admitted handler for %s", node.Key(), localEvent)
 	}
-	policy, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(source, node, flowID, localEvent, handler.Handler)
-	if err != nil {
+	if err := runtimepipeline.ValidateExecutionHandlerDeclaration(source, node, handler.Handler); err != nil {
 		return runfork.RunForkSelectedContractWorkflowState{}, false, err
 	}
 	path := strings.TrimSpace(recipientPath)
@@ -349,60 +392,22 @@ func selectedContractNodeWorkflowState(
 		return runfork.RunForkSelectedContractWorkflowState{}, false, err
 	}
 	if !found {
-		if policy.Dependency == runtimepipeline.DeliveryTargetExistingEntityRequired {
-			return runfork.RunForkSelectedContractWorkflowState{}, false, fmt.Errorf("receiver target owner is missing for flow instance %q", path)
-		}
-		// Optional absence needs no companion. Fresh acquisition stays with the
-		// ordinary publication classifier and its canonical materialization owner.
-		return runfork.RunForkSelectedContractWorkflowState{}, false, nil
+		return runfork.RunForkSelectedContractWorkflowState{}, false, fmt.Errorf("receiver target owner is missing for flow instance %q", path)
 	}
 	state, err := selectedContractReadinessState(source, eventID, flowID, entity)
 	return state, true, err
 }
 
-func validateSelectedContractReadinessEntityMetadata(entities []runfork.RunForkEntityState) error {
-	seen := make(map[string]struct{}, len(entities))
-	for _, entity := range entities {
-		id := strings.TrimSpace(entity.EntityID)
-		if _, duplicate := seen[id]; duplicate {
-			return fmt.Errorf("%s: duplicate entity ownership %s", runfork.RunForkMaterializedEntitySnapshotMetadataOwner, id)
-		}
-		metadata := entity.MaterializationMetadata
-		if id == "" || metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner ||
-			metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState ||
-			strings.TrimSpace(metadata.FlowInstance) == "" || strings.TrimSpace(metadata.EntityType) == "" {
-			return fmt.Errorf("%s: entity %s requires exact fixed-revision owner metadata", runfork.RunForkMaterializedEntitySnapshotMetadataOwner, id)
-		}
-		seen[id] = struct{}{}
-	}
-	return nil
-}
-
 func selectedContractReadinessEntityForRoute(source semanticview.Source, plan runfork.RunForkPlan, flowID, path string) (runfork.RunForkEntityState, bool, error) {
-	owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(source, flowID, plan.SourceRunID)
+	route := runtimeflowidentity.StoredRoute(runtimeflowidentity.ScopeKey(source, flowID), runtimeflowidentity.LogicalInstanceID(path), path)
+	instance, entity, found, err := runforkadmission.FixedConstructionForRoute(source, plan, route)
 	if err != nil {
 		return runfork.RunForkEntityState{}, false, err
 	}
-	if !owner.Owns(path) {
-		return runfork.RunForkEntityState{}, false, fmt.Errorf("selected-contract workflow route %q is outside flow scope %q", path, flowID)
+	if found && instance.TemplateID != flowID {
+		return runfork.RunForkEntityState{}, false, fmt.Errorf("selected-contract historical header disagrees with selected flow ownership")
 	}
-	var matched runfork.RunForkEntityState
-	found := false
-	for _, entity := range plan.Entities {
-		metadata := entity.MaterializationMetadata
-		if metadata.FlowInstance != path {
-			continue
-		}
-		if found {
-			return runfork.RunForkEntityState{}, false, fmt.Errorf("selected-contract receiving route %s has multiple fixed-revision entity owners", path)
-		}
-		contract, ok := entityruntime.ResolveForFlow(source, flowID)
-		if !ok || strings.TrimSpace(contract.EntityType) != metadata.EntityType {
-			return runfork.RunForkEntityState{}, false, fmt.Errorf("selected-contract entity %s type %q disagrees with selected flow %s", entity.EntityID, metadata.EntityType, flowID)
-		}
-		matched, found = entity, true
-	}
-	return matched, found, nil
+	return entity, found, nil
 }
 
 func selectedContractReadinessState(source semanticview.Source, eventID, flowID string, entity runfork.RunForkEntityState) (runfork.RunForkSelectedContractWorkflowState, error) {
@@ -411,12 +416,10 @@ func selectedContractReadinessState(source semanticview.Source, eventID, flowID 
 		SourceEventID: eventID, EntityID: entity.EntityID, EntityType: metadata.EntityType, FlowID: flowID,
 		WorkflowVersion: strings.TrimSpace(source.WorkflowVersion()), Mode: "static",
 	}
-	if len(metadata.FlowConfig) != 0 && strings.TrimSpace(string(metadata.FlowConfig)) != "null" {
-		var err error
-		state.Config, err = runtimepipeline.WorkflowInstanceBusinessConfigForRoute(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
-		if err != nil {
-			return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract fixed-revision receiver configuration for entity %s: %w", entity.EntityID, err)
-		}
+	var err error
+	state.Config, err = runtimepipeline.WorkflowInstanceBusinessConfigForRoute(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+	if err != nil {
+		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract fixed-revision receiver configuration for entity %s: %w", entity.EntityID, err)
 	}
 	if flowID == semanticview.RootExecutionFlowID(source) {
 		state.AddressKind = runfork.RunForkSelectedContractWorkflowStateRunScope
@@ -438,7 +441,7 @@ func selectedContractWorkflowStatesEqual(left, right runfork.RunForkSelectedCont
 	rightConfig, rightErr := canonicaljson.MarshalPreservingNumberKinds(right.Config)
 	return left.EntityID == right.EntityID && left.EntityType == right.EntityType && left.FlowID == right.FlowID &&
 		left.WorkflowVersion == right.WorkflowVersion && left.Mode == right.Mode &&
-		(left.Mode != "template" || left.ExecutionMode == right.ExecutionMode) && left.AddressKind == right.AddressKind &&
+		left.ExecutionMode == right.ExecutionMode && left.AddressKind == right.AddressKind &&
 		left.Route == right.Route && leftErr == nil && rightErr == nil && string(leftConfig) == string(rightConfig) &&
 		selectedContractWorkflowStateAgentsEqual(left.Agents, right.Agents)
 }

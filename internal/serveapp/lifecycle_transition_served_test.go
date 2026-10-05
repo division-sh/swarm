@@ -94,7 +94,7 @@ func requireLifecycleFlowEntity(t *testing.T, rt servedControlProofRuntime, runI
 	}
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 		var entityID string
-		err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance=$2 AND current_state=$3`, runID, instance, state).Scan(&entityID)
+		err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND current_state=$3`, runID, instance, state).Scan(&entityID)
 		if err == nil {
 			return entityID
 		}
@@ -110,7 +110,7 @@ func requireLifecycleFlowEntity(t *testing.T, rt servedControlProofRuntime, runI
 func readLifecycleTransitionHistory(t *testing.T, rt servedControlProofRuntime, runID, entityID string) []pipeline.WorkflowTransitionRecord {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(f.config AS TEXT) FROM flow_instances f JOIN entity_state e ON f.run_id=e.run_id AND f.instance_path=e.flow_instance WHERE e.run_id=$1 AND e.entity_id=$2`, runID, entityID).Scan(&raw); err != nil {
+	if err := rt.DB.QueryRow(`SELECT CAST(config AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var config struct {
@@ -135,7 +135,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmits))
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create"})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", "waiting")
+			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, started.RunID, "waiting")
 			publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 				return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": event, "run_id": started.RunID, "source_event_id": started.EventID, "payload": payload, "idempotency_key": key})
 			}
@@ -224,19 +224,22 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 // SQL is read-only proof of all business rows and persisted transition evidence.
 func lifecycleStoredSnapshot(t *testing.T, rt servedControlProofRuntime, runID string) string {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT e.entity_id,e.current_state,e.revision,CAST(e.fields AS TEXT),CAST(f.config AS TEXT),CAST(e.accumulator AS TEXT) FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.instance_path=e.flow_instance WHERE e.run_id=$1 ORDER BY e.entity_id`, runID)
+	rows, err := rt.DB.Query(`SELECT f.entity_id,f.current_state,f.revision,CAST(e.fields AS TEXT),CAST(f.config AS TEXT),CAST(f.accumulator AS TEXT)
+		FROM flow_instances f LEFT JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path AND e.entity_id=f.entity_id
+		WHERE f.run_id=$1 ORDER BY f.entity_id`, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	result := ""
 	for rows.Next() {
-		var id, state, fields, config, loops string
+		var id, state, config, loops string
+		var fields sql.NullString
 		var revision int
 		if err := rows.Scan(&id, &state, &revision, &fields, &config, &loops); err != nil {
 			t.Fatal(err)
 		}
-		result += fmt.Sprintf("%s/%s/%d/%s/%s/%s\n", id, state, revision, fields, config, loops)
+		result += fmt.Sprintf("%s/%s/%d/%t:%s/%s/%s\n", id, state, revision, fields.Valid, fields.String, config, loops)
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)

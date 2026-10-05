@@ -1,0 +1,969 @@
+{
+  "schema": 1,
+  "source_head": "471a0cd06",
+  "source_boundary": "Queued managed command started after 471a0cd06 was committed; the production/test sources used by these three packages were unchanged during execution. Concurrent edits were audit documents only.",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "receipt": "/tmp/agent-e-2496-disposition-cleanup-parent-race-v2.log",
+  "receipt_sha256": "deadd26b31e838c39b0ee212ed16e12c0b72a77dfdf2fd3e6374c1a7eb02cc69",
+  "exit_code": 0,
+  "first_test_event": "2026-10-03T06:11:44.156701118Z",
+  "last_test_event": "2026-10-03T06:12:24.111212463Z",
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "action": "pass",
+      "elapsed": 6.932
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "action": "pass",
+      "elapsed": 7.034
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+      "action": "pass",
+      "elapsed": 39.955
+    }
+  ],
+  "root_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedForkContextHandoffAndSiblingLifetime",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedForkContextRetirementJoinsAcceptedDisposition",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedForkContextRetirementTimeoutFailsClosed",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedForkContextCleanupPanicRetainsPossession",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedContractWorkflowReadinessComposesExactForkAgentTopology",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedContractWorkflowReadinessRejectsAgentOutsideExactFlowOwner",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestFailedForkDiscardRetainsPreparationUntilSettlement",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestFailedForkDiscardPreventsProcessRelease",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedWorkflowReadinessAndConfigRetainRecordedParent",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedResumeRequiresExactPermanentRequest",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestPreparedSelectedForkCloseJoinsBeforeProjectionCleanup",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestPreparedSelectedForkRetainsInvalidSourceUntilCleanupSucceeds",
+      "action": "pass",
+      "elapsed": 1.65
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestPreparedSelectedForkCanceledMaterializationFailsClosed",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation",
+      "action": "pass",
+      "elapsed": 0.01
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedProcessRetirementPreservesRecoverablePredecessor",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionBindsRootWithoutMutatingSelectedEvidence",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionKeepsNonRootAndAgentAxesStrict",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionGuardUsesBoundCopyAndExactChildRun",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionAgentDeclarationPath",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionDoesNotInventUndeclaredAgentReadiness",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactPermanentOperationBothStores",
+      "action": "pass",
+      "elapsed": 4.33
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryPinsMatchDurableFeedInventoryBothStores",
+      "action": "pass",
+      "elapsed": 0.41
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier",
+      "action": "pass",
+      "elapsed": 3.53
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresCheckpointAndOnlySettledExternalEffectsBothStores",
+      "action": "pass",
+      "elapsed": 0.72
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionUsesPlatformActivityRoutingSourceWithoutNodeRecipient",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionMapsRootPlatformActivityToRunScope",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStores",
+      "action": "pass",
+      "elapsed": 0.42
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionPreservesExactTemplateActivityRoute",
+      "action": "pass",
+      "elapsed": 0.18
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionRejectsInvalidPlatformActivitySource",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionIgnoresNonFrontierPlatformActivityHistory",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionDoesNotProjectUnroutedBusinessEvent",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+      "test": "TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic",
+      "action": "pass",
+      "elapsed": 38.9
+    }
+  ],
+  "cells": [
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/event_context_not_owner/context/one,context/two",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/event_context_not_owner/context/two,context/one",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/event_context_not_owner/owner/one,owner/one",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/event_context_not_owner/,",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/missing_blank_payload/missing",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/missing_blank_payload/blank_flow",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/missing_blank_payload/blank_type",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/missing_blank_payload/duplicate_identical",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/missing_blank_payload/duplicate_flow",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestRunForkSnapshotOwnershipMetadataAuthority/missing_blank_payload/duplicate_type",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestFailedForkDiscardRetainsPreparationUntilSettlement/success",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestFailedForkDiscardRetainsPreparationUntilSettlement/retirement_fail_once",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedWorkflowReadinessAndConfigRetainRecordedParent/nested_keyless",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestFailedForkDiscardRetainsPreparationUntilSettlement/retirement_persistent",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestFailedForkDiscardRetainsPreparationUntilSettlement/discard_fail_once",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestFailedForkDiscardRetainsPreparationUntilSettlement/discard_persistent",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedWorkflowReadinessAndConfigRetainRecordedParent/root_parent",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedWorkflowReadinessAndConfigRetainRecordedParent/missing_history",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedWorkflowReadinessAndConfigRetainRecordedParent/partial_parent",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedWorkflowReadinessAndConfigRetainRecordedParent/crossed_child",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedResumeRequiresExactPermanentRequest/foreign_source",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedResumeRequiresExactPermanentRequest/different_bundle",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedResumeRequiresExactPermanentRequest/different_operation",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedResumeRequiresExactPermanentRequest/different_point",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedResumeRequiresExactPermanentRequest/event_point",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedResumeRequiresExactPermanentRequest/wrong_disposition",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedResumeRequiresExactPermanentRequest/missing_predecessor",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/foreign_source",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/matching_source_is_not_caller_authority",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/event_selector",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/foreign_bundle",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/matching_bundle_is_not_caller_authority",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/fork_operation",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/empty_supplied_pins",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/supplied_pin",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/matching_selection_is_not_caller_authority",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/conflicting_selection",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/source_freeze",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/matching_source_fact_is_not_caller_authority",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/effective_source_identity",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation/recovery_override",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactPermanentOperationBothStores/sqlite",
+      "action": "pass",
+      "elapsed": 0.09
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestPreparedSelectedForkRetainsInvalidSourceUntilCleanupSucceeds/source_fact",
+      "action": "pass",
+      "elapsed": 1.47
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestPreparedSelectedForkRetainsInvalidSourceUntilCleanupSucceeds/module",
+      "action": "pass",
+      "elapsed": 0.18
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/missing_resume",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/missing_resume",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/wrong_child_status",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/wrong_child_status",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/foreign_run",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/foreign_run",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/missing_execution",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/missing_execution",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/foreign_source",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/foreign_source",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/wrong_revision",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/wrong_revision",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/missing_point",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/missing_point",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/wrong_bundle",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/wrong_bundle",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/wrong_selection",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/wrong_selection",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/invalid_operation",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/invalid_operation",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/missing_pins",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/missing_pins",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/foreign_pin",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/foreign_pin",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/duplicate_pin",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/duplicate_pin",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/resume_finite_feed/payload_on_terminal",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation/activate_finite_feed/payload_on_terminal",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedProcessRetirementPreservesRecoverablePredecessor/deployment-retired",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedProcessRetirementPreservesRecoverablePredecessor/deployment-failed",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedFiniteFeedProcessRetirementPreservesRecoverablePredecessor/event-retired",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence/absent_source_event",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence/different_source_event",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence/foreign_root_entity",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence/missing_event_identity",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence/activity_missing_routing_authority",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence/duplicate_source_event",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_0/selected_0/node",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_0/selected_0/activity",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_0/selected_0/mixed",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_1/selected_0/node",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_1/selected_0/activity",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_1/selected_0/mixed",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_1/selected_1/node",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_1/selected_1/activity",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_1/selected_1/mixed",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_2/selected_0/node",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_2/selected_0/activity",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_2/selected_0/mixed",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresExactPermanentOperationBothStores/postgres",
+      "action": "pass",
+      "elapsed": 4.24
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_2/selected_1/node",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_2/selected_1/activity",
+      "action": "pass",
+      "elapsed": 0.19
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryPinsMatchDurableFeedInventoryBothStores/sqlite",
+      "action": "pass",
+      "elapsed": 0.29
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryPinsMatchDurableFeedInventoryBothStores/postgres",
+      "action": "pass",
+      "elapsed": 0.12
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_2/selected_1/mixed",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_2/selected_2/node",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_2/selected_2/activity",
+      "action": "pass",
+      "elapsed": 0.2
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresCheckpointAndOnlySettledExternalEffectsBothStores/sqlite",
+      "action": "pass",
+      "elapsed": 0.57
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier/declared_2/selected_2/mixed",
+      "action": "pass",
+      "elapsed": 0.21
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryRequiresCheckpointAndOnlySettledExternalEffectsBothStores/postgres",
+      "action": "pass",
+      "elapsed": 0.15
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStores/sqlite/wrong-run",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStores/sqlite/wrong-bundle",
+      "action": "pass",
+      "elapsed": 0.04
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStores/sqlite",
+      "action": "pass",
+      "elapsed": 0.29
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStores/postgres/wrong-run",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStores/postgres/wrong-bundle",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStores/postgres",
+      "action": "pass",
+      "elapsed": 0.13
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionRejectsInvalidPlatformActivitySource/missing",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionRejectsInvalidPlatformActivitySource/out_of_scope",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionRejectsInvalidPlatformActivitySource/kind_conflicts_with_schema",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractWorkflowStateProjectionRejectsInvalidPlatformActivitySource/unknown_flow",
+      "action": "pass",
+      "elapsed": 0
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+      "test": "TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic/sqlite/explicit",
+      "action": "pass",
+      "elapsed": 10.26
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+      "test": "TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic/sqlite/subject",
+      "action": "pass",
+      "elapsed": 7.78
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+      "test": "TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic/sqlite/missing",
+      "action": "pass",
+      "elapsed": 7.61
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+      "test": "TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic/postgres/explicit",
+      "action": "pass",
+      "elapsed": 6.51
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+      "test": "TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic/postgres/subject",
+      "action": "pass",
+      "elapsed": 3.42
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+      "test": "TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic/postgres/missing",
+      "action": "pass",
+      "elapsed": 3.32
+    }
+  ],
+  "limits": [
+    "All requested matching roots executed; no failures or skips.",
+    "Causal diagnostic root has six unchanged real selected-execution cases on SQLite/PostgreSQL, including both missing-parent retirement failures.",
+    "Deterministic fault injections prove retained ownership and retry, not arbitrary real-store failure exhaustiveness.",
+    "This targeted command is not managed default, full-profile, paid-provider or hosted CI qualification."
+  ],
+  "command": "go run ./cmd/swarm-test -- ./internal/runtime/cataloge2e ./internal/runtime/runforkexecution ./internal/store/internal/backend/runforkpersistence -json -race -count=1 -run '^(TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic|TestFailedForkDiscardRetainsPreparationUntilSettlement|TestFailedForkDiscardPreventsProcessRelease|TestPreparedSelectedForkCloseJoinsBeforeProjectionCleanup|TestPreparedSelectedForkRetainsInvalidSourceUntilCleanupSucceeds|TestPreparedSelectedForkCanceledMaterializationFailsClosed|TestSelectedForkContextHandoffAndSiblingLifetime|TestSelectedForkContextRetirementJoinsAcceptedDisposition|TestSelectedForkContextRetirementTimeoutFailsClosed|TestSelectedForkContextCleanupPanicRetainsPossession|TestSelectedWorkflowReadinessAndConfigRetainRecordedParent|TestSelectedContractWorkflow.*|TestSelectedFiniteFeed.*|TestRunFork.*Ownership.*|TestRunFork.*RecordedConfig.*)$'"
+}

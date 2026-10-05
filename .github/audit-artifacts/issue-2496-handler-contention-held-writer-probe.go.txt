@@ -1,0 +1,55 @@
+package delivery
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"modernc.org/sqlite"
+)
+
+// Retained diagnostic only: reproduce contention without a timer releasing
+// the first raw transaction before the driver's fixed busy timeout.
+func TestSelectionHeldRawWriterProbe(t *testing.T) {
+	db, a, _ := selectionWriterFixture(t, "sqlite")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, fact := uuid.NewString(), selectionFact(t, "held-first")
+	first, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback()
+	if err := a.persistHandlerRuleSelectionSQL(ctx, first, id, fact); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		contender, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			done <- err
+			return
+		}
+		defer contender.Rollback()
+		done <- a.persistHandlerRuleSelectionSQL(ctx, contender, id, fact)
+	}()
+	select {
+	case err := <-done:
+		var native *sqlite.Error
+		if !errors.As(err, &native) || native.Code()&255 != 5 {
+			t.Fatalf("expected native contention before first commit: %v", err)
+		}
+		t.Logf("first raw writer still held; contender returned %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err := first.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, id).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("first canonical fact count=%d err=%v", count, err)
+	}
+}

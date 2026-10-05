@@ -1,0 +1,34 @@
+{
+  "base": "e63f4bdb197e473fe35e94f65ff3c77655957123",
+  "head": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+  "base_summary": {
+    "cognit": {
+      "callables": 19694,
+      "at_least_30": 573,
+      "at_least_50": 193,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 19694,
+      "at_least_30": 264,
+      "at_least_50": 53,
+      "maximum": 185
+    }
+  },
+  "head_summary": {
+    "cognit": {
+      "callables": 19711,
+      "at_least_30": 572,
+      "at_least_50": 194,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 19711,
+      "at_least_30": 260,
+      "at_least_50": 55,
+      "maximum": 185
+    }
+  },
+  "hotspot_count_increased": false,
+  "raw_sha256": "b8ad888796c593081df272ae0def8653f01e123a7f2110b538454c85db53fd45"
+}

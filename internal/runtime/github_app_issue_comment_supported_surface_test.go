@@ -25,6 +25,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -43,9 +44,9 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 
 		const (
 			runID        = "9a000000-0000-0000-0000-000000000001"
-			entityID     = "9a000000-0000-0000-0000-000000000002"
 			flowInstance = boundedProviderFlowID
 		)
+		entityID := runtimeflowidentity.EntityID(flowInstance)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-comment-observer")
@@ -72,9 +73,9 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 	t.Run("sqlite", func(t *testing.T) {
 		const (
 			runID        = "9b000000-0000-0000-0000-000000000001"
-			entityID     = "9b000000-0000-0000-0000-000000000002"
 			flowInstance = boundedProviderFlowID
 		)
+		entityID := runtimeflowidentity.EntityID(flowInstance)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-comment-observer")

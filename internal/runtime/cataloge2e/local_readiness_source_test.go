@@ -143,7 +143,17 @@ func TestLocalReadinessForkRecipientBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+			constructed, found, err := h.workflow.Load(ctx, identity)
+			if err != nil || !found {
+				t.Fatalf("load constructed local frontier owner: found=%t err=%v", found, err)
+			}
+			instance, err := constructed.ConstructionIdentity(identity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+				Identity: identity, Instance: instance,
+			}); err != nil {
 				t.Fatal(err)
 			}
 			concrete := routes.ResolveIndependentPubsubForRun(catalogRuntimeRunID, "worker-flow/worker-001/worker.inspect")
@@ -181,7 +191,9 @@ func localReadinessFixture(t *testing.T, declarations int, frontier string) stri
 		t.Fatal(err)
 	}
 	pins := schema["pins"].(map[string]any)
-	pins["inputs"] = append(pins["inputs"].([]any), "source.prepare")
+	pins["inputs"] = append(pins["inputs"].([]any), "source.prepare", "source.recorded")
+	pins["outputs"] = append(pins["outputs"].([]any), "source.prepare")
+	schema["connect"] = append(schema["connect"].([]any), map[string]any{"event": "source.prepare", "from": ".", "to": "worker-flow", "resolution": "select"})
 	data, err = yaml.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)
@@ -194,8 +206,8 @@ func localReadinessFixture(t *testing.T, declarations int, frontier string) stri
 		event = "worker.ready"
 	}
 	for name, addition := range map[string]string{
-		"events.yaml":             "\nsource.prepare:\n  worker_id: text\n",
-		"nodes.yaml":              "\nprepare:\n  execution_type: system_node\n  subscribes_to: [source.prepare]\n  event_handlers:\n    source.prepare:\n      guard: {id: admitted, check: true}\n",
+		"events.yaml":             "\nsource.prepare:\n  worker_id: text\nsource.recorded:\n  worker_id: text\n",
+		"nodes.yaml":              "\nprepare:\n  execution_type: system_node\n  subscribes_to: [source.recorded]\n  event_handlers:\n    source.recorded:\n      guard: {id: admitted, check: true}\n",
 		"worker-flow/schema.yaml": "\nauto_emit_on_create:\n  event: " + event + ".requested\n",
 	} {
 		path := filepath.Join(root, name)
@@ -263,12 +275,32 @@ func localReadinessFixture(t *testing.T, declarations int, frontier string) stri
 			}
 		}
 	}
+	childSchemaPath := filepath.Join(root, "worker-flow/schema.yaml")
+	childSchema, err := os.ReadFile(childSchemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var child map[string]any
+	if err := yaml.Unmarshal(childSchema, &child); err != nil {
+		t.Fatal(err)
+	}
+	childPins := child["pins"].(map[string]any)
+	childPins["inputs"] = append(childPins["inputs"].([]any), "source.prepare")
+	childSchema, err = yaml.Marshal(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(childSchemaPath, childSchema, 0600); err != nil {
+		t.Fatal(err)
+	}
 	return root
 }
 
 func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtimeHarness, eventName string) string {
 	t.Helper()
-	trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.prepare", "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
+	// Record the causal input without selecting the as-yet unconstructed child.
+	// This proof exercises explicit activation, not connect-time construction.
+	trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.recorded", "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
 		events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
 	if err := h.rt.Bus.PublishAndWait(ctx, trigger); err != nil {
 		t.Fatal(err)
@@ -286,9 +318,10 @@ func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtim
 	defer h.rt.Pipeline.SetTestLifecycleProbe(nil)
 	entityID := eventtest.UUID("run-scoped-selected-fork-worker")
 	if err := h.rt.Manager.ActivateFlowInstance(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(h.bundle),
-		Instance:       runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), "worker-flow", "worker-flow/worker-001", "worker-001", entityID, ""),
-		Config:         map[string]any{"worker_id": "worker-001"}, Fields: map[string]any{"worker_id": "worker-001"},
+		ContractBundle:   semanticview.Wrap(h.bundle),
+		Instance:         runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), "worker-flow", "worker-flow/worker-001", "worker-001", entityID, ""),
+		Config:           map[string]any{"worker_id": "worker-001"},
+		ConstructorInput: "source.prepare", ResolvedKey: "worker-001",
 		TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
 	}); err != nil {
 		t.Fatal(err)

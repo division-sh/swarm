@@ -36,14 +36,12 @@ func TestReceiverCompositionIndependentPoliciesBothStores(t *testing.T) {
 					if status != "delivered" || owner.Route().FlowInstance != scope {
 						t.Fatalf("recipient did not execute exact receiving scope: %s %s", status, raw)
 					}
-					if scope == optionalScope {
-						if !owner.EntitylessReceiver() || owner.Route().EntityID != "" {
-							t.Fatalf("optional recipient borrowed sibling activation: %s", raw)
-						}
-					} else if !owner.MaterializingEntity() || owner.Route().EntityID != flowidentity.EntityID("sink") {
-						t.Fatalf("materializer lost independent canonical target: %s", raw)
+					if !owner.ExistingEntity() || owner.Route() != (events.RouteIdentity{FlowID: scope, FlowInstance: scope, EntityID: flowidentity.EntityID(scope)}) {
+						t.Fatalf("recipient lost independent constructed target: %s", raw)
 					}
 				}
+				requireReceiverConstructedInstance(t, rt, published.RunID, optionalScope, optionalScope, flowidentity.EntityID(optionalScope), "receipt", "pending", published.RunID, "ready", 2, map[string]any{})
+				requireReceiverConstructedInstance(t, rt, published.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "done", published.RunID, "ready", 2, map[string]any{"result": "emitted"})
 				requireReceiverPublicReadback(t, rt, published.RunID)
 			})
 		}

@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/google/uuid"
 )
 
 type postCommitFaultHumanTaskStore struct {
@@ -68,12 +67,10 @@ func TestAskHumanAcknowledgedPostCommitErrorKeepsCardWithoutDuplicateBothStores(
 			const flowPath = "gateway/provider"
 			actor := models.AgentConfig{
 				ExecutionMode: "live", ID: "requester", Role: "worker",
-				FlowID: "provider", FlowPath: flowPath, EntityID: uuid.NewString(),
+				FlowID: flowPath, FlowPath: flowPath,
 				Tools: []string{"ask_human"}, Permissions: []string{"ask_human"},
 			}
-			bundle := loadWave1EntityToolBundle(t, actor, "provider", "provider_record", "", "provider_record:\n  status: text\n")
-			bundle.FlowTree.ByID["provider"].Path = flowPath
-			source := semanticview.Wrap(bundle)
+			source := humanTaskImportedSource(t, actor)
 			declarations := semanticview.AgentDeclarations(source)
 			if len(declarations) != 1 {
 				t.Fatalf("requester declarations = %d, want one", len(declarations))
@@ -87,13 +84,14 @@ func TestAskHumanAcknowledgedPostCommitErrorKeepsCardWithoutDuplicateBothStores(
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "human-task-ack-turn")
 			ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "tool_call:1:0:ask_human")
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
+			actor, loader := humanTaskConstructedRequester(t, ctx, selected, source, actor)
 			ctx = runtimetools.WithActor(ctx, actor)
 			fault := errors.Join(errors.New("post-commit cleanup failed"), errors.New("SQL password=private-token"))
 			wrapped := &postCommitFaultHumanTaskStore{HumanTaskAcknowledgedCreationStore: selected, fault: fault}
 			bus := &humanTaskRuntimeLogBus{}
 			exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 				Config: &config.Config{}, HumanTaskStore: wrapped,
-				AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: source,
+				AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: source, WorkflowInstances: loader,
 			})
 			input := map[string]any{"scope": "flow", "category": "review", "description": "Review provider response"}
 			out, err := exec.Execute(ctx, "ask_human", input)

@@ -162,6 +162,35 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			if err := insertRoute(eventRunID, "event", 1, eventID); err != nil {
 				t.Fatalf("event route recovery refused: %v", err)
 			}
+			insertDivergence := func(forkRunID, kind string, revision int64, forkEventID any) error {
+				t.Helper()
+				_, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_branch_divergences
+					(fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,owner,policy,
+					 source_run_status_at_activation,source_run_status_after_activation)
+					VALUES ($1,$2,$3,$4,$5,'branch-owner','selected_contract_source_advanced_branch','running','running')`,
+					forkRunID, sourceRunID, kind, revision, forkEventID)
+				return err
+			}
+			for _, invalid := range []struct {
+				kind     string
+				revision int64
+				eventID  any
+			}{
+				{"event", 1, nil},
+				{"deployment_revision", 2, eventID},
+				{"deployment_revision", 0, nil},
+				{"unknown", 2, nil},
+			} {
+				if err := insertDivergence(deploymentRunID, invalid.kind, invalid.revision, invalid.eventID); err == nil {
+					t.Fatalf("contradictory branch divergence point committed: %+v", invalid)
+				}
+			}
+			if err := insertDivergence(deploymentRunID, "deployment_revision", 2, nil); err != nil {
+				t.Fatalf("deployment branch divergence refused: %v", err)
+			}
+			if err := insertDivergence(eventRunID, "event", 1, eventID); err != nil {
+				t.Fatalf("event branch divergence refused: %v", err)
+			}
 			for _, route := range []struct {
 				runID, kind, eventID string
 				revision             int64
@@ -178,6 +207,15 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				}
 				if kind != route.kind || revision != route.revision || recoveredEventID != route.eventID {
 					t.Fatalf("route recovery point = (%s,%d,%s), want %+v", kind, revision, recoveredEventID, route)
+				}
+				var branchEventID sql.NullString
+				if err := db.QueryRowContext(ctx, `SELECT fork_point_kind,fork_revision,CAST(fork_event_id AS TEXT)
+					FROM run_fork_selected_contract_branch_divergences WHERE fork_run_id=$1`, route.runID).
+					Scan(&kind, &revision, &branchEventID); err != nil {
+					t.Fatal(err)
+				}
+				if kind != route.kind || revision != route.revision || branchEventID.String != route.eventID || branchEventID.Valid != (route.kind == "event") {
+					t.Fatalf("branch divergence point = (%s,%d,%+v), want %+v", kind, revision, branchEventID, route)
 				}
 			}
 		})

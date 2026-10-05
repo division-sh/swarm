@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -285,8 +286,17 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 	if _, exists := request.FieldByName("Template"); exists {
 		t.Fatal("route materialization request regained request-local template authority")
 	}
-	if request.NumField() != 2 {
-		t.Fatalf("route materialization request fields = %d, want identity plus activation variables", request.NumField())
+	if request.NumField() != 3 {
+		t.Fatalf("route materialization request fields = %d, want exact run identity, constructed instance, and activation variables", request.NumField())
+	}
+	for name, want := range map[string]reflect.Type{
+		"Identity":            reflect.TypeOf(runtimeflowidentity.RunScopedFlowInstance{}),
+		"Instance":            reflect.TypeOf(runtimeflowidentity.Instance{}),
+		"ActivationVariables": reflect.TypeOf(map[string]string{}),
+	} {
+		if field, exists := request.FieldByName(name); !exists || field.Type != want {
+			t.Fatalf("route materialization %s = %#v, want %v", name, field, want)
+		}
 	}
 
 	subscriber := reflect.TypeOf(runtimebus.Subscriber{})

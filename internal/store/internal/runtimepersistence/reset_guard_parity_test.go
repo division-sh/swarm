@@ -258,6 +258,11 @@ func TestResetRetainedCleanupScopeAndRollbackBothStores(t *testing.T) {
 func admitRetainedResetCleanupProof(t *testing.T, capability startupownership.ProcessCapability, quiescer destructivereset.QuiescenceStore, runID string, includeSources bool, additionalRunIDs ...string) destructivereset.CleanupRequest {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	return admitRetainedResetCleanupProofWithContext(t, ctx, capability, quiescer, runID, includeSources, additionalRunIDs...)
+}
+
+func admitRetainedResetCleanupProofWithContext(t *testing.T, ctx context.Context, capability startupownership.ProcessCapability, quiescer destructivereset.QuiescenceStore, runID string, includeSources bool, additionalRunIDs ...string) destructivereset.CleanupRequest {
+	t.Helper()
 	now := time.Now().UTC().Add(time.Minute)
 	operation, err := capability.AdmitResetOperation(ctx, destructivereset.Request{
 		OperationID: uuid.NewString(), ActorTokenID: "operator-token", RequestHash: "cleanup-guard",

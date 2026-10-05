@@ -83,6 +83,8 @@ type releaseProcessSpec struct {
 	WorkingDir                  string
 	ConfigPath                  string
 	Source                      string
+	RetainedBundleHash          string
+	RetainedLiveExecution       bool
 	Store                       string
 	Dev                         bool
 	APIPort                     int
@@ -113,6 +115,9 @@ type releaseServeProcess struct {
 
 func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServeProcess {
 	t.Helper()
+	if (options.RetainedBundleHash != "" || options.RetainedLiveExecution) && (options.InternalMockLifecycleBinary == "" || options.Source != "") {
+		t.Fatal("stored-artifact restart belongs only to the exact internal retained lifecycle proof")
+	}
 	output := &releaseProcessOutput{secrets: append([]string{options.Token}, options.RedactValues...)}
 	workspaceBackend := options.WorkspaceBackend
 	if workspaceBackend == "" {
@@ -176,12 +181,14 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		request, err := json.Marshal(struct {
 			ConfigPath    string
 			Source        string
+			StoredHash    string
+			Live          bool
 			Store         string
 			Dev           bool
 			APIPort       int
 			Token         string
 			ShutdownGrace time.Duration
-		}{options.ConfigPath, options.Source, options.Store, options.Dev, options.APIPort, options.Token, shutdownGrace})
+		}{options.ConfigPath, options.Source, options.RetainedBundleHash, options.RetainedLiveExecution, options.Store, options.Dev, options.APIPort, options.Token, shutdownGrace})
 		if err != nil {
 			t.Fatal(err)
 		}

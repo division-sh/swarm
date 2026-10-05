@@ -405,7 +405,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 			entityStateReader:      storeTemplate.entityStateReader,
 			entityCollectionReader: storeTemplate.entityCollectionReader,
 			targetReader:           storeTemplate.targetReader,
-			initialCommits:         storeTemplate.initialCommits,
 			deliveryStore:          opts.DeliveryStore,
 			pipelineStore:          opts.PipelineObligations,
 			decisionCards:          opts.DecisionCards,
@@ -957,7 +956,13 @@ func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (h
 			return a.result.Handled, errors.Join(a.executionErr, err), probeErr
 		}
 	}
-	guard, err := a.heartbeat.BeginSettlement()
+	var guard *runtimedelivery.ClaimSettlementGuard
+	var err error
+	if committed {
+		guard, err = a.heartbeat.BeginSettlementInMutation()
+	} else {
+		guard, err = a.heartbeat.BeginSettlement()
+	}
 	if err != nil {
 		if committed {
 			return a.result.Handled, errors.Join(a.executionErr, fmt.Errorf("prepare workflow node delivery settlement: %w", err)), probeErr
@@ -967,8 +972,11 @@ func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (h
 
 	var snapshot runtimedelivery.Snapshot
 	var settleErr error
+	acknowledged := true
 	if committed {
-		snapshot, settleErr = pc.deliveryStore.SettleSuccess(a.ctx, a.claim, []string{"handler_completed"}, time.Since(a.started), selection)
+		var outcome runtimedelivery.ClaimCommit
+		outcome, settleErr = pc.deliveryStore.SettleWorkflowNodeSuccess(a.ctx, a.claim, []string{"handler_completed"}, time.Since(a.started), selection)
+		snapshot, acknowledged = outcome.Snapshot, outcome.Acknowledged
 	} else {
 		failure := runtimefailures.FromError(a.executionErr, runtimeWorkflowID, "execute_handler")
 		disposition := runtimedelivery.FailureRetry
@@ -990,7 +998,7 @@ func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (h
 			RuleSelection: a.result.RuleSelection,
 		})
 	}
-	settled := snapshot.MatchesSettlementClaim(a.claim) &&
+	settled := acknowledged && snapshot.MatchesSettlementClaim(a.claim) &&
 		((committed && snapshot.Status == runtimedelivery.StatusDelivered) ||
 			(!committed && (snapshot.Status == runtimedelivery.StatusFailed || snapshot.Status == runtimedelivery.StatusDeadLetter)))
 	if !settled && settleErr == nil {

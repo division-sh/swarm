@@ -38,8 +38,12 @@ func TestEntitylessFanOutExecutesThroughDurableEventBusBothStores(t *testing.T) 
 				t.Fatal(err)
 			}
 			source, ok := public[step.eventID]
-			if !ok || source.EventName != "batch.submitted" || len(source.Deliveries) != 1 || source.Deliveries[0].Status != "delivered" || !source.Deliveries[0].Route.Target.EntitylessReceiver() {
+			if !ok || source.EventName != "batch.submitted" || len(source.Deliveries) != 1 || source.Deliveries[0].Status != "delivered" || !source.Deliveries[0].Route.Target.MaterializingEntity() {
 				t.Fatalf("source event/delivery readback: %+v found=%t", source, ok)
+			}
+			owner := source.Deliveries[0].Route.Target.Route()
+			if owner.FlowID != "." || owner.FlowInstance != catalogRuntimeRunID || owner.EntityID != flowidentity.EntityID(catalogRuntimeRunID) {
+				t.Fatalf("source delivery lost its exact constructed root: %+v", owner)
 			}
 			children := map[string]bool{}
 			for _, event := range public {
@@ -59,12 +63,12 @@ func TestEntitylessFanOutExecutesThroughDurableEventBusBothStores(t *testing.T) 
 			if len(children) != len(items) {
 				t.Fatalf("committed child executions = %v, want %d", children, len(items))
 			}
-			_, found, err := h.workflow.Load(ctx, flowidentity.RunScopedFlowInstance{RunID: catalogRuntimeRunID, Route: flowidentity.RouteForInstancePath(".")})
+			constructed, found, err := h.workflow.Load(ctx, flowidentity.RunScopedFlowInstance{RunID: catalogRuntimeRunID, Route: flowidentity.StoredRoute(".", catalogRuntimeRunID, catalogRuntimeRunID)})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if found {
-				t.Fatal("entityless source materialized a root workflow entity")
+			if !found || constructed.EntityType != "" || len(constructed.Fields) != 0 {
+				t.Fatalf("fieldless source must have only its canonical lifecycle header: found=%t instance=%+v", found, constructed)
 			}
 			if err := h.publishRuntimeEventResultForStep(step, 20*time.Second, false); err != nil {
 				t.Fatalf("duplicate source publication: %v", err)
@@ -97,14 +101,14 @@ func entitylessScatterGatherFixture(t *testing.T) string {
 			return err
 		}
 		if rel == "nodes.yaml" {
-			const stateful = "      create_entity: true\n      data_accumulation:\n        writes:\n          - {source_field: batch_id, target_field: batch_id}\n"
+			const stateful = "      data_accumulation:\n        writes:\n          - {source_field: batch_id, target_field: batch_id}\n"
 			if strings.Count(string(body), stateful) != 1 {
 				t.Fatal("scatter fixture no longer has one source entity mutation")
 			}
 			body = []byte(strings.Replace(string(body), stateful, "", 1))
 		}
 		if rel == "entities.yaml" {
-			body = []byte("batch_state: {}\n")
+			return nil
 		}
 		return os.WriteFile(target, body, 0600)
 	})

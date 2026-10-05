@@ -5,6 +5,11 @@
   "source_hash": "\u003cadmitted-bundle\u003e",
   "source_authority": "projection_only_existing_contract_owners",
   "root": {
+    "constructors": [
+      {
+        "no_arguments": true
+      }
+    ],
     "source_files": {
       "schema": "schema.yaml"
     },
@@ -23,6 +28,13 @@
   },
   "flows": [
     {
+      "constructors": [
+        {
+          "input": "account.ready",
+          "no_arguments": false,
+          "key_field": "account_id"
+        }
+      ],
       "id": "account",
       "path": "account",
       "mode": "template",
@@ -64,6 +76,11 @@
       ]
     },
     {
+      "constructors": [
+        {
+          "no_arguments": true
+        }
+      ],
       "id": "producer",
       "path": "producer",
       "mode": "static",

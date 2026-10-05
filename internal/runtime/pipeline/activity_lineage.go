@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -86,12 +87,20 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 	if !ok {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh selected activity requires an admitted node activity site")
 	}
-	route := request.RoutingSource().Route()
 	flowID := node.FlowPath()
 	if flowID == "" {
 		flowID = semanticview.RootExecutionFlowID(source)
 	}
-	if route.FlowID != flowID || route.FlowID != intent.ExecutionFlowID.String() || route.FlowInstance != intent.FlowInstance || route.EntityID != intent.EntityID.String() {
+	route := events.RouteIdentity{FlowID: intent.ExecutionFlowID.String(), FlowInstance: intent.FlowInstance, EntityID: intent.EntityID.String()}
+	if request.RoutingSource().Kind() == events.RoutingSourceRoot {
+		root, err := semanticview.AdmitRootExecutionCoordinate(source, request.RunID())
+		if err != nil || intent.FlowInstance != "" || route.FlowID != root.FlowID() {
+			return ActivityRequestLineage{}, fmt.Errorf("fresh activity has conflicting root execution route")
+		}
+		route.FlowInstance = root.RunID()
+	}
+	producerSource, sourceErr := pinrouting.AdmitNodeExecutionRoutingSource(source, node, flowID, route)
+	if sourceErr != nil || route.FlowID != flowID || producerSource != request.RoutingSource() {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh activity has conflicting execution route")
 	}
 	delivered := false

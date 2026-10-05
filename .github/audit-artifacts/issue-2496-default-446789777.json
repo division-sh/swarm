@@ -1,0 +1,318 @@
+{
+  "schema": 1,
+  "source_head": "4467897779051d1373e1053bd167a17338bb72d2",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "command": "go run ./cmd/swarm-test",
+  "profile": "default; no --full, no capacity bypass",
+  "exit_code": 0,
+  "receipt": "/tmp/agent-e-2496-managed-default-446789777.log",
+  "receipt_sha256": "a9a39482164b544c6105d2883b8eee747d604d540b3e66105c77c42635d543fb",
+  "completion_evidence": "swarm-test local: all 14 planned units passed required execution",
+  "units": [
+    "broad-01",
+    "catalog-required-inventory",
+    "catalog-required-verify",
+    "local-catalog-smoke",
+    "local-generated-fanout-fixture",
+    "local-fanout-handoff-ack-loss",
+    "local-api-matrix-registry",
+    "local-api-routing-canaries",
+    "local-routing-reporter",
+    "local-delivery-continuation",
+    "local-release-golden-restart",
+    "local-release-lifecycle-smoke",
+    "local-serveapp-canaries",
+    "local-runtime-bus-full"
+  ],
+  "first_test_event": "2026-10-03T02:58:16.673297803Z",
+  "last_test_event": "2026-10-03T03:23:55.603028776Z",
+  "test_event_span_seconds": 1538.93,
+  "root_pass_receipts": 6418,
+  "package_pass_receipts": 193,
+  "total_pass_receipts": 34244,
+  "failed_receipts": 0,
+  "skipped_receipts": 90,
+  "skips": [
+    {
+      "package": "github.com/division-sh/swarm"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-openapi-gen"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-openrpc-gen"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-provider-trigger-pack-gen"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cli/readwindow"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/operatorread"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/packruntime"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/activityresult"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/budgetspend"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/identitytest"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/ownership"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/paths"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/processbinding"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/sharding"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/state"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/deadletters"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/diaglog"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/entityquery"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/executionmode"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/platformcontext"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pythonmodule/internal/genartifactmanifest"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runbundle"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runquiescence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/timerobligation"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/turnactivity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/workflowroute"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/workspace",
+      "test": "TestClaudeStateDockerRetentionAndRefusal"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/workspace",
+      "test": "TestClaudeStateDockerSharedWorkspaceIsolation"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/workspace",
+      "test": "TestResetContainerIntentRealDocker"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/activityresult"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/decisioncard"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/effects"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/fanoutorigin"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/gateroute"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting",
+      "test": "TestCanonicalRoutingTrackedSplitsRemainOpen"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/sessions"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/budgetspend"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/failurecodec"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/ingresspersistence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/routingrules"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/storeerrors"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/workflowheader"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/workflowroute"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/platformschema"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/testsql"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/testutil/mutationlogfixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil/flowroutefixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil/packfixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
+    },
+    {
+      "package": "github.com/division-sh/swarm/packs"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedWorkspacePreparationRealDockerBothStores"
+    }
+  ],
+  "limits": [
+    "This receipt qualifies all 14 required default units on clean 446789777 only. The event span includes inter-unit admission waits and is not a command wall-clock measurement.",
+    "Later 063832347 test-reader migrations are integrated on f47c9026c but are not retroactively attributed to this default run. Production/spec/tooling trees are unchanged between 446789777 and f47c9026c.",
+    "Supplemental optional/provider/parent-relative topology and joined failure-discard dispositions remain open; default success is not failure-class elimination, final composed-head qualification or hosted CI.",
+    "The 90 skip receipts are retained, not relabeled executed proof. No deadline, test case, capacity control or merge/review gate was waived."
+  ]
+}

@@ -193,7 +193,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		existing, found, err := loadExactRunForkMaterialization(txctx, port.loadSnapshot, tx, forkRunID, plan, identity, &selection)
+		existing, found, err := loadExactRunForkMaterialization(txctx, port.loadSnapshot, tx, port.postgres, forkRunID, plan, identity, &selection)
 		if err != nil {
 			return err
 		}
@@ -280,6 +280,19 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		forkMutationSource := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return port.activeForkSource(ctx, tx, runID)
 		})
+		for _, state := range workflowStates {
+			config, err := selectedContractWorkflowStateConfig(state)
+			if err != nil {
+				return err
+			}
+			header, err := selectedContractHistoricalHeader(state, config, identity.SourceArtifactFact.BundleHash(), now)
+			if err != nil {
+				return err
+			}
+			meta := metadata[state.History.EntityID]
+			meta.PreparedHeader = &header
+			metadata[state.History.EntityID] = meta
+		}
 		for _, entity := range plan.Entities {
 			if err := port.materializeEntity(forkCtx, tx, attempt, forkMutationSource, forkRunID, target, plan, entity, metadata[entity.EntityID], now); err != nil {
 				return err

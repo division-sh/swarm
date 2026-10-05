@@ -77,8 +77,7 @@ pins:
   execution_type: system_node
   subscribes_to: [mixed.multi]
   event_handlers:
-    mixed.multi:
-      create_entity: true
+    mixed.multi: {}
 `,
 	}
 	for label, body := range files {

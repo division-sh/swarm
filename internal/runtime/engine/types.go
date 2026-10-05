@@ -183,6 +183,7 @@ func (c StateCarrier) StateBucket(name string) (values.Bucket, bool) {
 
 type StateSnapshot struct {
 	EntityID        identity.EntityID
+	Revision        int64
 	WorkflowName    string
 	WorkflowVersion string
 	CurrentState    string
@@ -262,11 +263,6 @@ type ExecutionRequest struct {
 	// their durable window and generation.
 	JoinDeclaration timeridentity.JoinRef
 	State           StateSnapshot
-	// InitialFieldValues is the exact authored create-entity projection that the
-	// persistence owner records separately from subsequent handler mutations.
-	InitialFieldValues            map[string]any
-	EntityMaterializationAdmitted bool
-	creating                      bool
 	// ExpectedComputeModuleTraces carries prior deterministic module evidence
 	// for supported replay. Nil means normal execution; a non-nil empty slice
 	// means replay mode with zero expected module executions. When present,
@@ -440,10 +436,9 @@ type StateMutation struct {
 	TriggerEventType string
 	TriggeredAt      time.Time
 	StateCarrier
-	ClearGates         []string
-	SetGate            string
-	DataAccumulation   runtimecontracts.WorkflowDataAccumulation
-	InitialFieldValues map[string]any
+	ClearGates       []string
+	SetGate          string
+	DataAccumulation runtimecontracts.WorkflowDataAccumulation
 }
 
 func (m StateMutation) FieldsBucket() values.Bucket {

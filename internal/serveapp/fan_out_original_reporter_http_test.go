@@ -77,15 +77,18 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 			candidateWrites := receipt.ByOperation[storetest.TransactionRunCompletionCandidate].WriteCommits
 			claims := receipt.ByOperation[storetest.TransactionDeliveryClaim].WriteCommits
 			mutations := receipt.ByOperation[storetest.TransactionWorkflowMutation].WriteCommits
-			if claims != uint64(len(rows)+1) || mutations != uint64(len(rows)+1) || candidateWrites == 0 || receipt.Total.Failed != 0 {
-				t.Fatalf("eight real consumers lost exact claim/mutation/candidate accounting: claims=%d mutations=%d candidates=%d receipt=%+v", claims, mutations, candidateWrites, receipt)
+			settlements := receipt.ByOperation[storetest.TransactionDeliverySettle].WriteCommits
+			// The fan-out handler mutates once; its empty receivers settle without state writes.
+			if claims != uint64(len(rows)+1) || mutations != 1 || settlements != uint64(len(rows)) || candidateWrites == 0 || receipt.Total.Failed != 0 {
+				t.Fatalf("eight real consumers lost exact claim/mutation/settlement/candidate accounting: claims=%d mutations=%d settlements=%d candidates=%d receipt=%+v", claims, mutations, settlements, candidateWrites, receipt)
 			}
-			t.Logf("eight-row real-consumer commits: total_writes=%d delivery_claims=%d workflow_mutations=%d completion_candidates=%d continuation_scans=%d continuation_observes=%d", receipt.Total.WriteCommits, claims, mutations, candidateWrites,
+			t.Logf("eight-row real-consumer commits: total_writes=%d delivery_claims=%d workflow_mutations=%d delivery_settlements=%d completion_candidates=%d continuation_scans=%d continuation_observes=%d", receipt.Total.WriteCommits, claims, mutations, settlements, candidateWrites,
 				receipt.ByOperation[storetest.TransactionDeliveryContinuationScan].ReadCommits,
 				receipt.ByOperation[storetest.TransactionDeliveryContinuationObserve].ReadCommits)
 			for _, operation := range []storetest.TransactionOperation{
 				storetest.TransactionDeliveryClaim,
 				storetest.TransactionWorkflowMutation,
+				storetest.TransactionDeliverySettle,
 				storetest.TransactionRunCompletionCandidate,
 			} {
 				counts := receipt.ByOperation[operation]

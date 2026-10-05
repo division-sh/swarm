@@ -1,0 +1,284 @@
+{
+  "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+  "concept": "Selected-store readiness row as sole attachment phase/attempt authority; native SQL stays in the bounded persistence owners, schema and exact reset cleanup.",
+  "boundary": "Direct production table-access census, not execution proof or failure-class closure. Companion audit supplies per-owner consumption and permanent proof.",
+  "file_count": 17,
+  "reference_count": 55,
+  "rows": [
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go",
+      "line": 410,
+      "text": "\t\t\t\tattemptQuery := `SELECT activation_attempt_id::text FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go",
+      "line": 412,
+      "text": "\t\t\t\t\tattemptQuery = `SELECT activation_attempt_id FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 82,
+      "text": "\t\t\tquery := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text, activation_attempt_state, activation_request_id::text FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 84,
+      "text": "\t\t\t\tquery = `SELECT activation_attempt_id, activation_attempt_grant_id, activation_attempt_state, activation_request_id FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 136,
+      "text": "\t\t\tquery = `UPDATE flow_instance_runtime_readiness SET activation_attempt_id=$1, activation_attempt_grant_id=$2::uuid, activation_attempt_state='accepted', phase='planned', updated_at=$3, activation_request_id=$9::uuid WHERE run_id=$4::uuid AND instance_path=$5 AND activation_attempt_id=$6 AND plan_hash=$7 AND activation_attempt_state=$8`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 138,
+      "text": "\t\t\t\tquery = `UPDATE flow_instance_runtime_readiness SET activation_attempt_id=?1, activation_attempt_grant_id=?2, activation_attempt_state='accepted', phase='planned', updated_at=?3, activation_request_id=?9 WHERE run_id=?4 AND instance_path=?5 AND activation_attempt_id=?6 AND plan_hash=?7 AND activation_attempt_state=?8`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 169,
+      "text": "\tquery := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text, activation_attempt_state FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 171,
+      "text": "\t\tquery = `SELECT activation_attempt_id, activation_attempt_grant_id, activation_attempt_state FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 353,
+      "text": "\tquery := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 355,
+      "text": "\t\tquery = `SELECT activation_attempt_id, activation_attempt_grant_id FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 369,
+      "text": "\tquery = `UPDATE flow_instance_runtime_readiness SET activation_attempt_state=$1, updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5 AND activation_attempt_state IN ('accepted', 'superseded', $1)`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_attempt.go",
+      "line": 371,
+      "text": "\t\tquery = `UPDATE flow_instance_runtime_readiness SET activation_attempt_state=?, updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND activation_attempt_state IN ('accepted', 'superseded', ?)`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_resolution.go",
+      "line": 54,
+      "text": "\t\t\t\tif _, err := tx.ExecContext(txctx, `UPDATE flow_instance_runtime_readiness SET activation_attempt_id=activation_attempt_id WHERE run_id=? AND instance_path=?`, plan.RunID, plan.Identity.InstancePath); err != nil {"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_resolution.go",
+      "line": 58,
+      "text": "\t\t\tquery := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text, activation_request_id::text, activation_attempt_state, plan_hash FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_resolution.go",
+      "line": 60,
+      "text": "\t\t\t\tquery = `SELECT activation_attempt_id, activation_attempt_grant_id, activation_request_id, activation_attempt_state, plan_hash FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_readiness.go",
+      "line": 66,
+      "text": "\t\tFROM flow_instance_runtime_readiness AS readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_readiness.go",
+      "line": 79,
+      "text": "\t\t\tFROM flow_instance_runtime_readiness AS readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_readiness.go",
+      "line": 114,
+      "text": "\t\tLEFT JOIN flow_instance_runtime_readiness AS readiness ON readiness.run_id = run.run_id AND readiness.instance_path = instance.instance_path"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_readiness.go",
+      "line": 164,
+      "text": "\t\tFROM flow_instance_runtime_readiness AS readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_readiness.go",
+      "line": 178,
+      "text": "\t\t\tFROM flow_instance_runtime_readiness AS readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_readiness.go",
+      "line": 382,
+      "text": "\t\t\t\tquery := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, plan_hash = $2,"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_readiness.go",
+      "line": 391,
+      "text": "\t\t\t\t\tquery = `UPDATE flow_instance_runtime_readiness SET plan = ?, plan_hash = ?, updated_at = ?,"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_readiness.go",
+      "line": 505,
+      "text": "\t\tFROM flow_instance_runtime_readiness AS readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_readiness.go",
+      "line": 517,
+      "text": "\t\t\tFROM flow_instance_runtime_readiness AS readiness"
+    },
+    {
+      "file": "internal/runtime/destructivereset/cleanup_catalog.go",
+      "line": 96,
+      "text": "\t\t{Table: \"flow_instance_runtime_readiness\", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: \"flow_instance_runtime_readiness.run_id\", DeleteOrderGroup: 3},"
+    },
+    {
+      "file": "internal/store/platformschema/platformschema.go",
+      "line": 262,
+      "text": "\tcase \"flow_instance_runtime_readiness\":"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/topology_admission.go",
+      "line": 169,
+      "text": "\t\tFROM flow_instance_runtime_readiness AS readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/agentpersistence/topology_admission.go",
+      "line": 177,
+      "text": "\t\t\tFROM flow_instance_runtime_readiness AS readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/workflow_timer_activation.go",
+      "line": 222,
+      "text": "\t\t\tquery := `SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/workflow_timer_activation.go",
+      "line": 224,
+      "text": "\t\t\t\tquery = `SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_attachment_phase.go",
+      "line": 80,
+      "text": "\t\t\tquery := `UPDATE flow_instance_runtime_readiness SET phase=$1,updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5 AND phase=$6 AND plan_hash=$7`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_attachment_phase.go",
+      "line": 82,
+      "text": "\t\t\t\tquery = `UPDATE flow_instance_runtime_readiness SET phase=?,updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND phase=? AND plan_hash=?`"
+    },
+    {
+      "file": "internal/store/internal/adminpersistence/destructive_reset_cleanup.go",
+      "line": 576,
+      "text": "\tcase \"fan_out_obligation_barriers\", \"fan_out_outcomes\", \"fan_out_intents\", \"resource_version_pins\", \"author_activity_occurrences\", \"run_fork_fact_revisions\", \"run_fork_revisions\", \"run_fork_revision_heads\", \"activity_attempts\", \"agent_turns\", \"agent_conversation_audits\", \"agent_sessions\", \"agents\", \"flow_instances\", \"routing_rules\", \"decision_card_route_obligations\", \"decision_card_changes\", \"decision_card_input_drafts\", \"proposed_effect_continuations\", \"human_task_continuations\", \"decision_cards\", \"entity_mutations\", \"entity_state\", \"workflow_instance_initial_materializations\", \"flow_instance_runtime_readiness\", \"run_control_state\", \"reply_contexts\", \"run_scenario_execution_profiles\", \"events\", \"runs\":"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_routes.go",
+      "line": 925,
+      "text": "\t\tLEFT JOIN flow_instance_runtime_readiness readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_routes.go",
+      "line": 947,
+      "text": "\t\tLEFT JOIN flow_instance_runtime_readiness readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "line": 41,
+      "text": "\tquery := `SELECT activation_attempt_grant_id::text FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "line": 43,
+      "text": "\t\tquery = `SELECT activation_attempt_grant_id FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "line": 53,
+      "text": "\t\tquery = `UPDATE flow_instance_runtime_readiness SET activation_attempt_grant_id=$1::uuid, updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5 AND plan_hash=$6 AND activation_attempt_state='accepted'`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_activation_rebind.go",
+      "line": 55,
+      "text": "\t\t\tquery = `UPDATE flow_instance_runtime_readiness SET activation_attempt_grant_id=?, updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND plan_hash=? AND activation_attempt_state='accepted'`"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+      "line": 199,
+      "text": "\t\tJOIN flow_instance_runtime_readiness r ON r.run_id = fi.run_id AND r.instance_path = fi.instance_path"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+      "line": 207,
+      "text": "\t\t\tJOIN flow_instance_runtime_readiness r ON r.run_id = fi.run_id AND r.instance_path = fi.instance_path"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+      "line": 277,
+      "text": "\t\t       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2)"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+      "line": 284,
+      "text": "\t\t\t       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?)"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+      "line": 326,
+      "text": "\t\t\tINSERT INTO flow_instance_runtime_readiness ("
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+      "line": 341,
+      "text": "\t\t\tINSERT INTO flow_instance_runtime_readiness ("
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_creation_commit.go",
+      "line": 70,
+      "text": "\t\tUPDATE flow_instance_runtime_readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/dynamic_flow_creation_commit.go",
+      "line": 81,
+      "text": "\t\t\tUPDATE flow_instance_runtime_readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/standing_service.go",
+      "line": 750,
+      "text": "\t\tUNION ALL SELECT 1 FROM flow_instance_runtime_readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/pipelinepersistence/standing_service.go",
+      "line": 776,
+      "text": "\t\t\tUNION ALL SELECT 1 FROM flow_instance_runtime_readiness"
+    },
+    {
+      "file": "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go",
+      "line": 450,
+      "text": "\t\tINSERT INTO flow_instance_runtime_readiness ("
+    },
+    {
+      "file": "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go",
+      "line": 457,
+      "text": "\t\t\tINSERT INTO flow_instance_runtime_readiness ("
+    },
+    {
+      "file": "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go",
+      "line": 470,
+      "text": "\tquery := `SELECT plan, plan_hash FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?`"
+    },
+    {
+      "file": "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go",
+      "line": 472,
+      "text": "\t\tquery = `SELECT plan, plan_hash FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2`"
+    },
+    {
+      "file": "internal/store/internal/backend/runforkpersistence/selected_recovery.go",
+      "line": 446,
+      "text": "\t\tFROM flow_instances f LEFT JOIN flow_instance_runtime_readiness r"
+    },
+    {
+      "file": "internal/store/internal/backend/runforkpersistence/selected_recovery.go",
+      "line": 501,
+      "text": "\tif err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instance_runtime_readiness r"
+    }
+  ]
+}

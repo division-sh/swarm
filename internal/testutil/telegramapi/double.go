@@ -59,6 +59,8 @@ type responseBarrier struct {
 	arrived chan struct{}
 	release chan struct{}
 	once    sync.Once
+	match   func(map[string]any) bool
+	message chan int
 }
 
 func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
@@ -264,9 +266,27 @@ func (p *Double) serveDelivery(w http.ResponseWriter, request *http.Request) {
 	loseResponse := p.loseNextDeliveryResponse
 	p.loseNextDeliveryResponse = false
 	barrier := p.deliveryResponseBarrier
-	p.deliveryResponseBarrier = nil
+	if barrier != nil && barrier.match == nil {
+		p.deliveryResponseBarrier = nil
+	}
 	p.mu.Unlock()
+	if barrier != nil && barrier.match != nil {
+		if barrier.match(payload) {
+			p.mu.Lock()
+			if p.deliveryResponseBarrier == barrier {
+				p.deliveryResponseBarrier = nil
+			} else {
+				barrier = nil
+			}
+			p.mu.Unlock()
+		} else {
+			barrier = nil
+		}
+	}
 	if barrier != nil {
+		if barrier.message != nil {
+			barrier.message <- messageID
+		}
 		close(barrier.arrived)
 		<-barrier.release
 	}
@@ -606,6 +626,16 @@ func (p *Double) PauseNextDeliveryResponse() (<-chan struct{}, func()) {
 	barrier := newResponseBarrier()
 	p.deliveryResponseBarrier = barrier
 	return barrier.arrived, barrier.releaseResponse
+}
+
+func (p *Double) PauseDeliveryResponseMatching(match func(map[string]any) bool) (<-chan int, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	barrier.match = match
+	barrier.message = make(chan int, 1)
+	p.deliveryResponseBarrier = barrier
+	return barrier.message, barrier.releaseResponse
 }
 
 func newResponseBarrier() *responseBarrier {

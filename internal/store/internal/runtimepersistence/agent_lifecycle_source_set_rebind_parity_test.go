@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -15,11 +18,14 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeexecutionmode "github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -240,7 +246,37 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 	}
 }
 
-func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSourceSetRebindStore) {
+func TestAgentLifecycleReadinessSourceSetRebindBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected lifecycleSourceSetRebindStore
+			if backend == "sqlite" {
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				selected = admitTestPostgresStore(t, db)
+			}
+			proveAgentLifecycleProcessBindingReadback(t, selected, true)
+		})
+	}
+}
+
+func TestAgentLifecyclePreparedReadinessRebindBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected lifecycleSourceSetRebindStore
+			if backend == "sqlite" {
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				selected = admitTestPostgresStore(t, db)
+			}
+			proveAgentLifecycleProcessBindingReadback(t, selected, true, true)
+		})
+	}
+}
+
+func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSourceSetRebindStore, sourceSetRebind ...bool) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
@@ -291,6 +327,20 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		t.Fatal(err)
 	}
 	readinessRevision = strings.TrimPrefix(readinessRevision, "sha256:")
+	readinessRecords := []runtimemanager.PersistedAgent{readinessRecord}
+	actorExpectations := []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{Identity: readinessIdentity, ConfigRevision: readinessRevision, EntityID: readinessRecord.Config.EntityID}}
+	if len(sourceSetRebind) > 0 && sourceSetRebind[0] {
+		sibling := readinessRecord
+		sibling.Config.ID = "process-readiness-sibling"
+		sibling.Config.Identity = mustTestAgentIdentityForRun(runID, sibling.Config.ID, readinessIdentity.FlowInstance())
+		sibling.Config = withRuntimePersistenceTestIntent(t, sibling.Config)
+		siblingRevision, err := canonicaljson.Hash(sibling.Config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readinessRecords = append(readinessRecords, sibling)
+		actorExpectations = append(actorExpectations, runtimepipeline.DynamicFlowRuntimeAgentExpectation{Identity: sibling.Config.Identity, ConfigRevision: strings.TrimPrefix(siblingRevision, "sha256:"), EntityID: sibling.Config.EntityID})
+	}
 	readinessPlan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{
 			TemplateID: "readiness", ScopeKey: "readiness", InstanceID: "instance-1",
@@ -298,25 +348,19 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		},
 		RunID: runID, BundleHash: coordinate.BundleHash,
 		WorkflowVersion: "1.0.0", ExecutionMode: runtimeexecutionmode.Live,
-		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{
-			Identity: readinessIdentity, ConfigRevision: readinessRevision,
-		}},
+		Agents: actorExpectations,
 	}).Normalized()
 	if err != nil {
 		t.Fatalf("normalize readiness owner: %v", err)
 	}
-	readinessPlanJSON, err := canonicaljson.Bytes(readinessPlan)
-	if err != nil {
-		t.Fatalf("encode readiness owner: %v", err)
-	}
-	readinessFingerprint, err := canonicaljson.HashRaw(readinessPlanJSON)
+	readinessFingerprint, err := readinessPlan.Hash()
 	if err != nil {
 		t.Fatalf("fingerprint readiness owner: %v", err)
 	}
-	seedLifecycleReadinessOwner(t, ctx, store, runID, readinessPlan.Identity.InstancePath, readinessPlanJSON, now)
+	seedLifecycleReadinessOwner(t, ctx, store, readinessPlan, now)
 	activationStore, ok := store.(interface {
 		LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
-		BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimemanager.ProcessExecutionBinding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
+		BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
 	})
 	if !ok {
 		t.Fatal("process takeover fixture requires exact flow activation owner")
@@ -329,7 +373,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if err != nil {
 		t.Fatal(err)
 	}
-	preparedTopology, err = preparedTopology.WithFlowPreparationRevision(readiness.PlanRevision)
+	preparedTopology, err = preparedTopology.WithFlowPreparationAttempt(readiness.AttemptOrdinal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +386,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		ConfigRevision: readinessRevision, RunMode: runtimemanager.AgentRunModeStopped,
 		Agent: &readinessRecord, Topology: preparedTopology, Now: time.Now().UTC(),
 	}
-	staleTopology, err := preparedTopology.WithFlowPreparationRevision(readiness.PlanRevision + 1)
+	staleTopology, err := preparedTopology.WithFlowPreparationAttempt(readiness.AttemptOrdinal + 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,6 +402,17 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	}
 	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, preparation); err != nil {
 		t.Fatalf("prepare stopped readiness agent before execution admission: %v", err)
+	}
+	for index := 1; index < len(readinessRecords); index++ {
+		record := readinessRecords[index]
+		record.Topology = preparedTopology
+		request := preparation
+		request.OperationID, request.RequestHash = uuid.NewString(), uuid.NewString()
+		request.Identity, request.AgentID = record.Config.Identity, record.Config.ID
+		request.ConfigRevision, request.Agent = actorExpectations[index].ConfigRevision, &record
+		if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, request); err != nil {
+			t.Fatalf("prepare sibling readiness actor: %v", err)
+		}
 	}
 	preparedState, found, err := store.LoadAgentLifecycleState(ctx, readinessIdentity)
 	if err != nil || !found || preparedState.Phase != runtimemanager.AgentLifecycleRegistered || preparedState.RunMode != runtimemanager.AgentRunModeStopped || !preparedState.Topology.Equal(preparedTopology) {
@@ -389,7 +444,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, forgedPreparation); err == nil || !strings.Contains(err.Error(), "flow topology preparation requires a current pre-admission") {
 		t.Fatalf("admitted grant reused preparation authority: %v", err)
 	}
-	admitted, err := activationStore.BeginDynamicFlowRuntimeActivation(ctx, readinessPlan, readiness.PlanRevision, readinessBinding)
+	admitted, err := activationStore.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readinessPlan, readiness.AttemptOrdinal, readiness.AttemptState, readinessBinding))
 	if err != nil || !admitted.Acknowledged {
 		t.Fatalf("admit readiness lifecycle attempt: result=%+v err=%v", admitted, err)
 	}
@@ -399,25 +454,127 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if err != nil {
 		t.Fatal(err)
 	}
-	readinessTopology, err = readinessTopology.WithFlowActivationAttempt(admitted.Attempt.ID(), admitted.Attempt.PlanRevision())
+	readinessTopology, err = readinessTopology.WithFlowActivationAttempt(admitted.Attempt.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
 	readinessRecord.Topology = readinessTopology
-	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
-		OperationID:      uuid.NewString(), OperationKind: "reconfigure", RequestHash: uuid.NewString(),
-		Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "readiness_fixture",
-		ExpectedEpoch: preparedState.RuntimeEpoch, ExpectedGeneration: preparedState.Generation, ExpectedPhase: preparedState.Phase,
-		TargetEpoch: preparedState.RuntimeEpoch, TargetGeneration: preparedState.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
-		ConfigRevision: readinessRevision, RunMode: runtimemanager.AgentRunModeStopped,
-		Agent: &readinessRecord, Topology: readinessTopology, Now: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("seed readiness lifecycle cell: %v", err)
+	if len(sourceSetRebind) < 2 || !sourceSetRebind[1] {
+		if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+			DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+			OperationID:      uuid.NewString(), OperationKind: "reconfigure", RequestHash: uuid.NewString(),
+			Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "readiness_fixture",
+			ExpectedEpoch: preparedState.RuntimeEpoch, ExpectedGeneration: preparedState.Generation, ExpectedPhase: preparedState.Phase,
+			TargetEpoch: preparedState.RuntimeEpoch, TargetGeneration: preparedState.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
+			ConfigRevision: readinessRevision, RunMode: runtimemanager.AgentRunModeStopped,
+			Agent: &readinessRecord, Topology: readinessTopology, Now: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("seed readiness lifecycle cell: %v", err)
+		}
+		for index := 1; index < len(readinessRecords); index++ {
+			record := readinessRecords[index]
+			record.Topology = readinessTopology
+			previous, found, err := store.LoadAgentLifecycleState(ctx, record.Config.Identity)
+			if err != nil || !found {
+				t.Fatalf("load prepared sibling: found=%t err=%v", found, err)
+			}
+			if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+				DiagnosticOrigin: preparation.DiagnosticOrigin,
+				OperationID:      uuid.NewString(), OperationKind: "reconfigure", RequestHash: uuid.NewString(),
+				Identity: record.Config.Identity, AgentID: record.Config.ID, Trigger: "readiness_fixture",
+				ExpectedEpoch: previous.RuntimeEpoch, ExpectedGeneration: previous.Generation, ExpectedPhase: previous.Phase,
+				TargetEpoch: previous.RuntimeEpoch, TargetGeneration: previous.Generation + 1, TargetPhase: previous.Phase,
+				ConfigRevision: previous.ConfigRevision, RunMode: previous.RunMode, Agent: &record, Topology: readinessTopology, Now: time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("admit sibling readiness actor: %v", err)
+			}
+		}
 	}
 	readinessState, found, err := store.LoadAgentLifecycleState(ctx, readinessIdentity)
 	if err != nil || !found {
 		t.Fatalf("load readiness lifecycle before termination: found=%v err=%v", found, err)
+	}
+	if len(sourceSetRebind) != 0 && sourceSetRebind[0] {
+		// Isolate durable readiness admission from runtime cleanup so the
+		// contested generation handoff has deterministic both-store evidence.
+		successor, err := predecessor.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+			BundleHash: coordinate.BundleHash, RuntimeInstanceID: predecessorAuthority.RuntimeInstanceID,
+			RuntimeGeneration: 3, SourceSetRevision: plan.Revision,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := successor.Retire(context.Background()); err != nil {
+				t.Error(err)
+			}
+		}()
+		if _, err := successor.MarkProbesSettled(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := successor.AdmitExecution(ctx); err != nil {
+			t.Fatal(err)
+		}
+		request := runtimemanager.FlowReadinessSourceSetRebindRequest{
+			Attempt: admitted.Attempt, PlanHash: readinessFingerprint,
+			Transitions: []runtimemanager.AgentLifecycleTransition{{
+				DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+				OperationID:      uuid.NewString(), OperationKind: "source_set_rebind", RequestHash: uuid.NewString(),
+				Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "readiness_source_set_rebind_proof",
+				ExpectedEpoch: readinessState.RuntimeEpoch, ExpectedGeneration: readinessState.Generation, ExpectedPhase: readinessState.Phase,
+				TargetEpoch: readinessState.RuntimeEpoch, TargetGeneration: readinessState.Generation, TargetPhase: readinessState.Phase,
+				ConfigRevision: readinessState.ConfigRevision, RunMode: readinessState.RunMode, Topology: readinessState.Topology, Now: time.Now().UTC(),
+			}},
+		}
+		for _, record := range readinessRecords[1:] {
+			state, found, err := store.LoadAgentLifecycleState(ctx, record.Config.Identity)
+			if err != nil || !found {
+				t.Fatalf("load sibling before rebind: found=%t err=%v", found, err)
+			}
+			request.Transitions = append(request.Transitions, runtimemanager.AgentLifecycleTransition{
+				DiagnosticOrigin: preparation.DiagnosticOrigin,
+				OperationID:      uuid.NewString(), OperationKind: "source_set_rebind", RequestHash: uuid.NewString(),
+				Identity: record.Config.Identity, AgentID: record.Config.ID, Trigger: "readiness_source_set_rebind_proof",
+				ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
+				TargetEpoch: state.RuntimeEpoch, TargetGeneration: state.Generation, TargetPhase: state.Phase,
+				ConfigRevision: state.ConfigRevision, RunMode: state.RunMode, Topology: state.Topology, Now: time.Now().UTC(),
+			})
+		}
+		if _, err := successor.CommitAgentLifecycleTransition(ctx, request.Transitions[0]); err == nil || !strings.Contains(err.Error(), "atomic") {
+			t.Fatalf("individual actor rebind bypassed the instance transaction: %v", err)
+		}
+		owner := successor.(runtimemanager.FlowReadinessSourceSetRebindPersistence)
+		if _, err := owner.RebindFlowReadinessSourceSet(ctx, runtimemanager.FlowReadinessSourceSetRebindRequest{Attempt: request.Attempt, PlanHash: request.PlanHash}); err == nil {
+			t.Fatal("empty census omitted a live instance actor")
+		}
+		proveReadinessRebindAtomicRollback(t, ctx, store, owner, request)
+		rebound, err := owner.RebindFlowReadinessSourceSet(ctx, request)
+		if err != nil {
+			t.Fatalf("same-process readiness survivor cannot bind its adjacent generation: %v", err)
+		}
+		if len(rebound.Transitions) != len(readinessRecords) || rebound.Attempt.ID() != admitted.Attempt.ID() {
+			t.Fatalf("readiness rebind lost its exact attempt: %+v", rebound)
+		}
+		result := rebound.Transitions[0]
+		successorBinding, err := successor.ProcessExecutionBinding()
+		if err != nil || !result.ProcessBinding.Equal(successorBinding) || !result.Topology.Equal(readinessState.Topology) ||
+			result.RuntimeEpoch != readinessState.RuntimeEpoch || result.Generation != readinessState.Generation || result.Phase != readinessState.Phase {
+			t.Fatalf("readiness survivor changed construction/lifecycle authority: result=%+v err=%v", result, err)
+		}
+		for _, transition := range request.Transitions {
+			state, found, err := store.LoadAgentLifecycleState(ctx, transition.Identity)
+			if err != nil || !found || !state.ProcessBinding.Equal(successorBinding) || !state.Topology.Equal(transition.Topology) || state.RuntimeEpoch != transition.ExpectedEpoch || state.Generation != transition.ExpectedGeneration || state.Phase != transition.ExpectedPhase {
+				t.Fatalf("rebound actor did not retain exact attachment: %+v found=%t err=%v", state, found, err)
+			}
+			if _, err := successor.CommitAgentLifecycleTransition(ctx, transition); err == nil {
+				t.Fatal("cached whole-instance operation allowed an individual same-attempt restamp")
+			}
+		}
+		again, err := owner.RebindFlowReadinessSourceSet(ctx, request)
+		if err != nil || len(again.Transitions) != len(readinessRecords) || again.Attempt.ID() != rebound.Attempt.ID() {
+			t.Fatalf("whole-instance restamp retry lost exact evidence: %+v %v", again, err)
+		}
+		return
 	}
 	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
@@ -524,6 +681,63 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	}
 }
 
+func proveReadinessRebindAtomicRollback(t *testing.T, ctx context.Context, store lifecycleSourceSetRebindStore, owner runtimemanager.FlowReadinessSourceSetRebindPersistence, request runtimemanager.FlowReadinessSourceSetRebindRequest) {
+	t.Helper()
+	var db *sql.DB
+	postgres := false
+	switch selected := store.(type) {
+	case *PostgresStore:
+		db, postgres = selected.backend.ConstructionHandle(), true
+	case *SQLiteRuntimeStore:
+		db = selected.backend.ConstructionHandle()
+	default:
+		t.Fatalf("unsupported readiness census fixture %T", store)
+	}
+	before := snapshotForkHistoricalExecutionTables(t, db, postgres)
+	for _, failure := range []string{"omitted_sibling", "wrong_plan", "cancelled", "second_actor_write"} {
+		bad, callCtx := request, ctx
+		var remove []string
+		switch failure {
+		case "omitted_sibling":
+			bad.Transitions = request.Transitions[:1]
+		case "wrong_plan":
+			bad.PlanHash = strings.Repeat("0", 64)
+		case "cancelled":
+			var cancel context.CancelFunc
+			callCtx, cancel = context.WithCancel(ctx)
+			cancel()
+		case "second_actor_write":
+			operation := request.Transitions[1].OperationID
+			install := []string{"CREATE TRIGGER rebind_second_actor BEFORE INSERT ON agent_lifecycle_operations WHEN NEW.operation_id='" + operation + "' BEGIN SELECT RAISE(ABORT,'second_actor_write'); END"}
+			remove = []string{"DROP TRIGGER rebind_second_actor"}
+			if postgres {
+				install = []string{"CREATE FUNCTION rebind_second_actor_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.operation_id='" + operation + "' THEN RAISE EXCEPTION 'second_actor_write'; END IF; RETURN NEW; END $$", "CREATE TRIGGER rebind_second_actor BEFORE INSERT ON agent_lifecycle_operations FOR EACH ROW EXECUTE FUNCTION rebind_second_actor_fn()"}
+				remove = []string{"DROP TRIGGER rebind_second_actor ON agent_lifecycle_operations", "DROP FUNCTION rebind_second_actor_fn()"}
+			}
+			for _, statement := range install {
+				if _, err := db.ExecContext(ctx, statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		result, err := owner.RebindFlowReadinessSourceSet(callCtx, bad)
+		for _, statement := range remove {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err == nil || len(result.Transitions) != 0 || result.Attempt.ID() != "" {
+			t.Fatalf("%s returned rebind evidence: %+v %v", failure, result, err)
+		}
+		if failure == "second_actor_write" && !strings.Contains(err.Error(), failure) {
+			t.Fatalf("wrong second-actor failure boundary: %v", err)
+		}
+		if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, postgres)) {
+			t.Fatalf("%s changed the grant stamp, predecessor actors, or durable evidence", failure)
+		}
+	}
+}
+
 func terminateLifecycleReadinessOwnerForTest(t testing.TB, ctx context.Context, store any, runID, instancePath string) {
 	t.Helper()
 	var db *sql.DB
@@ -548,52 +762,50 @@ func terminateLifecycleReadinessOwnerForTest(t testing.TB, ctx context.Context, 
 }
 
 func seedLifecycleReadinessOwner(
-	t testing.TB,
+	t *testing.T,
 	ctx context.Context,
 	store lifecycleSourceSetRebindStore,
-	runID string,
-	instancePath string,
-	plan []byte,
+	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	now time.Time,
 ) {
 	t.Helper()
-	var db *sql.DB
-	postgres := false
-	switch selected := store.(type) {
-	case *PostgresStore:
-		db = selected.backend.ConstructionHandle()
-		postgres = true
-	case *SQLiteRuntimeStore:
-		db = selected.backend.ConstructionHandle()
-	default:
-		t.Fatalf("unsupported lifecycle readiness fixture store %T", store)
+	selected, ok := store.(agentFixtureFlowStore)
+	if !ok {
+		t.Fatalf("lifecycle readiness fixture requires the constructor owner: %T", store)
 	}
-	if postgres {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-			VALUES ($1::uuid, $2, 'readiness', 'template', '{}'::jsonb, 'active', $3)
-		`, runID, instancePath, now); err != nil {
-			t.Fatalf("seed postgres flow instance: %v", err)
-		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-			VALUES ($1::uuid, $2, $3::jsonb, $4, $4)
-		`, runID, instancePath, plan, now); err != nil {
-			t.Fatalf("seed postgres readiness owner: %v", err)
-		}
-		return
+	flowID := plan.Identity.TemplateID
+	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
+		"schema.yaml":             "name: lifecycle-readiness-proof\n",
+		flowID + "/schema.yaml":   "name: " + flowID + "\ninstance: fixture_key\nstages:\n  pending: {initial: true}\npins:\n  inputs: [lifecycle.constructed]\n",
+		flowID + "/events.yaml":   "lifecycle.constructed:\n  fixture_key: text\n",
+		flowID + "/entities.yaml": "item:\n  fixture_key: text\n",
+	})
+	bundle.Semantics.Version = plan.WorkflowVersion
+	fact := mustStoreTestSourceArtifactFact(plan.BundleHash)
+	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(storeTestWorkContext(t, ctx), plan.RunID), fact)
+	ctx = runtimeeffects.WithExecutionMode(ctx, plan.ExecutionMode)
+	bus := &sqliteFlowActivationBus{}
+	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle)
+	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: fact,
+		SemanticSource: semanticview.Wrap(bundle), WorkflowInstances: workflows, WorkOwner: storeTestWorkOwner(t),
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	}, selected))
+	construction, err := manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(bundle), Instance: plan.Identity, OccurredAt: now,
+		ConstructorInput: "lifecycle.constructed", ResolvedKey: plan.Identity.InstanceID,
+		Config:       map[string]any{"fixture_key": plan.Identity.InstanceID},
+		TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "lifecycle.constructed", "fixture", "", []byte(`{"fixture_key":"`+plan.Identity.InstanceID+`"}`), 0, plan.RunID, events.EventEnvelope{}, now),
+	})
+	if err != nil {
+		t.Fatalf("prepare lifecycle readiness construction: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES (?, ?, 'readiness', 'template', '{}', 'active', ?)
-	`, runID, instancePath, now); err != nil {
-		t.Fatalf("seed sqlite flow instance: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, runID, instancePath, plan, now, now); err != nil {
-		t.Fatalf("seed sqlite readiness owner: %v", err)
+	// These store-admission controls supply their exact actor expectations but
+	// still commit the header, entry evidence and receipt through O2 atomically.
+	construction.Readiness = plan
+	committed, err := (agentFixtureFlowActivationCommitter{store: selected}).CommitFlowInstanceActivation(ctx, construction)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct lifecycle readiness owner: result=%+v err=%v", committed, err)
 	}
 }
 

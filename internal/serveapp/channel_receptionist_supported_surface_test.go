@@ -51,7 +51,12 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			if connected.Readiness == nil || !connected.Readiness.Ready {
 				t.Fatalf("public connection is not ready: %#v", connected)
 			}
-			cardMessageID := waitChannelCardMessageID(t, h.provider, "telegram-ingress")
+			db, err := sql.Open(backendName, h.storeDSN)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			cardMessageID := waitChannelCardMessageID(t, db, backendName, "telegram-ingress")
 			card := h.provider.Delivery(cardMessageID - 1)
 			if fmt.Sprint(card["chat_id"]) != "1001" {
 				t.Fatalf("operator card escaped operator conversation: %v", card)

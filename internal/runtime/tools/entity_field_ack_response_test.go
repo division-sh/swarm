@@ -62,7 +62,7 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 			exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 				EntityStore: store, WorkflowSource: semanticview.Wrap(bundle), AllowInternalLegacyEntityTools: true,
 			})
-			entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+			entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 				"flow_instance": "review/inst-1", "fields": map[string]any{"status": "open"},
 			})
 			db := storetest.DatabaseForTest(base)

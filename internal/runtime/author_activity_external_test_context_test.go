@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -617,6 +618,16 @@ func ownRuntimeTestAgentManager(t testing.TB, manager *runtimemanager.AgentManag
 		}
 	})
 	return manager
+}
+
+func constructExternalRuntimeTestRoot(t testing.TB, ctx context.Context, manager *runtimemanager.AgentManager, source semanticview.Source) {
+	t.Helper()
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	if err := manager.ActivateFlowInstance(testLiveExecutionContext(ctx), runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, Instance: flowidentity.Stored(source, ".", runID, runID, runID, ""), OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("construct runtime component root before delivery: %v", err)
+	}
 }
 
 func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOptions) []runtimeauthoractivity.EventDescriptor {

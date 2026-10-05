@@ -4,5 +4,5 @@ conformance:
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "dialect_compliance"
-    contains: "declares both create_entity and accumulate"
+    category: "contract_loader.undefined_field"
+    contains: 'handler field "create_entity" is not supported'

@@ -207,6 +207,10 @@ func (s *runtimeTestRetainedSession) InspectRunExecutionOwnership(ctx context.Co
 	return runtimemanager.RunExecutionOwned, nil
 }
 
+func (*runtimeTestRetainedSession) RebindFlowReadinessSourceSet(context.Context, runtimemanager.FlowReadinessSourceSetRebindRequest, runtimemanager.ProcessExecutionBinding) (runtimemanager.FlowReadinessSourceSetRebindResult, error) {
+	return runtimemanager.FlowReadinessSourceSetRebindResult{}, errors.New("runtime test session has no readiness row")
+}
+
 func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	result := runtimemanager.AgentLifecycleTransitionResult{
 		OperationID: req.OperationID, TransitionID: uuid.NewString(), Identity: req.Identity, AgentID: req.AgentID,

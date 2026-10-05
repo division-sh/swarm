@@ -267,11 +267,12 @@ func seedBudgetRecoveryRun(t *testing.T, ctx context.Context, db *sql.DB, postgr
 func seedBudgetRecoveryEntity(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID, entityID, state string, at time.Time) {
 	t.Helper()
 	instance := "flow/" + entityID
-	instanceQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES (?, ?, 'flow', 'static', '{}', 'active')`
-	if postgres {
-		instanceQuery = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES ($1::uuid, $2, 'flow', 'static', '{}'::jsonb, 'active')`
-	}
-	if _, err := db.ExecContext(ctx, instanceQuery, runID, instance); err != nil {
+	// This is a retained budget-projection fixture, not constructor qualification.
+	instanceQuery := `INSERT INTO flow_instances
+		(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined,
+		 current_state, gates, bookkeeping, accumulator, config, revision, entered_state_at, created_at, updated_at)
+		VALUES ($1,$2,$3,'budget_recovery','flow','static',TRUE,$4,'{}','{}','{}','{"config":{}}',1,$5,$5,$5)`
+	if _, err := db.ExecContext(ctx, instanceQuery, runID, instance, entityID, state, at); err != nil {
 		t.Fatalf("seed flow instance %s: %v", instance, err)
 	}
 	query := `

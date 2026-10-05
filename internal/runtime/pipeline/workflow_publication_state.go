@@ -94,12 +94,18 @@ func (p PreparedWorkflowPublicationState) JoinAdmissionInstance(target events.Ro
 		return nil, err
 	}
 	revision := record.ExpectedRevision + 1
-	instance, err := DecodeWorkflowEntityStatePersistenceRecord(WorkflowEntityStatePersistenceRecord{
+	fields := record.Fields
+	if record.EntityType == "" {
+		fields = nil
+	}
+	instance, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
 		EntityID: record.EntityID, FlowInstance: record.Identity.Route.InstancePath, EntityType: record.EntityType,
+		WorkflowName: record.WorkflowName, WorkflowVersion: record.WorkflowVersion, Mode: record.Mode,
+		Status: record.Status, TerminatedAt: record.TerminatedAt, StageDefined: record.StageDefined, Config: record.Config,
 		CurrentState: record.CurrentState, Revision: revision, EnteredStageAt: record.EnteredStageAt,
-		Fields: record.Fields, Bookkeeping: record.Bookkeeping, Gates: record.Gates, Accumulator: record.Accumulator,
+		Fields: fields, Bookkeeping: record.Bookkeeping, Gates: record.Gates, Accumulator: record.Accumulator,
 		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
-	}, record.Identity.Route, record.WorkflowName, record.WorkflowVersion, record.Mode)
+	})
 	if err != nil {
 		return nil, err
 	}

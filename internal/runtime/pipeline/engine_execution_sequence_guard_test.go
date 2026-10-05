@@ -44,8 +44,8 @@ func TestSelectedHandlerCommitResultHasOneInterpreter(t *testing.T) {
 			}
 			return true
 		})
-		if function.Name.Name == "CommitEngineMutation" && callsShared < 2 {
-			t.Error("stateful and entityless selected handlers must share commit-result consumption")
+		if function.Name.Name == "CommitEngineMutation" && callsShared != 2 {
+			t.Errorf("mutating and preserve-state branches must each consume the single commit-result owner: calls=%d, want two", callsShared)
 		}
 		if function.Name.Name == "commitPreparedEngineMutation" && callsStore != 1 {
 			t.Errorf("shared result owner has %d durable commit calls, want one", callsStore)
@@ -66,6 +66,9 @@ func TestRetiredHandlerExecutionInterpretersStayAbsent(t *testing.T) {
 		"coordinatorHandlerExecutionEngine",
 		"ExecuteHandlerSteps",
 		"commitEntitylessEngineMutation",
+		"prepareEntitylessEngineMutation",
+		"EntitylessTarget",
+		"EntitylessRunID",
 	}
 	files, err := os.ReadDir(".")
 	if err != nil {

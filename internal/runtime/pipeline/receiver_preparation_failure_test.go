@@ -82,7 +82,7 @@ func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
 				pc.deliveryStore = owner
 				configurePipelineTestDeliveryOwner(t, pc)
 				runID := runtimecorrelation.RunIDFromContext(ctx)
-				entityID := uuid.NewString()
+				entityID := runID
 				evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte("{}"), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC())
 				dialect := authoractivityfixture.DialectPostgres
 				if store.isSQLite() {
@@ -225,7 +225,7 @@ func TestReceiverPreparationFailureClaimMatrixBothStores(t *testing.T) {
 					pc.deliveryStore = owner
 					configurePipelineTestDeliveryOwner(t, pc)
 					runID := runtimecorrelation.RunIDFromContext(ctx)
-					entityID := uuid.NewString()
+					entityID := runID
 					evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte("{}"), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC())
 					dialect := authoractivityfixture.DialectPostgres
 					if store.isSQLite() {

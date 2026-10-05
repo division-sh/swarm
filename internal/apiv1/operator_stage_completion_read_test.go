@@ -7,8 +7,15 @@ import (
 	"testing"
 	"time"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -21,7 +28,6 @@ type stageCompletionReadStore interface {
 }
 
 func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
-	artifact := sourceartifactfixture.New("schema.yaml", []byte("name: exact-stage-completion\n"))
 	root := runtimecontracts.BuildWorkflowStageTopology(".", "ready", []string{"ready", "Ready"}, []string{"Ready"}, nil, nil, nil)
 	classifier, err := runtimecontracts.NewWorkflowStageClassifier(root, nil)
 	if err != nil {
@@ -43,22 +49,50 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 				t.Cleanup(cleanup)
 				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
 			}
-			fact := sourceartifactfixture.FactFor(artifact)
-			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Runs: selected})})
 			for _, tc := range []struct {
 				stage, status string
 			}{{"ready", "running"}, {"Ready", "completed"}} {
 				t.Run(tc.stage, func(t *testing.T) {
+					initialReady := tc.stage == "ready"
+					artifact := sourceartifactfixture.New("schema.yaml", []byte(fmt.Sprintf("name: exact-stage-completion\nstages:\n  ready: {initial: %t}\n  Ready: {initial: %t, terminal: true}\n", initialReady, !initialReady)))
+					fact := sourceartifactfixture.FactFor(artifact)
+					ctx := testAuthorActivityContextForSource(context.Background(), fact)
+					repo := runCompletionRepoRoot(t)
+					bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					source := semanticview.Wrap(bundle)
 					runID := uuid.NewString()
 					fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: artifact, StartedAt: time.Now().UTC()}
 					storetest.RequireRun(t, ctx, selected, fixture)
-					query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, '', 'stage-proof', ?)`
-					if backend == "postgres" {
-						query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, '', 'stage-proof', $3)`
+					bus, err := newScopedAPITestEventBus(t, selected.(runtimebus.EventStore), runStartTestEventBusOptions(source))
+					if err != nil {
+						t.Fatal(err)
 					}
-					if _, err := db.ExecContext(ctx, query, runID, uuid.NewString(), tc.stage); err != nil {
-						t.Fatalf("seed exact entity stage: %v", err)
+					constructor, err := newAPITestFlowConstructor(t, selected.(runtimebus.EventStore), bus, runStartTestEventBusOptions(source))
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
+					plan, err := constructor.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+						ContractBundle: source, Instance: runtimeflowidentity.Stored(source, ".", runID, runID, "", ""), OccurredAt: fixture.StartedAt,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					committed, err := bus.CommitFlowInstanceActivation(ctx, plan)
+					if err != nil || !committed.Acknowledged || !committed.Created {
+						t.Fatalf("construct exact fieldless stage: %+v %v", committed, err)
+					}
+					query := `SELECT (SELECT COUNT(*) FROM flow_instances WHERE run_id = ? AND current_state = ?), (SELECT COUNT(*) FROM entity_state WHERE run_id = ?)`
+					if backend == "postgres" {
+						query = `SELECT (SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND current_state = $2), (SELECT COUNT(*) FROM entity_state WHERE run_id = $3::uuid)`
+					}
+					var headers, fields int
+					if err := db.QueryRowContext(ctx, query, runID, tc.stage, runID).Scan(&headers, &fields); err != nil || headers != 1 || fields != 0 {
+						t.Fatalf("fieldless constructor headers=%d fields=%d err=%v", headers, fields, err)
 					}
 					if _, err := selected.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
 						t.Fatalf("request completion candidate: %v", err)

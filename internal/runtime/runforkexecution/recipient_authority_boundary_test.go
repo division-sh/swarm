@@ -36,7 +36,9 @@ func recipientBoundaryAllowances() map[string]recipientBoundaryAllowance {
 		"runtime/runforkadmission::completedInputRecipient/evidence_field:Path":                                          {1, "exact historical flow-instance completion correspondence"},
 		"runtime/runforkadmission::completedInputRecipient/evidence_field:AgentPlan":                                     {1, "complete runless agent identity after verifying the source run"},
 		"runtime/runforkexecution::prepareSelectedFork/evidence_field:Recipient":                                         {1, "choose node or agent schema owner for selected input validation"},
-		"runtime/runforkexecution::prepareSelectedFork/evidence_field:AgentPlan":                                         {1, "schema validation through the exact admitted agent owner"},
+		"runtime/runforkexecution::prepareSelectedFork/evidence_field:AgentPlan":                                         {1, "schema and construction validation through the exact admitted agent and fixed header owners"},
+		"runtime/bus::SelectedInputValidation.SelectRecipients/evidence_field:Recipient":                                 {1, "agent construction corroboration after canonical fixed-frontier recipient selection"},
+		"runtime/bus::SelectedInputValidation.SelectRecipients/evidence_field:AgentPlan":                                 {1, "exact runless plan selects immutable constructor facts, never a reduced recipient authority key"},
 		"runtime/runfork::EqualSelectedContractRecipientPlanning/raw_aggregate_equality":                                 {1, "metadata-only comparison after canonical keys are compared and cloned recipient fields cleared"},
 		"runtime/runfork::EqualSelectedContractRouteTopology/raw_aggregate_equality":                                     {1, "metadata-only comparison after canonical keys are compared and both cloned topology evidence fields cleared"},
 		"runtime/runfork::EqualSelectedContractFrontierEvents/raw_aggregate_equality":                                    {1, "metadata-only comparison after canonical keys are compared and cloned frontier recipient fields cleared"},
@@ -48,8 +50,8 @@ func recipientBoundaryAllowances() map[string]recipientBoundaryAllowance {
 		"runtime/runfork::RunForkSelectedContractRecipientPlanning.SelectedAgentPlans/evidence_field:AgentPlan":          {1, "shared full canonical runless agent plan selection"},
 		"runtime/runforkreadiness::Project/evidence_field:Recipient":                                                     {2, "node/agent workflow-state projection"},
 		"runtime/runforkreadiness::Project/evidence_field:Path":                                                          {1, "exact workflow-state route projection"},
-		"runtime/runforkreadiness::selectedContractTemplateAgentWorkflowState/evidence_field:Path":                       {1, "existing selected template workflow-state owner"},
-		"runtime/runforkreadiness::selectedContractTemplateAgentWorkflowState/evidence_field:AgentPlan":                  {1, "full plan correspondence, not a reduced recipient key"},
+		"runtime/runforkreadiness::selectedContractAgentWorkflowState/evidence_field:Path":                               {1, "exact fixed-construction workflow-state owner"},
+		"runtime/runforkreadiness::selectedContractAgentWorkflowState/evidence_field:AgentPlan":                          {1, "full plan correspondence, not a reduced recipient key"},
 		"runtime/runforkexecution::selectedContractDynamicTopologyEvidence/evidence_field:Path":                          {2, "nonmutating dynamic topology corroboration"},
 	}
 }

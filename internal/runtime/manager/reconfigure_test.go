@@ -12,7 +12,6 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
-	"github.com/google/uuid"
 )
 
 type reconfigureTestAgent struct{ id string }
@@ -154,11 +153,11 @@ func TestReconfigureAgent_TopologyOnlyRebindPreservesMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preparation, err = preparation.WithFlowPreparationRevision(1)
+	preparation, err = preparation.WithFlowPreparationAttempt(1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	attempt, err := preparation.WithFlowActivationAttempt(uuid.NewString(), 1)
+	attempt, err := preparation.WithFlowActivationAttempt("1")
 	if err != nil {
 		t.Fatal(err)
 	}

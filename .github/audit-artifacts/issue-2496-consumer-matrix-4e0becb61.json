@@ -1,0 +1,167 @@
+{
+  "issue": 2496,
+  "phase": "implementation qualification; not closure",
+  "tested_head": "4e0becb61",
+  "receipt": "/tmp/agent-e-2496-final-construction-consumer-proofs.log",
+  "managed": true,
+  "race": true,
+  "count": 1,
+  "result": "failed",
+  "passed_roots": 17,
+  "failed_roots": 6,
+  "results": [
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestA2ForkStageEntryProjectsExactOwnersAndNestedOrigin",
+      "elapsed_seconds": 0
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestA2ForkStageEntryRejectsHostileOwnership",
+      "elapsed_seconds": 0
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "test": "TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence",
+      "elapsed_seconds": 0.01
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "elapsed_seconds": 1.039
+    },
+    {
+      "action": "fail",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgres",
+      "elapsed_seconds": 4.63
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPayloadSelectorOnBothStores",
+      "elapsed_seconds": 0.53
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMutation",
+      "elapsed_seconds": 0.46
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBothStores",
+      "elapsed_seconds": 1.84
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBothStores",
+      "elapsed_seconds": 0.46
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleWithoutMutation",
+      "elapsed_seconds": 1.96
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDeliveryTargetApplicationCarriesConstructedScenarioPreStateThroughMutationOnSQLiteAndPostgres",
+      "elapsed_seconds": 0.73
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres",
+      "elapsed_seconds": 0.51
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestDeliveryTargetApplicationRequiresExactPreviewOwnerAndRejectsConflict",
+      "elapsed_seconds": 0.07
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestWorkflowEngineFirstMaterializationRejectsMissingOrContradictoryEntityContractOnBothStores",
+      "elapsed_seconds": 0.89
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext",
+      "elapsed_seconds": 0.51
+    },
+    {
+      "action": "fail",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestPipelineCompiledTransitionInitialAdmissionOnBothStores",
+      "elapsed_seconds": 3.37
+    },
+    {
+      "action": "fail",
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutation",
+      "elapsed_seconds": 22.5
+    },
+    {
+      "action": "fail",
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "test": "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation",
+      "elapsed_seconds": 0.85
+    },
+    {
+      "action": "fail",
+      "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "elapsed_seconds": 23.416
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores",
+      "elapsed_seconds": 11.02
+    },
+    {
+      "action": "fail",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores",
+      "elapsed_seconds": 0.54
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions",
+      "elapsed_seconds": 0.4
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestA2PersistedJoinHydrationRefusesCorruptionOnBothStores",
+      "elapsed_seconds": 8.32
+    },
+    {
+      "action": "pass",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestSelectedForkReceiverSupportedDeliveryBothStores",
+      "elapsed_seconds": 21.37
+    },
+    {
+      "action": "fail",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "test": "TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyContextOnBothStores",
+      "elapsed_seconds": 11.25
+    },
+    {
+      "action": "fail",
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "elapsed_seconds": 69.007
+    }
+  ]
+}

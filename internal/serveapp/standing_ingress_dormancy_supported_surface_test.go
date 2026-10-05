@@ -63,6 +63,7 @@ func TestDormantIngressDevPublishesNoAuthority(t *testing.T) {
 	}
 	process := startServeRuntimeTestProcessAtRepo(t, root, opts)
 	process.waitForReadyLine()
+	waitForInboundAdmissionServeOutput(t, process, "DORMANT ingress")
 	if !strings.Contains(process.outputString(), "DORMANT ingress") {
 		t.Fatalf("dev hid the missing-credential decision: %s", process.outputString())
 	}

@@ -17,7 +17,7 @@ func ReadCurrentSentReceiptTx(ctx context.Context, tx *sql.Tx, deliveryID, opera
 	if tx == nil || uuid.Validate(deliveryID) != nil || uuid.Validate(operationID) != nil {
 		return render.SentReceipt{}, false, fmt.Errorf("channel receipt read requires exact ids and selected transaction")
 	}
-	plan, found, err := LoadCurrentPlan(ctx, tx, deliveryID, postgres)
+	plan, found, err := LoadDestinationCurrentPlan(ctx, tx, deliveryID, postgres)
 	if err != nil || !found || plan.CurrentReceiptID != operationID ||
 		(plan.State != "sent" && plan.State != "rendered") {
 		return render.SentReceipt{}, false, err

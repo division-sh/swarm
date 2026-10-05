@@ -226,12 +226,16 @@ func TestKeyedFlowDescriptorCandidatesBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			planHash, err := plan.Hash()
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, query := range []struct {
 				statement string
 				args      []any
 			}{
 				{`INSERT INTO flow_instances (run_id,instance_path,flow_template,status,mode) VALUES($1,'review/z','review','active','template')`, []any{runID}},
-				{`INSERT INTO flow_instance_runtime_readiness (run_id,instance_path,plan,plan_revision) VALUES($1,'review/z',$2,1)`, []any{runID, string(encoded)}},
+				{`INSERT INTO flow_instance_runtime_readiness (run_id,instance_path,plan,plan_hash,activation_attempt_id) VALUES($1,'review/z',$2,$3,1)`, []any{runID, string(encoded), planHash}},
 				{`INSERT INTO entity_state (run_id,flow_instance,entity_id,current_state,fields) VALUES($1,'review/z',$2,'ready',$3)`, []any{runID, entityID, `{"startup.id":"alpha"}`}},
 			} {
 				if _, err := db.ExecContext(ctx, query.statement, query.args...); err != nil {
@@ -283,14 +287,14 @@ func TestKeyedFlowDescriptorCandidatesBothStores(t *testing.T) {
 func createScopedReadFixture(t *testing.T, db *sql.DB, postgres bool, runID string) {
 	t.Helper()
 	queries := []string{
-		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, flow_template TEXT, status TEXT, mode TEXT, terminated_at TIMESTAMP)`,
-		`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_revision INTEGER NOT NULL)`,
+		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, flow_template TEXT, status TEXT, mode TEXT, terminated_at TIMESTAMP, entity_id TEXT, current_state TEXT)`,
+		`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_hash TEXT NOT NULL, activation_attempt_id INTEGER NOT NULL, phase TEXT NOT NULL DEFAULT 'planned', activation_attempt_state TEXT NOT NULL DEFAULT 'planned')`,
 		`CREATE TABLE entity_state (run_id TEXT, flow_instance TEXT, entity_id TEXT, current_state TEXT, fields TEXT)`,
 	}
 	if postgres {
 		queries = []string{
-			`CREATE TABLE flow_instances (run_id UUID, instance_path TEXT, flow_template TEXT, status TEXT, mode TEXT, terminated_at TIMESTAMPTZ)`,
-			`CREATE TABLE flow_instance_runtime_readiness (run_id UUID, instance_path TEXT, plan JSONB, plan_revision BIGINT NOT NULL)`,
+			`CREATE TABLE flow_instances (run_id UUID, instance_path TEXT, flow_template TEXT, status TEXT, mode TEXT, terminated_at TIMESTAMPTZ, entity_id UUID, current_state TEXT)`,
+			`CREATE TABLE flow_instance_runtime_readiness (run_id UUID, instance_path TEXT, plan JSONB, plan_hash TEXT NOT NULL, activation_attempt_id BIGINT NOT NULL, phase TEXT NOT NULL DEFAULT 'planned', activation_attempt_state TEXT NOT NULL DEFAULT 'planned')`,
 			`CREATE TABLE entity_state (run_id UUID, flow_instance TEXT, entity_id UUID, current_state TEXT, fields JSONB)`,
 		}
 	}
@@ -320,6 +324,10 @@ func createScopedReadFixture(t *testing.T, db *sql.DB, postgres bool, runID stri
 		if err != nil {
 			t.Fatal(err)
 		}
+		planHash, err := plan.Hash()
+		if err != nil {
+			t.Fatal(err)
+		}
 		fields := `{"startup.id":"other","count":3,"flag":false}`
 		switch item.path {
 		case "review/a":
@@ -331,8 +339,8 @@ func createScopedReadFixture(t *testing.T, db *sql.DB, postgres bool, runID stri
 			statement string
 			args      []any
 		}{
-			{`INSERT INTO flow_instances (run_id,instance_path,flow_template,status,mode) VALUES($1,$2,$3,'active','template')`, []any{runID, item.path, item.template}},
-			{`INSERT INTO flow_instance_runtime_readiness (run_id,instance_path,plan,plan_revision) VALUES($1,$2,$3,1)`, []any{runID, item.path, string(encoded)}},
+			{`INSERT INTO flow_instances (run_id,instance_path,flow_template,status,mode,entity_id,current_state) VALUES($1,$2,$3,'active','template',$4,'ready')`, []any{runID, item.path, item.template, entityID}},
+			{`INSERT INTO flow_instance_runtime_readiness (run_id,instance_path,plan,plan_hash,activation_attempt_id) VALUES($1,$2,$3,$4,1)`, []any{runID, item.path, string(encoded), planHash}},
 			{`INSERT INTO entity_state (run_id,flow_instance,entity_id,current_state,fields) VALUES($1,$2,$3,'ready',$4)`, []any{runID, item.path, entityID, fields}},
 		} {
 			if _, err := db.Exec(query.statement, query.args...); err != nil {
@@ -340,7 +348,11 @@ func createScopedReadFixture(t *testing.T, db *sql.DB, postgres bool, runID stri
 			}
 		}
 	}
-	if _, err := db.Exec(`INSERT INTO entity_state (run_id,flow_instance,entity_id,current_state,fields) VALUES($1,'root',$2,'ready','{}')`, runID, uuid.NewString()); err != nil {
+	rootEntityID := uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO flow_instances (run_id,instance_path,flow_template,status,mode,entity_id,current_state) VALUES($1,'root','root','active','static',$2,'ready')`, runID, rootEntityID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO entity_state (run_id,flow_instance,entity_id,current_state,fields) VALUES($1,'root',$2,'ready','{}')`, runID, rootEntityID); err != nil {
 		t.Fatal(err)
 	}
 }

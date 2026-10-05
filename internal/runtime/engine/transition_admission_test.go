@@ -13,8 +13,46 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
+
+func TestEnginePreservationRejectsContradictoryExecution(t *testing.T) {
+	runID, entityID := eventtest.UUID("preservation-run"), identity.NormalizeEntityID(eventtest.UUID("preservation-entity"))
+	route := flowidentity.RouteForInstancePath(runID)
+	at := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	effect, err := workflowlifecycle.NewAcceptedEvent(route, entityID, eventtest.UUID("preservation-event"), "timer.arm", executionmode.Live, at, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []struct {
+		name  string
+		apply func(*EngineMutation)
+	}{
+		{"none", func(*EngineMutation) {}},
+		{"advance", func(m *EngineMutation) { m.State.NextState = "done" }},
+		{"gate", func(m *EngineMutation) { m.State.SetGate = "ready" }},
+		{"clear", func(m *EngineMutation) { m.State.ClearGates = []string{"ready"} }},
+		{"write", func(m *EngineMutation) {
+			m.State.DataAccumulation = contracts.WorkflowDataAccumulation{SourceEvent: "other"}
+		}},
+		{"publication", func(m *EngineMutation) { m.EmitIntents = []EmitIntent{{}} }},
+		{"activity", func(m *EngineMutation) { m.ActivityIntents = []ActivityIntent{{}} }},
+		{"foreign_event", func(m *EngineMutation) { m.State.TriggerEventID = eventtest.UUID("other-event") }},
+		{"multiple_causes", func(m *EngineMutation) { m.LifecycleEffects = append(m.LifecycleEffects, effect) }},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			m := EngineMutation{Address: StateAddress{FlowInstance: flowidentity.RunScopedFlowInstance{RunID: runID, Route: route}, EntityID: entityID},
+				PreserveConstructedState: &StateSnapshot{EntityID: entityID, Revision: 1, CurrentState: "waiting"},
+				State:                    StateMutation{TriggerEventID: effect.EventID(), TriggerEventType: effect.EventType(), TriggeredAt: at}, LifecycleEffects: []workflowlifecycle.Effect{effect}}
+			change.apply(&m)
+			if err := m.ValidateTransitionEvidence(); (err == nil) != (change.name == "none") {
+				t.Fatalf("preservation intent validation: %v", err)
+			}
+		})
+	}
+}
 
 type transitionMutationRecorder struct {
 	mutations []EngineMutation
@@ -245,24 +283,18 @@ func TestExecutorCompiledGuardDispositionHasExplicitCause(t *testing.T) {
 	}
 }
 
-func TestExecutorCompiledCreateCarrierRequiresCanonicalInitialStage(t *testing.T) {
+func TestExecutorRejectsRetiredHandlerConstructionBeforeMutation(t *testing.T) {
 	node := testFlowExecutableNode(t, "orders", "creator")
 	handler := contracts.SystemNodeEventHandler{CreateEntity: true, AdvancesTo: "working"}
 	graph := contracts.BuildWorkflowStageTopology("orders", "ready", []string{"ready", "working", "other"}, nil,
-		[]contracts.HandlerTransitionSemantic{{Node: node, EventType: "work.created", CreateEntity: true, AdvancesTo: "working"}}, nil, nil)
+		[]contracts.HandlerTransitionSemantic{{Node: node, EventType: "work.created", AdvancesTo: "working"}}, nil, nil)
 	source := semanticview.Wrap(&contracts.WorkflowContractBundle{Semantics: contracts.WorkflowSemanticView{StageTopologies: map[string]contracts.WorkflowStageTopology{"orders": graph}}})
 	for _, state := range []string{"ready", "", "other"} {
 		t.Run("source_"+state, func(t *testing.T) {
 			exec, recorder := transitionTestExecutor(t, source)
 			result, err := exec.ExecuteSemanticFixture(context.Background(), transitionTestRequest(t, node, "work.created", handler, state))
-			if state != "ready" {
-				if !errors.Is(err, ErrInvalidTransition) || len(recorder.mutations) != 0 {
-					t.Fatalf("arbitrary seed %q: err=%v mutations=%d", state, err, len(recorder.mutations))
-				}
-				return
-			}
-			if err != nil || result.StateMutation.Transition == nil || result.StateMutation.Transition.From() != "ready" || len(recorder.mutations) != 1 {
-				t.Fatalf("canonical initial source: result=%#v err=%v", result, err)
+			if !errors.Is(err, ErrInvalidConfig) || len(recorder.mutations) != 0 || result.Committed {
+				t.Fatalf("retired construction admitted from %q: result=%#v err=%v mutations=%d", state, result, err, len(recorder.mutations))
 			}
 		})
 	}

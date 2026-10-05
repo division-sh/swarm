@@ -18,6 +18,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
@@ -33,8 +34,9 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 				bundle := workflowTimerServedLifecycleBundle(t, state == "advanced" || state == "advanced_cancelled")
 				source := semanticview.Wrap(bundle)
 				identity := testRunScopedWorkflowInstanceForRun(runID, runID)
-				build := func() (*runtimepipeline.PipelineCoordinator, *runtimebus.EventBus, func()) {
+				build := func() (*runtimepipeline.PipelineCoordinator, func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) runtimepipeline.DynamicFlowRuntimeActivationAttempt, func()) {
 					t.Helper()
+					admitAttachment, closeAttachment := newTimerReplayAttachmentOwner(t, ctx, selected)
 					bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, "platform.stage_timer")
 					if err != nil {
 						t.Fatal(err)
@@ -64,20 +66,34 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 							if err := bus.WaitForQuiescence(join); err != nil {
 								t.Error(err)
 							}
+							closeAttachment()
 						})
 					}
 					t.Cleanup(stop)
-					return pc, bus, stop
+					return pc, admitAttachment, stop
 				}
-				pc, _, stop := build()
+				pc, admitAttachment, stop := build()
 				at := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 				instance := runtimepipeline.WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
 					CurrentState: "waiting", EntityType: "test_entity", CreatedAt: at, EnteredStageAt: at,
 				}
-				if result, err := pc.MaterializeInitialEntry(ctx, identity, instance, at); err != nil || result != runtimepipeline.WorkflowInitialMaterializationCreated {
-					t.Fatalf("materialize real initial timer: %v, %v", result, err)
+				initialized, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, identity, instance, at)
+				if err != nil {
+					t.Fatal(err)
 				}
+				construction, err := flowactivationfixture.Command(ctx, initialized, lifecycle, at)
+				if err != nil {
+					t.Fatal(err)
+				}
+				committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, construction)
+				if err != nil || !committed.Acknowledged || !committed.Created {
+					t.Fatalf("commit real initial timer: %+v, %v", committed, err)
+				}
+				if err := pc.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
+					t.Fatal(err)
+				}
+				attempt := admitAttachment(construction.Plan.Readiness)
 				reader := runtimepipeline.WorkflowTimerActivationPersistence(selected)
 				rows, err := reader.ListWorkflowTimerActivations(ctx, runID, entityID, false)
 				if err != nil || len(rows) != 1 {
@@ -87,7 +103,7 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 				cancelTimer := func() {
 					t.Helper()
 					if result, err := reader.CommitWorkflowTimerReconciliation(ctx, runtimepipeline.WorkflowTimerReconciliationCommand{
-						RunID: runID, Route: initial.Route, EntityID: entityID,
+						RunID: runID, Route: initial.Route, EntityID: entityID, ActivationAttempt: &attempt,
 						Plan: runtimepipeline.WorkflowLifecycleMutationPlan{Timers: []runtimepipeline.WorkflowTimerMutation{{Kind: runtimepipeline.WorkflowTimerMutationCancel, Activation: initial}}},
 					}); err != nil || !result.Committed {
 						t.Fatalf("real monotonic cancellation: %+v, %v", result, err)
@@ -117,7 +133,8 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				selected = reopen()
-				pc, _, _ = build()
+				pc, admitAttachment, _ = build()
+				attempt = admitAttachment(construction.Plan.Readiness)
 				reader = selected
 				assertUnchanged := func() {
 					t.Helper()
@@ -130,18 +147,18 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 					}
 				}
 				assertUnchanged()
-				if result, err := pc.MaterializeInitialEntry(ctx, identity, instance, at); err != nil || result != runtimepipeline.WorkflowInitialMaterializationAlreadyExists {
-					t.Fatalf("materialization's earlier exact-replay gate: %v, %v", result, err)
+				if result, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, construction); err != nil || !result.Acknowledged || result.Created || len(result.Lifecycle.Wakeups) != 0 || len(result.Lifecycle.Cancellations) != 0 {
+					t.Fatalf("construction's earlier exact-replay gate: %+v, %v", result, err)
 				}
 				assertUnchanged()
 				for i := 0; i < 2; i++ {
-					if err := pc.ReconcileInitialEntryTimers(ctx, identity); err != nil {
+					if err := pc.ReconcileInitialEntryTimersForAttempt(ctx, identity, attempt, construction.Plan.Readiness); err != nil {
 						t.Fatalf("production declaration reconciliation: %v", err)
 					}
 					assertUnchanged()
 				}
 				command := runtimepipeline.WorkflowTimerReconciliationCommand{
-					RunID: runID, Route: initial.Route, EntityID: entityID,
+					RunID: runID, Route: initial.Route, EntityID: entityID, ActivationAttempt: &attempt,
 					Plan: runtimepipeline.WorkflowLifecycleMutationPlan{Timers: []runtimepipeline.WorkflowTimerMutation{{Kind: runtimepipeline.WorkflowTimerMutationInsert, Activation: initial}}},
 				}
 				start, results := make(chan struct{}), make(chan error, 4)
@@ -164,6 +181,21 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 					t.Fatalf("concurrent exact selected replay: %v", err)
 				}
 				assertUnchanged()
+				t.Run("wrong_attachment_instance", func(t *testing.T) {
+					changed := initial
+					changed.Route = flowidentity.StoredRoute(".", "other", "other")
+					negative := runtimepipeline.WorkflowTimerReconciliationCommand{
+						RunID: runID, Route: changed.Route, EntityID: entityID, ActivationAttempt: &attempt,
+						Plan: runtimepipeline.WorkflowLifecycleMutationPlan{Timers: []runtimepipeline.WorkflowTimerMutation{{Kind: runtimepipeline.WorkflowTimerMutationInsert, Activation: changed}}},
+					}
+					if err := negative.Validate(); err == nil {
+						t.Fatal("foreign instance accepted the exact attachment receipt")
+					}
+					if result, err := reader.CommitWorkflowTimerReconciliation(ctx, negative); err == nil || result.Committed {
+						t.Fatalf("foreign attachment instance committed: %+v, %v", result, err)
+					}
+					assertUnchanged()
+				})
 				for _, test := range []struct {
 					name   string
 					change func(*runtimepipeline.WorkflowTimerActivation)
@@ -177,7 +209,7 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 						a.Ref.Cause = timeridentity.WorkflowTimerActivationCauseEvent
 					}},
 					{"route", func(a *runtimepipeline.WorkflowTimerActivation) {
-						a.Route = flowidentity.StoredRoute(".", "other", "other")
+						a.Route = flowidentity.StoredRoute("other", a.Route.InstanceID, a.Route.InstancePath)
 					}},
 					{"source", func(a *runtimepipeline.WorkflowTimerActivation) {
 						var err error
@@ -200,7 +232,7 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 						candidate.Ref.ActivationID = uuid.NewString()
 						candidate.Ref.DeclarationKey += ".rollback-probe"
 						negative := runtimepipeline.WorkflowTimerReconciliationCommand{
-							RunID: runID, Route: changed.Route, EntityID: entityID,
+							RunID: runID, Route: changed.Route, EntityID: entityID, ActivationAttempt: &attempt,
 							Plan: runtimepipeline.WorkflowLifecycleMutationPlan{Timers: []runtimepipeline.WorkflowTimerMutation{
 								{Kind: runtimepipeline.WorkflowTimerMutationInsert, Activation: candidate},
 								{Kind: runtimepipeline.WorkflowTimerMutationInsert, Activation: changed},

@@ -438,10 +438,8 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 	}
 	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
 	defer unlock()
-	route, err := workflowInstanceRouteForExecution(d.coordinator.SemanticSource(), intent.ExecutionFlowID.String(), intent.FlowInstance)
-	if err != nil {
-		return fmt.Errorf("activity state route: %w", err)
-	}
+	source, flowID := d.coordinator.SemanticSource(), intent.ExecutionFlowID.String()
+	route := runtimeflowidentity.StoredRoute(runtimeflowidentity.ScopeKey(source, flowID), runtimeflowidentity.LogicalInstanceID(intent.FlowInstance), intent.FlowInstance)
 	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(intent.SourceRunID, route)
 	if err != nil {
 		return err
@@ -452,6 +450,12 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 	}
 	current := false
 	if ok {
+		if !workflowInstanceOwnedByFlow(source, instance, flowID, intent.SourceRunID) {
+			return fmt.Errorf("activity state disagrees with its exact constructed owner")
+		}
+		if _, err := requireWorkflowInstanceIdentity(route, intent.EntityID, instance); err != nil {
+			return err
+		}
 		current, err = workflowLoopGenerationCurrent(&instance, intent.Generation, intent.LoopStage)
 	}
 	if err != nil {

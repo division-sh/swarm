@@ -390,6 +390,20 @@ func sourceSetTransitionPending(admission SourceSetTransitionAdmission) bool {
 	}
 }
 
+func sourceSetTransitionTerminalDraining(admission SourceSetTransitionAdmission) bool {
+	if admission == nil {
+		return false
+	}
+	select {
+	case <-admission.TerminalDrain():
+		return true
+	default:
+		return false
+	}
+}
+
+var errSourceSetTransitionTerminalDrain = errors.New("source-set transition terminal drain")
+
 func validateSourceSetTransitionAdmission(admission SourceSetTransitionAdmission) error {
 	if admission == nil {
 		return errors.New("source-set transition admission is required")
@@ -402,6 +416,9 @@ func validateSourceSetTransitionAdmission(admission SourceSetTransitionAdmission
 	}
 	if admission.Done() == nil {
 		return errors.New("source-set transition completion is required")
+	}
+	if admission.TerminalDrain() == nil {
+		return errors.New("source-set transition terminal drain signal is required")
 	}
 	return nil
 }
@@ -416,6 +433,9 @@ func (c *agentLifecycleCoordinator) installSourceSetTransitionAdmission(admissio
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	current := c.sourceSetTransition
+	if sourceSetTransitionTerminalDraining(current) || sourceSetTransitionTerminalDraining(admission) {
+		return errSourceSetTransitionTerminalDrain
+	}
 	if sourceSetTransitionPending(current) {
 		if !resume || current.TransitionID() != admission.TransitionID() ||
 			current.SourceSetRevision() != admission.SourceSetRevision() {
@@ -477,10 +497,16 @@ func (c *agentLifecycleCoordinator) waitForSourceSetTransition() error {
 		c.mu.Lock()
 		admission := c.sourceSetTransition
 		c.mu.Unlock()
+		if sourceSetTransitionTerminalDraining(admission) {
+			return errSourceSetTransitionTerminalDrain
+		}
 		if !sourceSetTransitionPending(admission) {
 			return nil
 		}
-		<-admission.Done()
+		select {
+		case <-admission.Done():
+		case <-admission.TerminalDrain():
+		}
 	}
 }
 
@@ -1909,6 +1935,9 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 		if cell := c.cells[token.Identity.Normalize()]; cell != nil && cell.execution != nil && cell.execution.token == token {
 			cell.execution.settlementErr = resultErr
 		}
+		if resultErr != nil {
+			c.terminalErr = errors.Join(c.terminalErr, fmt.Errorf("agent loop settlement: %w", resultErr))
+		}
 	}()
 	// Route settlement can depend on source-set admission. Join it before
 	// entering the serialization used for the later durable self-finalization.
@@ -1916,7 +1945,7 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 	close(done)
 	var cell *agentLifecycleCell
 	for {
-		if err := c.waitForSourceSetTransition(); err != nil {
+		if err := c.waitForSourceSetTransition(); err != nil && !errors.Is(err, errSourceSetTransitionTerminalDrain) {
 			return err
 		}
 		// Source-set preparation takes the exclusive side before publishing its
@@ -1924,7 +1953,7 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 		// atomic without blocking an ordinary replacement that is joining this loop.
 		c.sourceSetPublishMu.RLock()
 		c.mu.Lock()
-		pending := sourceSetTransitionPending(c.sourceSetTransition)
+		pending := sourceSetTransitionPending(c.sourceSetTransition) && !sourceSetTransitionTerminalDraining(c.sourceSetTransition)
 		c.mu.Unlock()
 		if !pending {
 			break
@@ -2135,7 +2164,7 @@ func (c *agentLifecycleCoordinator) abortUnlaunchedLoopLocked(ctx context.Contex
 	store := c.persistence()
 	if store != nil {
 		_, err = c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
-			OperationID: operationID, OperationKind: "start_failed", RequestHash: requestHash, Identity: cell.identity,
+			OperationID: operationID, OperationKind: "self_release", RequestHash: requestHash, Identity: cell.identity,
 			AgentID: identity.AgentID(), Trigger: "start_failed", ExpectedEpoch: cell.epoch, ExpectedGeneration: cell.generation,
 			ExpectedPhase: cell.phase, TargetEpoch: cell.epoch, TargetGeneration: cell.generation,
 			TargetPhase: AgentLifecycleRegistered, ConfigRevision: cell.configRevision, RunMode: AgentRunModeStopped,

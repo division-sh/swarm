@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -68,11 +69,12 @@ func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 			return err
 		}
 		if string(observedJSON) != string(currentObservationJSON) ||
+			observed.AttemptOrdinal != current.AttemptOrdinal || observed.AttemptState != current.AttemptState ||
 			!observed.OwningRunSource.Matches(current.OwningRunSource) ||
 			strings.TrimSpace(observed.RunStatus) != strings.TrimSpace(current.RunStatus) ||
 			strings.TrimSpace(observed.InstanceStatus) != strings.TrimSpace(current.InstanceStatus) ||
 			!observed.InstanceTerminatedAt.Equal(current.InstanceTerminatedAt) ||
-			!observed.TopologyReadyAt.Equal(current.TopologyReadyAt) ||
+			observed.Phase != current.Phase ||
 			!observed.CreationEventEmittedAt.Equal(current.CreationEventEmittedAt) {
 			return &DynamicFlowRuntimeReadinessObservationConflict{
 				RunID: normalized.RunID, InstancePath: instancePath, Coordinate: "test_observation",
@@ -84,15 +86,15 @@ func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 		if current.Plan.ExecutionMode != normalized.ExecutionMode {
 			return fmt.Errorf("dynamic flow runtime readiness reconciliation execution mode changed for %s", instancePath)
 		}
-		actualJSON, err := canonicaljson.Bytes(current.Plan)
-		if err != nil {
-			return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)
-		}
-		expectedJSON, err := canonicaljson.Bytes(normalized)
+		expectedJSON, err := canonicaljson.MarshalPreservingNumberKinds(normalized)
 		if err != nil {
 			return fmt.Errorf("encode expected dynamic flow runtime readiness %s: %w", instancePath, err)
 		}
-		if string(actualJSON) == string(expectedJSON) {
+		expectedHash, err := normalized.Hash()
+		if err != nil {
+			return err
+		}
+		if current.PlanHash == expectedHash {
 			return nil
 		}
 		if !current.CreationEventEmittedAt.IsZero() {
@@ -108,14 +110,24 @@ func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 				return fmt.Errorf("dynamic flow runtime readiness cannot revise emitted creation occurrence for %s", instancePath)
 			}
 		}
+		ordinal, disposition := current.AttemptOrdinal, "superseded"
+		phase := current.Phase
+		if current.AttemptState != "accepted" && current.AttemptState != "superseded" {
+			if ordinal == math.MaxInt64 {
+				return fmt.Errorf("attachment attempt ordinal exhausted")
+			}
+			ordinal++
+			disposition, phase = "planned", FlowAttachmentPlanned
+		}
 		if s.isSQLite() {
 			result, err := tx.ExecContext(txctx, `
 				UPDATE flow_instance_runtime_readiness
 				SET plan = ?,
-				    topology_ready_at = NULL,
+				    plan_hash = ?, activation_attempt_id = ?, activation_attempt_state = ?, phase = ?,
+				    activation_attempt_grant_id = CASE WHEN ? = 'planned' THEN NULL ELSE activation_attempt_grant_id END,
 				    updated_at = ?
 				WHERE run_id = ? AND instance_path = ?
-			`, expectedJSON, observedAt, normalized.RunID, instancePath)
+			`, expectedJSON, expectedHash, ordinal, disposition, string(phase), disposition, observedAt, normalized.RunID, instancePath)
 			if err != nil {
 				return err
 			}
@@ -130,10 +142,11 @@ func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 			result, err := tx.ExecContext(txctx, `
 				UPDATE flow_instance_runtime_readiness
 				SET plan = $1::jsonb,
-				    topology_ready_at = NULL,
-				    updated_at = $2
-				WHERE run_id = $3::uuid AND instance_path = $4
-			`, expectedJSON, observedAt, normalized.RunID, instancePath)
+				    plan_hash = $2, activation_attempt_id = $3, activation_attempt_state = $4, phase = $5,
+				    activation_attempt_grant_id = CASE WHEN $4 = 'planned' THEN NULL ELSE activation_attempt_grant_id END,
+				    updated_at = $6
+				WHERE run_id = $7::uuid AND instance_path = $8
+			`, expectedJSON, expectedHash, ordinal, disposition, string(phase), observedAt, normalized.RunID, instancePath)
 			if err != nil {
 				return err
 			}
@@ -181,7 +194,7 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 	}
 	instancePath := route.InstancePath
 	query := `
-		SELECT readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at,
+		SELECT readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.activation_attempt_state, readiness.phase, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
@@ -191,7 +204,7 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 	`
 	if s.isSQLite() {
 		query = `
-			SELECT readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at,
+			SELECT readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.activation_attempt_state, readiness.phase, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
@@ -201,17 +214,20 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 		`
 	}
 	var raw []byte
-	var bundleHash, runStatus, instanceStatus string
-	var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt dynamicFlowRuntimeReadinessTime
+	var bundleHash, runStatus, instanceStatus, planHash string
+	var creationEventEmittedAt, instanceTerminatedAt dynamicFlowRuntimeReadinessTime
+	var phase FlowAttachmentPhase
+	var ordinal uint64
+	var disposition string
 	var err error
 	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
 		err = tx.QueryRowContext(ctx, query, runID, instancePath).Scan(
-			&raw, &topologyReadyAt, &creationEventEmittedAt,
+			&raw, &planHash, &ordinal, &disposition, &phase, &creationEventEmittedAt,
 			&bundleHash, &runStatus, &instanceStatus, &instanceTerminatedAt,
 		)
 	} else {
 		err = dbQueryRowContext(ctx, s.testDB(), query, runID, instancePath).Scan(
-			&raw, &topologyReadyAt, &creationEventEmittedAt,
+			&raw, &planHash, &ordinal, &disposition, &phase, &creationEventEmittedAt,
 			&bundleHash, &runStatus, &instanceStatus, &instanceTerminatedAt,
 		)
 	}
@@ -222,10 +238,11 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 		return DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("load dynamic flow runtime readiness %s: %w", instancePath, err)
 	}
 	item, err := decodeDynamicFlowRuntimeReadiness(
-		runID, instancePath, raw, runStatus, instanceStatus, instanceTerminatedAt,
-		topologyReadyAt, creationEventEmittedAt,
+		runID, instancePath, raw, planHash, runStatus, instanceStatus, instanceTerminatedAt,
+		phase, creationEventEmittedAt,
 	)
 	if err == nil {
+		item.AttemptOrdinal, item.AttemptState = ordinal, disposition
 		item.OwningRunSource, err = runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	}
 	return item, err == nil, err
@@ -236,8 +253,8 @@ func (s *workflowInstanceStore) legacyQueryAllDynamicFlowRuntimeReadiness(ctx co
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
 	query := `
-		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan,
-		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.activation_attempt_state,
+		       readiness.phase, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
@@ -249,8 +266,8 @@ func (s *workflowInstanceStore) legacyQueryAllDynamicFlowRuntimeReadiness(ctx co
 	`
 	if s.isSQLite() {
 		query = `
-			SELECT readiness.run_id, readiness.instance_path, readiness.plan,
-			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+			SELECT readiness.run_id, readiness.instance_path, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.activation_attempt_state,
+			       readiness.phase, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
@@ -270,18 +287,21 @@ func (s *workflowInstanceStore) legacyQueryAllDynamicFlowRuntimeReadiness(ctx co
 	for rows.Next() {
 		var runID, instancePath string
 		var raw []byte
-		var bundleHash, runStatus, instanceStatus string
-		var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt dynamicFlowRuntimeReadinessTime
+		var bundleHash, runStatus, instanceStatus, planHash string
+		var creationEventEmittedAt, instanceTerminatedAt dynamicFlowRuntimeReadinessTime
+		var phase FlowAttachmentPhase
+		var ordinal uint64
+		var disposition string
 		if err := rows.Scan(
-			&runID, &instancePath, &raw,
-			&topologyReadyAt, &creationEventEmittedAt,
+			&runID, &instancePath, &raw, &planHash, &ordinal, &disposition,
+			&phase, &creationEventEmittedAt,
 			&bundleHash, &runStatus, &instanceStatus, &instanceTerminatedAt,
 		); err != nil {
 			return nil, err
 		}
 		item, err := decodeDynamicFlowRuntimeReadiness(
-			runID, instancePath, raw, runStatus, instanceStatus, instanceTerminatedAt,
-			topologyReadyAt, creationEventEmittedAt,
+			runID, instancePath, raw, planHash, runStatus, instanceStatus, instanceTerminatedAt,
+			phase, creationEventEmittedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -290,6 +310,7 @@ func (s *workflowInstanceStore) legacyQueryAllDynamicFlowRuntimeReadiness(ctx co
 		if err != nil {
 			return nil, err
 		}
+		item.AttemptOrdinal, item.AttemptState = ordinal, disposition
 		out = append(out, item)
 	}
 	return out, rows.Err()
@@ -312,7 +333,7 @@ func (s *workflowInstanceStore) legacyMarkDynamicFlowRuntimeTopologyReady(
 		ctx,
 		normalized.RunID,
 		normalized.Identity.InstancePath,
-		"topology_ready_at",
+		"phase",
 		expectedJSON,
 		readyAt,
 	)
@@ -320,9 +341,9 @@ func (s *workflowInstanceStore) legacyMarkDynamicFlowRuntimeTopologyReady(
 
 // These test-only methods construct committed topology fixtures without
 // granting execution authority. Production completion requires an attempt.
-func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReadyFixture(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, at time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
+func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReadyFixture(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, at time.Time) (FlowAttachmentAdvanceResult, error) {
 	err := s.legacyMarkDynamicFlowRuntimeTopologyReady(ctx, plan, at)
-	return DynamicFlowRuntimeTopologyReadyResult{Acknowledged: err == nil}, err
+	return FlowAttachmentAdvanceResult{Acknowledged: err == nil}, err
 }
 
 func (s *workflowInstanceStore) lockDynamicFlowRuntimeCreationEligibility(
@@ -394,7 +415,7 @@ func (s *workflowInstanceStore) markDynamicFlowRuntimeReadiness(
 	if instancePath == "" || observedAt.IsZero() {
 		return fmt.Errorf("dynamic flow runtime readiness transition requires exact instance and time")
 	}
-	if column != "topology_ready_at" && column != "creation_event_emitted_at" {
+	if column != "phase" && column != "creation_event_emitted_at" {
 		return fmt.Errorf("unsupported dynamic flow runtime readiness transition")
 	}
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -403,12 +424,16 @@ func (s *workflowInstanceStore) markDynamicFlowRuntimeReadiness(
 		if s.isSQLite() {
 			query := `UPDATE flow_instance_runtime_readiness SET ` + column + ` = COALESCE(` + column + `, ?), updated_at = ? WHERE run_id = ? AND instance_path = ?`
 			args := []any{observedAt, observedAt, runID, instancePath}
+			if column == "phase" {
+				query = `UPDATE flow_instance_runtime_readiness SET phase = 'ready', activation_attempt_state = 'retired', activation_attempt_grant_id = ?, updated_at = ? WHERE run_id = ? AND instance_path = ?`
+				args = []any{uuid.NewString(), observedAt, runID, instancePath}
+			}
 			if len(expectedPlan) != 0 {
 				query += ` AND plan = ?`
 				args = append(args, expectedPlan)
 			}
 			if column == "creation_event_emitted_at" {
-				query += ` AND topology_ready_at IS NOT NULL`
+				query += ` AND phase = 'ready'`
 			}
 			query += `
 				AND EXISTS (
@@ -425,12 +450,16 @@ func (s *workflowInstanceStore) markDynamicFlowRuntimeReadiness(
 		} else {
 			query := `UPDATE flow_instance_runtime_readiness SET ` + column + ` = COALESCE(` + column + `, $1), updated_at = $1 WHERE run_id = $2::uuid AND instance_path = $3`
 			args := []any{observedAt, runID, instancePath}
+			if column == "phase" {
+				query = `UPDATE flow_instance_runtime_readiness SET phase = 'ready', activation_attempt_state = 'retired', activation_attempt_grant_id = $1::uuid, updated_at = $2 WHERE run_id = $3::uuid AND instance_path = $4`
+				args = []any{uuid.NewString(), observedAt, runID, instancePath}
+			}
 			if len(expectedPlan) != 0 {
-				query += ` AND plan = $4::jsonb`
+				query += fmt.Sprintf(` AND plan = $%d::jsonb`, len(args)+1)
 				args = append(args, expectedPlan)
 			}
 			if column == "creation_event_emitted_at" {
-				query += ` AND topology_ready_at IS NOT NULL`
+				query += ` AND phase = 'ready'`
 			}
 			query += `
 				AND EXISTS (

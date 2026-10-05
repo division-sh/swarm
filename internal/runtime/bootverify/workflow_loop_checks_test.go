@@ -234,7 +234,7 @@ func refreshLoopValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 	transitions := make([]runtimecontracts.HandlerTransitionSemantic, 0)
 	for eventType, handler := range bundle.Nodes["controller"].EventHandlers {
 		transitions = append(transitions, runtimecontracts.HandlerTransitionSemantic{
-			ID: eventType, Node: controller, EventType: eventType, CreateEntity: handler.CreateEntity,
+			ID: eventType, Node: controller, EventType: eventType,
 			AdvancesTo: handler.AdvancesTo, Emit: handler.Emit, Loop: handler.Loop, OnComplete: handler.OnComplete,
 			Rules: handler.Rules, Accumulate: handler.Accumulate, Join: handler.Join,
 		})

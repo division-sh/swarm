@@ -4,7 +4,6 @@ search-intake:
   produces: [scout.requested]
   event_handlers:
     search.requested:
-      create_entity: true
       advances_to: scouting
       emit:
         event: scout.requested

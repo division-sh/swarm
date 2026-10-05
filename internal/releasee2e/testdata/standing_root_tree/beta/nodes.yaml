@@ -1,0 +1,10 @@
+observer:
+  execution_type: system_node
+  subscribes_to: [inbound.telegram, inbound.telegram.text_message, inbound.telegram.callback_action]
+  event_handlers:
+    inbound.telegram:
+      guard: {id: admit, check: 'true'}
+    inbound.telegram.text_message:
+      guard: {id: admit, check: 'true'}
+    inbound.telegram.callback_action:
+      guard: {id: admit, check: 'true'}

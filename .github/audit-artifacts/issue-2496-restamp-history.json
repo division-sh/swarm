@@ -1,0 +1,2171 @@
+{
+  "boundary": "Historical development receipts only. Includes composed race package timeout, pre-repair and malformed-fixture REDs, physical-COMMIT fixture expectation REDs, cancelled queued default with zero executions and wrong-package zero-test PASS. None is final qualification or an omitted-cell waiver.",
+  "receipts": [
+    {
+      "artifact": "issue-2496-restamp-history-ack-creation-corrected.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "d2d47da888c9b647b5eb7eaedb338d59fb905535b7c9d6c9a7498545c882f77c",
+      "bytes_uncompressed": 11388,
+      "root_outcomes": {
+        "pass": 3
+      },
+      "failed": [],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "action": "pass",
+          "elapsed": 0.009
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "pass",
+          "elapsed": 2.982
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-complexity.log.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "8334325bd90e033a5e1e9ae5ba51e7cf6a7f98b2206433043ae87b25270a369b",
+      "bytes_uncompressed": 449039,
+      "root_outcomes": {},
+      "failed": [],
+      "package_results": [],
+      "has_test_execution": false
+    },
+    {
+      "artifact": "issue-2496-restamp-history-composed-race.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "a3c6b90ffbceff50f57ae3579705f9787659e157cd16dfea3a8d000aa8e4ddb9",
+      "bytes_uncompressed": 288096,
+      "root_outcomes": {
+        "pass": 62
+      },
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime"
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/startupownership",
+          "action": "pass",
+          "elapsed": 1.228
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 6.151
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "action": "pass",
+          "elapsed": 1.303
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "action": "pass",
+          "elapsed": 2.832
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "pass",
+          "elapsed": 112.994
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "fail",
+          "elapsed": 600.067
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-creation.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "14d9dbf715de77bbd30f2c1005f20d9f95a899087fa9efcd807e7b2a2cfbf567",
+      "bytes_uncompressed": 10260,
+      "root_outcomes": {
+        "pass": 1,
+        "fail": 1
+      },
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowCreationSourceSetRebindBothStores/sqlite/pending"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowCreationSourceSetRebindBothStores/postgres/pending"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowCreationSourceSetRebindBothStores"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "action": "pass",
+          "elapsed": 0.009
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "fail",
+          "elapsed": 2.29
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-describe-red.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "6d2dfb501111ec836659ccabc8efa64589faf231f01ff22b0b85e9286a3240c2",
+      "bytes_uncompressed": 14140763,
+      "root_outcomes": {
+        "fail": 1
+      },
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-graph-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-graph-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/internal/releasee2e/testdata/golden_agent_workload/describe-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-graph-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/fan-in/barrier/describe-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/integrations/telegram-agent/describe-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-graph-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-create-minted-key/describe-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-graph-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe/examples/routing/template-select-or-create/describe-json"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp"
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "action": "fail",
+          "elapsed": 90.201
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-initial.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "36c52bc63c3594b05df18b9ab100f2e0913a8d2b4ae2258bc858386c357a602b",
+      "bytes_uncompressed": 17165,
+      "root_outcomes": {
+        "pass": 5,
+        "fail": 2
+      },
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores/sqlite"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores/postgres"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "fail",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/startupownership",
+          "action": "pass",
+          "elapsed": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "fail",
+          "elapsed": 0.188
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "fail",
+          "elapsed": 2.168
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-managed-default.log.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "34edae7f7e484c9419e4ad7ef4368e29c702cad64b22935d2e2dfca46bb711fe",
+      "bytes_uncompressed": 1597714,
+      "root_outcomes": {},
+      "failed": [],
+      "package_results": [],
+      "has_test_execution": false
+    },
+    {
+      "artifact": "issue-2496-restamp-history-native-ack.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "0e0706794c23cc9780fbeccc75ef6596bd63e5c7e5796d1d1716de5ee3fcd437",
+      "bytes_uncompressed": 6400,
+      "root_outcomes": {
+        "fail": 1
+      },
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeLostAckAfterRebindBothStores/postgres"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeLostAckAfterRebindBothStores"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "fail",
+          "elapsed": 1.645
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-native-current-writer.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "a2702beff456af6cb7afd796e4021c119df99f02388b90737731a5ffd3d42768",
+      "bytes_uncompressed": 10735,
+      "root_outcomes": {
+        "pass": 2
+      },
+      "failed": [],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 34.392
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-native-failure-closed-fixture.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "382ee1ed5d09f4eb271e176bb8e26e4adc2cc02f9e31cca6d94e92d2bf78b8af",
+      "bytes_uncompressed": 53927,
+      "root_outcomes": {
+        "fail": 2
+      },
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_false"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_true"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_false"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_true"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_false"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_true"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_false"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_true"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime"
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "fail",
+          "elapsed": 15.69
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-native-failure.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "f3c9c5a78385379c52247d439821fd7928a4abe6aaa3659f50cb81b96d21ed21",
+      "bytes_uncompressed": 14539,
+      "root_outcomes": {
+        "fail": 2
+      },
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_false"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_true"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_false"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_true"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_false"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_true"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_false"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_true"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores"
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime"
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "fail",
+          "elapsed": 0.029
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-phases-compiled.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "851daa5c3a684bf06451d5b489d9821b016e02419a76641f8f474e7e076dab38",
+      "bytes_uncompressed": 14229,
+      "root_outcomes": {
+        "pass": 1
+      },
+      "failed": [],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "pass",
+          "elapsed": 1.845
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-phases.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "3b2463fe38d02fb8ffce5cfcbdef33eca292eb6d314041d8e0438390cca6629e",
+      "bytes_uncompressed": 2519,
+      "root_outcomes": {},
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "fail",
+          "elapsed": 0
+        }
+      ],
+      "has_test_execution": false
+    },
+    {
+      "artifact": "issue-2496-restamp-history-preparation.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "c50a6996fe2de2dbeecbdeaeefc167debf02bb94af202bce733c74e7f939929a",
+      "bytes_uncompressed": 22187,
+      "root_outcomes": {
+        "pass": 4
+      },
+      "failed": [],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "action": "pass",
+          "elapsed": 0.011
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "pass",
+          "elapsed": 3.052
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-second.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "d417e306908d236b8b0764b598aeceaaa6d889920534d638e38bb4af1a8b0f40",
+      "bytes_uncompressed": 21687,
+      "root_outcomes": {
+        "pass": 9
+      },
+      "failed": [],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/startupownership",
+          "action": "pass",
+          "elapsed": 0.009
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 0.201
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 12.616
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "pass",
+          "elapsed": 2.873
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-strengthened.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "a36712395147bca05bd84fe95c9f1b591eb80b03a00985b139db580586df1241",
+      "bytes_uncompressed": 70554,
+      "root_outcomes": {
+        "pass": 17
+      },
+      "failed": [],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "action": "pass",
+          "elapsed": 0.014
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 0.209
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "pass",
+          "elapsed": 9.232
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 72.121
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-describe-wrong-package-no-tests.jsonl.gz",
+      "source": "working-tree development before the final 391e3678a qualification; not exact-head proof",
+      "sha256_uncompressed": "3018b6254d3cae05f2b84e62da4619ef0dce9eeada7fa7e5781928c2ec7d4001",
+      "bytes_uncompressed": 1066,
+      "root_outcomes": {},
+      "failed": [],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/releasee2e",
+          "action": "pass",
+          "elapsed": 0.006
+        }
+      ],
+      "has_test_execution": false
+    },
+    {
+      "artifact": "issue-2496-restamp-history-default-391-red.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "sha256_uncompressed": "7f4f6c39d3a4de74eebfee029fdd15f453584f0abae3b53521c3298f17878476",
+      "bytes_uncompressed": 31736393,
+      "root_outcomes": {
+        "pass": 5076,
+        "fail": 2,
+        "skip": 5
+      },
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions/branch",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions/branch/left",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/exact",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/mixed_static_associations",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/reordered_associations",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/mock_process",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/missing_process_posture",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/duplicate_entity",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/contradictory_entity",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/wrong_entity_type",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/missing_event_mode",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer/exact",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer/mixed_static_associations",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer/reordered_associations",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer/mock_process",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer/missing_process_posture",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer/duplicate_entity",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer/contradictory_entity",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer/wrong_entity_type",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer/missing_event_mode",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/producer",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left/exact",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left/mixed_static_associations",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left/reordered_associations",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left/mock_process",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left/missing_process_posture",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left/duplicate_entity",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left/contradictory_entity",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left/wrong_entity_type",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left/missing_event_mode",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/left",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right/exact",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right/mixed_static_associations",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right/reordered_associations",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right/mock_process",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right/missing_process_posture",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right/duplicate_entity",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right/contradictory_entity",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right/wrong_entity_type",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right/missing_event_mode",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations/branch/right",
+          "elapsed": 0.04
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "test": "TestSelectedForkWorkflowOwnerAssociations",
+          "elapsed": 0.53
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "elapsed": 74.491
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/cmd/swarm",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/cmd/swarm-openapi-gen",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/cmd/swarm-openrpc-gen",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/cmd/swarm-provider-trigger-pack-gen",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/apiidempotency",
+          "action": "pass",
+          "elapsed": 0.004
+        },
+        {
+          "package": "github.com/division-sh/swarm/cmd/swarm-test-changed",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/checkoutsource",
+          "action": "pass",
+          "elapsed": 0.016
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cli/readwindow",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cli/argcount",
+          "action": "pass",
+          "elapsed": 0.013
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/channelonboarding",
+          "action": "pass",
+          "elapsed": 0.197
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/config",
+          "action": "pass",
+          "elapsed": 0.037
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/events/eventtest",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/durabledata",
+          "action": "pass",
+          "elapsed": 0.5
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/mailbox",
+          "action": "pass",
+          "elapsed": 0.375
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/operatorread",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/packruntime",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/packmodel",
+          "action": "pass",
+          "elapsed": 0.197
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/packadmission",
+          "action": "pass",
+          "elapsed": 0.768
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/operatorchannel",
+          "action": "pass",
+          "elapsed": 0.786
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/packartifact",
+          "action": "pass",
+          "elapsed": 0.896
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/apispec",
+          "action": "pass",
+          "elapsed": 6.121
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/events",
+          "action": "pass",
+          "elapsed": 7.61
+        },
+        {
+          "package": "github.com/division-sh/swarm/cmd/swarm-complexity",
+          "action": "pass",
+          "elapsed": 19.157
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/activityresult",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/accumulator",
+          "action": "pass",
+          "elapsed": 0.022
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/platform",
+          "action": "pass",
+          "elapsed": 0.054
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/agentframe",
+          "action": "pass",
+          "elapsed": 0.382
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/accprojection",
+          "action": "pass",
+          "elapsed": 0.401
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/agentcontrol",
+          "action": "pass",
+          "elapsed": 0.446
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/agentmemory",
+          "action": "pass",
+          "elapsed": 0.007
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/agentintent",
+          "action": "pass",
+          "elapsed": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/providertriggers",
+          "action": "pass",
+          "elapsed": 1.917
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/authoractivity",
+          "action": "pass",
+          "elapsed": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/agenttopology",
+          "action": "pass",
+          "elapsed": 0.018
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/agents",
+          "action": "pass",
+          "elapsed": 0.398
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/packs",
+          "action": "pass",
+          "elapsed": 4.594
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/authority",
+          "action": "pass",
+          "elapsed": 0.374
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/providerconnectors",
+          "action": "pass",
+          "elapsed": 9.719
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/authoringview",
+          "action": "pass",
+          "elapsed": 6.081
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/budgetspend",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/bus/bustest",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/canonicaljson",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/channelnative",
+          "action": "pass",
+          "elapsed": 0.027
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/channelactivation",
+          "action": "pass",
+          "elapsed": 0.053
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/channeldelivery",
+          "action": "pass",
+          "elapsed": 0.109
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/computemodule",
+          "action": "pass",
+          "elapsed": 0.239
+        },
+        {
+          "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+          "action": "pass",
+          "elapsed": 34.832
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/activityidentity",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/bundleidentity",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/attemptgeneration",
+          "action": "pass",
+          "elapsed": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/containeridentity",
+          "action": "pass",
+          "elapsed": 0.014
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/actors",
+          "action": "pass",
+          "elapsed": 0.014
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/agentidentity",
+          "action": "pass",
+          "elapsed": 0.018
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/eventidentity",
+          "action": "pass",
+          "elapsed": 0.021
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/eventreceiver",
+          "action": "pass",
+          "elapsed": 0.022
+        },
+        {
+          "package": "github.com/division-sh/swarm/cmd/swarm-unused",
+          "action": "pass",
+          "elapsed": 37.668
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/identitytest",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/ownership",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/managedexecution",
+          "action": "pass",
+          "elapsed": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/forkpoint",
+          "action": "pass",
+          "elapsed": 0.011
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/manifesthash",
+          "action": "pass",
+          "elapsed": 0.011
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/handlerselection",
+          "action": "pass",
+          "elapsed": 0.022
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/flowidentity",
+          "action": "pass",
+          "elapsed": 0.026
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/managedcapabilities",
+          "action": "pass",
+          "elapsed": 0.027
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/identity",
+          "action": "pass",
+          "elapsed": 0.028
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/forkrecipient",
+          "action": "pass",
+          "elapsed": 0.101
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/paths",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/packidentity",
+          "action": "pass",
+          "elapsed": 0.009
+        },
+        {
+          "package": "github.com/division-sh/swarm/cmd/swarm-test",
+          "action": "pass",
+          "elapsed": 40.781
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/processbinding",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/sharding",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/state",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/toolcapabilities",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/timeridentity",
+          "action": "pass",
+          "elapsed": 0.009
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/toolidentity",
+          "action": "pass",
+          "elapsed": 0.004
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/registry",
+          "action": "pass",
+          "elapsed": 0.017
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/provideroutput",
+          "action": "pass",
+          "elapsed": 0.018
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/values",
+          "action": "pass",
+          "elapsed": 0.004
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/correlation",
+          "action": "pass",
+          "elapsed": 0.017
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/deadletters",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/currentstate",
+          "action": "pass",
+          "elapsed": 0.022
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/dataaccess",
+          "action": "pass",
+          "elapsed": 0.067
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/worklifetime",
+          "action": "pass",
+          "elapsed": 4.476
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/credentials",
+          "action": "pass",
+          "elapsed": 1.224
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/core/pinrouting",
+          "action": "pass",
+          "elapsed": 7.2620000000000005
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/decisioncard",
+          "action": "pass",
+          "elapsed": 25.685
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/diaglog",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/effects/effecttest",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/destructivereset",
+          "action": "pass",
+          "elapsed": 0.26
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/effects",
+          "action": "pass",
+          "elapsed": 2.58
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/deliverylifecycle",
+          "action": "pass",
+          "elapsed": 3.086
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/bootverify",
+          "action": "pass",
+          "elapsed": 54.645
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/entityquery",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/executionmode",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/eventpayload",
+          "action": "pass",
+          "elapsed": 0.002
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/executionposture",
+          "action": "pass",
+          "elapsed": 0.003
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/flowmodel",
+          "action": "pass",
+          "elapsed": 0.004
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/failures",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/fanoutbarrier",
+          "action": "pass",
+          "elapsed": 0.017
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/entityruntime",
+          "action": "pass",
+          "elapsed": 0.022
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/fanoutobligation",
+          "action": "pass",
+          "elapsed": 0.085
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/eventschema",
+          "action": "pass",
+          "elapsed": 0.196
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/flowdata",
+          "action": "pass",
+          "elapsed": 0.387
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/gateruntime",
+          "action": "pass",
+          "elapsed": 0.009
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/ingress",
+          "action": "pass",
+          "elapsed": 0.009
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/lifecycleprobe",
+          "action": "pass",
+          "elapsed": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/llm/selection",
+          "action": "pass",
+          "elapsed": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/joinruntime",
+          "action": "pass",
+          "elapsed": 0.014
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest",
+          "action": "pass",
+          "elapsed": 0.016
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/loopruntime",
+          "action": "pass",
+          "elapsed": 0.016
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/inboundpublication",
+          "action": "pass",
+          "elapsed": 0.061
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/genericschedule",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/managedcredentials/model",
+          "action": "pass",
+          "elapsed": 0.006
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/managedcredentials",
+          "action": "pass",
+          "elapsed": 0.561
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/engine",
+          "action": "pass",
+          "elapsed": 14.096
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/mockperformance",
+          "action": "pass",
+          "elapsed": 0.048
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/mutationlog",
+          "action": "pass",
+          "elapsed": 0.061
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/mcp",
+          "action": "pass",
+          "elapsed": 9.011
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/platformcontext",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/pythonmodule/internal/genartifactmanifest",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runbundle",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/plangeneration",
+          "action": "pass",
+          "elapsed": 0.013
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/pipelineobligation",
+          "action": "pass",
+          "elapsed": 0.017
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/replycontext",
+          "action": "pass",
+          "elapsed": 0.054
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/requiredagents",
+          "action": "pass",
+          "elapsed": 0.054
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/registration",
+          "action": "pass",
+          "elapsed": 0.586
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/publicingress",
+          "action": "pass",
+          "elapsed": 4.077
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/routingtopology",
+          "action": "pass",
+          "elapsed": 4.482
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runcontrol",
+          "action": "pass",
+          "elapsed": 0.025
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runfork",
+          "action": "pass",
+          "elapsed": 0.048
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/pythonmodule",
+          "action": "pass",
+          "elapsed": 14.043
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runquiescence",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runlifecycle",
+          "action": "pass",
+          "elapsed": 0.015
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runstalled",
+          "action": "pass",
+          "elapsed": 0.015
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/scenarioexecution",
+          "action": "pass",
+          "elapsed": 0.033
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/semanticvalue",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/scenariodocument",
+          "action": "pass",
+          "elapsed": 0.817
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/scenarioderivation",
+          "action": "pass",
+          "elapsed": 1.21
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runstart",
+          "action": "pass",
+          "elapsed": 3.091
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/semanticviewtest",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/sharedjson",
+          "action": "pass",
+          "elapsed": 0.002
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/startuprecovery",
+          "action": "pass",
+          "elapsed": 0.013
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkadmission",
+          "action": "pass",
+          "elapsed": 9.809
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testcases",
+          "action": "pass",
+          "elapsed": 2.045
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/startupownership",
+          "action": "pass",
+          "elapsed": 3.9779999999999998
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+          "action": "pass",
+          "elapsed": 12.18
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/sessions",
+          "action": "pass",
+          "elapsed": 5.051
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/timerobligation",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/timercancellation",
+          "action": "pass",
+          "elapsed": 0.004
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/toolgateway",
+          "action": "pass",
+          "elapsed": 0.037
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot",
+          "action": "pass",
+          "elapsed": 0.222
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 56.85
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/turnactivity",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/workflowroute",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/servedparity",
+          "action": "pass",
+          "elapsed": 0.012
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/triggergeneration",
+          "action": "pass",
+          "elapsed": 0.024
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/workflowlifecycle",
+          "action": "pass",
+          "elapsed": 0.036
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/workspace",
+          "action": "pass",
+          "elapsed": 0.97
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/backendselection",
+          "action": "pass",
+          "elapsed": 0.011
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/sourceartifact",
+          "action": "pass",
+          "elapsed": 0.872
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/construction",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/adminpersistence",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/eventfixture",
+          "action": "pass",
+          "elapsed": 0.062
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/activityresult",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal",
+          "action": "pass",
+          "elapsed": 0.012
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/apiidempotency",
+          "action": "pass",
+          "elapsed": 7.172
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/decisioncard",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/devscratch",
+          "action": "pass",
+          "elapsed": 8.842
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery",
+          "action": "pass",
+          "elapsed": 0.47
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity",
+          "action": "pass",
+          "elapsed": 3.91
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence",
+          "action": "pass",
+          "elapsed": 4.352
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence",
+          "action": "pass",
+          "elapsed": 0.018
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/effects",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence",
+          "action": "pass",
+          "elapsed": 2.911
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord",
+          "action": "pass",
+          "elapsed": 1.7389999999999999
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime",
+          "action": "pass",
+          "elapsed": 2.803
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/fanoutorigin",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/gateroute",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence",
+          "action": "pass",
+          "elapsed": 2.871
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog",
+          "action": "pass",
+          "elapsed": 0.009
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite",
+          "action": "pass",
+          "elapsed": 4.808
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule",
+          "action": "pass",
+          "elapsed": 3.068
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence",
+          "action": "pass",
+          "elapsed": 3.044
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel",
+          "action": "skip",
+          "elapsed": 0.003
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/delivery",
+          "action": "pass",
+          "elapsed": 16.947
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol",
+          "action": "pass",
+          "elapsed": 5.178
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/replycontext",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runstate",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/sessions",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle",
+          "action": "pass",
+          "elapsed": 0.012
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting",
+          "action": "pass",
+          "elapsed": 86.729
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/transactiontest",
+          "action": "pass",
+          "elapsed": 0.021
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/budgetspend",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/workflowexpr",
+          "action": "pass",
+          "elapsed": 53.639
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer",
+          "action": "pass",
+          "elapsed": 2.617
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/failurecodec",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/ingresspersistence",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/routingrules",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/operatorsurface",
+          "action": "pass",
+          "elapsed": 0.025
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision",
+          "action": "pass",
+          "elapsed": 14.429
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runhandoff",
+          "action": "pass",
+          "elapsed": 0.004
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence/internal/genfacade",
+          "action": "pass",
+          "elapsed": 0.128
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runbundle",
+          "action": "pass",
+          "elapsed": 1.763
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/sourceartifact",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/durabledata",
+          "action": "pass",
+          "elapsed": 10.638
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/tools",
+          "action": "pass",
+          "elapsed": 66.951
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/storeerrors",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/workflowentityquery",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/workflowheader",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/workflowroute",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/platformschema",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/testsql",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/testutil/agentfixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/testutil/mutationlogfixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testchanged",
+          "action": "pass",
+          "elapsed": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/selected",
+          "action": "pass",
+          "elapsed": 2.26
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testtiming",
+          "action": "pass",
+          "elapsed": 7.926
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/storetest",
+          "action": "pass",
+          "elapsed": 11.039
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil/flowactivationfixture",
+          "action": "pass",
+          "elapsed": 0.021
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil/flowroutefixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil/packfixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/schemastore",
+          "action": "pass",
+          "elapsed": 22.402
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil/replayconformance",
+          "action": "pass",
+          "elapsed": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil/stagecatalogfixture",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil/sourceartifactfixture",
+          "action": "pass",
+          "elapsed": 0.005
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil/telegramapi",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/postgres",
+          "action": "pass",
+          "elapsed": 49.315
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/versionmetadata",
+          "action": "pass",
+          "elapsed": 0.005
+        },
+        {
+          "package": "github.com/division-sh/swarm/packs",
+          "action": "skip",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/yamlsource",
+          "action": "pass",
+          "elapsed": 0.267
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/startupownership",
+          "action": "pass",
+          "elapsed": 29.328
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/semanticview",
+          "action": "pass",
+          "elapsed": 140.356
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/sqlite",
+          "action": "pass",
+          "elapsed": 54.635
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "action": "pass",
+          "elapsed": 29.316
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/userfacing",
+          "action": "pass",
+          "elapsed": 15.897
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testutil",
+          "action": "pass",
+          "elapsed": 31.78
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence",
+          "action": "pass",
+          "elapsed": 75.196
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+          "action": "fail",
+          "elapsed": 74.491
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+          "action": "pass",
+          "elapsed": 253.718
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+          "action": "pass",
+          "elapsed": 385.926
+        }
+      ],
+      "has_test_execution": true
+    },
+    {
+      "artifact": "issue-2496-restamp-history-attachment-sqlite-timeout.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "sha256_uncompressed": "27e1803c1a6470519d3818b9cb6a7d926c5e9bd6697acf7354eccdb57737342f",
+      "bytes_uncompressed": 288345,
+      "root_outcomes": {
+        "pass": 33,
+        "fail": 0,
+        "skip": 0
+      },
+      "failed": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "elapsed": 600.047
+        }
+      ],
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "fail",
+          "elapsed": 600.047
+        }
+      ],
+      "has_test_execution": true
+    }
+  ]
+}

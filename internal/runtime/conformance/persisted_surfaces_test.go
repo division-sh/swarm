@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
@@ -1339,9 +1340,11 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	module := loadConformanceWorkflowFixtureModule(t, filepath.Join("..", "..", "..", "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
+	fact := conformanceSourceArtifactFact(t, module.SemanticSource())
+	bundle, _ := runtimesemanticview.Bundle(module.SemanticSource())
+	ctx = testAuthorActivityContextForBundle(ctx, fact)
 	runID := uuid.NewString()
-	managerStore := &conformanceManagerReplayStore{}
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash(), Artifact: bundle.SourceArtifact})
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
@@ -1356,7 +1359,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
 		RunLifecycleCandidates:      pg,
 		RuntimeLogStore:             pg,
-		ManagerStore:                managerStore,
+		ManagerStore:                pg,
 		ManagerLifecycleDiagnostics: pg,
 		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
 		SessionResetter:             pg,
@@ -1368,13 +1371,13 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 			WorkflowModule:     module,
 			LLMRuntime:         conformanceNoopLLMRuntime{},
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
-			SourceArtifactFact: authorActivityTestSourceArtifactFact,
+			SourceArtifactFact: fact,
 		})}))
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	bundleHash := fact.BundleHash()
 	desiredAgents, err := rt.Manager.CompileStaticTopologyDesiredAgents(module.SemanticSource(), runtimeagenttopology.SourceCoordinate{
 		BundleHash: bundleHash,
 	})
@@ -1421,15 +1424,30 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		return conformanceManagerReplayAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		BaseContext:        ctx,
+		SourceArtifactFact: fact,
 		SemanticSource:     module.SemanticSource(),
+		WorkflowInstances:  rt.Pipeline,
 		WorkOwner:          rt.WorkOccurrence(),
 		DeliveryStore:      pg,
 		SessionResetter:    pg,
 		PersistenceRoles:   conformanceManagerPersistenceRoles(pg, rt.Bus, rt.Pipeline), ReceiverExecution: eventreceiver.NormalExecution(),
-	}, managerStore)
+	}, pg)
 	rt.Bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(rt.Manager.FinalizeCommittedAgentReadiness))
 	installConformanceRuntimeStartupGrant(t, ctx, pg, rt)
+	constructionCtx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
+	plan, err := rt.Manager.PrepareFlowInstanceActivation(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: module.SemanticSource(), Instance: runtimeflowidentity.Stored(module.SemanticSource(), ".", runID, runID, runID, ""), OccurredAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("prepare replay root before startup recovery: %v", err)
+	}
+	// Persist construction without releasing execution. Startup owns admission
+	// and recovery of this planned attachment before replaying accepted work.
+	committed, err := rt.Bus.CommitFlowInstanceActivation(constructionCtx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("stage replay root: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
+	}
 
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -1747,24 +1765,45 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 
 	entityID := uuid.NewString()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath("mutation-flow")}, runtimepipeline.WorkflowInstance{
-		InstanceID:      "mutation-flow",
-		StorageRef:      "mutation-flow",
-		EntityID:        entityID,
-		WorkflowName:    "mutation-flow",
-		WorkflowVersion: "1.0.0",
-		CurrentState:    "done",
-		EnteredStageAt:  enteredAt,
-		CreatedAt:       enteredAt,
-		Fields:          map[string]any{"status": "closed"},
-		Gates:           map[string]bool{"g_done": true},
-		StateBuckets: map[string]any{
-			"evidence": map[string]any{"score": 2},
-			"notes":    map[string]any{"count": 1},
-		},
-		EntityType: "test_entity",
-	}, enteredAt); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
+	{
+		construction1761Ctx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+		construction1761At := enteredAt
+		construction1761Instance, construction1761Lifecycle, err := pipeline.PrepareInitialEntryLifecycle(construction1761Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath("mutation-flow")}, runtimepipeline.WorkflowInstance{
+			InstanceID:      "mutation-flow",
+			StorageRef:      "mutation-flow",
+			EntityID:        entityID,
+			WorkflowName:    "mutation-flow",
+			WorkflowVersion: "1.0.0",
+			CurrentState:    "done",
+			EnteredStageAt:  enteredAt,
+			CreatedAt:       enteredAt,
+			Fields:          map[string]any{"status": "closed"},
+			Gates:           map[string]bool{"g_done": true},
+			StateBuckets: map[string]any{
+				"evidence": map[string]any{"score": 2},
+				"notes":    map[string]any{"count": 1},
+			},
+			EntityType: "test_entity",
+		}, construction1761At)
+		if err != nil {
+			t.Fatalf("prepare fixture initial lifecycle: %v", err)
+		}
+		construction1761Command, err := flowactivationfixture.Command(construction1761Ctx, construction1761Instance, construction1761Lifecycle, construction1761At)
+		if err != nil {
+			t.Fatalf("prepare fixture activation command: %v", err)
+		}
+		construction1761Committed, err := any(selected).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction1761Ctx, construction1761Command)
+		if err != nil {
+			t.Fatalf("seed workflow instance: %v", err)
+		}
+		if err == nil && !construction1761Committed.Acknowledged {
+			t.Fatal("fixture activation was not acknowledged")
+		}
+		if construction1761Committed.Acknowledged && construction1761Committed.Created {
+			if finalizeErr := pipeline.FinalizeInitialEntryLifecycle(construction1761Ctx, construction1761Committed.Lifecycle); finalizeErr != nil {
+				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
+			}
+		}
 	}
 
 	if err := trackedMutationStateMatchesEntityState(db, runID, entityID); err != nil {
@@ -1777,24 +1816,17 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 
 	requireMutationSurface(t, db)
 
-	createOut, err := exec.Execute(ctx, "create_entity", map[string]any{
+	_, err := exec.Execute(ctx, "create_entity", map[string]any{
 		"flow_instance": runID,
 		"fields": map[string]any{
 			"status": "open",
 			"score":  10.0,
 		},
 	})
-	if err != nil {
-		t.Fatalf("create_entity: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unsupported runtime tool: create_entity") {
+		t.Fatalf("retired create_entity must refuse: %v", err)
 	}
-	created, ok := createOut.(map[string]any)
-	if !ok {
-		t.Fatalf("create_entity output = %#v, want map", createOut)
-	}
-	entityID := readString(created["entity_id"])
-	if entityID == "" {
-		t.Fatal("create_entity did not return entity_id")
-	}
+	entityID := runID
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
 		"field":     "status",
@@ -2127,6 +2159,13 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	runID := uuid.NewString()
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+	construction := newFanInBarrierRuntimeForSource(t, pg, db, source, fact, 1)
+	constructionCtx := runtimecorrelation.WithRunID(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runID)
+	if err := construction.manager.ActivateFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, Instance: runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""), OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("construct tool mutation target: %v", err)
+	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		HumanTaskStore:                 pg,

@@ -1,0 +1,185 @@
+{
+  "schema": 1,
+  "source_head": "cb8b83ef9722bccb83a097d821bda70b4f274184",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "command": "go run ./cmd/swarm-test -- -json -race -count=1 -run '^(TestServedCompiledFrozenGateForkControlRefusalOnBothStores|TestServedCompiledRootLoopForkProjectsRevisionOnBothStores|TestServedCompiledGateOutcomeRestartOnBothStores|TestServedCompiledGateOutcomeGracefulDrainRestartOnBothStores|TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores|TestServedCompiledLoopTransitionReplayOnBothStores|TestServedCompiledGateFrozenTransitionEvidenceOnBothStores|TestServedCompiledTransitionRestartOnBothStores|TestServedCompiledTransitionStaticForkEvidenceOnBothStores)$' ./internal/serveapp",
+  "receipt": "/tmp/agent-e-2496-header-recovery-proof.log",
+  "receipt_sha256": "524d90d6b1075c5226205395b6193d793ad23d26f46e4f495f617d29f7fb206a",
+  "exit_code": 0,
+  "first_test_event": "2026-10-03T03:33:40.685480433Z",
+  "last_test_event": "2026-10-03T03:38:46.231310931Z",
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "action": "pass",
+      "elapsed": 305.546
+    }
+  ],
+  "root_results": [
+    {
+      "test": "TestServedCompiledFrozenGateForkControlRefusalOnBothStores",
+      "action": "pass",
+      "elapsed": 21.13
+    },
+    {
+      "test": "TestServedCompiledRootLoopForkProjectsRevisionOnBothStores",
+      "action": "pass",
+      "elapsed": 14.85
+    },
+    {
+      "test": "TestServedCompiledGateOutcomeRestartOnBothStores",
+      "action": "pass",
+      "elapsed": 22.91
+    },
+    {
+      "test": "TestServedCompiledGateOutcomeGracefulDrainRestartOnBothStores",
+      "action": "pass",
+      "elapsed": 14.12
+    },
+    {
+      "test": "TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores",
+      "action": "pass",
+      "elapsed": 96.71
+    },
+    {
+      "test": "TestServedCompiledLoopTransitionReplayOnBothStores",
+      "action": "pass",
+      "elapsed": 17.14
+    },
+    {
+      "test": "TestServedCompiledGateFrozenTransitionEvidenceOnBothStores",
+      "action": "pass",
+      "elapsed": 38.5
+    },
+    {
+      "test": "TestServedCompiledTransitionRestartOnBothStores",
+      "action": "pass",
+      "elapsed": 50.76
+    },
+    {
+      "test": "TestServedCompiledTransitionStaticForkEvidenceOnBothStores",
+      "action": "pass",
+      "elapsed": 28.36
+    }
+  ],
+  "cells": [
+    {
+      "test": "TestServedCompiledFrozenGateForkControlRefusalOnBothStores/default_sqlite",
+      "action": "pass",
+      "elapsed": 12.88
+    },
+    {
+      "test": "TestServedCompiledFrozenGateForkControlRefusalOnBothStores/explicit_postgres",
+      "action": "pass",
+      "elapsed": 8.25
+    },
+    {
+      "test": "TestServedCompiledRootLoopForkProjectsRevisionOnBothStores/default_sqlite",
+      "action": "pass",
+      "elapsed": 10.84
+    },
+    {
+      "test": "TestServedCompiledRootLoopForkProjectsRevisionOnBothStores/explicit_postgres",
+      "action": "pass",
+      "elapsed": 4.02
+    },
+    {
+      "test": "TestServedCompiledGateOutcomeRestartOnBothStores/sqlite",
+      "action": "pass",
+      "elapsed": 14.21
+    },
+    {
+      "test": "TestServedCompiledGateOutcomeRestartOnBothStores/postgres",
+      "action": "pass",
+      "elapsed": 8.7
+    },
+    {
+      "test": "TestServedCompiledGateOutcomeGracefulDrainRestartOnBothStores/sqlite",
+      "action": "pass",
+      "elapsed": 8.01
+    },
+    {
+      "test": "TestServedCompiledGateOutcomeGracefulDrainRestartOnBothStores/postgres",
+      "action": "pass",
+      "elapsed": 6.1
+    },
+    {
+      "test": "TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores/sqlite/cap_false",
+      "action": "pass",
+      "elapsed": 17.63
+    },
+    {
+      "test": "TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores/sqlite/cap_true",
+      "action": "pass",
+      "elapsed": 50.27
+    },
+    {
+      "test": "TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores/postgres/cap_false",
+      "action": "pass",
+      "elapsed": 15.55
+    },
+    {
+      "test": "TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores/postgres/cap_true",
+      "action": "pass",
+      "elapsed": 13.26
+    },
+    {
+      "test": "TestServedCompiledLoopTransitionReplayOnBothStores/default_sqlite",
+      "action": "pass",
+      "elapsed": 11.46
+    },
+    {
+      "test": "TestServedCompiledLoopTransitionReplayOnBothStores/explicit_postgres",
+      "action": "pass",
+      "elapsed": 5.68
+    },
+    {
+      "test": "TestServedCompiledGateFrozenTransitionEvidenceOnBothStores/sqlite",
+      "action": "pass",
+      "elapsed": 23.29
+    },
+    {
+      "test": "TestServedCompiledGateFrozenTransitionEvidenceOnBothStores/postgres",
+      "action": "pass",
+      "elapsed": 15.21
+    },
+    {
+      "test": "TestServedCompiledTransitionRestartOnBothStores/sqlite/before_cap_handler",
+      "action": "pass",
+      "elapsed": 14.93
+    },
+    {
+      "test": "TestServedCompiledTransitionRestartOnBothStores/sqlite/before_escape_consumer",
+      "action": "pass",
+      "elapsed": 14.82
+    },
+    {
+      "test": "TestServedCompiledTransitionRestartOnBothStores/postgres/before_cap_handler",
+      "action": "pass",
+      "elapsed": 10.46
+    },
+    {
+      "test": "TestServedCompiledTransitionRestartOnBothStores/postgres/before_escape_consumer",
+      "action": "pass",
+      "elapsed": 10.56
+    },
+    {
+      "test": "TestServedCompiledTransitionStaticForkEvidenceOnBothStores/default_sqlite",
+      "action": "pass",
+      "elapsed": 16.52
+    },
+    {
+      "test": "TestServedCompiledTransitionStaticForkEvidenceOnBothStores/explicit_postgres",
+      "action": "pass",
+      "elapsed": 11.84
+    }
+  ],
+  "failed_cells": [],
+  "skipped_cells": [],
+  "limits": [
+    "Nine exact roots and 22 named subtests all executed once under the race detector on both stores. Native deadlines and admission controls are unchanged.",
+    "This qualifies the existing exact frozen-gate refusals, static-fork evidence, supported transition replay, admitted node recovery, forced gate kill/restart and graceful restart. It adds no historical non-agent replay authority.",
+    "The forced gate-restart harness runs a compiled internal lifecycle process with public RPC readback; it is not real-provider or public-launcher qualification. A separate release-binary journey is recorded independently.",
+    "This is a source-attributed sibling-consumption receipt, not closure of pending optional/provider/topology or joined failure-discard dispositions, final composed-head default or hosted CI."
+  ]
+}

@@ -12,6 +12,34 @@ import (
 
 func LoadCurrentPlan(ctx context.Context, tx *sql.Tx, deliveryID string, postgres bool) (Plan, bool, error) {
 	if tx == nil {
+		return Plan{}, false, fmt.Errorf("channel delivery responsibility requires a transaction")
+	}
+	plan, found, err := LoadPlan(ctx, tx, deliveryID, postgres)
+	if err != nil || !found {
+		return Plan{}, false, err
+	}
+	if plan.RecoveryPending {
+		plan.CurrentBindingRevision = plan.BindingRevision
+		return plan, true, nil
+	}
+	plan, found, err = LoadDestinationCurrentPlan(ctx, tx, deliveryID, postgres)
+	if err != nil || !found {
+		return Plan{}, false, err
+	}
+	query := `SELECT ` + SendEligibilityPredicate + ` FROM channel_delivery_plans p WHERE p.delivery_id=?`
+	if postgres {
+		query = `SELECT ` + SendEligibilityPredicate + ` FROM channel_delivery_plans p WHERE p.delivery_id=$1::uuid`
+	}
+	var eligible bool
+	if err := tx.QueryRowContext(ctx, query, deliveryID).Scan(&eligible); err != nil {
+		return Plan{}, false, err
+	}
+	return plan, eligible, nil
+}
+
+// Destination currentness permits presentation maintenance, not a send.
+func LoadDestinationCurrentPlan(ctx context.Context, tx *sql.Tx, deliveryID string, postgres bool) (Plan, bool, error) {
+	if tx == nil {
 		return Plan{}, false, fmt.Errorf("current channel plan requires a transaction")
 	}
 	plan, found, err := LoadPlan(ctx, tx, deliveryID, postgres)
@@ -80,18 +108,19 @@ func LoadCurrentPlan(ctx context.Context, tx *sql.Tx, deliveryID string, postgre
 
 // ListCurrentPlans reads one bounded page of selected responsibilities. A
 // historical or retired destination remains durable but is not executable.
+// Accepted journal work is independently retained for recovery, not dispatch.
 func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, limit int, postgres bool) ([]Plan, error) {
 	if tx == nil || limit < 1 || limit > 500 || (afterDeliveryID != "" && uuid.Validate(afterDeliveryID) != nil) {
 		return nil, fmt.Errorf("channel delivery scan requires a transaction, valid cursor and bounded limit")
 	}
 	query := `SELECT p.delivery_id, p.source_kind, p.source_id, COALESCE(p.request_activation_id, ''), COALESCE(p.summary_count, 0), p.principal_id,
-		p.interface_key, p.binding_revision, CASE WHEN p.source_kind='response' THEN b.binding_revision ELSE d.binding_revision END,
+		p.interface_key, p.binding_revision, CASE WHEN ` + AcceptedEffectPredicate(false) + ` THEN p.binding_revision WHEN p.source_kind='response' THEN b.binding_revision ELSE d.binding_revision END,
 		p.delivery_epoch, p.external_account_reference,
 		p.conversation_reference, p.conversation_scope, p.state,
-		COALESCE(p.current_render_id, ''), COALESCE(p.current_receipt_operation_id, '')
+		COALESCE(p.current_render_id, ''), COALESCE(p.current_receipt_operation_id, ''), ` + AcceptedEffectPredicate(false) + `
 		FROM channel_delivery_plans p JOIN channel_delivery_defaults d ON d.singleton_id=1
 		LEFT JOIN operator_channel_bindings b ON b.interface_key=p.interface_key
-		WHERE d.state='current' AND p.principal_id=d.principal_id AND p.delivery_epoch=d.delivery_epoch
+		WHERE (((d.state='current' AND p.principal_id=d.principal_id AND p.delivery_epoch=d.delivery_epoch
 		AND ((p.source_kind='response' AND b.status='current' AND b.principal_id=p.principal_id
 			AND b.binding_revision>=p.binding_revision AND b.external_account_reference=p.external_account_reference
 			AND b.conversation_reference=p.conversation_reference AND b.conversation_scope=p.conversation_scope
@@ -105,16 +134,17 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 			AND d.binding_revision>=p.binding_revision
 			AND p.external_account_reference=d.external_account_reference
 			AND p.conversation_reference=d.conversation_reference AND p.conversation_scope=d.conversation_scope))
-		AND p.state <> 'retired' AND p.delivery_id > ? ORDER BY p.delivery_id LIMIT ?`
+		) AND p.state <> 'retired' AND ` + SendEligibilityPredicate + `) OR ` + AcceptedEffectPredicate(false) + `)
+		AND p.delivery_id > ? ORDER BY p.delivery_id LIMIT ?`
 	if postgres {
 		query = `SELECT p.delivery_id::text, p.source_kind, p.source_id::text, COALESCE(p.request_activation_id::text, ''), COALESCE(p.summary_count, 0), p.principal_id::text,
-			p.interface_key, p.binding_revision, CASE WHEN p.source_kind='response' THEN b.binding_revision ELSE d.binding_revision END,
+			p.interface_key, p.binding_revision, CASE WHEN ` + AcceptedEffectPredicate(true) + ` THEN p.binding_revision WHEN p.source_kind='response' THEN b.binding_revision ELSE d.binding_revision END,
 			p.delivery_epoch, p.external_account_reference,
 			p.conversation_reference, p.conversation_scope, p.state,
-			COALESCE(p.current_render_id::text, ''), COALESCE(p.current_receipt_operation_id::text, '')
+			COALESCE(p.current_render_id::text, ''), COALESCE(p.current_receipt_operation_id::text, ''), ` + AcceptedEffectPredicate(true) + `
 			FROM channel_delivery_plans p JOIN channel_delivery_defaults d ON d.singleton_id=1
 			LEFT JOIN operator_channel_bindings b ON b.interface_key=p.interface_key
-			WHERE d.state='current' AND p.principal_id=d.principal_id AND p.delivery_epoch=d.delivery_epoch
+			WHERE (((d.state='current' AND p.principal_id=d.principal_id AND p.delivery_epoch=d.delivery_epoch
 			AND ((p.source_kind='response' AND b.status='current' AND b.principal_id=p.principal_id
 				AND b.binding_revision>=p.binding_revision AND b.external_account_reference=p.external_account_reference
 				AND b.conversation_reference=p.conversation_reference AND b.conversation_scope=p.conversation_scope
@@ -128,7 +158,8 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 				AND d.binding_revision>=p.binding_revision
 				AND p.external_account_reference=d.external_account_reference
 				AND p.conversation_reference=d.conversation_reference AND p.conversation_scope=d.conversation_scope))
-			AND p.state <> 'retired' AND p.delivery_id > $1::uuid ORDER BY p.delivery_id LIMIT $2`
+			) AND p.state <> 'retired' AND ` + SendEligibilityPredicate + `) OR ` + AcceptedEffectPredicate(true) + `)
+			AND p.delivery_id > $1::uuid ORDER BY p.delivery_id LIMIT $2`
 	}
 	cursor := afterDeliveryID
 	if cursor == "" {
@@ -146,7 +177,7 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 		if err := rows.Scan(&p.DeliveryID, &p.SourceKind, &p.SourceID, &p.RequestActivationID, &p.SummaryCount,
 			&p.PrincipalID, &p.InterfaceKey, &p.BindingRevision, &p.CurrentBindingRevision, &p.DeliveryEpoch,
 			&p.ExternalAccountRef, &p.ConversationRef, &scope, &p.State,
-			&p.CurrentRenderID, &p.CurrentReceiptID); err != nil {
+			&p.CurrentRenderID, &p.CurrentReceiptID, &p.RecoveryPending); err != nil {
 			return nil, err
 		}
 		p.ConversationScope = operatorchannel.ConversationScope(scope)

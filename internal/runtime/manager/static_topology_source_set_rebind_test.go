@@ -12,6 +12,8 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -27,24 +29,26 @@ func (p sourceSetLifecycleCensusProbe) ListDurableAgentLifecycleStates(context.C
 }
 
 type sourceSetTransitionAdmissionProbe struct {
-	mu           sync.Mutex
-	id           string
-	revision     string
-	predecessors map[string]ProcessExecutionBinding
-	done         chan struct{}
-	once         sync.Once
-	reads        atomic.Int64
+	mu            sync.Mutex
+	id            string
+	revision      string
+	predecessors  map[string]ProcessExecutionBinding
+	done          chan struct{}
+	terminalDrain chan struct{}
+	once          sync.Once
+	reads         atomic.Int64
 }
 
 func newSourceSetTransitionAdmissionProbe(revision string) *sourceSetTransitionAdmissionProbe {
 	return &sourceSetTransitionAdmissionProbe{
 		id: uuid.NewString(), revision: revision,
-		predecessors: make(map[string]ProcessExecutionBinding), done: make(chan struct{}),
+		predecessors: make(map[string]ProcessExecutionBinding), done: make(chan struct{}), terminalDrain: make(chan struct{}),
 	}
 }
 
-func (p *sourceSetTransitionAdmissionProbe) TransitionID() string      { return p.id }
-func (p *sourceSetTransitionAdmissionProbe) SourceSetRevision() string { return p.revision }
+func (p *sourceSetTransitionAdmissionProbe) TransitionID() string           { return p.id }
+func (p *sourceSetTransitionAdmissionProbe) SourceSetRevision() string      { return p.revision }
+func (p *sourceSetTransitionAdmissionProbe) TerminalDrain() <-chan struct{} { return p.terminalDrain }
 func (p *sourceSetTransitionAdmissionProbe) Done() <-chan struct{} {
 	p.reads.Add(1)
 	return p.done
@@ -98,7 +102,7 @@ type durableSourceSetPreparationFixture struct {
 
 func newDurableSourceSetPreparationFixture(t *testing.T) *durableSourceSetPreparationFixture {
 	t.Helper()
-	source := loadFilesystemStaticAgentSource(t)
+	source := loadRootAndFlowStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
 	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
@@ -165,8 +169,25 @@ func (p *sourceSetLifecycleCommitProbe) CommitAgentLifecycleTransition(ctx conte
 	return result, nil
 }
 
+func (p *sourceSetLifecycleCommitProbe) RebindFlowReadinessSourceSet(ctx context.Context, req FlowReadinessSourceSetRebindRequest) (FlowReadinessSourceSetRebindResult, error) {
+	result := FlowReadinessSourceSetRebindResult{}
+	var err error
+	result.Attempt, err = runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(req.Attempt.ID(), req.Attempt.RunID(), req.Attempt.InstancePath(), p.binding)
+	if err != nil {
+		return result, err
+	}
+	for _, transition := range req.Transitions {
+		committed, err := p.CommitAgentLifecycleTransition(ctx, transition)
+		if err != nil {
+			return FlowReadinessSourceSetRebindResult{}, err
+		}
+		result.Transitions = append(result.Transitions, committed)
+	}
+	return result, nil
+}
+
 func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *testing.T) {
-	source := loadFilesystemStaticAgentSource(t)
+	source := loadRootAndFlowStaticAgentSource(t)
 	oldStore := newLifecyclePersistenceProbe()
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
@@ -322,7 +343,7 @@ func TestPrepareDurableTopologySourceSetRebindRejectsForeignGrantAtValidPredeces
 }
 
 func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *testing.T) {
-	source := loadFilesystemStaticAgentSource(t)
+	source := loadRootAndFlowStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
 	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
@@ -400,7 +421,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 }
 
 func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t *testing.T) {
-	source := loadFilesystemStaticAgentSource(t)
+	source := loadRootAndFlowStaticAgentSource(t)
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
 	manager.semanticSource = source
 	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
@@ -438,8 +459,23 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 	}
 	staticIdentity, _ := records[0].Config.ConcreteIdentity()
 	staticRevision, _ := lifecycleConfigRevision(records[0])
-	flowIdentity := runtimeagentidentitytest.RootRuntime(t, "readiness-agent", "bundle-delete-source-set-rebind")
-	flowTopology, err := runtimeagenttopology.FlowReadinessAdmission(uuid.NewString(), "review/instance-1", "plan-v1")
+	parent := flowidentity.Stored(source, ".", managerIdentityTestRunID, managerIdentityTestRunID, managerIdentityTestRunID, "")
+	child, err := flowidentity.KeylessChild(source, parent, "ops-flow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	constructed, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, child, map[string]any{})
+	if err != nil || len(constructed.Agents) != 1 {
+		t.Fatalf("constructed actor missing from its attachment: %+v %v", constructed, err)
+	}
+	flowIdentity, err := constructed.Agents[0].Identity.Live(managerIdentityTestRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flowTopology, err := runtimeagenttopology.FlowReadinessAdmission(managerIdentityTestRunID, child.InstancePath, "plan-v1")
+	if err == nil {
+		flowTopology, err = flowTopology.WithFlowActivationAttempt("1")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,7 +788,7 @@ func (s *staticStartupReconcileStore) CommitAgentLifecycleTransition(_ context.C
 }
 
 func TestStaticTopologyStartupReintroducesDesiredFailedDeclaration(t *testing.T) {
-	source := loadFilesystemStaticAgentSource(t)
+	source := loadRootAndFlowStaticAgentSource(t)
 	store := &staticStartupReconcileStore{}
 	manager := newTestAgentManager(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil

@@ -23,11 +23,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -215,14 +218,36 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				}
 				activationCtx := correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, fact), runID)
 				activationCtx = authoractivity.WithScope(activationCtx, authoractivity.BundleScope(instance, fact.BundleHash()))
-				trigger := eventtest.InExecutionMode(eventtest.RuntimeControl(uuid.NewString(), "flow.created", "test", "", json.RawMessage(`{"instance_id":"startup-worker"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()), executionmode.Mock)
-				if err := candidate.runtime.Bus.Publish(activationCtx, trigger); err != nil {
-					t.Fatalf("persist causal activation trigger: %v", err)
+				activationCtx = effects.WithExecutionMode(activationCtx, executionmode.Mock)
+				rootPlan, err := candidate.runtime.Manager.PrepareFlowInstanceActivation(activationCtx, pipeline.FlowInstanceActivationRequest{
+					ContractBundle: loaded.source,
+					Instance:       flowidentity.Stored(loaded.source, ".", runID, runID, runID, ""),
+					Config:         map[string]any{},
+					OccurredAt:     time.Now().UTC(),
+				})
+				if err != nil {
+					t.Fatalf("prepare canonical source root: %v", err)
 				}
+				rootCommit, err := candidate.runtime.Bus.CommitFlowInstanceActivation(activationCtx, rootPlan)
+				if err != nil {
+					t.Fatalf("commit canonical source root: %v", err)
+				}
+				if err := candidate.runtime.Manager.FinalizeCommittedFlowInstanceActivation(activationCtx, rootCommit); err != nil {
+					t.Fatalf("finalize canonical source root: %v", err)
+				}
+				trigger := eventtest.InExecutionMode(eventtest.RuntimeControl(uuid.NewString(), "worker.requested", "test", "", json.RawMessage(`{"instance_id":"startup-worker"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()), executionmode.Mock)
+				dialect := authoractivityfixture.DialectSQLite
+				if backend == "postgres" {
+					dialect = authoractivityfixture.DialectPostgres
+				}
+				// Seed the exact causal precondition without dispatching the connect
+				// edge: this proof interrupts construction before its finalizer.
+				storetest.InsertCanonicalEventRecord(t, activationCtx, db, dialect, trigger)
 				activation, err := candidate.runtime.Manager.PrepareFlowInstanceActivation(activationCtx, pipeline.FlowInstanceActivationRequest{
 					ContractBundle: loaded.source,
 					Instance:       flowidentity.Instance{TemplateID: "worker", ScopeKey: "worker", InstanceID: "startup-worker", InstancePath: "worker/startup-worker", EntityID: uuid.NewString(), HasStoredPath: true},
 					Config:         map[string]any{"instance_id": "startup-worker"}, TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
+					ConstructorInput: "worker.requested", ResolvedKey: "startup-worker",
 				})
 				if err != nil {
 					t.Fatalf("prepare interrupted activation: %v", err)

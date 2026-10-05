@@ -64,7 +64,7 @@ func primaryEntityOperationDemands(source semanticview.Source) map[string]bool {
 			continue
 		}
 		for event, handler := range record.Entry.EventHandlers {
-			if bootverifyHandlerMaterializesEntity(source, node, event, node.FlowPath(), handler) {
+			if bootverifyHandlerUsesCanonicalEntity(source, node, event, node.FlowPath(), handler) {
 				demands[node.FlowPath()] = true
 			}
 			for _, expression := range handlerExecutableReaderExpressionsForSource(source, node, event, handler) {

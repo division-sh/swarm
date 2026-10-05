@@ -46,7 +46,7 @@ func createObjectUncertainCards(t *testing.T, h *channelOnboardingE2EHarness, db
 			"payload":         map[string]any{"detail": strings.Repeat("uncertain recovery detail;", 60)},
 			"idempotency_key": fmt.Sprintf("multi-recovery-%d", index),
 		})
-		cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+		cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 		waitUncertainCopyPlan(t, db, cards[index])
 	}
 	return cards

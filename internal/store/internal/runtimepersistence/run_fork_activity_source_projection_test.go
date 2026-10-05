@@ -18,10 +18,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -112,24 +115,45 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			for _, state := range []string{"absent", "zero", "missing", "corrupt", "loop"} {
+			for _, state := range []string{"absent", "zero", "fieldless", "missing", "corrupt", "wrong-header-flow", "wrong-header-type", "loop"} {
 				t.Run(state, func(t *testing.T) {
 					sourceRun, child, event := seedSelectedOrdinaryRootProjectionFixture(t, fixture, backend.name == "postgres", state)
 					ctx := testAuthorActivityContext()
 					switch state {
 					case "missing":
-						if _, err := fixture.db.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID); err != nil {
+						if _, err := fixture.db.ExecContext(ctx, `DELETE FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID); err != nil {
 							t.Fatal(err)
 						}
 					case "corrupt":
-						if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET accumulator='{"handler_loops":123}' WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID); err != nil {
+						if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET accumulator='{"handler_loops":123}' WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID); err != nil {
+							t.Fatal(err)
+						}
+					case "wrong-header-flow":
+						if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET flow_template='foreign' WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID); err != nil {
+							t.Fatal(err)
+						}
+					case "wrong-header-type":
+						if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET entity_type='foreign' WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID); err != nil {
 							t.Fatal(err)
 						}
 					}
+					if state == "fieldless" {
+						var headers, fields int
+						if err := fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, child.ForkRunID).Scan(&headers); err != nil {
+							t.Fatal(err)
+						}
+						if err := fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND entity_id=$1`, child.ForkRunID).Scan(&fields); err != nil || headers != 1 || fields != 0 {
+							t.Fatalf("fieldless fixture must contain only its constructed header: headers=%d fields=%d err=%v", headers, fields, err)
+						}
+					}
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID())
+					beforeAll := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, sourceRun))
 					if after := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID()); !reflect.DeepEqual(before, after) {
 						t.Fatal("ordinary preparation changed source evidence")
+					}
+					if afterAll := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres"); !reflect.DeepEqual(beforeAll, afterAll) {
+						t.Fatal("ordinary preparation changed complete source/child/application state")
 					}
 					if state == "missing" {
 						if !errors.Is(err, sql.ErrNoRows) || !strings.Contains(err.Error(), "load fork-local loop state") {
@@ -143,11 +167,18 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 						}
 						return
 					}
+					if strings.HasPrefix(state, "wrong-header-") {
+						if err == nil || !strings.Contains(err.Error(), "exact child route/type") {
+							t.Fatalf("wrong header supplied source generations: count=%d err=%v", len(loaded), err)
+						}
+						return
+					}
 					if err != nil || len(loaded) != 1 {
 						t.Fatalf("ordinary source projection count=%d err=%v", len(loaded), err)
 					}
 					got := loaded[0]
-					if got.RoutingSource != eventtest.RootRoutingSource(child.ForkRunID) {
+					wantSource := events.RouteIdentity{FlowID: ".", FlowInstance: child.ForkRunID, EntityID: child.ForkRunID}
+					if got.RoutingSource.Route() != wantSource || got.RoutingSource.Kind() != event.RoutingSource().Kind() || got.RoutingSource.Authority() != event.RoutingSource().Authority() {
 						t.Fatalf("root source was not projected: %#v", got.RoutingSource)
 					}
 					if state == "loop" {
@@ -173,7 +204,7 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 							t.Fatal("rejected selected-S interpretation changed persistence")
 						}
 						var accumulator []byte
-						if err := fixture.db.QueryRowContext(ctx, `SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID).Scan(&accumulator); err != nil {
+						if err := fixture.db.QueryRowContext(ctx, `SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID).Scan(&accumulator); err != nil {
 							t.Fatal(err)
 						}
 						var buckets map[string]map[string]any
@@ -219,8 +250,9 @@ func seedSelectedOrdinaryRootProjectionFixture(t *testing.T, fixture authorActiv
 	t.Helper()
 	runID, parentID, eventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
-	declarations := selectedActivityProducerSourceWithLoops(t, state == "loop", false)
+	declarations := selectedActivityProducerSourceWithRootFields(t, state == "loop", false, state != "fieldless")
 	ctx := seedSelectedActivitySourceRun(t, fixture, runID, declarations)
+	ctx = correlation.WithRunID(ctx, runID)
 	parent := eventtest.ExistingRunRootIngress(parentID, "activity.seeded", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
 	if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
 		t.Fatal(err)
@@ -230,6 +262,22 @@ func seedSelectedOrdinaryRootProjectionFixture(t *testing.T, fixture authorActiv
 		payload[field], _ = json.Marshal(value)
 	}
 	if state != "absent" {
+		bundle, ok := semanticview.Bundle(declarations)
+		if !ok {
+			t.Fatal("source-state fixture requires its admitted bundle")
+		}
+		req := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
+		req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
+		req.OccurredAt = at
+		plan := constructHistoricalSourceFixture(t, correlation.WithRunID(ctx, runID), fixture.store.(agentFixtureFlowStore), req)
+		persisted, err := plan.PersistenceRecord()
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := persisted.State
+		record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+		record.ExpectedState, record.ExpectedRevision = "pending", 1
+		record.UpdatedAt = at
 		buckets := map[string]map[string]any{}
 		if state == "loop" {
 			activation, err := loopruntime.New(runID, runID, ".", "revision", "opaque_revision", parentID, "pending", 3, at)
@@ -240,14 +288,9 @@ func seedSelectedOrdinaryRootProjectionFixture(t *testing.T, fixture authorActiv
 				t.Fatal(err)
 			}
 			payload["opaque_revision"], _ = json.Marshal(activation.Generation().RevisionID)
-			if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_mutations (run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at) VALUES ($1,$2,'accumulator','handler_loops','null',$3,$4,'platform','source-state-fixture','seed',$5)`, runID, runID, forkTestJSON(t, buckets[loopruntime.BucketKey]), parentID, at); err != nil {
-				t.Fatal(err)
-			}
 		}
-		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES ($1,$2,$3,'default','pending','{}','{}','{}',$4,1,$5,$6,$7)`, runID, runID, runID, forkTestJSON(t, buckets), at, at, at); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_mutations (run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at) VALUES ($1,$2,'lifecycle_state','','null','"pending"',$3,'platform','source-state-fixture','seed',$4)`, runID, runID, parentID, at); err != nil {
+		record.Accumulator = json.RawMessage(forkTestJSON(t, buckets))
+		if _, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
 			t.Fatal(err)
 		}
 		captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, postgres)
@@ -256,7 +299,7 @@ func seedSelectedOrdinaryRootProjectionFixture(t *testing.T, fixture authorActiv
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := pinrouting.AdmitNodeExecutionRoutingSource(selectedActivityProducerSource(t), mustPersistenceRootNode("reader"), ".", events.RouteIdentity{FlowID: ".", EntityID: runID})
+	source, err := pinrouting.AdmitNodeExecutionRoutingSource(declarations, mustPersistenceRootNode("reader"), ".", events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +310,16 @@ func seedSelectedOrdinaryRootProjectionFixture(t *testing.T, fixture authorActiv
 		t.Fatal(err)
 	}
 	fixture.advance()
-	child := materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, eventID)
+	selected := fixture.store.(selectedActivityProjectionStore)
+	if state == "fieldless" {
+		request := selectedSourceMaterializationRequest(t, ctx, selected, runID, eventID, declarations)
+		child, err := selected.MaterializeRunForkForSelectedContractExecution(ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return runID, child, event
+	}
+	child := materializeSelectedActivityFixture(t, ctx, selected, runID, eventID)
 	return runID, child, event
 }
 
@@ -307,7 +359,7 @@ func TestSelectedContractActivitySourceProjectionBothStores(t *testing.T) {
 					wantRoute := original.RoutingSource().Route()
 					wantFlow := wantRoute.FlowInstance
 					if cell.root {
-						wantRoute.EntityID, wantFlow = child.ForkRunID, child.ForkRunID
+						wantRoute.EntityID, wantRoute.FlowInstance, wantFlow = child.ForkRunID, child.ForkRunID, child.ForkRunID
 					}
 					if got.RoutingSource.Route() != wantRoute || got.RoutingSource.Kind() != original.RoutingSource().Kind() || got.RoutingSource.Authority() != original.RoutingSource().Authority() || got.SourceEventID != original.ID() || got.EventName != string(original.Type()) || got.ExecutionMode != original.ExecutionMode() || got.Scope != string(original.Scope()) {
 						t.Fatalf("loaded activity lost source identity: got=%#v original=%#v wantRoute=%#v", got, original, wantRoute)
@@ -386,27 +438,24 @@ func seedSelectedActivityProjectionFixture(t *testing.T, fixture authorActivityR
 
 func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture authorActivityReceiptFixture, postgres, root, independentTarget, wrongFlow bool, input json.RawMessage, postEvent func(context.Context, string)) (string, runfork.RunForkMaterialization, events.Event) {
 	t.Helper()
-	runID, parentID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	runID, parentID := uuid.NewString(), uuid.NewString()
 	declarations := selectedActivityProducerSource(t)
 	ctx := seedSelectedActivitySourceRun(t, fixture, runID, declarations)
-	flowID, flowInstance := "flow-a", "flow-a"
+	ctx = correlation.WithRunID(ctx, runID)
+	flowID := "flow-a"
 	if root {
-		flowID, flowInstance, entityID = ".", runID, runID
+		flowID = "."
 	}
 	node := mustPersistenceNode(flowID, "reader")
-	source, err := pinrouting.AdmitNodeExecutionRoutingSource(declarations, node, flowID, events.RouteIdentity{FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID})
-	if err != nil {
-		t.Fatal(err)
-	}
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
 	parent := eventtest.ExistingRunRootIngress(parentID, "activity.seeded", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
 	if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_mutations (run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at) VALUES ($1,$2,'lifecycle_state','','null','"pending"',$3,'platform','activity-fixture','seed',$4)`, runID, entityID, parentID, at); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES ($1,$2,$3,'default','pending','{}','{}','{}','{}',1,$4,$5,$6)`, runID, entityID, flowInstance, at, at, at); err != nil {
+	instance := constructSelectedActivityProducerFixture(t, ctx, fixture.store.(agentFixtureFlowStore), declarations, parent, flowID, at)
+	flowInstance, entityID := instance.InstancePath, instance.EntityID
+	source, err := pinrouting.AdmitNodeExecutionRoutingSource(declarations, node, flowID, events.RouteIdentity{FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID})
+	if err != nil {
 		t.Fatal(err)
 	}
 	captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, postgres)
@@ -443,10 +492,35 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	}
 	fixture.advance()
 	child := materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, eventID)
-	if child.MaterializedEntityCount != 1 {
-		t.Fatalf("activity fixture did not materialize its producer state: count=%d", child.MaterializedEntityCount)
+	// The producer is chosen from the complete root/keyless-child construction.
+	wantEntities := 2
+	if child.MaterializedEntityCount != wantEntities {
+		t.Fatalf("activity fixture did not materialize its complete constructed topology: count=%d want=%d", child.MaterializedEntityCount, wantEntities)
 	}
 	return runID, child, event
+}
+
+func constructSelectedActivityProducerFixture(t *testing.T, ctx context.Context, selected agentFixtureFlowStore, source semanticview.Source, parent events.Event, flowID string, at time.Time) flowidentity.Instance {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("activity producer requires its admitted constructor source")
+	}
+	runID := parent.RunID()
+	req := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
+	req.Instance = flowidentity.Stored(source, ".", runID, runID, runID, "")
+	req.OccurredAt = at
+	plan := constructHistoricalSourceFixture(t, correlation.WithInboundEvent(correlation.WithRunID(ctx, runID), parent), selected, req)
+	for _, constructed := range plan.ConstructionPlans() {
+		if constructed.Identity.TemplateID == flowID {
+			if err := constructed.Identity.ValidateConstruction(source, runID); err != nil {
+				t.Fatal(err)
+			}
+			return constructed.Identity
+		}
+	}
+	t.Fatalf("root constructor omitted activity producer %s", flowID)
+	return flowidentity.Instance{}
 }
 
 func TestSelectedContractForkDoesNotCopyRotationReceiptBothStores(t *testing.T) {
@@ -503,6 +577,10 @@ func selectedActivityProducerSource(t *testing.T) semanticview.Source {
 }
 
 func selectedActivityProducerSourceWithLoops(t *testing.T, ordinaryRootLoop, activityLoop bool) semanticview.Source {
+	return selectedActivityProducerSourceWithRootFields(t, ordinaryRootLoop, activityLoop, true)
+}
+
+func selectedActivityProducerSourceWithRootFields(t *testing.T, ordinaryRootLoop, activityLoop, rootFields bool) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
@@ -551,6 +629,9 @@ telegram.send_message:
   effect_class: non_idempotent_write
   http: {method: POST, url: "http://127.0.0.1:1/send"}
 `,
+	}
+	if !rootFields {
+		delete(files, "entities.yaml")
 	}
 	if ordinaryRootLoop {
 		files["schema.yaml"] += "  closed: {terminal: true}\n  exhausted: {terminal: true}\nloops:\n  revision:\n    revision_field: opaque_revision\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"

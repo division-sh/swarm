@@ -128,6 +128,14 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					at := time.Now().UTC().Truncate(time.Microsecond)
 					event := eventtest.PersistedProjection(uuid.NewString(), "work.completed", "route-proof", "", []byte(`{"ok":true}`), 0,
 						runID, "", events.EnvelopeForTargetRoute(events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{target}), target), at)
+					if route.Target.MaterializingEntity() {
+						// This native historical-wire control carries the complete
+						// publication binding, not proof of installed construction.
+						route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
 					beforeCommit := routeEvidenceHead(t, ctx, fixture.db, runID)
 					if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{route}); err != nil {
 						t.Fatalf("canonical event/delivery writer: %v", err)
@@ -331,6 +339,13 @@ func proveRouteEvidenceRollback(t testing.TB, ctx context.Context, fixture autho
 	t.Helper()
 	before := routeEvidenceHead(t, ctx, fixture.db, event.RunID())
 	rollbackEvent := eventtest.PersistedProjection(uuid.NewString(), "route.rollback", "route-proof", "", []byte(`{}`), 0, event.RunID(), "", events.EventEnvelope{}, event.CreatedAt())
+	if route.Target.MaterializingEntity() {
+		var err error
+		route.Initialization, err = events.AdmitFlowReceiverInitialization(rollbackEvent, route.Target)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, rollbackEvent); err != nil {
 		t.Fatal(err)
 	}

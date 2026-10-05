@@ -40,7 +40,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
@@ -1813,34 +1812,17 @@ type activityCommitAckLossRunner struct {
 }
 
 func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	runner := &recordingRuntimeMutationRunner{db: r.db, dialect: workflowStoreDialectSQLite}
+	acknowledged, err := runner.RunRuntimeMutationContextAcknowledged(ctx, func(attemptCtx context.Context) error {
+		err := fn(attemptCtx)
+		if err != nil {
+			r.callbackErr.Store(err.Error())
 		}
-	}()
-	postCommit := make([]OwnerAction, 0, 2)
-	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
-	storyctx, err := authoractivityfixture.Begin(txctx, tx, authoractivityfixture.DialectSQLite)
-	if err != nil {
+		return err
+	})
+	if err != nil || !acknowledged {
 		return err
 	}
-	if err := fn(storyctx); err != nil {
-		r.callbackErr.Store(err.Error())
-		return err
-	}
-	if err := authoractivityfixture.Finalize(storyctx); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	committed = true
-	flushPipelinePostCommitActions(postCommit)
 	if r.failNext.Swap(false) {
 		r.ackLost.Store(true)
 		return errors.New("simulated commit acknowledgment loss")

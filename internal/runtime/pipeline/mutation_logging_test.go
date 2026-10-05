@@ -228,7 +228,7 @@ func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 	pc := testMutationLoggingCoordinator(t, db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID), "workflow.ready", "g_ready", false); err != nil {
+	if err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(testPipelineRunID).Route, "workflow.ready", "g_ready", false); err != nil {
 		t.Fatalf("applyWorkflowGateForTest: %v", err)
 	}
 
@@ -247,7 +247,7 @@ func TestAccumulatorAppend_LogsMutationRow(t *testing.T) {
 	pc := testMutationLoggingCoordinator(t, db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := commitAccumulatorAppendForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, ".", "research", map[string]any{"summary": "done"}); err != nil {
+	if err := commitAccumulatorAppendForTest(testPipelineCoordinatorRunContext(t, pc), pc, testRunScopedWorkflowInstance(testPipelineRunID).Route, entityID, ".", "research", map[string]any{"summary": "done"}); err != nil {
 		t.Fatalf("accumulator append: %v", err)
 	}
 
@@ -290,8 +290,9 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		dropEntityMutationsTable(t, db)
 
 		ctx := testPipelineCoordinatorRunContext(t, pc)
-		transitionCtx := testPersistedWorkflowStateTransitionContext(t, pc.workflowStore, ctx, testWorkflowInstanceRoute(testPipelineRunID), entityID, "flow.transitioned")
-		err := pc.persistWorkflowStateForTest(transitionCtx, testWorkflowInstanceRoute(testPipelineRunID), entityID, "done", "flow.transitioned")
+		route := testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID).Route
+		transitionCtx := testPersistedWorkflowStateTransitionContext(t, pc.workflowStore, ctx, route, entityID, "flow.transitioned")
+		err := pc.persistWorkflowStateForTest(transitionCtx, route, entityID, "done", "flow.transitioned")
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("persistWorkflowStateForTest err = %v, want entity_mutations failure", err)
 		}
@@ -305,7 +306,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID), "workflow.ready", "g_ready", false)
+		err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(testPipelineRunID).Route, "workflow.ready", "g_ready", false)
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("applyWorkflowGateForTest err = %v, want entity_mutations failure", err)
 		}
@@ -319,7 +320,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := commitAccumulatorAppendForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, ".", "research", map[string]any{"summary": "done"})
+		err := commitAccumulatorAppendForTest(testPipelineCoordinatorRunContext(t, pc), pc, testRunScopedWorkflowInstance(testPipelineRunID).Route, entityID, ".", "research", map[string]any{"summary": "done"})
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("accumulator append err = %v, want entity_mutations failure", err)
 		}

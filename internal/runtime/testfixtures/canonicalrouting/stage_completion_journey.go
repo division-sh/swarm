@@ -22,9 +22,10 @@ connect:
   - {event: flow.finish, from: ., to: discovery}
 `,
 		"events.yaml":             "flow.started:\n  topic:\n    type: string?\nflow.finish:\n  topic:\n    type: string?\n",
+		"nodes.yaml":              "root-completion:\n  execution_type: system_node\n  subscribes_to: [flow.finish]\n  event_handlers:\n    flow.finish:\n      advances_to: done\n",
 		"discovery/schema.yaml":   "name: discovery\nstages:\n  ready:\n    initial: true\n  Ready:\n    terminal: true\npins:\n  inputs:\n    - flow.started\n    - flow.finish\n",
 		"discovery/entities.yaml": "discovery: {}\n",
-		"discovery/nodes.yaml":    "pipeline:\n  execution_type: system_node\n  subscribes_to: [flow.started, flow.finish]\n  event_handlers:\n    flow.started:\n      create_entity: true\n    flow.finish:\n      advances_to: Ready\n",
+		"discovery/nodes.yaml":    "pipeline:\n  execution_type: system_node\n  subscribes_to: [flow.started, flow.finish]\n  event_handlers:\n    flow.started: {}\n    flow.finish:\n      advances_to: Ready\n",
 	} {
 		writeClosedVariantFile(t, root, path, contents)
 	}

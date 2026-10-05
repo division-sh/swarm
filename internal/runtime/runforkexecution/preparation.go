@@ -19,6 +19,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -40,6 +41,7 @@ type PreparedSelectedFork struct {
 	closed                  bool
 	cleanupComplete         bool
 	closeErr                error
+	pendingDiscard          *selectedForkFailureDiscard
 	loadedSource            LoadedSelectedContractSource
 	originalSource          LoadedSelectedContractSource
 	originalLoopCarriage    semanticview.OriginalLoopCarriage
@@ -406,6 +408,13 @@ func (p *PreparedSelectedFork) Close() (finalErr error) {
 		return err
 	}
 	p.loadedSource.Cleanup = nil
+	if p.pendingDiscard != nil {
+		if err := p.pendingDiscard.store.DiscardMaterializedSelectedContractExecutionFork(context.WithoutCancel(p.operation.Context()), p.pendingDiscard.runID); err != nil {
+			p.closeErr = fmt.Errorf("cleanup selected-contract fork %s: %w", p.pendingDiscard.runID, err)
+			return p.closeErr
+		}
+		p.pendingDiscard = nil
+	}
 	p.closeErr = p.operation.Finish()
 	p.cleanupComplete = p.closeErr == nil
 	return p.closeErr
@@ -467,10 +476,21 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 		if _, err := admitPayload(ctx, original, payload.Binding().FlowID()); err != nil {
 			return nil, fmt.Errorf("selected starting input %s: %w", event.SourceEventID, err)
 		}
+		constructions := make(map[agentidentity.Plan]flowidentity.Instance)
 		for _, recipient := range event.Recipients {
 			flow := recipient.HandlerNode().FlowPath()
 			if recipient.Recipient.IsAgent() {
-				scope, err := semanticview.ResolveAgentPlanExecutionSemanticScope(loaded.Source, original.RunID(), recipient.AgentPlan)
+				agentPlan := recipient.AgentPlan
+				instance, err := runforkreadiness.AgentConstruction(loaded.Source, plan, agentPlan)
+				if err != nil {
+					return nil, fmt.Errorf("selected input %s recipient construction: %w", event.SourceEventID, err)
+				}
+				var construction semanticview.AgentExecutionConstruction
+				if instance.HasStoredPath {
+					construction = instance
+					constructions[agentPlan] = instance
+				}
+				scope, err := semanticview.ResolveAgentPlanExecutionSemanticScope(loaded.Source, original.RunID(), agentPlan, construction)
 				if err != nil {
 					return nil, fmt.Errorf("selected input %s recipient scope: %w", event.SourceEventID, err)
 				}
@@ -480,7 +500,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 				return nil, fmt.Errorf("selected input %s recipient schema: %w", event.SourceEventID, err)
 			}
 		}
-		p.inputs[event.SourceEventID], err = input.SelectRecipients(event.Recipients)
+		p.inputs[event.SourceEventID], err = input.SelectRecipients(event.Recipients, constructions)
 		if err != nil {
 			return nil, err
 		}

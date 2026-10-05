@@ -46,7 +46,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if gate {
 				stage = "review"
 			}
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", stage)
+			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, stage)
 			var parentCard map[string]any
 			if gate {
 				parentCard = lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")

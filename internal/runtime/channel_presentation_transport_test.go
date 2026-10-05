@@ -20,7 +20,7 @@ func TestChannelPresentationExecutorAndRegisteredForkCatalogUnderReplacement(t *
 	predecessor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", false)
 	successor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", true)
 	owner := testChannelActivationOwner(t, predecessor)
-	executor := configuredChannelExecutor(semanticview.Wrap(configuredChannelAgentBundle(t)), owner, nil, unusedChannelRuntimeActivityExecutor{})
+	executor := configuredChannelExecutor(semanticview.Wrap(configuredChannelAgentBundle(t)), owner, nil, unusedChannelRuntimeActivityExecutor{}, nil)
 	actor := models.AgentConfig{ID: "channel-sender", Role: "worker", FlowID: "global", Tools: []string{"channel.ops.deliver"}, ExecutionMode: "live"}
 	ctx := models.WithActor(context.Background(), actor)
 	pinned, definitions, release, err := executor.AcquireToolDefinitionsForActorInContext(ctx, actor)

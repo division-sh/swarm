@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "source_head": "cb8b83ef9722bccb83a097d821bda70b4f274184",
+  "command": "go test ./internal/serveapp -json -count=1 -run '^TestRetainedRootForkOriginalArtifactPreserved$'",
+  "receipt": "/tmp/agent-e-2496-retained-artifact-proof.log",
+  "receipt_sha256": "aa6727d67d120cb443d555ff3319085f75d09bda8bf04fc6e1cae64475f7a339",
+  "exit_code": 0,
+  "root": {
+    "test": "TestRetainedRootForkOriginalArtifactPreserved",
+    "status": "pass",
+    "elapsed": 0
+  },
+  "package_results": [
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "elapsed": 0.01
+    }
+  ],
+  "limit": "Small file-hash regression only, different semantic concept from construction/header/lifecycle execution. No store, runtime or provider is exercised; not included among the 17 relevant lifecycle roots."
+}

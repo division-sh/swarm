@@ -33,7 +33,7 @@ func SupersedeDecisionCardAnchorForTest(ctx context.Context, selected any, card 
 				return err
 			}
 			var raw string
-			if err := tx.QueryRowContext(ctx, `SELECT CAST(accumulator AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, card.RunID, anchor.EntityID).Scan(&raw); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT CAST(accumulator AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, card.RunID, anchor.EntityID).Scan(&raw); err != nil {
 				return err
 			}
 			var buckets map[string]map[string]any
@@ -56,9 +56,9 @@ func SupersedeDecisionCardAnchorForTest(ctx context.Context, selected any, card 
 			if err != nil {
 				return err
 			}
-			query = `UPDATE entity_state SET accumulator=$1 WHERE run_id=$2 AND entity_id=$3`
+			query = `UPDATE flow_instances SET accumulator=$1 WHERE run_id=$2 AND entity_id=$3`
 			if postgres {
-				query = `UPDATE entity_state SET accumulator=$1::jsonb WHERE run_id=$2 AND entity_id=$3`
+				query = `UPDATE flow_instances SET accumulator=$1::jsonb WHERE run_id=$2 AND entity_id=$3`
 			}
 			result, err := tx.ExecContext(ctx, query, string(updated), card.RunID, anchor.EntityID)
 			return requireSupersededAnchorFixtureRow(result, err)

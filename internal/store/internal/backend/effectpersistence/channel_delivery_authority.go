@@ -18,13 +18,6 @@ func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authorit
 	if err := channeldelivery.LockPrincipalTx(ctx, tx, delivery.PrincipalID, postgres); err != nil {
 		return invalidExternalAuthority(authority, "principal_not_current")
 	}
-	current, err := channelDeliveryAuthorityCurrent(ctx, tx, authority, postgres, true)
-	if err != nil {
-		return err
-	}
-	if !current {
-		return invalidExternalAuthority(authority, "stale")
-	}
 	plan, found, err := channeldelivery.LoadPlan(ctx, tx, delivery.DeliveryID, postgres)
 	if err != nil {
 		return err
@@ -35,6 +28,15 @@ func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authorit
 	frozen, err := channeldelivery.FreezeCurrentSourceTx(ctx, tx, plan, postgres)
 	if err != nil || frozen.Hash != delivery.RenderHash {
 		return invalidExternalAuthority(authority, "source_changed")
+	}
+	// Freeze locks the canonical source before eligibility is evaluated. A
+	// terminal status need not change the render bytes (for example a notice).
+	current, err := channelDeliveryAuthorityCurrent(ctx, tx, authority, postgres, true)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return invalidExternalAuthority(authority, "stale")
 	}
 	return nil
 }
@@ -138,12 +140,7 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 	receiptClause, receiptArgs := channelDeliveryReceiptClause(d, postgres)
 	query += receiptClause
 	args = append(args, receiptArgs...)
-	if d.PreviousReceiptOperationID == "" {
-		query += ` AND (p.source_kind='summary' OR (p.source_kind='notice' AND EXISTS
-			(SELECT 1 FROM mailbox notice WHERE notice.item_id=p.source_id AND notice.status='pending'))
-			OR (p.source_kind='card' AND EXISTS
-			(SELECT 1 FROM decision_cards card WHERE card.card_id=p.source_id AND card.status='pending')))`
-	}
+	query += ` AND ` + channeldelivery.SendEligibilityPredicate
 	if postgres {
 		if lock {
 			query += ` FOR UPDATE OF p, selected, binding, activation`

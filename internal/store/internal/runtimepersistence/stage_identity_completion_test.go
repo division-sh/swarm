@@ -51,6 +51,13 @@ func TestSelectedCompletionStageReadersBothStores(t *testing.T) {
 				if _, err := f.db.ExecContext(ctx, query, stage, runID); err != nil {
 					t.Fatal(err)
 				}
+				query = "UPDATE flow_instances SET current_state=? WHERE run_id=?"
+				if f.postgres {
+					query = "UPDATE flow_instances SET current_state=$1 WHERE run_id=$2::uuid"
+				}
+				if _, err := f.db.ExecContext(ctx, query, stage, runID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			t.Run("raw_sql_must_preserve_Ready", func(t *testing.T) {
 				id := seedCompletionBlockerRun(t, f, ctx)

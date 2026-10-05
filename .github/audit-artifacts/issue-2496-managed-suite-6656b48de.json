@@ -1,0 +1,31 @@
+{
+  "executed_head": "6656b48de",
+  "receipt": "/tmp/agent-e-2496-managed-suite-final-consumer-repairs.log",
+  "command": "go run ./cmd/swarm-test",
+  "completed_units": 1,
+  "unexecuted_units": 13,
+  "passed_package_count": 173,
+  "passed_root_count": 4880,
+  "failed_package_count": 2,
+  "failed_root_count": 5,
+  "failed_root_and_subtest_records": 43,
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "elapsed": 83.737,
+      "failed_roots": [
+        "TestSelectedForkTemplateCompanionReadinessBothStores",
+        "TestSelectedForkHistoricalFieldlessHeaderBothStores"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "elapsed": 315.651,
+      "failed_roots": [
+        "TestPipelineCompiledTransitionInitialAdmissionOnBothStores",
+        "TestWorkflowEngineCompleteCarrierPreservesBookkeepingOnBothStores",
+        "TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes"
+      ]
+    }
+  ]
+}

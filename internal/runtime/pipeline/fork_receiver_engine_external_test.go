@@ -51,13 +51,29 @@ type forkEngineObservation struct {
 }
 
 type forkEngineProbe struct {
-	claimed chan forkEngineObservation
-	resume  chan struct{}
-	once    sync.Once
+	claimed       chan forkEngineObservation
+	settled       chan lifecycleprobe.Signal
+	resume        chan struct{}
+	resumeSettled chan struct{}
+	once          sync.Once
+	settledOnce   sync.Once
 }
 
 func (p *forkEngineProbe) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
-	if signal.Kind != lifecycleprobe.DeliveryStatusChanged || signal.Status != "in_progress" || signal.EventType != "producer/work.ready" {
+	if signal.Kind != lifecycleprobe.DeliveryStatusChanged || signal.EventType != "producer/work.ready" {
+		return
+	}
+	if runtimedelivery.Status(signal.Status).Terminal() {
+		p.settledOnce.Do(func() {
+			p.settled <- signal
+			select {
+			case <-p.resumeSettled:
+			case <-ctx.Done():
+			}
+		})
+		return
+	}
+	if signal.Status != "in_progress" {
 		return
 	}
 	p.once.Do(func() {
@@ -125,9 +141,13 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("missing actual selected fork owner")
 				}
-				probe := &forkEngineProbe{claimed: make(chan forkEngineObservation, 1), resume: make(chan struct{})}
-				var resumeOnce sync.Once
+				probe := &forkEngineProbe{
+					claimed: make(chan forkEngineObservation, 1), settled: make(chan lifecycleprobe.Signal, 1),
+					resume: make(chan struct{}), resumeSettled: make(chan struct{}),
+				}
+				var resumeOnce, resumeSettledOnce sync.Once
 				resume := func() { resumeOnce.Do(func() { close(probe.resume) }) }
+				resumeSettled := func() { resumeSettledOnce.Do(func() { close(probe.resumeSettled) }) }
 				forkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
 				finished := make(chan error, 1)
@@ -145,6 +165,7 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				t.Cleanup(func() {
 					cancel()
 					resume()
+					resumeSettled()
 					select {
 					case <-done:
 					case <-time.After(10 * time.Second):
@@ -186,10 +207,12 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				}
 				resume()
 				select {
-				case err := <-finished:
-					if err != nil {
-						t.Fatalf("bridge fork did not finish: %v", err)
+				case signal := <-probe.settled:
+					if signal.EventID != observed.id {
+						t.Fatalf("settlement changed the claimed event: %s != %s", signal.EventID, observed.id)
 					}
+				case err := <-finished:
+					t.Fatalf("fork finished without exact delivery settlement: %v", err)
 				case <-forkCtx.Done():
 					t.Fatal(forkCtx.Err())
 				}
@@ -199,12 +222,68 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 					want = runtimedelivery.StatusDeadLetter
 				}
 				if err != nil || current.Status != want || current.ClaimVersion != claim.Version() {
-					t.Fatalf("bridge exact settlement=%+v err=%v", current, err)
+					t.Fatalf("bridge exact settlement status=%s reason=%s failure=%+v claim=%d want=%s err=%v diagnostics=%v", current.Status, current.ReasonCode, current.Failure, current.ClaimVersion, want, err, forkEngineHandlerErrors(t, db, claim.RunID()))
 				}
 				assertForkEngineRows(t, db, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
+				resumeSettled()
+				select {
+				case err := <-finished:
+					if missing {
+						if err == nil || !strings.Contains(err.Error(), "constructed header projection disagrees with its declared field row") {
+							t.Fatalf("corrupt constructed receiver did not refuse activation: %v", err)
+						}
+					} else if err != nil {
+						t.Fatalf("bridge fork did not finish: %v", err)
+					}
+				case <-forkCtx.Done():
+					t.Fatal(forkCtx.Err())
+				}
+				if missing {
+					for _, table := range []string{"flow_instances", "flow_instance_runtime_readiness", "workflow_instance_initial_materializations", "entity_state", "event_deliveries", "events"} {
+						var remaining int
+						if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, claim.RunID()).Scan(&remaining); err != nil || remaining != 0 {
+							t.Fatalf("failed fork retained %s rows: count=%d err=%v", table, remaining, err)
+						}
+					}
+					if err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='consumer'`, runID).Scan(&sourceConsumer); err != nil || forkEngineMarker(t, sourceConsumer) != "consumer-engine" {
+						t.Fatalf("failed fork cleanup changed the source receiver: %s err=%v", sourceConsumer, err)
+					}
+				}
 			})
 		}
 	}
+}
+
+func forkEngineHandlerErrors(t *testing.T, db *sql.DB, runID string) []string {
+	t.Helper()
+	rows, err := db.Query(`SELECT CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name='platform.runtime_log'`, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var failures []string
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var entry struct {
+			Details struct {
+				Action string
+				Error  string
+			}
+		}
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry.Details.Action == "handler_error" {
+			failures = append(failures, entry.Details.Error)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return failures
 }
 
 func forkEngineMarker(t *testing.T, raw string) any {

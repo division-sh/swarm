@@ -1,0 +1,25 @@
+{
+  "source_head": "ccaab9ce3a4496f47dabd80f2733c5f47fe50562",
+  "master_base": "e63f4bdb197e473fe35e94f65ff3c77655957123",
+  "command": [
+    "go", "test", "./internal/runtime/contracts", "./internal/runtime/manager",
+    "./internal/runtime/core/flowidentity", "-run",
+    "^(TestHandlerConstructionRetirementDiskAndReconstructedSource|TestDynamicFlowLegacyExecutionAuthorityAPIsAbsent|TestKeylessChildOfRunRootKeepsAuthoredCoordinate|TestStandingConstructionUsesSelectedGenerationRun)$",
+    "-race", "-count=3", "-json"
+  ],
+  "result": "PASS",
+  "roots": [
+    "TestHandlerConstructionRetirementDiskAndReconstructedSource",
+    "TestDynamicFlowLegacyExecutionAuthorityAPIsAbsent",
+    "TestKeylessChildOfRunRootKeepsAuthoredCoordinate",
+    "TestStandingConstructionUsesSelectedGenerationRun"
+  ],
+  "root_passes": 12,
+  "cell_passes": 30,
+  "failures": 0,
+  "skips": 0,
+  "package_seconds": {"contracts": 1.049, "flowidentity": 1.017, "manager": 27.112},
+  "receipt": "/tmp/agent-e-2496-ccaab9ce3-rebased-owner-guards.log",
+  "receipt_sha256": "facb139448256891f275aee7dcb5dc10d32aef508287508a8d63f8204b7aebbb",
+  "boundary": "Small component identity/retirement controls only. No selected provider execution, C22 closure, managed-default or exact-head CI proof."
+}

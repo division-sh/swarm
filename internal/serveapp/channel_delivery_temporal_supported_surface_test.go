@@ -19,7 +19,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 					"event_name": "work.requested", "bundle_hash": bundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "temporal-seed",
 				})
-				gate := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate)
+				gate := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				gateMessage := waitChannelAnchorReceipt(t, db, gate)
 				deadline := time.Now().UTC().Add(time.Hour)
 				if transition == "expire_restart" {
@@ -30,7 +30,7 @@ func TestChannelDeliveryHumanTemporalReceiptPublicJourney(t *testing.T) {
 					"payload":         map[string]any{"seed": true, "deadline_at": deadline.Format(time.RFC3339Nano)},
 					"idempotency_key": "temporal-human",
 				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindHumanTask)
+				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindHumanTask, "observers")
 				message := waitChannelAnchorReceipt(t, db, card)
 				token, found := telegramCallbackToken(h.provider.Delivery(message-1), "Approve")
 				if !found {

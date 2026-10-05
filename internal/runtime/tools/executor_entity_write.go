@@ -2,11 +2,9 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -15,11 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 const entityFieldPostCommitErrorCode = "entity_field_write_post_commit_failure"
-const entityCreatePostCommitErrorCode = "entity_create_post_commit_failure"
 
 func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	store, source, payload, err := e.entityToolDependencies(input)
@@ -187,120 +183,4 @@ func actorFlowOwnershipRoot(source semanticview.Source, actor models.AgentConfig
 
 func entityFlowOwnedBy(flowRoot, targetFlow string) bool {
 	return runtimeflowidentity.OwnedByScope(flowRoot, targetFlow)
-}
-
-func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	store, source, payload, err := e.entityToolDependencies(input)
-	if err != nil {
-		return nil, err
-	}
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return nil, failures.WrapDetail("write_failed", "tool-executor", "exec_create_entity.run_context", nil, err)
-	}
-	if strings.TrimSpace(asString(payload["entity_id"])) != "" {
-		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.entity_id", map[string]any{"field": "entity_id"})
-	}
-	entityID := uuid.NewString()
-	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
-	if flowInstance == "" {
-		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.flow_instance", map[string]any{"field": "flow_instance"})
-	}
-	contract, ok := entityruntime.ResolveForActor(source, actor)
-	if !ok {
-		contract, ok = entityruntime.ResolveForRuntimeInstance(source, runID, flowInstance)
-	}
-	if !ok {
-		return nil, failures.NewDetail("not_found", "tool-executor", "exec_create_entity.flow_instance", map[string]any{"flow_path": flowInstance})
-	}
-	flowID := entityruntime.ResolveFlowIDForRuntimeInstance(source, runID, flowInstance)
-	if contract.FlowID != "" && flowID != "" && contract.FlowID != flowID {
-		return nil, failures.New(failures.ClassAuthorizationDenied, "flow_scope_create_forbidden", "tool-executor", "exec_create_entity.flow_instance", map[string]any{"action": "entity_create", "flow_path": flowInstance, "actor_id": strings.TrimSpace(actor.ID)})
-	}
-	if strings.TrimSpace(asString(payload["entity_type"])) != "" {
-		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.entity_type", map[string]any{"field": "entity_type"})
-	}
-	if strings.TrimSpace(asString(payload["subject_id"])) != "" {
-		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.subject_id", map[string]any{"field": "subject_id"})
-	}
-	name := strings.TrimSpace(asString(payload["name"]))
-	currentState := strings.TrimSpace(asString(payload["initial_state"]))
-	stageFlowID := flowID
-	if stageFlowID == "" {
-		stageFlowID = "."
-	}
-	graph, found := semanticview.WorkflowStageTopology(source, stageFlowID)
-	if !found || graph.FlowID != stageFlowID || !graph.ValidStageCatalog() {
-		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.initial_state", map[string]any{"field": "initial_state", "flow": stageFlowID})
-	}
-	initial, err := graph.InitialStoredStage()
-	if err != nil {
-		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.initial_state", map[string]any{"field": "initial_state"}, err)
-	}
-	if currentState == "" {
-		currentState = initial.ID()
-	}
-	if currentState != initial.ID() {
-		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.initial_state", map[string]any{"field": "initial_state"})
-	}
-
-	fieldsPayload := map[string]any{}
-	if raw, ok := payload["fields"]; ok && raw != nil {
-		if decoded, ok := raw.(map[string]any); ok {
-			fieldsPayload = decoded
-		} else if err := decodeToolInput(raw, &fieldsPayload); err != nil {
-			return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.fields", nil, err)
-		}
-	}
-	normalizedFields, err := entityruntime.Initialize(contract, fieldsPayload)
-	if err != nil {
-		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.fields", nil, err)
-	}
-	fieldsJSON, err := json.Marshal(normalizedFields)
-	if err != nil {
-		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.fields", nil, err)
-	}
-	now := time.Now().UTC()
-	result, err := store.CreateEntity(ctx, EntityCreateRecord{
-		Source:       source,
-		RunID:        runID,
-		EntityID:     entityID,
-		FlowInstance: flowInstance,
-		EntityType:   contract.EntityType,
-		Name:         name,
-		CurrentState: currentState,
-		FieldsJSON:   json.RawMessage(fieldsJSON),
-		CreatedAt:    now,
-		Writer: EntityMutationWriter{
-			Type:        "platform",
-			ID:          "create_entity",
-			HandlerStep: "create_entity",
-		},
-	})
-	if !result.Acknowledged {
-		if err == nil {
-			err = fmt.Errorf("entity create was not acknowledged")
-		}
-		return nil, failures.WrapDetail("write_failed", "tool-executor", "exec_create_entity.insert", map[string]any{"entity_id": entityID}, err)
-	}
-	response := map[string]any{
-		"entity_id":     result.EntityID,
-		"current_state": currentState,
-		"created_at":    now.Format(time.RFC3339Nano),
-	}
-	if err != nil {
-		response["status"] = "committed_with_post_commit_error"
-		response["write_committed"] = true
-		response["retry_write"] = false
-		response["post_commit_error_code"] = entityCreatePostCommitErrorCode
-		if logger := e.runtimeLogSink(); logger != nil {
-			_ = logger.LogRuntime(toolExecutorRuntimeLogContext(ctx), runtimepipeline.RuntimeLogEntry{
-				Level: "warn", Message: "Entity create committed with a post-commit failure",
-				Component: "tool-executor", Action: entityCreatePostCommitErrorCode,
-				AgentID: strings.TrimSpace(actor.ID), EntityID: result.EntityID,
-				Detail: map[string]any{"post_commit_error": err.Error()},
-			})
-		}
-	}
-	return response, nil
 }

@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 	modernsqlite "modernc.org/sqlite"
@@ -30,16 +33,25 @@ func TestSQLiteWorkflowEngineMutationPreBusyAttemptUsesCallerContext(t *testing.
 		t.Fatalf("register blocking SQLite function: %v", err)
 	}
 
-	selected, db, baseCtx, runID := openStateOnlyAcquisitionStore(t, "sqlite")
-	owner, ok := selected.(runtimepipeline.WorkflowEngineMutationOwner)
-	if !ok {
-		t.Fatal("SQLite selected store does not expose workflow mutation owner")
-	}
 	flowID := "prebusy-workflow-" + uuid.NewString()
 	instancePath := flowID + "/receiver"
-	entityID := uuid.NewString()
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-	seedWorkflowTargetStateForTransition(t, "sqlite", db, runID, entityID, instancePath, "active", 1, createdAt)
+	fixture, record := constructWorkflowMutationFixture(t, "sqlite", flowID, createdAt)
+	db, baseCtx, runID := fixture.db, fixture.ctx, correlation.RunIDFromContext(fixture.ctx)
+	owner, entityID := fixture.store.(runtimepipeline.WorkflowEngineMutationOwner), record.EntityID
+	node := mustPersistenceNode(flowID, "engine-prebusy")
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: instancePath, EntityID: entityID})}
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "engine.prebusy.requested", "fixture", "", []byte(`{}`), 0, runID,
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), instancePath), createdAt)
+	selected := fixture.store.(stateOnlyAcquisitionStore)
+	if err := commitSemanticEventFixtureWithRoutes(baseCtx, selected, event, []events.DeliveryRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := claimDeliveryFixture(baseCtx, selected, event, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record = workflowMutationDeliveryEntry(t, record, node, event, claimed.Claim)
 	triggerName := "swarm_prebusy_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if _, err := db.ExecContext(baseCtx, fmt.Sprintf(`
 		CREATE TRIGGER %s
@@ -54,7 +66,6 @@ func TestSQLiteWorkflowEngineMutationPreBusyAttemptUsesCallerContext(t *testing.
 
 	ctx, cancel := context.WithTimeout(baseCtx, 15*time.Second)
 	defer cancel()
-	record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
 	done := make(chan error, 1)
 	go func() {
 		_, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record})

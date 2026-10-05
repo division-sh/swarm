@@ -1,0 +1,348 @@
+{
+  "source_head": "a609c110230db16711afbde5f45e473450d9092e",
+  "baseline_source": "4ea08530c",
+  "before_receipt": "/tmp/agent-e-2496-describe-four-dispositions-fresh.log",
+  "receipt": "/tmp/agent-e-2496-a609c1102-catalog-required-verify.log",
+  "receipt_sha256": "37a214fc294056b41dead61cfa14a3966dc142e67f5255b86f159e61cafd5c9b",
+  "old_spec_sha256": "4ff93bea2b45b6a38ecd89690c0051b1e4661b002a711bef7cd1546dc1cfa0fa",
+  "new_spec_sha256": "88994b4d2e083affcaee233e000711874e7a90bb5544e9b71cc81b65c5d008d1",
+  "changed": 10,
+  "unchanged": 35,
+  "spec_hunks": [
+    {
+      "old": 20048,
+      "removed": 3,
+      "next": 20048,
+      "added": 6
+    },
+    {
+      "old": 20056,
+      "removed": 0,
+      "next": 20060,
+      "added": 5
+    }
+  ],
+  "rows": [
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-text",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "9bf0f706b9b17f31a5e3230c77626998b897e1b761d32d4bb55a6e2a7576dc0a",
+      "after": "93e874ca56481a843ca8f9f1aa93e365e8dbf6c753519aa934980fb343b9f6b0",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-quiet",
+      "stdout_sha256": "eca9a9c76db7a4488e37e236e8467b4992e078a234075eee6e5274557f850118",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "9bf0f706b9b17f31a5e3230c77626998b897e1b761d32d4bb55a6e2a7576dc0a",
+      "after": "93e874ca56481a843ca8f9f1aa93e365e8dbf6c753519aa934980fb343b9f6b0",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "describe-no-color",
+      "stdout_sha256": "2d035d7d966baded00f8d18c920b121b694dafd5c85792d4746bd1211aed2fb3",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-text",
+      "stdout_sha256": "4e85f66b68b3428055ca54c5d1ff3146aeb08d4c1923d57b1efd64cb1b0c39f1",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-json",
+      "stdout_sha256": "cdd9f1199c913404f4c983cd6a88227df286be69db2028735ee6b91236fd89ee",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-select-or-create",
+      "surface": "routes-quiet",
+      "stdout_sha256": "0b978d387a2f9408ea2af84988014b80e51acf3e53e239742206db0475919b0d",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-text",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "3a58bfb7bf3ba7f319a54a2249c7db917fb6219c414d1b6af7e9ce2eb8255814",
+      "after": "635d999f95799de0f4b179655711c1241502a342495b2e26bea0a2c525dd28a3",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-quiet",
+      "stdout_sha256": "e0e08278e2acaf3e8638fe233c9da5a6aeddc1dff4ff5eab647578efb627945f",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "3a58bfb7bf3ba7f319a54a2249c7db917fb6219c414d1b6af7e9ce2eb8255814",
+      "after": "635d999f95799de0f4b179655711c1241502a342495b2e26bea0a2c525dd28a3",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "describe-no-color",
+      "stdout_sha256": "4dcb2dc84f9d2342f48819b140e6957be3c90b4c01e1f138351e1fbee493280a",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-text",
+      "stdout_sha256": "68d31678f5be68a3ea45990ee04e35dcb077a4b1a49de9e73dc1beb6e3fbcd67",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-json",
+      "stdout_sha256": "638ec5e423f1f39f9c76c6b8b4d833402b5642eba3f21003a82de374a6b2eb67",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/template-create-minted-key",
+      "surface": "routes-quiet",
+      "stdout_sha256": "c6f4a60511ce8f17e6ae3c384537fb41f82c2f287d8eba09a43379fc2b83f561",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-text",
+      "stdout_sha256": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "e4fab5ad55db93f31c6c356ba6c44b2ac2ceeb653b784f4b292915064e47c5d6",
+      "after": "db53982d54c569123b299cfb539a75fa13b40d6cc66259c3077865b5c93fda04",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-quiet",
+      "stdout_sha256": "744111e5fccbae512336302c6b0baf0ef2eb159842070ea72e4f98ceac7a4837",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "e293ed51bb5790be27ffe0ba6fbd0b0809b509ae84867f4888df701611e36c86",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "beb99f3937b3f9dcb637687a408fe65eaecded09053d8245fbd16da0d072f2af",
+      "after": "5b160e6016fa9e2e5595ad2b0a9bb6db7487c86e5175446d5c1c73c0b7a9118c",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "describe-no-color",
+      "stdout_sha256": "e7fb5101c210fb08c1ea3d72d8336b398ac443b58df0a71ca4eada3921e3173b",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-text",
+      "stdout_sha256": "5be2d5444abf97675937143f5723b788a4aba5e01b124e8a5364053dacd5a0ff",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-json",
+      "stdout_sha256": "179e7404c4aed757ef09f9a8743dd90df016565639c5335ef6c0bb2e17225e32",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/integrations/telegram-agent",
+      "surface": "routes-quiet",
+      "stdout_sha256": "47f733bd1d9d366934c2a518160cbba27df3b47068252025bd75df338d9b01b3",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-text",
+      "stdout_sha256": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "a11289b6df4aa5c38ca175a670caea490aa84866189b4befb25bca7f3c595669",
+      "after": "c9f4ac558504780b106125efde971b2ae9c892ccdcbbf725cccb82669b2c8f44",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-quiet",
+      "stdout_sha256": "ec7cb0781f201870ae6f6b76e14a9936c687b8fbe6e8f0d9d327dc918cc2bb31",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "126e635b670c0a83830a0b31bbff5961f7d7e4196e03e0055dfd3ec1e681f7c5",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "b75f0497f18b1bf2fb4ebf0e9be884cf001d348c751d7ed2370a10a5bc6f07c6",
+      "after": "3bf9fadf4e4de4c912a3605608812463c594f2ab7e046e48cdc9f9685d966b67",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "describe-no-color",
+      "stdout_sha256": "26aa67eb04572295edc649b0fc29d4944ee821a41f732ea90dff2c594d92db25",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-text",
+      "stdout_sha256": "bfead8a7c6742f825ae536c1ee1089df440966f920efed6a344c60da7e96ac0a",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-json",
+      "stdout_sha256": "6993774157618225d8ada629158d8d5501e0f6cf4bba8c2d8876441b3b9ae6ac",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "examples/routing/fan-in/barrier",
+      "surface": "routes-quiet",
+      "stdout_sha256": "995e660da9c0a68dead683d6cb3319333555e168e31d416e22bb9a0d3200b2ee",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-text",
+      "stdout_sha256": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-json",
+      "status": "changed",
+      "before": "96f9e908b4dd386aab22a8a31a5a479389bc0d43ff46721fa6245e25863c546a",
+      "after": "c9fce50c44af3072276db3b34b36d069722270d21575548caa83354f63933e6b",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-quiet",
+      "stdout_sha256": "1fdddbc98da8f20c1e269ce9af09276b0c9390143c8977a9caa940b7ffcb9688",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-text",
+      "stdout_sha256": "7c82c5b9b78c78b523d873a40399ced58a8bd87df4cf8ba06d6cfdc19aec624d",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-graph-json",
+      "status": "changed",
+      "before": "c7751604fbcdbc860c2860bde5dd7856024f89f876cbc3e7caa3487b3a6e94ed",
+      "after": "89d413c025b8e2c542103dc956b83b5b65583bfdaee8299a21887719786b89f3",
+      "counts": {
+        "source_file": 1309,
+        "source_line": 267
+      }
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "describe-no-color",
+      "stdout_sha256": "6f8e34f6dc600ecfd54692c97233c609fbe544b61af96375cd236e13a56ad620",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-text",
+      "stdout_sha256": "1b5fc30037ca171c7d94ff4c8719020e836bc3a9738badf6d2730a3ecbe13b1b",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-json",
+      "stdout_sha256": "20c679a9e1947d5ea64d2735281ab90ad7905a3188ea51a693b6aaf2c81ba7dc",
+      "status": "unchanged"
+    },
+    {
+      "fixture": "internal/releasee2e/testdata/golden_agent_workload",
+      "surface": "routes-quiet",
+      "stdout_sha256": "9511636c853ebd7b3f45207c6de487346217f313816b7d7bceb617bca2b70289",
+      "status": "unchanged"
+    }
+  ],
+  "boundary": "Captured 45-cell characterization; ten JSON cells differ only in exact spec provenance. Baseline not updated and no accepted rerun or full-suite credit claimed."
+}

@@ -220,7 +220,6 @@
           "node_id": "telegram-responder"
         },
         "EventType": "telegram.reply_requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -2001,7 +2000,6 @@
           "node_id": "ingress-node"
         },
         "EventType": "operating.report.triggered",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -2095,7 +2093,6 @@
           "node_id": "operating-node"
         },
         "EventType": "operating.report.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -2200,7 +2197,6 @@
           "node_id": "portfolio-router"
         },
         "EventType": "operating.reported",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -2294,7 +2290,6 @@
           "node_id": "portfolio-router"
         },
         "EventType": "portfolio.setup",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -2415,7 +2410,6 @@
           "node_id": "portfolio-collector"
         },
         "EventType": "period.reported",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -2588,7 +2582,6 @@
           "node_id": "portfolio-collector"
         },
         "EventType": "period.setup",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3566,7 +3559,6 @@
           "node_id": "ingress-node"
         },
         "EventType": "operating.report.triggered",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3638,7 +3630,6 @@
           "node_id": "operating-node"
         },
         "EventType": "operating.report.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3721,7 +3712,6 @@
           "node_id": "portfolio-collector"
         },
         "EventType": "operating.reported",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -4544,7 +4534,7 @@
             "Input": null,
             "Approval": null
           },
-          "CreateEntity": true,
+          "CreateEntity": false,
           "Description": "",
           "Emit": {
             "Event": "",
@@ -5232,7 +5222,7 @@
               "Compute": null,
               "Condition": "",
               "Count": null,
-              "CreateEntity": true,
+              "CreateEntity": false,
               "DataAccumulation": {
                 "SourceEvent": "",
                 "Writes": [
@@ -5380,7 +5370,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.notification.completed",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5429,7 +5418,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.notify.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5516,7 +5504,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.registered",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5603,7 +5590,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.account.register.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5664,7 +5650,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.accounts.register.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5781,7 +5766,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.membership.seeded",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5868,7 +5852,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.notify.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5958,7 +5941,6 @@
           "node_id": "portfolio-coordinator"
         },
         "EventType": "portfolio.opened",
-        "CreateEntity": true,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6375,7 +6357,6 @@
           "node_id": "consumer-node"
         },
         "EventType": "work.ready",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6424,7 +6405,6 @@
           "node_id": "producer-node"
         },
         "EventType": "work.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6788,7 +6768,6 @@
           "node_id": "item-handler"
         },
         "EventType": "item.received",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6849,7 +6828,6 @@
           "node_id": "item-observer"
         },
         "EventType": "item.processed",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7560,7 +7538,6 @@
           "node_id": "producer-node"
         },
         "EventType": "validation.started",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7696,7 +7673,6 @@
           "node_id": "producer-node"
         },
         "EventType": "validation.triggered",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7757,7 +7733,6 @@
           "node_id": "validator-node"
         },
         "EventType": "validation.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -8730,7 +8705,6 @@
           "node_id": "initiator-node"
         },
         "EventType": "request.submitted",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -8791,7 +8765,6 @@
           "node_id": "initiator-node"
         },
         "EventType": "requester.setup.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -8852,7 +8825,6 @@
           "node_id": "provider-node"
         },
         "EventType": "provider.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -8924,7 +8896,6 @@
           "node_id": "requester-node"
         },
         "EventType": "provider.replied",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -8973,7 +8944,6 @@
           "node_id": "requester-node"
         },
         "EventType": "requester.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9034,7 +9004,6 @@
           "node_id": "requester-node"
         },
         "EventType": "requester.setup",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9655,7 +9624,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.ready",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9704,7 +9672,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.setup",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9753,7 +9720,6 @@
           "node_id": "producer-node"
         },
         "EventType": "account.setup.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9814,7 +9780,6 @@
           "node_id": "producer-node"
         },
         "EventType": "account.work.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10205,7 +10170,6 @@
           "node_id": "account-node"
         },
         "EventType": "account.ready",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10254,7 +10218,6 @@
           "node_id": "producer-node"
         },
         "EventType": "account.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10504,7 +10467,6 @@
           "node_id": "send-notification"
         },
         "EventType": "automation.requested",
-        "CreateEntity": false,
         "Activity": {
           "ID": "",
           "Tool": "",

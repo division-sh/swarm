@@ -81,10 +81,11 @@ type SelectedContractAgentRuntimeMaterialization struct {
 }
 
 type selectedContractAgentRuntimePlan struct {
+	SourceRunID         string
 	Declarations        runtimeagenttopology.SelectedDeclarationPlan
 	Proof               SelectedContractAgentRuntimeMaterialization
 	Blueprints          []runtimemanager.AgentMaterializationBlueprint
-	Flows               []runtimemanager.TemplateFlowMaterializationPlan
+	Flows               []runtimemanager.FlowInstanceMaterializationPlan
 	ConfiguredPlans     []agentidentity.Plan
 	Records             []runtimemanager.PersistedAgent
 	Options             SelectedContractAgentRuntimeOptions
@@ -162,6 +163,14 @@ func (p selectedContractAgentRuntimePlan) bindRun(runID string, committed []runf
 		records = append(records, record)
 	}
 	p.Records = records
+	p.Flows = append([]runtimemanager.FlowInstanceMaterializationPlan(nil), p.Flows...)
+	for i := range p.Flows {
+		parent, err := runfork.ProjectParentRoute(p.SourceRunID, runID, p.Flows[i].Instance.ParentRoute)
+		if err != nil {
+			return selectedContractAgentRuntimePlan{}, err
+		}
+		p.Flows[i].Instance.ParentRoute, p.Flows[i].Instance.ParentEntityID = parent, parent.EntityID
+	}
 	for _, identity := range p.Proof.AgentRecipients {
 		if _, ok := topologyByIdentity[identity]; ok {
 			continue
@@ -434,22 +443,6 @@ func bindSelectedContractWorkspaceProjection(loaded LoadedSelectedContractSource
 	return options, &selectedContractWorkspaceProjection{lifecycle: rebound}, nil
 }
 
-func selectedContractStaticAgentRecords(runID string, source semanticview.Source) ([]runtimemanager.PersistedAgent, error) {
-	blueprints, err := runforkreadiness.StaticAgentBlueprints(source)
-	if err != nil {
-		return nil, err
-	}
-	records := make([]runtimemanager.PersistedAgent, 0, len(blueprints))
-	for _, blueprint := range blueprints {
-		record, err := blueprint.Materialize(runID)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
-	}
-	return records, nil
-}
-
 func selectedContractAgentRuntimeUnsupportedPlanError(plans []agentidentity.Plan, reason string) error {
 	plans = append([]agentidentity.Plan(nil), plans...)
 	sortAgentPlans(plans)
@@ -522,17 +515,18 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			resultErr = errors.Join(resultErr, runtimeOwner.Shutdown())
 		}
 	}()
+	binding, err := generationGrant.ProcessExecutionBinding()
+	if err != nil {
+		return nil, managedexecution.Admission{}, err
+	}
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, binding.RuntimeInstanceID)
 	publishRoutes := func() error {
-		binding, err := generationGrant.ProcessExecutionBinding()
-		if err != nil {
-			return err
-		}
 		for _, flow := range req.AgentRuntime.Flows {
 			owner, err := runtimeflowidentity.NewRunScopedFlowInstance(authority.SelectedFork.ForkRunID, flow.Instance.Route())
 			if err != nil {
 				return err
 			}
-			route := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, ActivationVariables: flow.ActivationVariables}
+			route := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: flow.Instance, ActivationVariables: flow.ActivationVariables}
 			if err := admitSelectedContractFlowRoute(ctx, pipeline, bus, binding, route, diagnostics, &runtimeOwner.pendingActivations); err != nil {
 				return err
 			}
@@ -542,7 +536,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	transferRoutes := func(manager *runtimemanager.AgentManager) error {
 		for len(runtimeOwner.pendingActivations) > 0 {
 			activation := runtimeOwner.pendingActivations[0]
-			if err := manager.AdoptSelectedFlowActivation(activation.attempt, activation.publication, activation.timersProjected); err != nil {
+			if err := manager.AdoptSelectedFlowActivation(activation.identity, activation.attempt, activation.publication, activation.timersProjected); err != nil {
 				return err
 			}
 			runtimeOwner.pendingActivations = runtimeOwner.pendingActivations[1:]
@@ -576,7 +570,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		if err := publishRoutes(); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
-		if err := completeSelectedContractFlowRoutes(ctx, pipeline, runtimeOwner.pendingActivations, diagnostics); err != nil {
+		if err := completeSelectedContractFlowRoutes(ctx, pipeline, bus, runtimeOwner.pendingActivations, diagnostics); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
 		if err := transferRoutes(manager); err != nil {
@@ -627,7 +621,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 				if identity.RunID != activation.attempt.RunID() || identity.FlowInstance() != activation.attempt.InstancePath() {
 					continue
 				}
-				rec.Topology, err = rec.Topology.WithFlowActivationAttempt(activation.attempt.ID(), activation.attempt.PlanRevision())
+				rec.Topology, err = rec.Topology.WithFlowActivationAttempt(activation.attempt.ID())
 				if err != nil {
 					return nil, managedexecution.Admission{}, err
 				}
@@ -650,7 +644,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			EntityID: rec.Config.EffectiveEntityID(),
 		})
 	}
-	if err := completeSelectedContractFlowRoutes(ctx, pipeline, runtimeOwner.pendingActivations, diagnostics); err != nil {
+	if err := completeSelectedContractFlowRoutes(ctx, pipeline, bus, runtimeOwner.pendingActivations, diagnostics); err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
 	if err := transferRoutes(manager); err != nil {

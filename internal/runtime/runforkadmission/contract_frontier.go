@@ -37,7 +37,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	if err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract fork routes: %w", err)
 	}
-	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Plan.SourceRunID, req.Source, req.Plan.PendingWork); err != nil {
+	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan); err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, err
 	}
 	workflowNodes, err := runtimepipeline.LoadWorkflowNodes(req.Source)
@@ -202,7 +202,7 @@ func completeContractFrontierFlowInstances(runID string, source semanticview.Sou
 		if !ok {
 			continue
 		}
-		exact, err := contractFrontierFlowInstances(runID, source, item)
+		exact, err := contractFrontierExactFlowInstances(runID, item)
 		if err != nil {
 			return err
 		}
@@ -317,74 +317,21 @@ func runForkFrontierEvents(pending []runfork.RunForkPendingWork) ([]runfork.RunF
 	return out, lineage
 }
 
-func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, runID string, source semanticview.Source, pending []runfork.RunForkPendingWork) error {
-	routes, err := contractFrontierFlowInstanceRoutes(runID, source, pending)
+func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, source semanticview.Source, plan runfork.RunForkPlan) error {
+	instances, err := ConstructedInstances(source, plan)
 	if err != nil {
 		return err
 	}
-	for _, route := range routes {
-		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
+	for _, instance := range instances {
+		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.SourceRunID, instance.Route())
 		if err != nil {
-			return fmt.Errorf("derive selected-contract flow-instance identity %s: %w", route.InstancePath, err)
+			return fmt.Errorf("derive selected-contract flow-instance identity %s: %w", instance.InstancePath, err)
 		}
-		if err := routeTable.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
-			return fmt.Errorf("derive selected-contract flow-instance route %s: %w", route.InstancePath, err)
+		if err := routeTable.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: instance}); err != nil {
+			return fmt.Errorf("derive selected-contract flow-instance route %s: %w", instance.InstancePath, err)
 		}
 	}
 	return nil
-}
-
-func contractFrontierFlowInstanceRoutes(runID string, source semanticview.Source, pending []runfork.RunForkPendingWork) ([]runtimeflowidentity.Route, error) {
-	seen := map[runtimeflowidentity.Route]struct{}{}
-	out := make([]runtimeflowidentity.Route, 0)
-	for _, item := range pending {
-		instances, err := contractFrontierFlowInstances(runID, source, item)
-		if err != nil {
-			return nil, err
-		}
-		for _, instancePath := range instances {
-			route := runtimeflowidentity.StoredRoute("", "", instancePath)
-			if !route.Valid() {
-				continue
-			}
-			if _, ok := seen[route]; ok {
-				continue
-			}
-			seen[route] = struct{}{}
-			out = append(out, route)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].ScopeKey != out[j].ScopeKey {
-			return out[i].ScopeKey < out[j].ScopeKey
-		}
-		if out[i].InstanceID != out[j].InstanceID {
-			return out[i].InstanceID < out[j].InstanceID
-		}
-		return out[i].InstancePath < out[j].InstancePath
-	})
-	return out, nil
-}
-
-func contractFrontierFlowInstances(runID string, source semanticview.Source, item runfork.RunForkPendingWork) ([]string, error) {
-	candidates, err := contractFrontierExactFlowInstances(runID, item)
-	if err != nil {
-		return nil, err
-	}
-	seen := make(map[string]struct{}, len(candidates))
-	out := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		if !isContractFrontierTemplateInstancePath(source, candidate) {
-			continue
-		}
-		if _, exists := seen[candidate]; exists {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		out = append(out, candidate)
-	}
-	sort.Strings(out)
-	return out, nil
 }
 
 func contractFrontierExactFlowInstances(runID string, item runfork.RunForkPendingWork) ([]string, error) {
@@ -422,26 +369,6 @@ func contractFrontierExactFlowInstances(runID string, item runfork.RunForkPendin
 	}
 	sort.Strings(out)
 	return out, nil
-}
-
-func isContractFrontierTemplateInstancePath(source semanticview.Source, instancePath string) bool {
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	if source == nil || instancePath == "" {
-		return false
-	}
-	for _, scope := range source.FlowScopes() {
-		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-			continue
-		}
-		scopePath := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		if scopePath == "" || instancePath == scopePath {
-			continue
-		}
-		if strings.HasPrefix(instancePath, scopePath+"/") {
-			return true
-		}
-	}
-	return false
 }
 
 func contractFrontierRoutingSource(pending []runfork.RunForkPendingWork, eventID string) events.RoutingSource {

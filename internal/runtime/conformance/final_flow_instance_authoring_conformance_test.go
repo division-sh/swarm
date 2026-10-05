@@ -119,8 +119,8 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 		{
 			name:        "caller-selected static create_entity",
 			opts:        finalflowinstanceauthoring.Options{StaticCreateEntity: true},
-			checkID:     "flow_boundary_create_entity_validation",
-			wantMessage: "caller-selected entity_id",
+			loadError:   true,
+			wantMessage: `handler field "create_entity" is not supported`,
 		},
 		{
 			name:        "retired static select_entity",

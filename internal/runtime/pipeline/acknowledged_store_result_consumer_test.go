@@ -8,11 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -119,75 +117,5 @@ func TestActivityTerminalNonzeroRecordWithoutAcknowledgmentDoesNotPublish(t *tes
 	err := dispatcher.publishCommittedActivityAttempt(context.Background(), testActivityIntent("https://example.com"), record, false, fault, "complete_activity_attempt")
 	if !errors.Is(err, fault) || len(bus.publishes) != 0 {
 		t.Fatalf("unacknowledged terminal record: error=%v publications=%d", err, len(bus.publishes))
-	}
-}
-
-type faultingInitialMaterializationOwner struct {
-	WorkflowInitialMaterializationCommitOwner
-	fault error
-	used  bool
-}
-
-func (o *faultingInitialMaterializationOwner) CommitWorkflowInitialMaterialization(ctx context.Context, command WorkflowInitialMaterializationCommand) (CommittedWorkflowInitialMaterialization, error) {
-	result, err := o.WorkflowInitialMaterializationCommitOwner.CommitWorkflowInitialMaterialization(ctx, command)
-	if result.Committed && err == nil && !o.used {
-		o.used = true
-		return result, o.fault
-	}
-	return result, err
-}
-
-type unacknowledgedInitialMaterializationOwner struct{}
-
-func (unacknowledgedInitialMaterializationOwner) CommitWorkflowInitialMaterialization(context.Context, WorkflowInitialMaterializationCommand) (CommittedWorkflowInitialMaterialization, error) {
-	return CommittedWorkflowInitialMaterialization{Result: WorkflowInitialMaterializationCreated}, nil
-}
-
-func TestInitialMaterializationPostCommitErrorFinalizesLifecycleBothStores(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		setup func(*testing.T) (*workflowInstanceStore, context.Context)
-	}{
-		{"sqlite", func(t *testing.T) (*workflowInstanceStore, context.Context) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
-			return newSQLiteWorkflowInstanceStoreForTest(t, db), withLiveWorkflowInitialEntry(sqliteExactOnceRunContext(t, db))
-		}},
-		{"postgres", func(t *testing.T) (*workflowInstanceStore, context.Context) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return newPostgresWorkflowInstanceStoreForTest(db), withLiveWorkflowInitialEntry(testPipelineRunContext(t, db))
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.setup(t)
-			lifecycle := &workflowInitialMaterializationTestOwner{}
-			store.lifecycleOwner = lifecycle
-			fault := errors.New("injected initial materialization post-commit cleanup fault")
-			commit := &faultingInitialMaterializationOwner{WorkflowInitialMaterializationCommitOwner: store.initialCommits, fault: fault}
-			store.initialCommits = commit
-			instance := WorkflowInstance{InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review", WorkflowVersion: "1.0.0", CurrentState: "pending", Fields: map[string]any{}, EntityType: "test_entity"}
-			identity := testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef)
-			at := time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)
-			result, err := store.MaterializeInitialEntry(ctx, identity, instance, at)
-			if result != WorkflowInitialMaterializationCreated || !errors.Is(err, fault) || !commit.used || lifecycle.effects != 1 {
-				t.Fatalf("committed initial entry = result %v err %v injected %t lifecycle finalizations %d", result, err, commit.used, lifecycle.effects)
-			}
-			if _, found, err := store.Load(ctx, identity); err != nil || !found {
-				t.Fatalf("load committed initial entry: found=%t err=%v", found, err)
-			}
-			replayed, err := store.MaterializeInitialEntry(ctx, identity, instance, at)
-			if err != nil || replayed != WorkflowInitialMaterializationAlreadyExists || lifecycle.effects != 1 {
-				t.Fatalf("initial entry replay = result %v err %v lifecycle finalizations %d", replayed, err, lifecycle.effects)
-			}
-			store.initialCommits = unacknowledgedInitialMaterializationOwner{}
-			unacknowledged := instance
-			unacknowledged.InstanceID = "inst-2"
-			unacknowledged.StorageRef = "review/inst-2"
-			unacknowledgedIdentity := testRunScopedWorkflowInstanceFromContext(ctx, unacknowledged.StorageRef)
-			result, err = store.MaterializeInitialEntry(ctx, unacknowledgedIdentity, unacknowledged, at)
-			if result != WorkflowInitialMaterializationUnknown || err == nil || lifecycle.effects != 1 {
-				t.Fatalf("unacknowledged nonzero materialization = result %v err %v lifecycle finalizations %d", result, err, lifecycle.effects)
-			}
-		})
 	}
 }

@@ -2,7 +2,6 @@ package tools_test
 
 import (
 	"context"
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,7 +70,7 @@ accounts:
 		AllowInternalLegacyEntityTools: true,
 	})
 
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"name":          "Acme",
 		"fields": map[string]any{
@@ -162,7 +161,7 @@ accounts:
 	}
 }
 
-func TestEntityTools_CreateEntityPersistsCanonicalEntityContractOnBothStores(t *testing.T) {
+func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "tester",
@@ -189,7 +188,7 @@ func TestEntityTools_CreateEntityPersistsCanonicalEntityContractOnBothStores(t *
 			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 				EntityStore: entityStore, WorkflowSource: semanticview.Wrap(bundle), AllowInternalLegacyEntityTools: true,
 			})
-			entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+			entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 				"flow_instance": "review/inst-1",
 				"fields":        map[string]any{"status": "open"},
 			})
@@ -215,27 +214,10 @@ func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "account", "types:\n  Brief:\n    summary: text\n", "account:\n  business_brief: Brief\n  tags: list<text>\n")
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
-	entityID := uuid.NewString()
-	if _, err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-		Source:       semanticview.Wrap(bundle),
-		RunID:        entityToolTestRunID,
-		EntityID:     entityID,
-		FlowInstance: "review/inst-structured",
-		EntityType:   "account",
-		CurrentState: "queued",
-		FieldsJSON: json.RawMessage(`{
-			"business_brief":{"summary":"validated"},
-			"tags":["alpha","beta"]
-		}`),
-		CreatedAt: time.Now().UTC(),
-		Writer: runtimetools.EntityMutationWriter{
-			Type:        "platform",
-			ID:          "sqlite-structured-filter-test",
-			HandlerStep: "seed",
-		},
-	}); err != nil {
-		t.Fatalf("seed sqlite structured entity: %v", err)
-	}
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
+		"flow_instance": "review/inst-structured",
+		"fields":        map[string]any{"business_brief": map[string]any{"summary": "validated"}, "tags": []any{"alpha", "beta"}},
+	})
 
 	rows, err := sqliteStore.QueryEntityStates(ctx, runtimetools.EntityStateQuery{
 		RunID: entityToolTestRunID,
@@ -257,24 +239,10 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
-	entityID := uuid.NewString()
-	if _, err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-		Source:       semanticview.Wrap(bundle),
-		RunID:        entityToolTestRunID,
-		EntityID:     entityID,
-		FlowInstance: "validation/inst-1",
-		EntityType:   "validation_case",
-		CurrentState: "queued",
-		FieldsJSON:   json.RawMessage(`{"status":"open","business_brief":{"summary":"before","confidence":1}}`),
-		CreatedAt:    time.Now().UTC(),
-		Writer: runtimetools.EntityMutationWriter{
-			Type:        "platform",
-			ID:          "sqlite-role-scoped-test",
-			HandlerStep: "seed",
-		},
-	}); err != nil {
-		t.Fatalf("seed sqlite role-scoped entity: %v", err)
-	}
+	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
+		"flow_instance": "validation/inst-1",
+		"fields":        map[string]any{"status": "open", "business_brief": map[string]any{"summary": "before", "confidence": int64(1)}},
+	})
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		UPDATE entity_state
 		SET bookkeeping = '{"private_fact":"must-not-leak"}'
@@ -344,12 +312,10 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			requester := models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "requester",
-				Role:          "worker", FlowID: "provider", FlowPath: flowPath, EntityID: uuid.NewString(),
+				Role:          "worker", FlowID: flowPath, FlowPath: flowPath,
 				Tools: []string{"ask_human"}, Permissions: []string{"ask_human"},
 			}
-			bundle := loadWave1EntityToolBundle(t, requester, "provider", "provider_record", "", "provider_record:\n  status: text\n")
-			bundle.FlowTree.ByID["provider"].Path = flowPath
-			source := semanticview.Wrap(bundle)
+			source := humanTaskImportedSource(t, requester)
 			declarations := semanticview.AgentDeclarations(source)
 			if len(declarations) != 1 {
 				t.Fatalf("requester declarations = %#v, want one", declarations)
@@ -359,9 +325,6 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 				t.Fatalf("requester declaration name: %v", err)
 			}
 			requester.Identity = agentidentitytest.Declared(t, plan.AgentID, plan.OwnerURI, flowPath, "provider", flowPath)
-			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
-				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: source,
-			})
 			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-turn")
 			ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "tool_call:1:0:mock-1:ask_human")
@@ -370,6 +333,10 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 				t.Fatalf("logical call = %q, present %v", logicalCall, ok)
 			}
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
+			requester, loader := humanTaskConstructedRequester(t, ctx, tc.store, source, requester)
+			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
+				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: source, WorkflowInstances: loader,
+			})
 			ctx = runtimetools.WithActor(ctx, requester)
 			input := map[string]any{
 				"scope": "flow", "category": "review", "description": "Review provider response",
@@ -405,7 +372,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			if got, _ := provenance["logical_operation_id"].String(); got != operation.String() || strings.ContainsRune(got, '\x00') {
 				t.Fatalf("persisted operation = %q, want %q", got, operation.String())
 			}
-			wantSourceRoute := events.RouteIdentity{FlowID: "provider", FlowInstance: flowPath, EntityID: requester.EntityID}
+			wantSourceRoute := events.RouteIdentity{FlowID: flowPath, FlowInstance: flowPath, EntityID: requester.EntityID}
 			if got := anchor.Source.Route().Normalized(); got != wantSourceRoute {
 				t.Fatalf("human-task routing source = %#v, want %#v", got, wantSourceRoute)
 			}
@@ -416,7 +383,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			if continuation.ReplyContextID != replyContextID || continuation.SourceEventID != sourceEventID || continuation.State != decisioncard.HumanTaskContinuationPending {
 				t.Fatalf("human-task continuation = %#v", continuation)
 			}
-			if got := continuation.RequesterRoute.Normalized(); got != (events.RouteIdentity{FlowID: "provider", FlowInstance: flowPath, EntityID: requester.EntityID}) {
+			if got := continuation.RequesterRoute.Normalized(); got != (events.RouteIdentity{FlowID: flowPath, FlowInstance: flowPath, EntityID: requester.EntityID}) {
 				t.Fatalf("human-task requester route = %#v", got)
 			}
 			if got := continuation.DeadlineAt.Sub(card.CreatedAt); got != 48*time.Hour {
@@ -439,7 +406,8 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			forkCtx, _, _ := seedReplyToolContext(t, tc.store)
 			forkCtx = runtimeeffects.WithLogicalOperationIdentity(forkCtx, logicalCall)
 			forkCtx = runtimecorrelation.WithSourceArtifactFact(forkCtx, authorActivityTestSourceArtifactFact)
-			forkCtx = runtimetools.WithActor(forkCtx, requester)
+			forkRequester, _ := humanTaskConstructedRequester(t, forkCtx, tc.store, source, requester)
+			forkCtx = runtimetools.WithActor(forkCtx, forkRequester)
 			forked, err := exec.Execute(forkCtx, "ask_human", input)
 			if err != nil {
 				t.Fatalf("fork-local ask_human: %v", err)

@@ -1153,7 +1153,7 @@ func TestExecutionScopeResolveOperand_AllowsPlatformEntityRoot(t *testing.T) {
 	}
 }
 
-func TestExecutor_ValidateRequestRejectsCreateEntityWithAccumulate(t *testing.T) {
+func TestExecutor_ValidateRequestRejectsHandlerConstruction(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
@@ -1169,8 +1169,8 @@ func TestExecutor_ValidateRequestRejectsCreateEntityWithAccumulate(t *testing.T)
 			Accumulate:   &runtimecontracts.AccumulateSpec{},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
-		t.Fatalf("ValidateRequest error = %v, want create_entity/accumulate error", err)
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "handler construction is retired") {
+		t.Fatalf("ValidateRequest error = %v, want retired handler construction refusal", err)
 	}
 }
 
@@ -3327,7 +3327,7 @@ func TestExecutorDoesNotSerializeIndependentEntitiesBehindCommit(t *testing.T) {
 			EntityID: entityID, Node: testFlowExecutableNode(t, "flow-1", "node-1"),
 			Route:   runtimeflowidentity.RouteForInstancePath("flow-1"),
 			Event:   eventtest.RunCreatingRootIngress(eventID, "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
-			Handler: runtimecontracts.SystemNodeEventHandler{}, State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+			Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "task.recorded"}}, State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 		}
 	}
 	firstRequest := request("entity-1", "evt-1")
@@ -3395,7 +3395,7 @@ func TestExecutorKeepsEntityLockThroughCommitButNotDispatch(t *testing.T) {
 			}
 			dispatcher.executor = exec
 			dispatcher.reentry = request
-			dispatcher.reentry.Handler = runtimecontracts.SystemNodeEventHandler{}
+			dispatcher.reentry.Handler = runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "task.recorded"}}
 			dispatcher.reentry.Event = eventtest.RunCreatingRootIngress("evt-2", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 1, 0, time.UTC))
 			result, err := exec.ExecuteSemanticFixture(context.Background(), request)
 			if err != nil || locker.held || len(result.EmitIntents) != 1 {

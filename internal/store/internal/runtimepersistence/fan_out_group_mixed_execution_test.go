@@ -495,15 +495,10 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	fact := mustStoreTestSourceArtifactFact(f.seed.bundleHash)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, f.seed.runID), fact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, f.seed.bundleHash))
-	setup := pipeline.ScenarioSetupRequest{RunID: f.seed.runID, CreatedAt: f.seed.createdAt}
-	for _, flow := range []string{"one", "multi-a", "multi-b", "agent-only"} {
-		setup.Entities = append(setup.Entities, pipeline.ScenarioSetupEntityRequest{Alias: flow, EntityID: uuid.NewString(), FlowInstance: flow, EntityType: "test_entity", CurrentState: "active", Fields: map[string]any{}})
-	}
-	if _, err := f.raw.(interface {
-		SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
-	}).SetupScenarioEntities(ctx, setup); err != nil {
-		t.Fatal(err)
-	}
+	construction := sqliteFlowActivationRequest(bundle, ".", f.seed.runID, "", f.seed.runID)
+	construction.Instance = flowidentity.Stored(source, ".", f.seed.runID, f.seed.runID, f.seed.runID, "")
+	construction.OccurredAt = f.seed.createdAt
+	constructHistoricalSourceFixture(t, ctx, f.raw.(agentFixtureFlowStore), construction)
 	process := worklifetime.NewProcess()
 	var am *manager.AgentManager
 	f.occurrence, err = process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: f.seed.bundleHash})
@@ -555,6 +550,21 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 		t.Fatal(err)
 	}
 	seen := make(chan events.Event, 16)
+	workflow := f.raw.(workflowTestSelectedStore)
+	nodes, err := pipeline.LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := pipeline.NewPipelineCoordinatorWithOptions(f.bus, pipeline.PipelineCoordinatorOptions{
+		Module: forkFanOutConsumerModule{runForkGateWorkflowModule{source: source}, nodes}, Persistence: pipeline.NewWorkflowPersistence(workflow), DeliveryStore: workflow,
+		DeadLetters: workflow, PipelineObligations: workflow.PipelineObligations(), DecisionCards: workflow, ProposedEffects: workflow, HumanTasks: workflow,
+		DecisionCardDraftExpiry: workflow, HumanTaskExpiry: workflow, DeliveryRuntime: f.bus, RunLifecycle: workflow,
+		SourceArtifactFact: fact, ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: f.occurrence,
+		TestLifecycleProbe: handlers,
+	})
+	if coordinator == nil {
+		t.Fatal("real mixed pipeline dependencies incomplete")
+	}
 	am = manager.NewAgentManagerWithOptions(f.bus, func(cfg actors.AgentConfig) (manager.Agent, error) {
 		subs := make([]events.EventType, len(cfg.Subscriptions))
 		for i, value := range cfg.Subscriptions {
@@ -563,8 +573,9 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 		return &mixedRecordingAgent{id: cfg.ID, subscriptions: subs, seen: seen, store: selected}, nil
 	}, manager.AgentManagerOptions{
 		SourceArtifactFact: fact, SemanticSource: source, DeliveryStore: selected, ExecutionPosture: executionposture.Live,
-		PersistenceRoles: manager.PersistenceRoles{AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus, RouteRestorer: f.bus, CreationPublisher: f.bus, DeliveryRuntime: f.bus, LifecycleState: f.raw.(manager.AgentLifecycleStateReader)},
-		WorkOwner:        f.occurrence, ReceiverExecution: eventreceiver.NormalExecution(),
+		WorkflowInstances: coordinator,
+		PersistenceRoles:  manager.PersistenceRoles{AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus, RouteRestorer: f.bus, CreationPublisher: f.bus, DeliveryRuntime: f.bus, LifecycleState: f.raw.(manager.AgentLifecycleStateReader)},
+		WorkOwner:         f.occurrence, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, f.raw.(manager.ManagerPersistence))
 	f.bus.SetCommittedAgentReadinessFinalizer(bus.CommittedAgentReadinessFinalizerFunc(am.FinalizeCommittedAgentReadiness))
 	coordinate := agenttopology.SourceCoordinate{BundleHash: f.seed.bundleHash}
@@ -616,20 +627,8 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	if err := am.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
-	workflow := f.raw.(workflowTestSelectedStore)
-	nodes, err := pipeline.LoadWorkflowNodes(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	coordinator := pipeline.NewPipelineCoordinatorWithOptions(f.bus, pipeline.PipelineCoordinatorOptions{
-		Module: forkFanOutConsumerModule{runForkGateWorkflowModule{source: source}, nodes}, Persistence: pipeline.NewWorkflowPersistence(workflow), DeliveryStore: workflow,
-		DeadLetters: workflow, PipelineObligations: workflow.PipelineObligations(), DecisionCards: workflow, ProposedEffects: workflow, HumanTasks: workflow,
-		DecisionCardDraftExpiry: workflow, HumanTaskExpiry: workflow, DeliveryRuntime: f.bus, RunLifecycle: workflow,
-		SourceArtifactFact: fact, ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: f.occurrence,
-		TestLifecycleProbe: handlers,
-	})
-	if coordinator == nil {
-		t.Fatal("real mixed pipeline dependencies incomplete")
+	if _, err := am.EnsureFlowInstance(ctx, construction); err != nil {
+		t.Fatalf("attach constructed mixed tree: %v", err)
 	}
 	f.bus.SetInterceptors(coordinator)
 	continuations, err := deliverycontinuation.New(selected, selected, authority, f.occurrence, f.bus, func(_ context.Context, err error) { t.Errorf("real mixed continuation: %v", err) })

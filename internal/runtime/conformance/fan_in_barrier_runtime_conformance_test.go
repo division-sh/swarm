@@ -116,8 +116,8 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			seedFanInBarrierRun(t, ctx, backend, db, runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
+			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, db, source)
 			const periodID = "2026-Q3"
 			const portfolioID = "portfolio-one"
@@ -283,10 +283,26 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 		t.Run(tc.name, func(t *testing.T) {
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			seedFanInBarrierRun(t, ctx, backend, db, runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
+			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, db, source)
-			sourceEntityID := eventtest.UUID("root-to-singleton-source-" + tc.name)
+			constructionCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+			construction, err := runtime.manager.PrepareFlowInstanceActivation(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
+				ContractBundle: source,
+				Instance:       runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""),
+				OccurredAt:     time.Now().UTC(),
+			})
+			if err != nil {
+				t.Fatalf("prepare eager root/receiver tree: %v", err)
+			}
+			committed, err := runtime.bus.CommitFlowInstanceActivation(constructionCtx, construction)
+			if err != nil || !committed.Acknowledged || !committed.Created || len(committed.Children) != 1 {
+				t.Fatalf("commit eager root/receiver tree: committed=%#v err=%v", committed, err)
+			}
+			if err := runtime.manager.FinalizeCommittedFlowInstanceActivation(constructionCtx, committed); err != nil {
+				t.Fatalf("finalize eager root/receiver tree: %v", err)
+			}
+			sourceEntityID := runID
 			sourceRoute := events.RouteIdentity{
 				FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: sourceEntityID,
 			}.Normalized()
@@ -314,7 +330,7 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 			wantRoute := events.RouteIdentity{
 				FlowID: "consumer", FlowInstance: "consumer", EntityID: runtimeflowidentity.EntityID("consumer"),
 			}.Normalized()
-			wantOwner := events.MustMaterializingEntityTarget(wantRoute)
+			wantOwner := events.MustExistingEntityTarget(wantRoute)
 			if sourceEntityID == wantRoute.EntityID {
 				t.Fatal("root source and singleton receiver identities must remain distinguishable")
 			}
@@ -322,20 +338,21 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 				RunID: runID,
 				Route: runtimeflowidentity.RouteForInstancePath("consumer"),
 			}
-			if instance, found, err := runtime.pipeline.Load(ctx, consumerIdentity); err != nil || found {
-				t.Fatalf("singleton receiver must not exist before first delivery: found:%t instance:%#v err:%v", found, instance, err)
+			before, found, err := runtime.pipeline.Load(ctx, consumerIdentity)
+			if err != nil || !found || before.EntityID != wantRoute.EntityID {
+				t.Fatalf("singleton receiver must be constructed before first delivery: found:%t instance:%#v err:%v", found, before, err)
 			}
 			plan, err := runtime.bus.CheckPublishRecipientPlan(ctx, event)
 			if err != nil {
 				t.Fatalf("preflight root-to-singleton conformance delivery: %v", err)
 			}
 			if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != wantOwner || plan.DeliveryRoutes[0].ConnectClaim.Empty() {
-				t.Fatalf("root-to-singleton plan = failure:%q routes:%#v, want exact materializing receiver", plan.TargetFailure, plan.DeliveryRoutes)
+				t.Fatalf("root-to-singleton plan = failure:%q routes:%#v, want exact constructed receiver", plan.TargetFailure, plan.DeliveryRoutes)
 			}
 			if err := runtime.bus.PublishAcknowledged(ctx, event); err != nil {
 				t.Fatalf("publish root-to-singleton conformance delivery: %v", err)
 			}
-			waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 10*time.Second)
+			waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			if err := runtime.bus.WaitForQuiescence(waitCtx); err != nil {
 				t.Fatalf("wait for root-to-singleton execution: %v", err)
@@ -351,7 +368,7 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 			if err != nil {
 				t.Fatalf("load materialized singleton receiver: %v", err)
 			}
-			if !found || strings.TrimSpace(instance.EntityID) != wantRoute.EntityID {
+			if !found || strings.TrimSpace(instance.EntityID) != wantRoute.EntityID || !instance.CreatedAt.Equal(before.CreatedAt) {
 				t.Fatalf("materialized singleton receiver = found:%t instance:%#v, want entity %s", found, instance, wantRoute.EntityID)
 			}
 			view, err := backend.LoadOperatorEvent(ctx, eventID)
@@ -360,7 +377,7 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 			}
 			if view.NoDelivery != nil || len(view.DeadLetters) != 0 || len(view.Deliveries) != 1 ||
 				view.Deliveries[0].Target.Kind != wantOwner.Code() || view.Deliveries[0].Target.EntityID != wantRoute.EntityID {
-				t.Fatalf("public root-to-singleton projection = %#v, want one successful materializing receiver", view)
+				t.Fatalf("public root-to-singleton projection = %#v, want one successful constructed receiver", view)
 			}
 		})
 	}
@@ -414,8 +431,8 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			seedFanInBarrierRun(t, ctx, backend, db, runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
+			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
 			selectedOwner := eventtest.UUID("fan-in-selected-owner-" + tc.name)
 			selectedTarget := events.RouteIdentity{
 				FlowID: "portfolio", FlowInstance: "portfolio/selected-period", EntityID: selectedOwner,
@@ -541,17 +558,23 @@ func (s *fanInBarrierRouteProofSink) close(restart bool) error {
 
 func newFanInBarrierRouteProofBus(t *testing.T, backend fanInBarrierConformanceStore, source semanticview.Source, manager *runtimemanager.AgentManager) *runtimebus.EventBus {
 	t.Helper()
+	fact := conformanceSourceArtifactFact(t, source)
+	var joinEvents []string
+	if len(source.WorkflowJoins()) > 0 {
+		joinEvents = []string{"platform.join_complete", "platform.join_timeout"}
+	}
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
 		ContractBundle:          source,
-		WorkOwner:               conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash()),
+		SourceArtifactFact:      fact,
+		WorkOwner:               conformanceTestRuntimeOccurrence(t, fact.BundleHash()),
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(manager.PrepareFlowInstanceActivation),
 		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(manager.FinalizeCommittedFlowInstanceActivation),
-	}), "platform.join_complete", "platform.join_timeout")
+	}), joinEvents...)
 	if err != nil {
 		t.Fatalf("create fan-in route proof EventBus: %v", err)
 	}
 	for _, route := range mustFanInBarrierRoutes(t, backend) {
-		if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
+		if err := flowroutefixture.Publish(eventBus, route); err != nil {
 			t.Fatalf("restore fan-in proof route %s: %v", route.Identity.Route.InstancePath, err)
 		}
 	}
@@ -743,6 +766,12 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	if len(generation) > 0 {
 		runtimeGeneration = generation[0]
 	}
+	return newFanInBarrierRuntimeForSource(t, backend, db, source, conformanceSourceArtifactFact(t, source), runtimeGeneration)
+}
+
+func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConformanceStore, db *sql.DB, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeGeneration uint64) fanInBarrierRuntime {
+	t.Helper()
+	baseCtx := testAuthorActivityContextForBundle(context.Background(), fact)
 	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
@@ -751,10 +780,15 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		coordinator *runtimepipeline.PipelineCoordinator
 		manager     *runtimemanager.AgentManager
 	)
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash())
+	workOwner := conformanceTestRuntimeOccurrence(t, fact.BundleHash())
+	var joinEvents []string
+	if len(source.WorkflowJoins()) > 0 {
+		joinEvents = []string{"platform.join_complete", "platform.join_timeout"}
+	}
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
-		ContractBundle: source,
-		WorkOwner:      workOwner,
+		ContractBundle:     source,
+		SourceArtifactFact: fact,
+		WorkOwner:          workOwner,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -773,7 +807,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 			}
 			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
 		}),
-	}), "platform.join_complete", "platform.join_timeout")
+	}), joinEvents...)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -793,7 +827,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		}
 	})
 	for _, route := range mustFanInBarrierRoutes(t, backend) {
-		if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
+		if err := flowroutefixture.Publish(eventBus, route); err != nil {
 			t.Fatalf("restore fan-in route %s: %v", route.Identity.Route.InstancePath, err)
 		}
 	}
@@ -827,8 +861,8 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	lifecycle := &notifyAllChildrenLifecycleOwner{}
 	manager = runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
-		BaseContext:        testAuthorActivityContext(context.Background()),
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		BaseContext:        baseCtx,
+		SourceArtifactFact: fact,
 		SemanticSource:     source,
 		WorkflowInstances:  coordinator,
 		WorkOwner:          workOwner,
@@ -836,8 +870,8 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		LifecycleStore:     lifecycle,
 		PersistenceRoles:   conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
-	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(context.Background()), authorActivityTestRuntimeInstanceID)
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
+	ctx := runtimecorrelation.WithRuntimeInstanceID(baseCtx, authorActivityTestRuntimeInstanceID)
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -899,19 +933,27 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, pipeline: coordinator, manager: manager, workOwner: workOwner, grant: grant, schedules: schedules}
 }
 
-func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, runID string) {
+func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, source semanticview.Source, runID string) {
 	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		t.Fatal("fan-in run requires an admitted source bundle")
+	}
+	fixture := runlifecyclefixture.Fixture{
+		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID,
+		Source: conformanceSourceArtifactFact(t, source), Artifact: bundle.SourceArtifact,
+	}
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
 	} else {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
 	}
 }
 
 func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, manager *runtimemanager.AgentManager, source semanticview.Source, entityID string) {
 	t.Helper()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "portfolio.setup", "operator", "", []byte(`{}`), 0,
+	trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "operating.reported", "operator", "", []byte(`{"operating_id":"proof-instance","period_id":"2026-Q3","revenue":42}`), 0,
 		runtimecorrelation.RunIDFromContext(ctx), events.EventEnvelope{}, enteredAt)
 	plan, err := manager.PrepareFlowInstanceActivation(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source,
@@ -920,7 +962,7 @@ func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, eventBus 
 			InstancePath: "portfolio/selected-period", EntityID: entityID,
 			HasStoredPath: true,
 		},
-		Fields:       map[string]any{"period_id": "2026-Q3"},
+		ConstructorInput: "operating.reported", ResolvedKey: "2026-Q3",
 		Config:       map[string]any{"period_id": "2026-Q3"},
 		TriggerEvent: trigger, OccurredAt: enteredAt,
 	})
@@ -1006,15 +1048,20 @@ func requireFanInBarrierReportTargets(
 	}
 }
 
-func mustFanInBarrierRoutes(t *testing.T, backend fanInBarrierConformanceStore) []runtimebus.FlowInstanceRouteRecord {
+func mustFanInBarrierRoutes(t *testing.T, backend fanInBarrierConformanceStore) []runtimebus.FlowInstanceRouteMaterializationRequest {
 	t.Helper()
-	routes, err := backend.ListFlowInstanceRoutes(testAuthorActivityContext(context.Background()))
+	ctx := testAuthorActivityContext(context.Background())
+	routes, err := backend.ListFlowInstanceRoutes(ctx)
 	if err != nil {
 		t.Fatalf("ListFlowInstanceRoutes: %v", err)
 	}
-	out := make([]runtimebus.FlowInstanceRouteRecord, 0, len(routes))
+	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, 0, len(routes))
 	for _, route := range routes {
-		out = append(out, runtimebus.FlowInstanceRouteRecord{Identity: route})
+		readiness, found, err := backend.LoadDynamicFlowRuntimeReadiness(ctx, route.RunID, route.Route)
+		if err != nil || !found {
+			t.Fatalf("load constructed fan-in owner %s: found=%v err=%v", route.Route.InstancePath, found, err)
+		}
+		out = append(out, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route, Instance: readiness.Plan.Identity})
 	}
 	return out
 }

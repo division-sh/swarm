@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -83,7 +84,16 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 					t.Fatalf("%s E2E-14 predecessor = %#v", backend, predecessor)
 				}
 				// Rebind retires predecessor execution before its publication barrier.
-				_ = waitChannelCardMessageID(t, harness.provider, "telegram-ingress")
+				driver := "sqlite"
+				if backend == servedparity.BackendExplicitPostgres {
+					driver = "postgres"
+				}
+				db, err := sql.Open(driver, harness.storeDSN)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = db.Close() })
+				_ = waitChannelCardMessageID(t, db, driver, "telegram-ingress")
 				predecessorCredentialCount = channelOnboardingCredentialCount(t, harness.credentialPath)
 				predecessorCallback, predecessorSigning, _ = harness.provider.Registration()
 				harness.provider.SetResourceID("crash-boundary-rebind-token", 420114)

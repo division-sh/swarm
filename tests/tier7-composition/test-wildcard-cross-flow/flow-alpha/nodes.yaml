@@ -4,7 +4,6 @@ alpha-node:
   produces: [job.alpha_done]
   event_handlers:
     trigger.alpha:
-      create_entity: true
       advances_to: done
       emit:
         event: job.alpha_done

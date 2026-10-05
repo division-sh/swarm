@@ -83,6 +83,14 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, candidate runtimechanneldelivery.Candidate) error {
+	current, found, err := d.store.GetCurrentChannelDeliveryPlan(ctx, candidate.DeliveryID)
+	if err != nil || !found {
+		return err
+	}
+	candidate = current
+	if candidate.RecoveryPending {
+		return nil
+	}
 	if candidate.State == "uncertain" || candidate.State == "retired" {
 		return nil
 	}
@@ -97,11 +105,11 @@ func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, 
 	if err != nil {
 		return fmt.Errorf("freeze channel delivery %s: %w", candidate.DeliveryID, err)
 	}
-	current, found, err := d.store.GetCurrentChannelDeliveryPlan(ctx, candidate.DeliveryID)
+	current, found, err = d.store.GetCurrentChannelDeliveryPlan(ctx, candidate.DeliveryID)
 	if err != nil {
 		return fmt.Errorf("read channel delivery %s: %w", candidate.DeliveryID, err)
 	}
-	if !found || current.CurrentRenderID != prepared.RenderID {
+	if !found || current.RecoveryPending || current.CurrentRenderID != prepared.RenderID {
 		return nil
 	}
 	if current.CurrentReceiptID == "" {

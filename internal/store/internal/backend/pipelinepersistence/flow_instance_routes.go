@@ -919,7 +919,7 @@ func listFlowInstanceRouteRecords(
 }
 
 const postgresActiveFlowInstanceDescriptorsSQL = `
-		SELECT fi.run_id::text, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_revision,
+		SELECT fi.run_id::text, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.phase, readiness.activation_attempt_state,
 		       run.bundle_hash, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
@@ -941,7 +941,7 @@ const postgresActiveFlowInstanceDescriptorsSQL = `
 	`
 
 const sqliteActiveFlowInstanceDescriptorsSQL = `
-		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_revision,
+		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.phase, readiness.activation_attempt_state,
 		       run.bundle_hash, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
@@ -1188,26 +1188,24 @@ func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptorsForKey(ctx contex
 }
 
 const postgresSelectedRunTargetOwnersSQL = `
-		SELECT es.entity_id::text, es.flow_instance, es.current_state,
- CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
-		FROM entity_state es
- LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
-		JOIN runs run ON run.run_id = es.run_id
-		WHERE es.run_id = $1::uuid
+		SELECT fi.entity_id::text, fi.instance_path, fi.current_state,
+		       fi.status, fi.terminated_at IS NOT NULL
+		FROM flow_instances fi
+		JOIN runs run ON run.run_id = fi.run_id
+		WHERE fi.run_id = $1::uuid
 		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
 	`
 
 const sqliteSelectedRunTargetOwnersSQL = `
-		SELECT es.entity_id, es.flow_instance, es.current_state,
- CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
-		FROM entity_state es
- LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
-		JOIN runs run ON run.run_id = es.run_id
-		WHERE es.run_id = ?
+		SELECT fi.entity_id, fi.instance_path, fi.current_state,
+		       fi.status, fi.terminated_at IS NOT NULL
+		FROM flow_instances fi
+		JOIN runs run ON run.run_id = fi.run_id
+		WHERE fi.run_id = ?
 		  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
 	`
 
-const selectedRunTargetOwnerOrderSQL = ` ORDER BY es.flow_instance ASC, es.entity_id ASC`
+const selectedRunTargetOwnerOrderSQL = ` ORDER BY fi.instance_path ASC, fi.entity_id ASC`
 
 func (s *PipelinePostgresOwner) ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	if s == nil || s.backend == nil {
@@ -1265,13 +1263,13 @@ func (s *PipelinePostgresOwner) ListSelectedRunTargetOwnersForScope(ctx context.
 	args = append(args, runID)
 	predicates := make([]string, 0, 2)
 	if len(paths) > 0 {
-		predicates = append(predicates, exactScopePredicate("es.flow_instance", true, 2, len(paths)))
+		predicates = append(predicates, exactScopePredicate("fi.instance_path", true, 2, len(paths)))
 	}
 	for _, path := range paths {
 		args = append(args, path)
 	}
 	if sourceEntityID != "" {
-		predicates = append(predicates, fmt.Sprintf("es.entity_id=$%d::uuid", len(args)+1))
+		predicates = append(predicates, fmt.Sprintf("fi.entity_id=$%d::uuid", len(args)+1))
 		args = append(args, sourceEntityID)
 	}
 	query := postgresSelectedRunTargetOwnersSQL + " AND (" + strings.Join(predicates, " OR ") + ")" + selectedRunTargetOwnerOrderSQL
@@ -1308,13 +1306,13 @@ func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwnersForScope(ctx context.Co
 	args = append(args, runID)
 	predicates := make([]string, 0, 2)
 	if len(paths) > 0 {
-		predicates = append(predicates, exactScopePredicate("es.flow_instance", false, 2, len(paths)))
+		predicates = append(predicates, exactScopePredicate("fi.instance_path", false, 2, len(paths)))
 	}
 	for _, path := range paths {
 		args = append(args, path)
 	}
 	if sourceEntityID != "" {
-		predicates = append(predicates, "es.entity_id=?")
+		predicates = append(predicates, "fi.entity_id=?")
 		args = append(args, sourceEntityID)
 	}
 	query := sqliteSelectedRunTargetOwnersSQL + " AND (" + strings.Join(predicates, " OR ") + ")" + selectedRunTargetOwnerOrderSQL
@@ -1355,8 +1353,11 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, label string) ([]run
 	for rows.Next() {
 		var runID, instancePath, templateID string
 		var planRaw, bundleHash, fieldsRaw sql.NullString
-		var planRevision sql.NullInt64
-		if err := rows.Scan(&runID, &instancePath, &templateID, &planRaw, &planRevision, &bundleHash, &fieldsRaw); err != nil {
+		var attemptOrdinal sql.NullInt64
+		var planHash sql.NullString
+		var phase sql.NullString
+		var attemptState sql.NullString
+		if err := rows.Scan(&runID, &instancePath, &templateID, &planRaw, &planHash, &attemptOrdinal, &phase, &attemptState, &bundleHash, &fieldsRaw); err != nil {
 			return nil, fmt.Errorf("scan %s: %w", label, err)
 		}
 		instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
@@ -1367,8 +1368,8 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, label string) ([]run
 		if !planRaw.Valid || strings.TrimSpace(planRaw.String) == "" {
 			return nil, fmt.Errorf("%s %s is missing exact readiness plan", label, instancePath)
 		}
-		if !planRevision.Valid || planRevision.Int64 <= 0 {
-			return nil, fmt.Errorf("%s %s is missing exact readiness plan revision", label, instancePath)
+		if !attemptOrdinal.Valid || attemptOrdinal.Int64 <= 0 {
+			return nil, fmt.Errorf("%s %s is missing exact attachment attempt", label, instancePath)
 		}
 		if !bundleHash.Valid {
 			return nil, fmt.Errorf("%s %s is missing exact run source artifact", label, instancePath)
@@ -1376,7 +1377,10 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, label string) ([]run
 		readiness, err := runtimepipeline.DecodeDynamicFlowRuntimeReadinessPersistenceRecord(
 			runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord{
 				RunID: runID, InstancePath: instancePath, Plan: []byte(planRaw.String),
-				PlanRevision:        uint64(planRevision.Int64),
+				AttemptOrdinal:      uint64(attemptOrdinal.Int64),
+				PlanHash:            planHash.String,
+				Phase:               runtimepipeline.FlowAttachmentPhase(phase.String),
+				AttemptState:        attemptState.String,
 				OwningRunBundleHash: bundleHash.String,
 			},
 		)
@@ -1403,6 +1407,7 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, label string) ([]run
 			return nil, fmt.Errorf("%s %s entity fields: %w", label, instancePath, err)
 		}
 		out = append(out, runtimebus.ActiveFlowInstanceDescriptor{
+			Identity:   plan.Identity,
 			RunID:      runID,
 			InstanceID: plan.Identity.InstanceID, EntityID: plan.Identity.EntityID,
 			FlowInstance: instancePath, FlowTemplate: templateID,

@@ -9,11 +9,11 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
@@ -51,24 +51,9 @@ type StandingTargetMutationRequest struct {
 
 type StandingTargetMutationResult struct {
 	Reconciliation      StandingServiceReconciliation
+	Instance            runtimeflowidentity.Instance
 	Created             bool
 	PublicationSequence int64
-}
-
-// CommitDynamicFlowRuntimeReadinessReconciliation owns the selected
-// transaction for one run-scoped readiness reconciliation.
-func (pc *PipelineCoordinator) CommitDynamicFlowRuntimeReadinessReconciliation(
-	ctx context.Context,
-	observedAt time.Time,
-	owner StandingFlowInstanceOwner,
-) error {
-	if pc == nil || pc.workflowStore == nil {
-		return fmt.Errorf("dynamic flow readiness reconciliation requires workflow persistence")
-	}
-	if owner == nil {
-		return fmt.Errorf("dynamic flow readiness reconciliation requires flow instance owner")
-	}
-	return owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(ctx, observedAt)
 }
 
 func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstanceOwner) ([]StandingTargetMutationResult, error) {
@@ -91,6 +76,11 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 	if observedAt.IsZero() {
 		return nil, nil, fmt.Errorf("standing target mutation requires observed_at")
 	}
+	for _, target := range req.Targets {
+		if err := RequireStandingConstructionPath(target.Activation.ContractBundle, target.Candidate.FlowPath); err != nil {
+			return nil, nil, err
+		}
+	}
 	var completions []func() error
 	results := make([]StandingTargetMutationResult, 0, len(req.Targets))
 	for _, target := range req.Targets {
@@ -104,7 +94,16 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 				return nil, nil, err
 			}
 		}
-		result := StandingTargetMutationResult{Reconciliation: reconciliation, PublicationSequence: reconciliation.PublicationSequence}
+		// A fresh credential-dormant declaration has no admitted run or instance.
+		if reconciliation.RunID == "" && !reconciliation.RestartDisposition.Executable() {
+			results = append(results, StandingTargetMutationResult{Reconciliation: reconciliation})
+			continue
+		}
+		instance, err := runtimeflowidentity.StandingForGeneration(target.Activation.ContractBundle, reconciliation.FlowPath, reconciliation.RunID)
+		if err != nil {
+			return nil, nil, err
+		}
+		result := StandingTargetMutationResult{Reconciliation: reconciliation, Instance: instance, PublicationSequence: reconciliation.PublicationSequence}
 		if reconciliation.RestartDisposition.Executable() {
 			if err := pc.workflowStore.AdmitStandingServiceRun(ctx, reconciliation.RunID, pc.executionPosture); err != nil {
 				return nil, nil, err
@@ -118,6 +117,15 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 				}
 			}
 			activation := target.Activation
+			activation.Instance, err = runtimeflowidentity.StandingForGeneration(activation.ContractBundle, semanticview.RootExecutionFlowID(activation.ContractBundle), reconciliation.RunID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if instance.TemplateID != activation.Instance.TemplateID {
+				activation.InitialState = ""
+				activation.Config = nil
+				activation.Bookkeeping = nil
+			}
 			activation.StandingGenerationReplacement = reconciliation.Generation > 1
 			var created bool
 			var err error
@@ -134,12 +142,22 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 				return nil, nil, err
 			}
 			result.Created = created
-			result.PublicationSequence, err = pc.workflowStore.PublishStandingService(operationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
-			if err != nil {
-				return nil, nil, err
-			}
 		}
 		results = append(results, result)
+	}
+	// Do not publish any member until every generation's complete tree exists.
+	for i := range results {
+		reconciliation := results[i].Reconciliation
+		if !reconciliation.RestartDisposition.Executable() {
+			continue
+		}
+		publicationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
+		publicationCtx = runtimecorrelation.WithSourceArtifactFact(publicationCtx, req.Targets[i].Candidate.Source)
+		sequence, err := pc.workflowStore.PublishStandingService(publicationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
+		if err != nil {
+			return nil, nil, err
+		}
+		results[i].PublicationSequence = sequence
 	}
 	return results, func() error {
 		for _, complete := range completions {
@@ -186,6 +204,15 @@ func (pc *PipelineCoordinator) Load(ctx context.Context, identity runtimeflowide
 	return pc.workflowStore.Load(ctx, identity)
 }
 
+func (pc *PipelineCoordinator) LoadConstructedFlowInstance(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID) (WorkflowInstance, bool, error) {
+	target, err := pc.workflowStore.LoadTargetPersistence(ctx, owner, entityID)
+	if err != nil || target.Presence == WorkflowTargetPersistenceAbsent {
+		return WorkflowInstance{}, false, err
+	}
+	instance, err := target.DecodeComplete(owner.Route, entityID)
+	return instance, err == nil, err
+}
+
 func (pc *PipelineCoordinator) ListWorkflowInstances(ctx context.Context, runID string) ([]WorkflowInstance, error) {
 	return pc.workflowStore.list(ctx, runID)
 }
@@ -216,10 +243,6 @@ func (pc *PipelineCoordinator) RequireGateRouteAdmitted(ctx context.Context, run
 
 func (pc *PipelineCoordinator) LoadRouteRecoveryProjection(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstanceRouteRecoveryProjection, error) {
 	return pc.workflowStore.LoadRouteRecoveryProjection(ctx, identity)
-}
-
-func (pc *PipelineCoordinator) MaterializeInitialEntry(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
-	return pc.workflowStore.MaterializeInitialEntry(ctx, owner, instance, occurredAt)
 }
 
 func (pc *PipelineCoordinator) PrepareInitialEntryLifecycle(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, occurredAt time.Time) (WorkflowInstance, WorkflowLifecycleMutationPlan, error) {
@@ -272,16 +295,20 @@ func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForRun(ctx cont
 	return pc.workflowStore.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 
-func (pc *PipelineCoordinator) BeginDynamicFlowRuntimeActivation(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, revision uint64, binding runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAdmissionResult, error) {
-	return pc.workflowStore.BeginDynamicFlowRuntimeActivation(ctx, plan, revision, binding)
+func (pc *PipelineCoordinator) BeginDynamicFlowRuntimeActivation(ctx context.Context, request DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationAdmissionResult, error) {
+	return pc.workflowStore.BeginDynamicFlowRuntimeActivation(ctx, request)
+}
+
+func (pc *PipelineCoordinator) ResolveDynamicFlowRuntimeActivation(ctx context.Context, request DynamicFlowRuntimeActivationRequest) (DynamicFlowRuntimeActivationResolution, error) {
+	return pc.workflowStore.ResolveDynamicFlowRuntimeActivation(ctx, request)
 }
 
 func (pc *PipelineCoordinator) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {
 	return pc.workflowStore.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
-func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
-	return pc.workflowStore.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, plan, readyAt)
+func (pc *PipelineCoordinator) AdvanceFlowAttachment(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt, previous FlowAttachmentPhase, at time.Time) (FlowAttachmentAdvanceResult, error) {
+	return pc.workflowStore.AdvanceFlowAttachment(ctx, attempt, previous, at)
 }
 
 func (pc *PipelineCoordinator) RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {

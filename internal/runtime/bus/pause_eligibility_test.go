@@ -507,6 +507,10 @@ func TestPauseAfterCarrierElectionFencesClaimBothStores(t *testing.T) {
 			f.startDeliveryContinuations(t, ctx, generation)
 			// Restore the exact run-bound recipient through real delivery before
 			// testing a new publication; a static receiver is not that identity.
+			// Synchronize the owned startup scan before waiting for its delivery.
+			if err := generation.coordinator.Synchronize(ctx); err != nil {
+				t.Fatal(err)
+			}
 			assertCompleteEventDelivery(t, seen, f.event)
 			if err := generation.coordinator.Synchronize(ctx); err != nil {
 				t.Fatal(err)

@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -234,6 +235,44 @@ func TestAdmissionRequiresPositiveSealForEmptyProjection(t *testing.T) {
 	}
 }
 
+func TestSelectedReadinessRequiresCompleteConstruction(t *testing.T) {
+	for _, change := range []string{"exact", "imported_state", "missing_config", "malformed_config", "foreign_route_config", "unknown_config_control", "missing_stage", "missing_entry_clock", "unknown_mode", "wrong_mode", "missing_flow_template", "wrong_flow_template"} {
+		t.Run(change, func(t *testing.T) {
+			req := templateAdmissionRequest(t)
+			entity := &req.Plan.Entities[0]
+			metadata := entity.MaterializationMetadata
+			switch change {
+			case "imported_state":
+				metadata.Source = runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState
+			case "missing_config":
+				metadata.FlowConfig = nil
+			case "malformed_config":
+				metadata.FlowConfig = []byte(`{}`)
+			case "foreign_route_config":
+				metadata.FlowConfig = []byte(strings.ReplaceAll(string(metadata.FlowConfig), "consumer/item", "consumer/foreign"))
+			case "unknown_config_control":
+				metadata.FlowConfig = append([]byte(`{"unknown_runtime_control":true,`), metadata.FlowConfig[1:]...)
+			case "missing_stage":
+				entity.CurrentState = ""
+			case "missing_entry_clock":
+				entity.EnteredStateAt = nil
+			case "unknown_mode":
+				metadata.Mode = "unknown"
+			case "wrong_mode":
+				metadata.Mode = "static"
+			case "missing_flow_template":
+				metadata.FlowTemplate = ""
+			case "wrong_flow_template":
+				metadata.FlowTemplate = "foreign"
+			}
+			_, err := Project(req.Plan, req.Source, req.RecipientPlanning, req.SourceModes, req.ModelOptions)
+			if (err == nil) != (change == "exact") {
+				t.Fatalf("construction admission %s: %v", change, err)
+			}
+		})
+	}
+}
+
 func TestAdmissionSealsResolvedModelRevision(t *testing.T) {
 	req := templateAdmissionRequest(t)
 	first, err := Admit(req)
@@ -355,9 +394,19 @@ func templateAdmissionRequestWithVariables(t *testing.T, variables map[string]co
 		t.Fatal(err)
 	}
 	runID, entityID := uuid.NewString(), uuid.NewString()
+	graph, found := semanticview.WorkflowStageTopology(effective.Source(), "consumer")
+	if !found {
+		t.Fatal("fixture has no admitted consumer lifecycle")
+	}
+	initial, err := graph.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := time.Now().UTC()
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{EventID: "event-b", Revision: 7}, Entities: []runfork.RunForkEntityState{{
-		EntityID: entityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
-			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState,
+		EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &entered, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
+			FlowTemplate: "consumer", Mode: "template", StageDefined: graph.StageCount() != 0,
 			EntityType: "deployment", FlowInstance: "consumer/item",
 			FlowConfig: json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","config":{"vertical_id":"recorded-business-key"}}`),
 		},

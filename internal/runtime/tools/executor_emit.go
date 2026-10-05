@@ -110,7 +110,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		return nil, fmt.Errorf("emit tool requires exact agent declaration")
 	}
 	flowID := projection.OwnerFlowID
-	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, entityID)
+	routingSource, err := e.agentExecutionRoutingSource(ctx, actor)
 	if err != nil {
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "routing_source_invalid", "routing_source", "construct", err)
 		return nil, err

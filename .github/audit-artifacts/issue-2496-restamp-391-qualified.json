@@ -1,0 +1,1411 @@
+{
+  "source_head": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+  "boundary": "Focused local qualification on the recorded committed tree, not default-suite completion. No exact-head CI, rebase-equivalence, independent review or merge-approval claim. Native matrices use real construction/Runtime/Manager and native stores, not provider/public-launcher qualification.",
+  "preserved_failures": "The earlier composed race package timeout, corrected fixture-expectation REDs, cancelled queued default and zero-test wrong-package command remain distinct historical receipts, never qualification credit. On this source the managed default is RED in two stale selected-fork fixture roots; the combined SQLite attachment race/count3 exceeds the unchanged 600-second package limit during the third repetition. These receipts are retained, not qualification credit.",
+  "outstanding": [
+    "Repair the two selected-fork fixture inputs and pass the complete managed default.",
+    "Run the unchanged complete SQLite attachment race/count3 cell set in bounded commands.",
+    "Conflict-only rebase, affected requalification and exact-head CI."
+  ],
+  "receipts": [
+    {
+      "file": "issue-2496-restamp-qualified-describe.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "compiled describe: 45 cells, two internal repetitions",
+      "sha256_uncompressed": "86db9c4ce2a193462b89b11e07d5f6b4c8a08cbec8f595a7a6a846c0b78dab39",
+      "bytes_uncompressed": 105137,
+      "root_outcomes_including_repetitions": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 46,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "action": "pass",
+          "elapsed": 118.238
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "test": "TestReadProofFactoringCompiledDescribe",
+          "action": "pass",
+          "elapsed": 46.65
+        }
+      ],
+      "required_native_cells": [],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-ports-race.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "native ports, phase, lost-ack, creation and Manager/serve controls: race/count3",
+      "sha256_uncompressed": "da6dc3141de58fb4333d755de3598ad0a62892512beca242ab9c035018ccb311",
+      "bytes_uncompressed": 178916,
+      "root_outcomes_including_repetitions": {
+        "pass": 57,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 162,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/startupownership",
+          "action": "pass",
+          "elapsed": 1.176
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "action": "pass",
+          "elapsed": 1.314
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "action": "pass",
+          "elapsed": 2.847
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "action": "pass",
+          "elapsed": 5.683
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "pass",
+          "elapsed": 125.919
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/startupownership",
+          "test": "TestProcessCapabilityIssuesExactRevocableGenerationGrant",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "test": "TestFlowConstructorProofPartitionRequiresBothStores",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/startupownership",
+          "test": "TestProcessCapabilityIssuesExactRevocableGenerationGrant",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/startupownership",
+          "test": "TestProcessCapabilityIssuesExactRevocableGenerationGrant",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "test": "TestFlowConstructorProofPartitionRequiresBothStores",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/testplanning",
+          "test": "TestFlowConstructorProofPartitionRequiresBothStores",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/serveapp",
+          "test": "TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 1.48
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessRetirementReleasesAttemptBeforeJoin",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessReplacementReleasesDependentCaller",
+          "action": "pass",
+          "elapsed": 0.24
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalLoopRouteJoinReleasesSourceSetPublication",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessRetirementReleasesAttemptBeforeJoin",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessReplacementReleasesDependentCaller",
+          "action": "pass",
+          "elapsed": 0.23
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalLoopRouteJoinReleasesSourceSetPublication",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration",
+          "action": "pass",
+          "elapsed": 0.13
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission",
+          "action": "pass",
+          "elapsed": 0.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit",
+          "action": "pass",
+          "elapsed": 0.06
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessRetirementReleasesAttemptBeforeJoin",
+          "action": "pass",
+          "elapsed": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalReadinessReplacementReleasesDependentCaller",
+          "action": "pass",
+          "elapsed": 0.24
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/manager",
+          "test": "TestTerminalLoopRouteJoinReleasesSourceSetPublication",
+          "action": "pass",
+          "elapsed": 0
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 9.7
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecyclePreparedReadinessRebindBothStores",
+          "action": "pass",
+          "elapsed": 3.11
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeLostAckAfterRebindBothStores",
+          "action": "pass",
+          "elapsed": 3.51
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores",
+          "action": "pass",
+          "elapsed": 6.55
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores",
+          "action": "pass",
+          "elapsed": 3.17
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores",
+          "action": "pass",
+          "elapsed": 3.51
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowCreationSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 6.99
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationAttemptAdmissionBothStores",
+          "action": "pass",
+          "elapsed": 3.36
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 4
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 3.12
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecyclePreparedReadinessRebindBothStores",
+          "action": "pass",
+          "elapsed": 3.16
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeLostAckAfterRebindBothStores",
+          "action": "pass",
+          "elapsed": 3.74
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores",
+          "action": "pass",
+          "elapsed": 6.66
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores",
+          "action": "pass",
+          "elapsed": 3.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores",
+          "action": "pass",
+          "elapsed": 3.49
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowCreationSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 6.94
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationAttemptAdmissionBothStores",
+          "action": "pass",
+          "elapsed": 3.67
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 3.73
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecycleReadinessSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 3.09
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestAgentLifecyclePreparedReadinessRebindBothStores",
+          "action": "pass",
+          "elapsed": 3.14
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeLostAckAfterRebindBothStores",
+          "action": "pass",
+          "elapsed": 3.44
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores",
+          "action": "pass",
+          "elapsed": 6.66
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores",
+          "action": "pass",
+          "elapsed": 3.36
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores",
+          "action": "pass",
+          "elapsed": 3.36
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestDynamicFlowCreationSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 7.22
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationAttemptAdmissionBothStores",
+          "action": "pass",
+          "elapsed": 3.62
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 4.98
+        }
+      ],
+      "required_native_cells": [],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-terminal-control.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "one small aggregate-only terminal fencing control: ordinary go test, race/count3",
+      "sha256_uncompressed": "9d95b4b74d02351e874bdc056abbeb91637bfbd5728c01300854c56188619c1b",
+      "bytes_uncompressed": 3689,
+      "root_outcomes_including_repetitions": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 1.093
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet",
+          "action": "pass",
+          "elapsed": 0.02
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet",
+          "action": "pass",
+          "elapsed": 0.02
+        }
+      ],
+      "required_native_cells": [],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-atomic-race.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "TestRuntimeConstructedActorAtomicRebindRetryBothStores",
+      "sha256_uncompressed": "4a1335600758ab86f59c886e59f4cbec348dea6c250507c862c634361fe1bcfb",
+      "bytes_uncompressed": 18145,
+      "root_outcomes_including_repetitions": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 15,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 254.059
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores",
+          "action": "pass",
+          "elapsed": 90.1
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores",
+          "action": "pass",
+          "elapsed": 79.57
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores",
+          "action": "pass",
+          "elapsed": 83.33
+        }
+      ],
+      "required_native_cells": [
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 29.74
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 27.21
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 18.46
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 14.69
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 24.69
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 26.25
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 14.22
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 14.41
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 25.46
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 27.16
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 14.53
+        },
+        {
+          "test": "TestRuntimeConstructedActorAtomicRebindRetryBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 16.18
+        }
+      ],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-partial-shutdown-race.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores",
+      "sha256_uncompressed": "deda92a9cd81b764614c1bba1bab1f97c10480bd531a323e1162582118cc7f52",
+      "bytes_uncompressed": 19872,
+      "root_outcomes_including_repetitions": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 15,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 250.04
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 79.51
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 76.08
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 93.4
+        }
+      ],
+      "required_native_cells": [
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 28.4
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 23.36
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 15.59
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 12.16
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 22.72
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 24.66
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 15.41
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 13.28
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 37.41
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 27.36
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 14.78
+        },
+        {
+          "test": "TestRuntimeConstructedActorPartialRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 13.85
+        }
+      ],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-survivor-race.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores",
+      "sha256_uncompressed": "6e068f3405f217b607c75c6f17630cc6ca7879305ea72cf6672d46f0654d1149",
+      "bytes_uncompressed": 21049,
+      "root_outcomes_including_repetitions": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 15,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 212.926
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 91.44
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 75.73
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores",
+          "action": "pass",
+          "elapsed": 44.7
+        }
+      ],
+      "required_native_cells": [
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 46.42
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 23.36
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 12.16
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 9.49
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 39.22
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 21.8
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 7.32
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 7.39
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 15.06
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 15.03
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 7.29
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusSourceSetRebindBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 7.33
+        }
+      ],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-restart-race.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "TestRuntimeConstructedActorCensusRestartBothStores",
+      "sha256_uncompressed": "384788d175380845c99044f94728df501b877f91ee22674939d5cbc14550081f",
+      "bytes_uncompressed": 21417,
+      "root_outcomes_including_repetitions": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 15,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 128.084
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores",
+          "action": "pass",
+          "elapsed": 45.5
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores",
+          "action": "pass",
+          "elapsed": 41.43
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores",
+          "action": "pass",
+          "elapsed": 40.11
+        }
+      ],
+      "required_native_cells": [
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 15.57
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 13.79
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 9.61
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.52
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 13.38
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 14.71
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 6.66
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.69
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 13.43
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 13.57
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 6.58
+        },
+        {
+          "test": "TestRuntimeConstructedActorCensusRestartBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.52
+        }
+      ],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-retained-shutdown-race.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+      "sha256_uncompressed": "f20f801f9cfb316da51e80f1ea40b7cb40209bdaf93348c7607df3da2a514f90",
+      "bytes_uncompressed": 22979,
+      "root_outcomes_including_repetitions": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 15,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "action": "pass",
+          "elapsed": 130.543
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 48.5
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 40.94
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime",
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores",
+          "action": "pass",
+          "elapsed": 40.06
+        }
+      ],
+      "required_native_cells": [
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 16.91
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 14.39
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 10.28
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.93
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 14.12
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 13.59
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 6.57
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.65
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_false",
+          "action": "pass",
+          "elapsed": 13.51
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/sqlite/fields_true",
+          "action": "pass",
+          "elapsed": 13.4
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_false",
+          "action": "pass",
+          "elapsed": 6.58
+        },
+        {
+          "test": "TestRuntimeConstructedActorRetainedRefreshShutdownBothStores/postgres/fields_true",
+          "action": "pass",
+          "elapsed": 6.56
+        }
+      ],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-public-construction.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "standing root tree/progressive presence: public verify/serve/source deletion/hash restart; sequential regression uses compiled internal mock lifecycle plus public RPC, not real-provider qualification",
+      "sha256_uncompressed": "531f38a501bef5b53791505617c6f7de187e789c64853ba49223aa60e207a2d9",
+      "bytes_uncompressed": 25092,
+      "root_outcomes_including_repetitions": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 11,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/releasee2e",
+          "action": "pass",
+          "elapsed": 83.124
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/releasee2e",
+          "test": "TestEntityProgressivePresencePublicServeRestartSQLitePostgres",
+          "action": "pass",
+          "elapsed": 19.63
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/releasee2e",
+          "test": "TestGoldenAgentWorkloadSequentialRunsBothStores",
+          "action": "pass",
+          "elapsed": 48.64
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/releasee2e",
+          "test": "TestStandingRootTreePublicRestartAndResetBothStores",
+          "action": "pass",
+          "elapsed": 14.85
+        }
+      ],
+      "required_native_cells": [],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-volume-sqlite.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "unchanged 1362 fan-out settlement/readback/hash restart oracle: SQLite/count1",
+      "sha256_uncompressed": "993f7ef2a1cd00174e576bb888290597e4b988cafad94042be91fd50595a8492",
+      "bytes_uncompressed": 21564,
+      "root_outcomes_including_repetitions": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 2,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/conformance",
+          "action": "pass",
+          "elapsed": 151.115
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/conformance",
+          "test": "TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores",
+          "action": "pass",
+          "elapsed": 151.1
+        }
+      ],
+      "required_native_cells": [],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-volume-postgres.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "unchanged 1362 fan-out settlement/readback/hash restart oracle: PostgreSQL/count1",
+      "sha256_uncompressed": "ddcc23a9458f4006283519500a5f614f430d892b15e14c4a9217e7de79bea124",
+      "bytes_uncompressed": 27884,
+      "root_outcomes_including_repetitions": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 2,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/conformance",
+          "action": "pass",
+          "elapsed": 112.513
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/conformance",
+          "test": "TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores",
+          "action": "pass",
+          "elapsed": 112.48
+        }
+      ],
+      "required_native_cells": [],
+      "skips": []
+    },
+    {
+      "file": "issue-2496-restamp-qualified-attachment-postgres-race.log.gz",
+      "source": "391e3678ad707a53e4f74dfc06a8cebf25420f04",
+      "boundary": "complete attachment/acquisition/cleanup protocol family: PostgreSQL/race/count3",
+      "sha256_uncompressed": "ea03012d844a8d73f053b5624d6cf56609909bca358e7706b80c69cc26927fbe",
+      "bytes_uncompressed": 293812,
+      "root_outcomes_including_repetitions": {
+        "pass": 42,
+        "fail": 0,
+        "skip": 0
+      },
+      "test_outcomes_including_repetitions": {
+        "pass": 243,
+        "fail": 0,
+        "skip": 0
+      },
+      "package_results": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "action": "pass",
+          "elapsed": 336.361
+        }
+      ],
+      "named_roots": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentAgentAcquisitionCutsBothStores",
+          "action": "pass",
+          "elapsed": 10.53
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentRouteAcquisitionCutsBothStores",
+          "action": "pass",
+          "elapsed": 5.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+          "action": "pass",
+          "elapsed": 69.15
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeLostAckAfterRebindBothStores",
+          "action": "pass",
+          "elapsed": 0.7
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeCommitAcknowledgmentBothStores",
+          "action": "pass",
+          "elapsed": 4.49
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentPhaseFailureRetainsConstructionBothStores",
+          "action": "pass",
+          "elapsed": 13.96
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores",
+          "action": "pass",
+          "elapsed": 0.71
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentTimerAcquisitionCutsBothStores",
+          "action": "pass",
+          "elapsed": 4.38
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationAttemptBatchRetirementBothStores",
+          "action": "pass",
+          "elapsed": 0.72
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationAttemptAdmissionBothStores",
+          "action": "pass",
+          "elapsed": 0.79
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentConditionalPhaseProgressBothStores",
+          "action": "pass",
+          "elapsed": 0.8
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentPlanABARetainsPredecessorUntilSettlementBothStores",
+          "action": "pass",
+          "elapsed": 0.78
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFailedFlowActivationRetirementIsPendingBothStores",
+          "action": "pass",
+          "elapsed": 0.77
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFailedFlowActivationCreationPosturesRemainRetryableBothStores",
+          "action": "pass",
+          "elapsed": 1.56
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentAgentAcquisitionCutsBothStores",
+          "action": "pass",
+          "elapsed": 5.28
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentRouteAcquisitionCutsBothStores",
+          "action": "pass",
+          "elapsed": 5.33
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+          "action": "pass",
+          "elapsed": 69.19
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeLostAckAfterRebindBothStores",
+          "action": "pass",
+          "elapsed": 0.7
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeCommitAcknowledgmentBothStores",
+          "action": "pass",
+          "elapsed": 4.81
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentPhaseFailureRetainsConstructionBothStores",
+          "action": "pass",
+          "elapsed": 15.96
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores",
+          "action": "pass",
+          "elapsed": 0.71
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentTimerAcquisitionCutsBothStores",
+          "action": "pass",
+          "elapsed": 4.58
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationAttemptBatchRetirementBothStores",
+          "action": "pass",
+          "elapsed": 0.76
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationAttemptAdmissionBothStores",
+          "action": "pass",
+          "elapsed": 0.81
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentConditionalPhaseProgressBothStores",
+          "action": "pass",
+          "elapsed": 0.78
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentPlanABARetainsPredecessorUntilSettlementBothStores",
+          "action": "pass",
+          "elapsed": 0.8
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFailedFlowActivationRetirementIsPendingBothStores",
+          "action": "pass",
+          "elapsed": 0.77
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFailedFlowActivationCreationPosturesRemainRetryableBothStores",
+          "action": "pass",
+          "elapsed": 1.57
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentAgentAcquisitionCutsBothStores",
+          "action": "pass",
+          "elapsed": 5.19
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentRouteAcquisitionCutsBothStores",
+          "action": "pass",
+          "elapsed": 5.05
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+          "action": "pass",
+          "elapsed": 68.99
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeLostAckAfterRebindBothStores",
+          "action": "pass",
+          "elapsed": 0.69
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentNativeCommitAcknowledgmentBothStores",
+          "action": "pass",
+          "elapsed": 4.52
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentPhaseFailureRetainsConstructionBothStores",
+          "action": "pass",
+          "elapsed": 13.88
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores",
+          "action": "pass",
+          "elapsed": 0.71
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentTimerAcquisitionCutsBothStores",
+          "action": "pass",
+          "elapsed": 4.36
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationAttemptBatchRetirementBothStores",
+          "action": "pass",
+          "elapsed": 0.73
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowActivationAttemptAdmissionBothStores",
+          "action": "pass",
+          "elapsed": 0.8
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentConditionalPhaseProgressBothStores",
+          "action": "pass",
+          "elapsed": 0.8
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFlowAttachmentPlanABARetainsPredecessorUntilSettlementBothStores",
+          "action": "pass",
+          "elapsed": 0.8
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFailedFlowActivationRetirementIsPendingBothStores",
+          "action": "pass",
+          "elapsed": 0.79
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "test": "TestFailedFlowActivationCreationPosturesRemainRetryableBothStores",
+          "action": "pass",
+          "elapsed": 1.56
+        }
+      ],
+      "required_native_cells": [],
+      "skips": []
+    }
+  ]
+}

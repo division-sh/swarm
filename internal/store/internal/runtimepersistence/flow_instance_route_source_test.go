@@ -32,8 +32,8 @@ func TestFlowInstanceRouteSourceProjectionBothStores(t *testing.T) {
 				EventPattern: "review/source-proof/input", SubscriberType: "node", SubscriberID: "receiver", SourceFlow: "review",
 			}
 			if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances
-				(run_id,instance_path,flow_template,mode,config,status,created_at)
-				VALUES ($1,$2,'review','template','{}','active',$3)`, flowRouteTestRunID, route.Identity.Route.InstancePath, time.Now().UTC()); err != nil {
+				(run_id,instance_path,entity_id,flow_template,mode,config,status,stage_defined,current_state,entered_state_at,created_at,updated_at,gates,bookkeeping,accumulator,revision)
+				VALUES ($1,$2,$4,'review','template','{}','active',FALSE,'inert',$3,$3,$3,'{}','{}','{}',1)`, flowRouteTestRunID, route.Identity.Route.InstancePath, time.Now().UTC(), runtimeflowidentity.EntityID(route.Identity.Route.InstancePath)); err != nil {
 				t.Fatal(err)
 			}
 			insertSource := func(flow, status string, wildcard bool, age time.Duration) string {

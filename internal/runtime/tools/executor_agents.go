@@ -64,16 +64,20 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	if err != nil {
 		return nil, fmt.Errorf("admit schedule payload: %w", err)
 	}
-	executionSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, entityID)
+	executionSource, err := e.agentExecutionRoutingSource(ctx, actor)
 	if err != nil {
 		return nil, fmt.Errorf("admit schedule owner source: %w", err)
 	}
 	routingSource := executionSource
-	if executionSource.Kind() != events.RoutingSourceRoot {
+	if executionSource.Kind() == events.RoutingSourceStaticFlow && executionSource.Route().FlowID == "." {
+		// Root schedules retain root-control provenance, not the business
+		// publication coordinate of the constructed root execution.
+		routingSource, err = events.NewRootRoutingSource(executionSource.Route().EntityID)
+	} else if executionSource.Kind() != events.RoutingSourceRoot {
 		routingSource, err = events.NewFlowOwnedControlRoutingSource(executionSource.Route())
-		if err != nil {
-			return nil, fmt.Errorf("admit schedule control source: %w", err)
-		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("admit schedule control source: %w", err)
 	}
 	flowID := "."
 	if routingSource.Kind() == events.RoutingSourceFlowOwnedControl {

@@ -29,7 +29,7 @@ const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
-func exactTestFlowInstanceDescriptors(in []runtimebus.ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact, runID string) []runtimebus.ActiveFlowInstanceDescriptor {
+func exactTestFlowInstanceDescriptors(in []runtimebus.ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact, runID string, sources ...semanticview.Source) []runtimebus.ActiveFlowInstanceDescriptor {
 	if sourceFact.Validate() != nil {
 		sourceFact = authorActivityTestSourceArtifactFact
 	}
@@ -47,6 +47,12 @@ func exactTestFlowInstanceDescriptors(in []runtimebus.ActiveFlowInstanceDescript
 		}
 		if strings.TrimSpace(out[idx].WorkflowVersion) == "" {
 			out[idx].WorkflowVersion = strings.TrimSpace(workflowVersion)
+		}
+		if out[idx].Identity == (runtimeflowidentity.Instance{}) && len(sources) == 1 {
+			out[idx].Identity = runtimebus.ConstructedFlowInstanceIdentityFixture(sources[0], out[idx].FlowTemplate, runtimeflowidentity.LogicalInstanceID(out[idx].FlowInstance), out[idx].RunID)
+			if out[idx].EntityID == "" {
+				out[idx].EntityID = out[idx].Identity.EntityID
+			}
 		}
 	}
 	return out
@@ -123,6 +129,11 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	}
 	if err := ensureTestEventBusSourceArtifact(store, opts.ContractBundle, opts.SourceArtifactFact); err != nil {
 		return nil, err
+	}
+	if receiver, ok := store.(interface {
+		setTestConstructionSource(semanticview.Source)
+	}); ok {
+		receiver.setTestConstructionSource(opts.ContractBundle)
 	}
 	if receiver, ok := store.(interface {
 		setTestSemanticSource(runtimecorrelation.SourceArtifactFact, string)

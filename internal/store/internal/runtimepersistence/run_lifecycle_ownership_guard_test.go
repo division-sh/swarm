@@ -212,6 +212,15 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)"}},
 		"internal/store/internal/backend/runforkpersistence/selected_finite_feed_operation_test.go": {
 			"CREATE TABLE runs (run_id TEXT PRIMARY KEY,status TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,'paused')"}},
+		"internal/store/internal/backend/runforkpersistence/run_fork_branch_divergence_test.go": {
+			"CREATE TABLE runs (run_id ID_TYPE PRIMARY KEY, bundle_hash TEXT NOT NULL, origin_kind TEXT, status TEXT, forked_from_run_id ID_TYPE, forked_from_point_kind TEXT, forked_from_revision BIGINT, forked_from_event_id ID_TYPE)",
+			[]string{
+				"INSERT INTO runs (run_id,bundle_hash,origin_kind,status) VALUES ($1,$2,'deployment',$3)",
+				"INSERT INTO runs (run_id,bundle_hash,origin_kind,status,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id) VALUES ($1,$2,'fork_materialization','running',$3,$4,$5,$6)",
+				"UPDATE runs SET forked_from_revision=forked_from_revision+1 WHERE run_id=$1",
+				"UPDATE runs SET forked_from_revision=forked_from_revision-1 WHERE run_id=$1",
+			},
+		},
 	}
 	shape, ok := shapes[path]
 	if !ok {
@@ -277,6 +286,50 @@ func classifyA2CollectionMinimalRunLiterals(file *ast.File) (map[token.Pos]bool,
 		}
 	}
 	return approved, nil
+}
+
+func TestBranchDivergenceMinimalRunFixtureClassificationIsExact(t *testing.T) {
+	const path = "internal/store/internal/backend/runforkpersistence/run_fork_branch_divergence_test.go"
+	raw, err := os.ReadFile(filepath.Join(repoRootForRuntimeWriterGuard(t), path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
+	for _, tc := range []struct {
+		name, path, source string
+		want               bool
+	}{
+		{"exact-native-projection", path, source, true},
+		{"other-owner", "internal/runtime/other_test.go", source, false},
+		{"missing-bundle-schema", path, strings.Replace(source, "bundle_hash TEXT NOT NULL, ", "", 1), false},
+		{"expanded-schema", path, strings.Replace(source, "status TEXT,", "status TEXT, event_count BIGINT,", 1), false},
+		{"missing-source-bundle", path, strings.Replace(source, "(run_id,bundle_hash,origin_kind,status)", "(run_id,origin_kind,status)", 1), false},
+		{"lifecycle-write", path, source + "\nvar unsupported = " + strconv.Quote("UPDATE runs SET status='completed' WHERE run_id=$1"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture_test.go", tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approved, err := classifyBackendMinimalRunLiterals(tc.path, file)
+			allowed := err == nil
+			ast.Inspect(file, func(node ast.Node) bool {
+				literal, ok := node.(*ast.BasicLit)
+				if !ok || literal.Kind != token.STRING {
+					return true
+				}
+				value, unquoteErr := strconv.Unquote(literal.Value)
+				if unquoteErr == nil && runWrite.MatchString(value) && !approved[literal.Pos()] {
+					allowed = false
+				}
+				return true
+			})
+			if allowed != tc.want {
+				t.Fatalf("allowed=%t want=%t err=%v", allowed, tc.want, err)
+			}
+		})
+	}
 }
 
 func TestA2CollectionMinimalRunFixtureClassificationIsExact(t *testing.T) {

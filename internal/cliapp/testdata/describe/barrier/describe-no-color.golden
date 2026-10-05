@@ -4,24 +4,31 @@ validation: structural; live readiness: not evaluated
 events:
   - operating.report.triggered (fields: operating_id, period_id, portfolio_id, revenue)
   - portfolio.setup (fields: expected_operating_ids, period_id, portfolio_id)
+root constructor: (no arguments)
 flows:
   - ingress (static)
     events:
       - operating.report.requested (fields: operating_id, period_id, portfolio_id, revenue)
+    constructor: (no arguments)
   - operating (template)
     events:
       - operating.reported (fields: operating_id, operating_instance_id, period_id, portfolio_id, revenue)
     primary entity: operating_state
     instance: field=operating_instance_id identity=run + flow + instance_key
+    constructor: operating.report.requested key=operating_instance_id supplied=[]
   - portfolio (template)
     events:
       - period.reported (fields: operating_id, period_id, portfolio_id, revenue)
       - period.setup (fields: expected_operating_ids, period_id, portfolio_id)
     primary entity: portfolio_context
     instance: field=portfolio_id identity=run + flow + instance_key
+    constructor: operating.reported key=portfolio_id supplied=[]
+    constructor: portfolio.setup key=portfolio_id supplied=[]
   - portfolio/period (template)
     primary entity: period_state
     instance: field=period_id identity=run + flow + instance_key
+    constructor: period.reported key=period_id supplied=[portfolio_id]
+    constructor: period.setup key=period_id supplied=[expected_operating_ids, portfolio_id]
 routing topology: routing-topology/v1
   source authority: projection_only_existing_contract_owners
   - [typed_pubsub] portfolio/operating.reported: portfolio.operating.reported -> portfolio.portfolio-router

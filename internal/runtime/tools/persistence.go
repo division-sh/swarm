@@ -2,8 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
-	"time"
 
 	corestate "github.com/division-sh/swarm/internal/runtime/core/state"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -27,12 +25,6 @@ type EntityPersistence interface {
 	LoadEntityState(ctx context.Context, identity EntityIdentity) (map[string]any, bool, error)
 	QueryEntityStates(ctx context.Context, query EntityStateQuery) ([]map[string]any, error)
 	SaveEntityField(ctx context.Context, update EntityFieldUpdate) (EntityFieldWriteResult, error)
-	CreateEntity(ctx context.Context, rec EntityCreateRecord) (EntityCreateResult, error)
-}
-
-type EntityCreateResult struct {
-	EntityID     string
-	Acknowledged bool
 }
 
 type EntityFieldWriteResult struct {
@@ -79,19 +71,6 @@ type EntityFieldUpdate struct {
 	FieldPath string
 	Value     any
 	Writer    EntityMutationWriter
-}
-
-type EntityCreateRecord struct {
-	Source       semanticview.Source
-	RunID        string
-	EntityID     string
-	FlowInstance string
-	EntityType   string
-	Name         string
-	CurrentState string
-	FieldsJSON   json.RawMessage
-	CreatedAt    time.Time
-	Writer       EntityMutationWriter
 }
 
 type HumanTaskCardStore = decisioncard.HumanTaskAcknowledgedCreationStore

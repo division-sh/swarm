@@ -328,6 +328,10 @@ func scanAgentLifecycleDiagnostics(rows *sql.Rows) ([]diaglog.LifecycleDiagnosti
 }
 
 func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	return s.commitAgentLifecycleTransitionTx(ctx, attempt, req, false)
+}
+
+func (s *AgentPostgresOwner) commitAgentLifecycleTransitionTx(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition, instanceRebind bool) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -338,12 +342,15 @@ func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Contex
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
+	if err := rejectIndividualReadinessRestamp(req, instanceRebind); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	var result runtimemanager.AgentLifecycleTransitionResult
 	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := AuthorizeGenerationMutationTx(ctx, tx, req, false); err != nil {
 			return err
 		}
-		result, err = commitPostgresAgentLifecycleTransitionTx(ctx, tx, attempt, req, s.providerDrains, s.diagnosticEvents, s.diagnosticOrigins)
+		result, err = commitPostgresAgentLifecycleTransitionTx(ctx, tx, attempt, req, s.providerDrains, s.diagnosticEvents, s.diagnosticOrigins, instanceRebind)
 		return err
 	})
 	if err != nil {
@@ -353,6 +360,10 @@ func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Contex
 }
 
 func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	return s.commitAgentLifecycleTransitionTx(ctx, attempt, req, false)
+}
+
+func (s *AgentSQLiteOwner) commitAgentLifecycleTransitionTx(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition, instanceRebind bool) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -363,12 +374,15 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
+	if err := rejectIndividualReadinessRestamp(req, instanceRebind); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	var result runtimemanager.AgentLifecycleTransitionResult
 	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := AuthorizeGenerationMutationTx(ctx, tx, req, true); err != nil {
 			return err
 		}
-		result, err = commitSQLiteAgentLifecycleTransitionTx(ctx, tx, attempt, req, s.providerDrains, s.diagnosticEvents, s.diagnosticOrigins)
+		result, err = commitSQLiteAgentLifecycleTransitionTx(ctx, tx, attempt, req, s.providerDrains, s.diagnosticEvents, s.diagnosticOrigins, instanceRebind)
 		return err
 	})
 	if err != nil {
@@ -377,7 +391,7 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	return result, err
 }
 
-func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainPostgresCapturer, eventOwner LifecycleDiagnosticEventOwner, originOwner LifecycleDiagnosticOriginValidator) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainPostgresCapturer, eventOwner LifecycleDiagnosticEventOwner, originOwner LifecycleDiagnosticOriginValidator, instanceRebind bool) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	fingerprint, err := req.Identity.Fingerprint()
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -399,6 +413,9 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, a
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	if err := validateLifecycleExpectation(req, previous, exists); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if err := validateFlowReadinessSuccessor(req, previous, exists, instanceRebind); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result := lifecycleResult(req, previous, exists)
@@ -424,7 +441,7 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, a
 	return result, err
 }
 
-func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainSQLiteCapturer, eventOwner LifecycleDiagnosticEventOwner, originOwner LifecycleDiagnosticOriginValidator) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainSQLiteCapturer, eventOwner LifecycleDiagnosticEventOwner, originOwner LifecycleDiagnosticOriginValidator, instanceRebind bool) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	previous, exists, err := loadSQLiteLifecycleCell(ctx, tx, req.Identity)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -439,6 +456,9 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, att
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	if err := validateLifecycleExpectation(req, previous, exists); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if err := validateFlowReadinessSuccessor(req, previous, exists, instanceRebind); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result := lifecycleResult(req, previous, exists)
@@ -530,6 +550,7 @@ type lifecycleCell struct {
 	Generation uint64
 	Phase      runtimemanager.AgentLifecyclePhase
 	Binding    runtimemanager.ProcessExecutionBinding
+	Topology   []byte
 }
 
 func normalizeLifecycleTransition(req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransition, error) {
@@ -614,6 +635,22 @@ func validateLifecycleExpectation(req runtimemanager.AgentLifecycleTransition, p
 		}
 	default:
 		if !previous.Binding.Equal(req.ProcessBinding) {
+			if req.OperationKind == "self_release" && req.Topology.Authority.Kind == runtimeagenttopology.AuthorityFlowReadinessPlan &&
+				previous.Binding.SameProcessExecution(req.ProcessBinding) {
+				var topology runtimeagenttopology.Admission
+				if err := canonicaljson.DecodeInto(previous.Topology, &topology); err != nil {
+					return err
+				}
+				if err := topology.Validate(); err != nil {
+					return err
+				}
+				if !topology.Equal(req.Topology) {
+					return lifecycleConflict(req, previous, true)
+				}
+				// The exact lifecycle token and readiness attempt were checked in
+				// this transaction. Its current write grant is not attachment identity.
+				return nil
+			}
 			return lifecycleConflict(req, previous, true)
 		}
 	}
@@ -951,7 +988,7 @@ func loadPostgresLifecycleCell(
 			       lifecycle_process_authority_id::text, lifecycle_process_owner_id,
 			       lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text
 			       , lifecycle_bundle_hash,
-			       lifecycle_runtime_instance_id::text, lifecycle_runtime_generation
+			       lifecycle_runtime_instance_id::text, lifecycle_runtime_generation, topology_admission
 		FROM agents
 		WHERE run_id = $1::uuid AND agent_id = $2 AND agent_name_owner = $3 AND agent_name_source = $4
 		  AND agent_route_presence = $5 AND flow_scope_key = $6
@@ -969,6 +1006,7 @@ func loadPostgresLifecycleCell(
 		&cell.Binding.BundleHash,
 		&cell.Binding.RuntimeInstanceID,
 		&cell.Binding.RuntimeGeneration,
+		&cell.Topology,
 	)
 	if err == sql.ErrNoRows {
 		return lifecycleCell{}, false, nil
@@ -996,7 +1034,7 @@ func loadSQLiteLifecycleCell(
 			       lifecycle_process_authority_id, lifecycle_process_owner_id,
 			       lifecycle_process_boot_id, lifecycle_generation_grant_id
 			       , lifecycle_bundle_hash,
-			       lifecycle_runtime_instance_id, lifecycle_runtime_generation
+			       lifecycle_runtime_instance_id, lifecycle_runtime_generation, topology_admission
 		FROM agents
 		WHERE run_id = ? AND agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
 		  AND agent_route_presence = ? AND flow_scope_key = ?
@@ -1013,6 +1051,7 @@ func loadSQLiteLifecycleCell(
 		&cell.Binding.BundleHash,
 		&cell.Binding.RuntimeInstanceID,
 		&cell.Binding.RuntimeGeneration,
+		&cell.Topology,
 	)
 	if err == sql.ErrNoRows {
 		return lifecycleCell{}, false, nil

@@ -50,8 +50,8 @@ func fanOutBacklogProbe(t *testing.T, interval time.Duration) {
 	workflowStore := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
-	parentEntityID := uuid.NewString()
 	parentPath := runtimecorrelation.RunIDFromContext(ctx)
+	parentEntityID := parentPath
 
 	parent := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),

@@ -711,9 +711,11 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 		t, materialized.ForkRunID, "flow-a", "flow-a/1", entityID, "ready", 1, at,
 	)
 	forkState.EntityType = "fork_entity"
+	forkState.Mode = "static"
+	forkState.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	forkExecutionCtx := runtimecorrelation.WithRunID(ctx, materialized.ForkRunID)
 	if _, err := pg.CommitWorkflowEngineMutation(forkExecutionCtx, runtimepipeline.WorkflowEngineMutationCommand{State: forkState}); err != nil {
-		t.Fatalf("execute activated state-only fork target: %v", err)
+		t.Fatalf("execute activated constructed fork target: %v", err)
 	}
 	assertWorkflowTargetTransitionRows(t, "postgres", db, materialized.ForkRunID, entityID, "flow-a/1", "flow-a", "done", 2, 1)
 
@@ -1844,6 +1846,7 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 	`, orphanRunID, orphanEntityID, at); err != nil {
 		t.Fatalf("seed orphan fork entity_state: %v", err)
 	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, orphanRunID, orphanEntityID, "flow-a/1", "flow-a", "default", "pending", "{}", at)
 	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: orphanRunID, AllowSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork typed-origin lineage: %v", err)
@@ -2134,6 +2137,10 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 
 func seedActivationReadySourceState(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "flow-a/1", "flow-a", "fork_entity", "ready", "{}", at)
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET name='Activation Entity' WHERE run_id=$1 AND instance_path='flow-a/1'`, sourceRunID); err != nil {
+		t.Fatal(err)
+	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (

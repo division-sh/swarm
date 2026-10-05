@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -104,6 +105,7 @@ func (f *timerDiagnosticOccurrenceFaultForTest) CommitWorkflowTimerOccurrence(ct
 type WorkflowDiagnosticFixtureForTest struct {
 	Context              context.Context
 	Coordinator          *PipelineCoordinator
+	CommitConstruction   func(context.Context, flowidentity.RunScopedFlowInstance, WorkflowInstance, time.Time)
 	VerifyFailure        func(context.Context, string, string, string, string, runtimefailures.Envelope) error
 	Events               func(context.Context) []events.Event
 	PublishHandler       func(context.Context, events.Event) error
@@ -135,9 +137,7 @@ func VerifyWorkflowHandlerFailureDiagnosticPersistsOnBothStoresForTest(t *testin
 				WorkflowVersion: pc.SemanticSource().WorkflowVersion(), EntityType: "test_entity", CurrentState: "ready", CreatedAt: at, EnteredStageAt: at,
 			})
 			identity := testRunScopedWorkflowInstanceFromContext(ctx, runID)
-			if result, err := pc.MaterializeInitialEntry(ctx, identity, instance, at); err != nil || result != WorkflowInitialMaterializationCreated {
-				t.Fatalf("materialize canonical handler receiver: %v, %v", result, err)
-			}
+			f.CommitConstruction(ctx, identity, instance, at)
 			before, found, err := pc.Load(ctx, identity)
 			if err != nil || !found {
 				t.Fatalf("load admitted handler receiver: found=%t err=%v", found, err)
@@ -210,9 +210,7 @@ func VerifyWorkflowTimerFailureDiagnosticsPersistOnBothStoresForTest(t *testing.
 						CreatedAt: createdAt, EnteredStageAt: createdAt,
 					})
 					identity := testRunScopedWorkflowInstanceFromContext(ctx, path)
-					if result, err := pc.MaterializeInitialEntry(ctx, identity, instance, createdAt); err != nil || result != WorkflowInitialMaterializationCreated {
-						t.Fatalf("materialize admitted timer owner: %v, %v", result, err)
-					}
+					f.CommitConstruction(ctx, identity, instance, createdAt)
 					activations, err := lifecycle.initialEntryTimerActivations(ctx, identity)
 					if err != nil {
 						t.Fatal(err)

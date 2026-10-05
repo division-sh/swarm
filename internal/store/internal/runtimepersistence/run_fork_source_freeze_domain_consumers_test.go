@@ -18,6 +18,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -26,7 +27,7 @@ import (
 )
 
 type forkedDomainConsumerSurface interface {
-	CreateEntity(context.Context, runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error)
+	SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
 	SaveEntityField(context.Context, runtimetools.EntityFieldUpdate) (runtimetools.EntityFieldWriteResult, error)
 	RecordSpend(context.Context, budgetspend.SpendRecord) error
 	ListBudgetProjectionTargets(context.Context) ([]budgetspend.ProjectionTarget, error)
@@ -66,14 +67,16 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				t.Fatalf("bind freeze domain source: %v", err)
 			}
 			fixture.sourceBundleHash = fact.BundleHash()
+			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 
 			entityID := uuid.NewString()
-			entity := runtimetools.EntityCreateRecord{
-				Source: source, RunID: fixture.sourceRun, EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "review_item",
-				CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"domain"}`), CreatedAt: fixture.forkedAt.Add(-time.Minute),
-				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
+			entity := pipeline.ScenarioSetupEntityRequest{
+				Alias: "domain", EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "review_item",
+				CurrentState: "active", Fields: map[string]any{"account_id": "domain"},
 			}
-			if _, err := surface.CreateEntity(ctx, entity); err != nil {
+			if _, err := surface.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
+				RunID: fixture.sourceRun, CreatedAt: fixture.forkedAt.Add(-time.Minute), Entities: []pipeline.ScenarioSetupEntityRequest{entity},
+			}); err != nil {
 				t.Fatal(err)
 			}
 			mutationQuery := `SELECT COUNT(*) FROM entity_mutations WHERE entity_id = ?`
@@ -99,8 +102,10 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 			lateEntity := entity
 			lateEntity.EntityID = uuid.NewString()
-			_, err := surface.CreateEntity(ctx, lateEntity)
-			requireForkedSourceRefusal(t, "create entity", err)
+			_, err := surface.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
+				RunID: fixture.sourceRun, CreatedAt: fixture.forkedAt, Entities: []pipeline.ScenarioSetupEntityRequest{lateEntity},
+			})
+			requireForkedSourceRefusal(t, "scenario import", err)
 			_, err = surface.SaveEntityField(ctx, runtimetools.EntityFieldUpdate{
 				Source: source, RunID: fixture.sourceRun, EntityID: entityID, FieldPath: "account_id", Value: "changed",
 				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
@@ -180,12 +185,19 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 func seedForkedFlowInstance(t *testing.T, fixture *forkedConsumerTestBackend, instancePath string) {
 	t.Helper()
-	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, ?, 'freeze', 'template', '{}', 'active', ?)`
+	query := `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
+		SELECT run_id, flow_instance, entity_id, entity_type, 'freeze', 'template', '{}', 'active', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1 FROM entity_state WHERE run_id = ? AND flow_instance = ?`
 	if fixture.postgres != nil {
-		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, $2, 'freeze', 'template', '{}'::jsonb, 'active', $3)`
+		query = `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
+			SELECT run_id, flow_instance, entity_id, entity_type, 'freeze', 'template', '{}'::jsonb, 'active', TRUE, 'active', $1, $2, $3, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1 FROM entity_state WHERE run_id = $4::uuid AND flow_instance = $5`
 	}
-	if _, err := fixture.db.ExecContext(context.Background(), query, fixture.sourceRun, instancePath, fixture.forkedAt.Add(-time.Minute)); err != nil {
+	at := fixture.forkedAt.Add(-time.Minute)
+	result, err := fixture.db.ExecContext(context.Background(), query, at, at, at, fixture.sourceRun, instancePath)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		t.Fatalf("seed exact frozen-source header: rows=%d err=%v", count, err)
 	}
 }
 

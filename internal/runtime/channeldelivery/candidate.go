@@ -22,6 +22,7 @@ type Candidate struct {
 	State               string
 	CurrentRenderID     string
 	CurrentReceiptID    string
+	RecoveryPending     bool
 }
 
 type PreparedRender struct {

@@ -15,7 +15,6 @@ import (
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -124,19 +123,9 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				t.Fatalf("Start: %v", err)
 			}
 
-			entityID := uuid.NewString()
-			startedAt := time.Now().UTC().Add(-time.Second)
 			materializeCtx := worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-			rootRoute := runID
-			if _, err := rt.Pipeline.MaterializeInitialEntry(testLiveExecutionContext(materializeCtx), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(rootRoute)}, runtimepipeline.WorkflowInstance{
-				InstanceID: rootRoute, StorageRef: rootRoute,
-				WorkflowName: bundle.WorkflowName(), WorkflowVersion: bundle.WorkflowVersion(),
-				CurrentState: "pending", EnteredStageAt: startedAt, CreatedAt: startedAt,
-				Fields:     map[string]any{},
-				EntityType: "test_entity",
-			}, startedAt); err != nil {
-				t.Fatalf("materialize receiver authority workflow: %v", err)
-			}
+			constructExternalRuntimeTestRoot(t, materializeCtx, rt.Manager, source)
+			entityID := runID
 			rootSource := eventtest.RootRoutingSource(entityID)
 			root := eventtest.ExistingRunRootIngressWithRoutingSource(
 				uuid.NewString(), "task.assigned", "receiver-authority-e2e", "", []byte(`{}`), 0, runID,

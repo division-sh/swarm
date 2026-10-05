@@ -1,0 +1,309 @@
+{
+  "source_head": "a73cabe917975637ab655bc682239ec8d3c18859",
+  "base": "276d7723f9f6c66458d416a0554c107be373772b",
+  "receipt": "/tmp/agent-e-2496-non-native-ci-revalidation.log",
+  "result": "RED; incomplete after the unchanged serveapp 600s package deadline",
+  "requested_roots": 137,
+  "reported_roots": 89,
+  "passing_roots": 77,
+  "failed_roots": [
+    {
+      "test": "TestGuardTerminationHistoricalForkPreservesCauseBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestA2JoinPublicProjectionAgreementBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestA2MapRecipeSupportedSurfaceBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestA2PortfolioPublicIndependentArrivalAdmissionBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestA2PortfolioSupportedStreamSurfaceBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestA2PortfolioSupportedFiniteJoinSurfaceBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomically",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestDynamicTopologyStartupPreflightSQLiteScopesTwoContextsAndRefusesAtomically",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestNodeIdentityCanonicalMapKeySQLitePostgres",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    },
+    {
+      "test": "TestIssue2394ReporterFiveHundredDelayedCommitsBothStores",
+      "pass": 0,
+      "fail": 1,
+      "skip": 0
+    }
+  ],
+  "unreported_roots": [
+    {
+      "test": "TestServedCompiledRootLoopForkProjectsRevisionOnBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedCompiledLoopTransitionReplayOnBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedCompiledTransitionRestartOnBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedParityHarnessMailboxDecisionLifecycle",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedParityHarnessTestSetupEntitiesLifecycle",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestReleaseCompiledLifecycleJourneysBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthoritySchema",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmission",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestRunState_UsesDurableCompletedRunState",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestRunState_PreservesRunningTruthWhileManagerWorkIsActive",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestSelectedForkReceiverPolicyPermutationExecutionBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestSelectedForkRequiredReceiverOwnershipStateEffectBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestSelectedForkReceiverGeometryPostRevisionPolicyRefusalBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedPublicationSitesBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestReceiverCompositionSharedChildJourney",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestReceiverCompositionEntitylessOnwardBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestReceiverCompositionEntitylessRootExportBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestReceiverCompositionForkBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestReceiverCompositionEntitylessLocalOnwardBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestReceiverCompositionMixedAgentBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestReceiverCompositionIndependentPoliciesBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestComposedStartupCreationPublicationHandoffOnBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedLifecycleEmitterLoopEscapeJourney",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedGeneratedActivityPublicationBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestMailboxRefusalAtPreparationAndCommitBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestSelectedForkNestedStaticReceiverIsolationExecutionBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestSelectedForkIndependentReceiverBusinessMutationBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestProspectiveReceiverUpdatesAndCompanionRepairBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestProspectiveTerminalReceiverRefusesWithoutStateOrPublicationBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedPublicationDirectTextSiteBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedPublicationDirectRestartBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestMockActivitySelectedForkSemanticResultExecutionParity",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    },
+    {
+      "test": "TestServedPublicationTextSitesBothStores",
+      "package": "github.com/division-sh/swarm/internal/serveapp"
+    }
+  ],
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/apiv1",
+      "result": "pass",
+      "seconds": 24.546
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "result": "pass",
+      "seconds": 59.992
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/releasee2e",
+      "result": "fail",
+      "seconds": 97.383
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/cataloge2e",
+      "result": "fail",
+      "seconds": 245.957
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/conformance",
+      "result": "fail",
+      "seconds": 427.615
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "result": "fail",
+      "seconds": 600.016
+    }
+  ]
+}

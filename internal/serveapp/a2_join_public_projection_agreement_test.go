@@ -179,7 +179,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			requireA2PortfolioDelivery(t, completion, ".", "join-node", firedEntity, "existing_entity")
 			firedEntry, found, err := workflowlifecycle.LoadStageEntry(firedEntity.Bookkeeping)
 			if err != nil || !found || firedEntry == entry || firedEntry.EventID != completion.EventID ||
-				firedEntry.RequireOwner(opened.RunID, opened.RunID, opened.RunID, opened.RunID, opened.RunID, "ready") != nil {
+				firedEntry.RequireOwner(opened.RunID, ".", opened.RunID, opened.RunID, opened.RunID, "ready") != nil {
 				t.Fatalf("public fired bookkeeping lost the actual continuation's new entry: entry=%+v retained=%+v event=%s err=%v", firedEntry, entry, completion.EventID, err)
 			}
 			a2RequireJoinPublicFailureAgreement(t, firedDiagnosis, a2ReadJoinPublicEvent(t, rt, late.EventID))
@@ -217,7 +217,7 @@ func a2ReadJoinPublicObligation(t *testing.T, rt servedControlProofRuntime, runI
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ref.StageEntry().RequireOwner(runID, runID, runID, runID, runID, "awaiting"); err != nil {
+	if err := ref.StageEntry().RequireOwner(runID, ".", runID, runID, runID, "awaiting"); err != nil {
 		t.Fatalf("public obligation lost its exact lifecycle owner: entry=%+v err=%v", ref.StageEntry(), err)
 	}
 	if entity.Entity.RunID != runID || entity.Entity.EntityID != runID || entity.Entity.FlowInstance != runID || !ref.Declaration().Equal(declaration) ||

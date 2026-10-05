@@ -153,6 +153,10 @@ type selectedRetainedActivationProbe struct {
 	attempts int
 }
 
+func (p *selectedRetainedActivationProbe) ResolveDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationResolution, error) {
+	return runtimepipeline.DynamicFlowRuntimeActivationResolution{}, errors.New("unexpected pending admission in retained activation control")
+}
+
 func (p *selectedRetainedActivationProbe) Retire() error {
 	p.routes++
 	if p.failAt == "route" && p.failing {

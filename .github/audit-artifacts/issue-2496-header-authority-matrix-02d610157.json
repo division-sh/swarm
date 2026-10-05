@@ -1,0 +1,29 @@
+{
+  "executed_head": "02d610157",
+  "receipt": "/tmp/agent-e-2496-header-authority-repair-matrix.log",
+  "command": "go run ./cmd/swarm-test -- ./internal/runtime/pipeline ./internal/store/internal/backend/runforkpersistence -run '^(TestPipelineCompiledTransitionInitialAdmissionOnBothStores|TestWorkflowEngineCompleteCarrierPreservesBookkeepingOnBothStores|TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes|TestSelectedForkTemplateCompanionReadinessBothStores|TestSelectedForkHistoricalFieldlessHeaderBothStores)$' -race -count=3 -json",
+  "failed_records": 0,
+  "packages": [
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence",
+      "status": "pass",
+      "elapsed": 7.670,
+      "passed_root_occurrences": 6,
+      "passed_roots": [
+        "TestSelectedForkTemplateCompanionReadinessBothStores",
+        "TestSelectedForkHistoricalFieldlessHeaderBothStores"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+      "status": "pass",
+      "elapsed": 20.382,
+      "passed_root_occurrences": 9,
+      "passed_roots": [
+        "TestPipelineCompiledTransitionInitialAdmissionOnBothStores",
+        "TestWorkflowEngineCompleteCarrierPreservesBookkeepingOnBothStores",
+        "TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes"
+      ]
+    }
+  ]
+}

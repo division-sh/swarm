@@ -5,6 +5,11 @@
   "source_hash": "\u003cadmitted-bundle\u003e",
   "source_authority": "projection_only_existing_contract_owners",
   "root": {
+    "constructors": [
+      {
+        "no_arguments": true
+      }
+    ],
     "source_files": {
       "schema": "schema.yaml",
       "entities": "entities.yaml"
@@ -47,6 +52,13 @@
   },
   "flows": [
     {
+      "constructors": [
+        {
+          "input": "candidate.requested",
+          "no_arguments": false,
+          "key_field": "candidate_id"
+        }
+      ],
       "id": "candidate",
       "path": "candidate",
       "mode": "template",
@@ -167,6 +179,11 @@
       ]
     },
     {
+      "constructors": [
+        {
+          "no_arguments": true
+        }
+      ],
       "id": "scout",
       "path": "scout",
       "mode": "static",
@@ -3366,16 +3383,6 @@
       }
     },
     {
-      "path": "nodes[\".:search-intake\"].event_handlers[\"search.requested\"].create_entity",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "nodes.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "nodes[\".:search-intake\"].event_handlers[\"search.requested\"].emit",
       "provenance": {
         "origin": "authored",
@@ -3967,16 +3974,6 @@
     },
     {
       "path": "nodes[\"scout:scout-intake\"].event_handlers[\"scout.requested\"].advances_to",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "scout/nodes.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "nodes[\"scout:scout-intake\"].event_handlers[\"scout.requested\"].create_entity",
       "provenance": {
         "origin": "authored",
         "source_file": "scout/nodes.yaml",

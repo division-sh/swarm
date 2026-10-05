@@ -1,0 +1,37 @@
+{
+  "source_head": "0cfffef87985e16745007f56cd3bf6dbf7fc6aac",
+  "base": "7ada6e30e372f4acd7d573e6f81d2cddc75c0de7",
+  "source_boundary": "Non-test Go source is unchanged by the test integration and measurement commit containing this artifact. This measurement is not final qualification or merge approval.",
+  "measurement": "git diff --numstat --no-renames; every non-_test.go Go path, including test support",
+  "files": 248,
+  "additions": 9718,
+  "deletions": 8508,
+  "net": 1210,
+  "readiness_core_lines": 389,
+  "invariant": "Execution consumes one committed construction owner and one exact process-plus-plan attachment attempt; unchanged-plan grant refresh is atomic across the complete instance, while mutation-free NODE success atomically renews and settles its exact claim without workflow-state writes.",
+  "budget_disposition": "Positive net growth uses the approved load-bearing invariant, not a net-negative claim. The 3000-line target is soft; gross additions and deletions are reported without excluding generated or fixture sources.",
+  "complexity_policy": "Current-head qualification pending under the unchanged independently measured master comparison. The retired committed baseline is not restored.",
+  "prior_measurement": {
+    "source_head": "db133e21b5feefbc173cc88d6c95d0880d628a7e",
+    "base": "276d7723f9f6c66458d416a0554c107be373772b",
+    "files": 199,
+    "additions": 7701,
+    "deletions": 7799,
+    "net": -98,
+    "readiness_core_lines": 386,
+    "complexity_policy": "Historical PASS under the then-committed baseline, not current-head credit",
+    "cognitive_30_base_head": [578, 575],
+    "cognitive_50_base_head": [193, 193],
+    "cyclomatic_30_base_head": [265, 261],
+    "cyclomatic_50_base_head": [53, 55]
+  },
+  "historical_measurement": {
+    "source_head": "3b0f58c2ebcc7dd62552793a9c4cce3dbdbd4aea",
+    "base": "ee9b091526f89154a425c1f1d1321085aa9b832b",
+    "files": 198,
+    "additions": 7678,
+    "deletions": 7795,
+    "net": -117,
+    "readiness_core_lines": 386
+  }
+}

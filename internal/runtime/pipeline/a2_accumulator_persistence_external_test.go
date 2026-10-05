@@ -31,6 +31,7 @@ type a2AccumulatorPersistenceProof struct {
 	module      proposedEffectProofModule
 	pc          *pipeline.PipelineCoordinator
 	persistence *a2AccumulatorPersistenceObserver
+	logger      *exactJoinRuntimeLogger
 }
 
 type a2AccumulatorPersistenceObserver struct {
@@ -84,7 +85,7 @@ item.recorded:
   subscribes_to: [seed]
   event_handlers:
     seed:
-      create_entity: true
+      {}
 collector:
   execution_type: system_node
   subscribes_to: [item.keyed, item.nested, item.unkeyed]
@@ -121,6 +122,7 @@ collector:
 	selected.persistence = pipeline.NewWorkflowPersistence(observer)
 	proof := &a2AccumulatorPersistenceProof{selected: selected, ctx: ctx, runID: runID, bus: bus, module: module, persistence: observer}
 	proof.restart()
+	commitKeylessConstructorComponent(t, ctx, selected, proof.pc, source)
 	proof.execute(t, proof.publish(t, "seed", `{}`), "")
 	return proof
 }
@@ -166,7 +168,7 @@ func (p *a2AccumulatorPersistenceProof) execute(t *testing.T, publication a2Accu
 			t.Fatalf("execution failure=%#v err=%v, want %s", failure, executionErr, want)
 		}
 	} else if executionErr != nil || typed {
-		t.Fatalf("execute %s: failure=%#v err=%v", publication.event.Type(), failure, executionErr)
+		t.Fatalf("execute %s: failure=%#v err=%v persistence=%v diagnostics=%v", publication.event.Type(), failure, executionErr, p.persistence.err, p.logger)
 	}
 }
 

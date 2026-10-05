@@ -1,0 +1,173 @@
+{
+  "schema": 1,
+  "source_head": "06383234726ab42a421687e165e000c1f769a652",
+  "base": "0fa24140aaa05e397509f451ba780fef3a260867",
+  "command": "go run ./cmd/swarm-test -- -json -race -count=1 -run '^(TestServedCompiledTransitionNestedCarrierCollisionOnBothStores|TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores|TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores|TestServedCompiledGateAdvanceOnlyOnBothStores)$' ./internal/serveapp",
+  "receipt": "/tmp/agent-e-2496-header-lifecycle-proof.log",
+  "receipt_sha256": "71d8fb8d46f3764e9cfb40c105aae70f47931ebcd546954296c58c4ca1bb5b44",
+  "exit_code": 0,
+  "first_test_event": "2026-10-03T03:15:32.644954122Z",
+  "last_test_event": "2026-10-03T03:17:46.358453719Z",
+  "package_results": [
+    {
+      "action": "pass",
+      "elapsed": 133.714
+    }
+  ],
+  "root_results": [
+    {
+      "test": "TestServedCompiledGateAdvanceOnlyOnBothStores",
+      "action": "pass",
+      "elapsed": 13.01
+    },
+    {
+      "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores",
+      "action": "pass",
+      "elapsed": 21.03
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores",
+      "action": "pass",
+      "elapsed": 85.85
+    },
+    {
+      "test": "TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores",
+      "action": "pass",
+      "elapsed": 12.78
+    }
+  ],
+  "cells": [
+    {
+      "test": "TestServedCompiledGateAdvanceOnlyOnBothStores/default_sqlite",
+      "action": "pass",
+      "elapsed": 6.91
+    },
+    {
+      "test": "TestServedCompiledGateAdvanceOnlyOnBothStores/explicit_postgres",
+      "action": "pass",
+      "elapsed": 6.11
+    },
+    {
+      "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores/default_sqlite",
+      "action": "pass",
+      "elapsed": 13.8
+    },
+    {
+      "test": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores/explicit_postgres",
+      "action": "pass",
+      "elapsed": 7.23
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_false/first/alpha",
+      "action": "pass",
+      "elapsed": 4.39
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_false/first/beta",
+      "action": "pass",
+      "elapsed": 4.59
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_false/second/alpha",
+      "action": "pass",
+      "elapsed": 4.61
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_false/second/beta",
+      "action": "pass",
+      "elapsed": 4.67
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_false",
+      "action": "pass",
+      "elapsed": 27.74
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_true/first/alpha",
+      "action": "pass",
+      "elapsed": 4.34
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_true/first/beta",
+      "action": "pass",
+      "elapsed": 4.61
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_true/second/alpha",
+      "action": "pass",
+      "elapsed": 4.69
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_true/second/beta",
+      "action": "pass",
+      "elapsed": 4.71
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/default_sqlite/reordered_true",
+      "action": "pass",
+      "elapsed": 27.99
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_false/first/alpha",
+      "action": "pass",
+      "elapsed": 1.75
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_false/first/beta",
+      "action": "pass",
+      "elapsed": 1.7
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_false/second/alpha",
+      "action": "pass",
+      "elapsed": 1.69
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_false/second/beta",
+      "action": "pass",
+      "elapsed": 1.7
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_false",
+      "action": "pass",
+      "elapsed": 15.05
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_true/first/alpha",
+      "action": "pass",
+      "elapsed": 1.76
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_true/first/beta",
+      "action": "pass",
+      "elapsed": 1.67
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_true/second/alpha",
+      "action": "pass",
+      "elapsed": 1.69
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_true/second/beta",
+      "action": "pass",
+      "elapsed": 1.71
+    },
+    {
+      "test": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores/explicit_postgres/reordered_true",
+      "action": "pass",
+      "elapsed": 15.06
+    },
+    {
+      "test": "TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores/default_sqlite",
+      "action": "pass",
+      "elapsed": 8.38
+    },
+    {
+      "test": "TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores/explicit_postgres",
+      "action": "pass",
+      "elapsed": 4.39
+    }
+  ],
+  "proof_surface": "compiled in-process mock-lifecycle process; authenticated public RPC readback where named, not real-provider/public-launcher qualification",
+  "qualification_boundary": "Strengthened static eager-tree/no-op refusal and shared canonical-header readers. Nested keyed-grandchild topology/recovery remains RED and is not executed or credited by these roots."
+}

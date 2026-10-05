@@ -89,7 +89,7 @@ func TestEntityDefiniteAssignmentLoops(t *testing.T) {
 			repo := repoRootForBootverifyTest(t)
 			bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
 			source := semanticview.Wrap(bundle)
-			analysis, err := engine.BuildEntityAssignmentAnalysis(source, "review")
+			analysis, err := engine.BuildConstructorAssignmentAnalysis(source, "review", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -104,7 +104,7 @@ func TestEntityDefiniteAssignmentLoops(t *testing.T) {
 			projection := bundle.Semantics.StageTopologies["review"]
 			projection.InitialStage = "exhausted"
 			bundle.Semantics.StageTopologies["review"] = projection
-			fromCompiledStage, err := engine.BuildEntityAssignmentAnalysis(source, "review")
+			fromCompiledStage, err := engine.BuildConstructorAssignmentAnalysis(source, "review", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -186,7 +186,6 @@ worker:
   subscribes_to: [task.assigned]
   event_handlers:
     task.assigned:
-      create_entity: true
       on_complete:
         - id: early
           condition: entity.base_score > 0
@@ -235,7 +234,6 @@ work.result:
   produces: [work.result]
   event_handlers:
     work.opened:
-      create_entity: true
       advances_to: assess
     work.scored:
       guard: {check: _entity.current_state == 'assess'}

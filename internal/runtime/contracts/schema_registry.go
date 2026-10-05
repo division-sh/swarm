@@ -345,6 +345,100 @@ func eventSchemaForTypeRefSchema(raw string, types TypeCatalogDocument, seen map
 	return schema
 }
 
+// ValidateCatalogFieldSupply uses the same schema implication owner as tool
+// results. Structural equality alone does not preserve refinements or enums.
+func ValidateCatalogFieldSupply(subject string, supplied map[string]any, target EntityFieldDecl, catalog TypeCatalogDocument) error {
+	if (target.Type == "json" || target.Type == "jsonb") && target.Refinements.Empty() {
+		return nil
+	}
+	accepted, _ := eventSchemaForTypeRef(target.Type, catalog, map[string]struct{}{})
+	applySchemaRefinements(accepted, target.Refinements)
+	if err := validateCatalogMapKeySupply(subject, supplied, accepted); err != nil {
+		return err
+	}
+	sourceSchema, err := AdmitToolInputSchemaMap(catalogValueSchema(supplied))
+	if err != nil {
+		return fmt.Errorf("%s supplied schema: %w", subject, err)
+	}
+	targetSchema, err := AdmitToolInputSchemaMap(catalogValueSchema(accepted))
+	if err != nil {
+		return fmt.Errorf("%s state schema: %w", subject, err)
+	}
+	return sourceSchema.ValidateAssignableTo(subject, targetSchema)
+}
+
+// Catalog maps carry a key schema separately from the value schema. Reuse the
+// same implication checker for both, without admitting a new tool grammar.
+func validateCatalogMapKeySupply(subject string, supplied, accepted map[string]any) error {
+	if len(accepted) == 0 {
+		return nil
+	}
+	if keys, ok := accepted["propertyNames"].(map[string]any); ok {
+		sourceKeys, ok := supplied["propertyNames"].(map[string]any)
+		if !ok {
+			sourceKeys = map[string]any{"type": "string"}
+		}
+		source, err := AdmitToolInputSchemaMap(sourceKeys)
+		if err != nil {
+			return err
+		}
+		target, err := AdmitToolInputSchemaMap(keys)
+		if err != nil {
+			return err
+		}
+		if err := source.ValidateAssignableTo(subject+" map key", target); err != nil {
+			return err
+		}
+	}
+	for _, name := range []string{"items", "additionalProperties"} {
+		source, _ := supplied[name].(map[string]any)
+		target, _ := accepted[name].(map[string]any)
+		if err := validateCatalogMapKeySupply(subject+"."+name, source, target); err != nil {
+			return err
+		}
+	}
+	sourceProperties, _ := supplied["properties"].(map[string]any)
+	targetProperties, _ := accepted["properties"].(map[string]any)
+	for name, raw := range sourceProperties {
+		source, _ := raw.(map[string]any)
+		target, _ := targetProperties[name].(map[string]any)
+		if target == nil {
+			target, _ = accepted["additionalProperties"].(map[string]any)
+		}
+		if err := validateCatalogMapKeySupply(subject+"."+name, source, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func catalogValueSchema(schema map[string]any) map[string]any {
+	out := make(map[string]any, len(schema))
+	for name, value := range schema {
+		switch name {
+		case "propertyNames":
+			continue
+		case "items", "additionalProperties":
+			if nested, ok := value.(map[string]any); ok {
+				value = catalogValueSchema(nested)
+			}
+		case "properties":
+			if properties, ok := value.(map[string]any); ok {
+				projected := make(map[string]any, len(properties))
+				for field, raw := range properties {
+					if nested, ok := raw.(map[string]any); ok {
+						raw = catalogValueSchema(nested)
+					}
+					projected[field] = raw
+				}
+				value = projected
+			}
+		}
+		out[name] = value
+	}
+	return out
+}
+
 func applySchemaRefinements(schema map[string]any, refinements SchemaRefinements) {
 	if schema == nil || refinements.Empty() {
 		return
@@ -440,7 +534,12 @@ func cloneEventSchemaValue(value any) any {
 	case map[string]any:
 		return cloneEventSchemaMap(typed)
 	case []string:
-		return append([]string(nil), typed...)
+		if typed == nil {
+			return []string(nil)
+		}
+		out := make([]string, len(typed))
+		copy(out, typed)
+		return out
 	case []any:
 		out := make([]any, len(typed))
 		for i := range typed {

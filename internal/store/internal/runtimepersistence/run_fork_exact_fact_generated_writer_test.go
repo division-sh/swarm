@@ -13,68 +13,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
 func TestRunForkExactFactsEntityIDSpellingsBothStores(t *testing.T) {
-	source := exactFactEntitySource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, spelling := range []string{"canonical", "upper", "compact"} {
-				t.Run(spelling, func(t *testing.T) {
-					selected, db, ctx, runID := openStateOnlyAcquisitionStoreWithSource(t, backend, source)
-					owner := selected.(interface {
-						CreateEntity(context.Context, tools.EntityCreateRecord) (tools.EntityCreateResult, error)
-					})
-					canonical := uuid.NewString()
-					input := canonical
-					if spelling == "upper" {
-						input = strings.ToUpper(canonical)
-					} else if spelling == "compact" {
-						input = strings.ReplaceAll(canonical, "-", "")
-					}
-					created, err := owner.CreateEntity(ctx, tools.EntityCreateRecord{Source: source, RunID: runID, EntityID: input, FlowInstance: "exact-fact/receiver", EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: time.Now().UTC(), Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}})
-					if err != nil {
-						t.Fatalf("actual CreateEntity(%s, %q): %v", spelling, input, err)
-					}
-					var actualRun, actualEntity string
-					if err := db.QueryRowContext(ctx, `SELECT CAST(run_id AS TEXT),CAST(entity_id AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, input).Scan(&actualRun, &actualEntity); err != nil {
-						t.Fatal(err)
-					}
-					wantEntity := input
-					if backend == "postgres" {
-						wantEntity = canonical
-					}
-					if !created.Acknowledged || created.EntityID != wantEntity {
-						t.Fatalf("created coordinate = %+v, want acknowledged %q", created, wantEntity)
-					}
-					if actualRun != runID || actualEntity != wantEntity {
-						t.Fatalf("stored coordinate=(%s,%s), want=(%s,%s)", actualRun, actualEntity, runID, wantEntity)
-					}
-					s := exactFactStore{db: db, postgres: backend == "postgres"}
-					if len(assertActualMutationLedger(t, ctx, s, actualRun, actualEntity)) == 0 {
-						t.Fatal("actual entity writer minted no mutation IDs")
-					}
-					exactRollbackTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
-						matched := 0
-						for _, row := range exactLedger(t, ctx, tx, actualRun) {
-							if row.Family != string(runforkrevision.FamilyEntityMetadata) {
-								continue
-							}
-							body, ok := row.Body.(map[string]any)
-							if !ok || !row.Present || row.Key != actualEntity || body["entity_id"] != actualEntity {
-								t.Fatalf("stored metadata coordinate disagrees with exact ledger: %#v", row)
-							}
-							matched++
-						}
-						if matched != 1 {
-							t.Fatalf("metadata facts=%d want=1", matched)
-						}
-					})
-				})
-			}
 			for _, producer := range []string{"scenario_setup", "engine_route_state"} {
 				t.Run(producer, func(t *testing.T) {
 					for _, spelling := range []string{"canonical", "upper", "compact"} {
@@ -159,13 +104,13 @@ func proveExactEntityProducerSpelling(t *testing.T, backend, producer, spelling 
 		assertWorkflowTargetTransitionRows(t, backend, db, runID, input, instance, "", "active", 1, 0)
 		return
 	}
-	record := stateOnlyWorkflowEngineMutationRecord(t, runID, flow, instance, input, "", 0, at)
-	record.Transition = pipeline.WorkflowEngineStateTransitionCreateStateAndCompanion
-	if _, err := owner.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
-		t.Fatalf("actual engine create (%s): %v", spelling, err)
-	}
+	record := commitPreparedWorkflowAggregateFixture(t, ctx, selected.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
+		InstanceID: "receiver", StorageRef: instance, EntityID: wantID, EntityType: "review_item", WorkflowName: flow, WorkflowVersion: "1",
+		Mode: "static", StageDefined: true, CurrentState: "done", Fields: map[string]any{"account_id": "preserved", "handled": true}, CreatedAt: at, EnteredStageAt: at,
+	}, at)
 	check(1)
 	assertWorkflowTargetTransitionRows(t, backend, db, runID, input, instance, flow, "done", 1, 1)
+	record.EntityID = input
 	record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	record.ExpectedState, record.ExpectedRevision = "done", 1
 	record.CurrentState, record.Name = "reviewed", "Updated exact metadata"
@@ -252,20 +197,26 @@ func TestRunForkExactFactsGeneratedWriterIDsBothStores(t *testing.T) {
 				selected, db, ctx, runID := openStateOnlyAcquisitionStoreWithSource(t, backend, source)
 				owner := selected.(interface {
 					pipeline.WorkflowEngineMutationOwner
-					CreateEntity(context.Context, tools.EntityCreateRecord) (tools.EntityCreateResult, error)
+					SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
 				})
 				s := exactFactStore{db: db, postgres: backend == "postgres"}
 				entityID, flowID := uuid.NewString(), "exact-fact"
-				instance := flowID + "/" + uuid.NewString()
+				instanceID := uuid.NewString()
+				instance := flowID + "/" + instanceID
 				at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				if _, err := owner.CreateEntity(ctx, tools.EntityCreateRecord{Source: source, RunID: runID, EntityID: entityID, FlowInstance: instance, EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: at, Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}}); err != nil {
-					t.Fatal(err)
-				}
+				record := commitPreparedWorkflowAggregateFixture(t, ctx, selected.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
+					InstanceID: instanceID, StorageRef: instance, EntityID: entityID, EntityType: "review_item", WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(),
+					Mode: "static", StageDefined: true, CurrentState: "active", Fields: map[string]any{"account_id": "preserved"}, CreatedAt: at, EnteredStageAt: at,
+				}, at)
 				initial := assertActualMutationLedger(t, ctx, s, runID, entityID)
 				if len(initial) == 0 {
 					t.Fatal("entity owner did not generate mutation IDs")
 				}
-				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instance, entityID, "active", 1, at)
+				record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+				record.ExpectedState, record.ExpectedRevision = "active", 1
+				record.CurrentState = "done"
+				record.Fields = json.RawMessage(`{"account_id":"preserved","handled":true}`)
+				record.UpdatedAt = at.Add(time.Second)
 				if _, err := owner.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
 					t.Fatal(err)
 				}

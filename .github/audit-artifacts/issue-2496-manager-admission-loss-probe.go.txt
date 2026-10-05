@@ -1,0 +1,54 @@
+// P11 diagnostic at f2fe10d81. Install temporarily in internal/runtime/manager
+// as flow_admission_loss_probe_test.go to reproduce; this is not closure proof.
+package manager
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+)
+
+type flowAdmissionLossProbe struct {
+	*flowActivationTestInstanceStore
+	lost bool
+}
+
+func (s *flowAdmissionLossProbe) BeginDynamicFlowRuntimeActivation(ctx context.Context, plan pipeline.DynamicFlowRuntimeReadinessPlan, ordinal uint64, binding processbinding.Binding) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+	result, err := s.flowActivationTestInstanceStore.BeginDynamicFlowRuntimeActivation(ctx, plan, ordinal, binding)
+	if err == nil && result.Acknowledged && !s.lost {
+		s.lost = true
+		return pipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("P11 committed admission response lost")
+	}
+	return result, err
+}
+
+func TestFlowAdmissionLossProbe(t *testing.T) {
+	instances := &flowAdmissionLossProbe{flowActivationTestInstanceStore: &flowActivationTestInstanceStore{}}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
+	defer cancel()
+	req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
+		t.Fatal("unacknowledged admission must fail closed")
+	}
+	row, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || row.Phase != pipeline.FlowAttachmentPlanned || row.AttemptState != "accepted" || row.AttemptOrdinal != 1 {
+		t.Fatalf("actual admission did not commit: %+v %t %v", row, found, err)
+	}
+	if len(bus.addedPaths) != 0 || len(instances.armedEntries) != 0 || len(instances.creates) != 1 {
+		t.Fatal("unacknowledged admission installed resources or repeated construction")
+	}
+	created, err := am.EnsureFlowInstance(ctx, req)
+	if err != nil || created {
+		t.Fatalf("exact owned admission could not reconcile without reconstruction: created=%t err=%v", created, err)
+	}
+	row, found, err = instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || row.Phase != pipeline.FlowAttachmentReady || row.AttemptOrdinal != 1 {
+		t.Fatalf("admission reconciliation did not complete its original attempt: %+v %t %v", row, found, err)
+	}
+}

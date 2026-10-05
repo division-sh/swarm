@@ -831,7 +831,7 @@ func connectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, sourceEvent
 			if route.FlowID != "." {
 				return false
 			}
-		} else if endpoint.IsTemplate() || route.FlowID != endpoint.flowID.value || route.FlowInstance != scope {
+		} else if endpoint.IsTemplate() || route.FlowID != endpoint.flowID.value || route.FlowInstance == "" {
 			return false
 		}
 	case events.RoutingSourceConcreteTemplateInstance:

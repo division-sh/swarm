@@ -18,9 +18,12 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -256,18 +259,23 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, "fixture-entity")
+			const runID = "00000000-0000-0000-0000-000000000001"
+			entityID := runID
+			if tc.flowID != "" {
+				entityID = runtimeflowidentity.EntityID(tc.flowInstance)
+			}
+			envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
 			if tc.flowID != "" {
 				envelope = events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
-					FlowID: tc.flowID, FlowInstance: tc.flowInstance, EntityID: "fixture-entity",
+					FlowID: tc.flowID, FlowInstance: tc.flowInstance, EntityID: entityID,
 				})
 			}
 			routingSource := eventtest.RootRoutingSource("00000000-0000-0000-0000-000000000001")
 			if tc.flowID != "" {
 				if scope, ok := source.FlowScopeByID(tc.flowID); ok && scope.Mode == "template" {
-					routingSource = eventtest.ConcreteTemplateRoutingSource(tc.flowID, tc.flowInstance, "fixture-entity")
+					routingSource = eventtest.ConcreteTemplateRoutingSource(tc.flowID, tc.flowInstance, entityID)
 				} else {
-					routingSource = eventtest.StaticFlowRoutingSource(tc.flowID, tc.flowInstance, "fixture-entity")
+					routingSource = eventtest.StaticFlowRoutingSource(tc.flowID, tc.flowInstance, entityID)
 				}
 			}
 			previewCtx := context.Background()
@@ -275,21 +283,23 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			if tc.flowPath != "" {
 				node = conformanceFlowPathNode(t, tc.flowPath, tc.nodeID)
 			}
-			if tc.flowID != "" {
-				previewCtx = runtimedelivery.WithRoute(previewCtx, events.DeliveryRoute{
-					Recipient: events.MustNodeDeliveryRecipient(node),
-					Target: events.MustExistingEntityTarget(events.RouteIdentity{
-						FlowID: tc.flowID, FlowInstance: tc.flowInstance, EntityID: "fixture-entity",
-					}),
-				})
+			flowID, instancePath := tc.flowID, tc.flowInstance
+			if flowID == "" {
+				flowID, instancePath = ".", runID
 			}
+			previewCtx = runtimedelivery.WithRoute(previewCtx, events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(node),
+				Target: events.MustExistingEntityTarget(events.RouteIdentity{
+					FlowID: flowID, FlowInstance: instancePath, EntityID: entityID,
+				}),
+			})
 			preview, err := runtimepipeline.PreviewContractHandlerExecution(
 				previewCtx, bundle, node,
 				eventtest.RunCreatingRootIngressWithRoutingSource(
 					"event-"+strings.ToLower(tc.id), events.EventType(tc.trigger), "fixture-proof", "", payload, 0,
 					"00000000-0000-0000-0000-000000000001", "", envelope, routingSource, time.Now().UTC(),
 				),
-				runtimeengine.StateSnapshot{CurrentState: source.FlowInitialStage(tc.flowID)}, nil,
+				producerRoutingPreviewSnapshot(t, source, tc.flowID, instancePath, entityID), nil,
 			)
 			if err != nil {
 				t.Fatalf("execute emitting handler: %v", err)
@@ -400,7 +410,7 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 			previewCtx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(node),
 				Target: events.MustExistingEntityTarget(events.RouteIdentity{
-					FlowID: source.WorkflowName(), FlowInstance: "00000000-0000-0000-0000-000000000001", EntityID: "fixture-entity",
+					FlowID: ".", FlowInstance: "00000000-0000-0000-0000-000000000001", EntityID: "00000000-0000-0000-0000-000000000001",
 				}),
 			})
 			preview, err := runtimepipeline.PreviewContractHandlerExecution(
@@ -409,9 +419,9 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 				node,
 				eventtest.RunCreatingRootIngress(
 					"event-"+strings.ToLower(tc.id), events.EventType(tc.trigger), "fixture-harness", "", payload, 0,
-					"00000000-0000-0000-0000-000000000001", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "fixture-entity"), time.Now().UTC(),
+					"00000000-0000-0000-0000-000000000001", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "00000000-0000-0000-0000-000000000001"), time.Now().UTC(),
 				),
-				runtimeengine.StateSnapshot{CurrentState: source.WorkflowInitialStage()},
+				producerRoutingPreviewSnapshot(t, source, "", "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000001"),
 				nil,
 			)
 			if err != nil {
@@ -421,6 +431,31 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 				t.Fatalf("preview emits = %v, want %q", preview.Emits, tc.wantEmitted)
 			}
 		})
+	}
+}
+
+// These are compiled-handler component proofs with an explicit constructed
+// snapshot, not public construction or persistence qualification.
+func producerRoutingPreviewSnapshot(t *testing.T, source semanticview.Source, flowID, path, entityID string) runtimeengine.StateSnapshot {
+	t.Helper()
+	name := flowID
+	if name == "" {
+		name = "."
+	}
+	control := runtimeengine.StateControl{FlowPath: path, StorageRef: path, InstanceID: runtimeflowidentity.LogicalInstanceID(path)}
+	var fields map[string]any
+	if contract, found := entityruntime.ResolveForFlow(source, flowID); found {
+		control.EntityType = contract.EntityType
+		var err error
+		fields, err = entityruntime.InitialValues(contract)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return runtimeengine.StateSnapshot{
+		EntityID: identity.NormalizeEntityID(entityID), WorkflowName: name, WorkflowVersion: source.WorkflowVersion(),
+		CurrentState: source.FlowInitialStage(name), EnteredStateAt: time.Now().UTC(),
+		StateCarrier: runtimeengine.NewStateCarrierWithOwners(fields, nil, control, nil, nil),
 	}
 }
 

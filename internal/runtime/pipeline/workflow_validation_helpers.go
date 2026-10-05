@@ -19,25 +19,7 @@ func workflowEntityContract(source semanticview.Source, flowID string) (entityru
 	return entityruntime.ResolveForFlow(source, flowID)
 }
 
-func workflowEntitySchemaFields(source semanticview.Source, flowID string) map[string]struct{} {
-	contract, ok := workflowEntityContract(source, flowID)
-	if !ok {
-		return map[string]struct{}{}
-	}
-	out := make(map[string]struct{}, len(contract.Entity.Fields))
-	for _, field := range entityruntime.FieldNames(contract) {
-		out[field] = struct{}{}
-	}
-	return out
-}
 
-func workflowEntitySchemaInitialValues(source semanticview.Source, flowID string) (map[string]any, error) {
-	contract, ok := workflowEntityContract(source, flowID)
-	if !ok {
-		return nil, fmt.Errorf("entity creation requires declared contract for flow %q", flowID)
-	}
-	return entityruntime.InitialValues(contract)
-}
 
 func WorkflowEntitySchemaInitialValueFields(source semanticview.Source) map[string]struct{} {
 	if source == nil {
@@ -155,13 +137,37 @@ func requireWorkflowEntityType(source semanticview.Source, flowID string) (strin
 	return entityType, nil
 }
 
+func workflowEntityTypeForFlow(source semanticview.Source, flowID string) (string, error) {
+	if _, found := workflowEntityContract(source, flowID); found {
+		return requireWorkflowEntityType(source, flowID)
+	}
+	if source == nil {
+		return "", fmt.Errorf("flow %s requires an admitted source", flowID)
+	}
+	if _, found := source.FlowSchemaByID(flowID); !found {
+		return "", fmt.Errorf("flow %s has no admitted schema", flowID)
+	}
+	bundle, admitted := semanticview.Bundle(source)
+	if !admitted || bundle == nil {
+		return "", fmt.Errorf("flow %s requires an admitted state declaration", flowID)
+	}
+	declarations, _ := bundle.FlowEntityContractsByID(flowID)
+	if flowID == semanticview.RootExecutionFlowID(source) {
+		declarations = bundle.RootEntityContracts()
+	}
+	if len(declarations) != 0 {
+		return "", fmt.Errorf("flow %s lost its declared entity contract", flowID)
+	}
+	return "", nil
+}
+
 func validateWorkflowEntityType(source semanticview.Source, flowID, actual string) error {
-	expected, err := requireWorkflowEntityType(source, flowID)
+	expected, err := workflowEntityTypeForFlow(source, flowID)
 	if err != nil {
 		return err
 	}
 	actual = strings.TrimSpace(actual)
-	if actual == "" {
+	if actual == "" && expected != "" {
 		return fmt.Errorf("flow %s entity-bearing state requires canonical entity_type %q", strings.TrimSpace(flowID), expected)
 	}
 	if actual != expected {

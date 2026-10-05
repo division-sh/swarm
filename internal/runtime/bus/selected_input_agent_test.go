@@ -96,11 +96,11 @@ func TestSelectedInputValidationAgentDeclarationOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			exact, err := validation.SelectRecipients([]forkrecipient.Evidence{evidence})
+			exact, err := validation.SelectRecipients([]forkrecipient.Evidence{evidence}, nil)
 			if err != nil || !exact.AllowsSubscriber(good) {
 				t.Fatalf("exact disposition lost agent: %v", err)
 			}
-			none, err := validation.SelectRecipients(nil)
+			none, err := validation.SelectRecipients(nil, nil)
 			if err != nil || none.AllowsSubscriber(good) {
 				t.Fatalf("empty disposition recreated agent: %v", err)
 			}

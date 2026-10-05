@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,9 @@ func TestReceiverMaterializationRootPreflightBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyReceiverMaterializationIntoRoot(t), backend, true)
+			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "work.requested", Payload: map[string]any{"token": "constructed"}}, 20*time.Second, true); err != nil {
+				t.Fatal(err)
+			}
 			route := events.RouteIdentity{FlowID: "child", FlowInstance: "child"}
 			source, err := events.NewStaticFlowRoutingSource(route)
 			if err != nil {
@@ -33,8 +37,12 @@ func TestReceiverMaterializationRootPreflightBothStores(t *testing.T) {
 				t.Fatalf("root preflight: %+v", plan)
 			}
 			for _, delivery := range plan.DeliveryRoutes {
-				if !delivery.Target.MaterializingEntity() || delivery.Target.Route() != (events.RouteIdentity{FlowID: ".", FlowInstance: catalogRuntimeRunID, EntityID: catalogRuntimeRunID}) {
-					t.Fatalf("root preflight inherited source or lost future ownership: %+v", delivery)
+				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: catalogRuntimeRunID, EntityID: catalogRuntimeRunID})
+				if delivery.Recipient.IsAgent() {
+					want = events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: catalogRuntimeRunID})
+				}
+				if !events.SameDeliveryTargetOwnership(delivery.Target, want) || !delivery.Initialization.Empty() {
+					t.Fatalf("root preflight inherited source or invented construction: %+v", delivery)
 				}
 			}
 			if err := events.ValidateReceiverMaterializations(event, plan.DeliveryRoutes); err != nil {
@@ -43,20 +51,18 @@ func TestReceiverMaterializationRootPreflightBothStores(t *testing.T) {
 			foreign := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), event.Type(), event.Producer(), "", event.Payload(), 0,
 				events.EventLineage{RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live},
 				event.NormalizedEnvelope(), source, time.Now().UTC())
-			// Preflight installs the event's admitted run, rather than borrowing the
-			// caller's correlation scope as receiver ownership.
+			// An unrelated run cannot borrow this root or use a child output as
+			// construction authority for its missing header.
 			other, err := h.rt.Bus.CheckPublishRecipientPlan(catalogRunContext(h, catalogRuntimeRunID), foreign)
-			if err != nil || other.TargetFailure != "" || len(other.DeliveryRoutes) != 2 {
-				t.Fatalf("second run preflight: %+v %v", other, err)
-			}
-			for _, delivery := range other.DeliveryRoutes {
-				if delivery.Target.Route().FlowInstance != foreign.RunID() || delivery.Target.Route().EntityID != foreign.RunID() {
-					t.Fatalf("preflight reused another run's root: %+v", delivery)
-				}
+			if err == nil || !strings.Contains(err.Error(), "construct it before handler delivery") {
+				t.Fatalf("unconstructed second run preflight must refuse: %+v %v", other, err)
 			}
 			var count int
 			if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM events WHERE event_id IN ($1,$2)`, event.ID(), foreign.ID()).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("preflight persisted event: count=%d err=%v", count, err)
+			}
+			if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, foreign.RunID()).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("preflight repaired an unrelated missing header: count=%d err=%v", count, err)
 			}
 		})
 	}
@@ -117,11 +123,21 @@ func TestReceiverMaterializationDuplicateNamesAcrossSiblingAndNestedScopesBothSt
 					if !snapshot.Route.Recipient.IsAgent() {
 						continue
 					}
-					dependency := snapshot.Route.Materialization
-					node, found := snapshots[dependency.Materializer()]
-					if dependency.Empty() || !found || !node.Route.Recipient.IsNode() || !events.SameDeliveryTargetOwnership(node.Route.Target, snapshot.Route.Target) || snapshot.StartedAt.Before(node.SettledAt) {
-						t.Fatalf("crossed sibling materializer: node=%+v agent=%+v", node, snapshot)
+					var node deliverylifecycle.Snapshot
+					for _, candidate := range snapshots {
+						if candidate.Route.Recipient.IsNode() && candidate.Route.Target.Route().FlowID == snapshot.Route.Target.Route().FlowID && candidate.Route.Target.Route().FlowInstance == snapshot.Route.Target.Route().FlowInstance {
+							if node.DeliveryID != "" {
+								t.Fatal("ambiguous scoped ordinary node")
+							}
+							node = candidate
+						}
 					}
+					if node.DeliveryID == "" {
+						t.Fatalf("crossed sibling receiver: agent=%+v", snapshot)
+					}
+					requireDeclaredAgentReceiverOwnership(t, catalogRuntimeRunID, node, snapshot)
+					requireReceiverConstructedBeforeDelivery(t, h, catalogRuntimeRunID, node)
+					requireReceiverConstructedBeforeDelivery(t, h, catalogRuntimeRunID, snapshot)
 					target := snapshot.Route.Target.Route()
 					if target.FlowID != geometry.prefix+"consumer" && target.FlowID != geometry.prefix+"sibling" {
 						t.Fatalf("foreign target: %+v", target)
@@ -129,11 +145,11 @@ func TestReceiverMaterializationDuplicateNamesAcrossSiblingAndNestedScopesBothSt
 					if _, exists := owners[target.FlowID]; exists {
 						t.Fatal("duplicate agent replaced another scoped owner")
 					}
-					owners[target.FlowID] = target.EntityID
+					owners[target.FlowID] = node.Route.Target.Route().EntityID
 					var turns int
 					h.llm.mu.Lock()
 					for _, call := range h.llm.deliveryCalls {
-						if call.RunID == catalogRuntimeRunID && call.EventID == eventID && call.TargetEntityID == target.EntityID {
+						if call.RunID == catalogRuntimeRunID && call.EventID == eventID && call.AgentIdentity == snapshot.Route.AgentIdentity.Normalize() && call.TargetEntityID == "" {
 							turns++
 						}
 					}
@@ -179,7 +195,7 @@ func TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores(t *t
 					continue
 				}
 				observers++
-				if !route.Target.Empty() || !route.Materialization.Empty() || route.AgentIdentity.RunID != catalogRuntimeRunID {
+				if !route.Target.Empty() || !route.Initialization.Empty() || route.AgentIdentity.RunID != catalogRuntimeRunID {
 					t.Fatalf("source-local observer invented receiving state: %+v", route)
 				}
 				deliveryID, err := deliverylifecycle.DeliveryID(id, route)
@@ -281,9 +297,12 @@ func TestReceiverMaterializationChildToRootBothStores(t *testing.T) {
 					agent = snapshot
 				}
 			}
-			if agent.Route.Materialization.Empty() || agent.Route.Materialization.Materializer() != node.RouteIdentity || agent.Route.Target.Route().FlowInstance != catalogRuntimeRunID || agent.Route.Target.Route().EntityID != catalogRuntimeRunID || agent.StartedAt.Before(node.SettledAt) {
-				t.Fatalf("root dependency lost ownership: node=%+v agent=%+v", node, agent)
+			if node.Route.Target.Route().FlowID != "." {
+				t.Fatal("child output lost the selected root")
 			}
+			requireDeclaredAgentReceiverOwnership(t, catalogRuntimeRunID, node, agent)
+			requireReceiverConstructedBeforeDelivery(t, h, catalogRuntimeRunID, node)
+			requireReceiverConstructedBeforeDelivery(t, h, catalogRuntimeRunID, agent)
 		})
 	}
 }

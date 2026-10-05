@@ -26,7 +26,7 @@ func (s *recordingGenericScheduleWakeupOwner) ReconcileWakeupWithRecovery(_ cont
 }
 
 func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
-	const entityID = "11111111-1111-1111-1111-111111111111"
+	const entityID = testPipelineRunID
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -119,7 +119,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 }
 
 func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *testing.T) {
-	const entityID = "11111111-1111-1111-1111-111111111111"
+	const entityID = testPipelineRunID
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -154,6 +154,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	}
 
 	childEntityID := FlowInstanceEntityID("child")
+	seedConstructorUnitInstance(t, pc, testPipelineCoordinatorRunContext(t, pc), "child")
 	triggerEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, childEntityID), "child")
 	triggerEnvelope = events.EnvelopeForTargetRoute(triggerEnvelope, events.RouteIdentity{
 		FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
@@ -175,7 +176,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	childWorker := pipelineSourceNode(t, pc.SemanticSource(), "child", "child-worker")
 	triggerRoute := seedPipelineNodeDeliveryRouteAuthority(t, db, trigger, events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(childWorker),
-		Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{
 			FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
 		}),
 	})

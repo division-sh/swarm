@@ -399,14 +399,13 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 			"missing": map[string]any{"type": "string"},
 		},
 	})
-	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		module:         staticSemanticWorkflowModule{source: source},
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-	}
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	pc, bus, ctx := newConstructorHandlerUnitCoordinator(t, staticSemanticWorkflowModule{source: source})
+	event := handlerTestRootIngress(uuid.NewString(), "render.requested", "", "", mustJSON(map[string]any{
+		"component": "api", "owner": "platform", "language": "go",
+		"files": []any{"main.go", "README.md", "service.yaml"},
+	}), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, ".", "node-a", event)
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Compute: &runtimecontracts.ComputeSpec{
 			Operation: runtimecontracts.ComputeOpModule,
 			StoreAs:   "computed.rendered_bundle",
@@ -423,23 +422,7 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 			},
 		},
 	}, workflowTriggerContext{
-		Event: handlerTestRootIngress(
-			"evt-failure",
-			events.EventType("render.requested"),
-			"",
-			"",
-			mustJSON(map[string]any{
-				"component": "api",
-				"owner":     "platform",
-				"language":  "go",
-				"files":     []any{"main.go", "README.md", "service.yaml"},
-			}),
-			0,
-			testPipelineRunID,
-			"",
-			events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID}),
-			time.Time{},
-		),
+		Event: event, State: state,
 	}, false)
 	if err == nil {
 		t.Fatal("executeNodeContractHandler error = nil, want output-schema failure")
@@ -543,7 +526,7 @@ func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
 	}
 }
 
-func TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler(t *testing.T) {
+func TestExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmit(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
@@ -565,28 +548,21 @@ node-a:
 	if !ok {
 		t.Fatal("expected temp workflow bundle")
 	}
-	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{
-			bundle: bundle,
-		}),
-	}
+	pc, bus, ctx := newConstructorHandlerUnitCoordinator(t, canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{bundle: bundle}))
+	event := handlerTestRootIngress(uuid.NewString(), "custom.trigger", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, "scoring", "node-a", event)
 
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Minted Entity")},
+				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Updated Entity")},
 			},
 		},
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted", Fields: map[string]runtimecontracts.ExpressionValue{
 			"label": runtimecontracts.CELExpression(`has(entity.name) ? entity.name : "missing"`),
 		}},
 	}, workflowTriggerContext{
-		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-		State: WorkflowState{Stage: WorkflowStateID(""), Metadata: map[string]any{}},
+		Event: event, State: state,
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -597,12 +573,12 @@ node-a:
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("bus published count = %d, want 1", got)
 	}
-	if got := bus.publishedEvent(0).EntityID(); got == "" {
-		t.Fatal("expected emitted event to carry canonical entity_id")
+	if got := bus.publishedEvent(0).EntityID(); got != FlowInstanceEntityID("scoring") {
+		t.Fatalf("emitted entity_id=%s, want constructed scoring identity", got)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil || payload["label"] != "Minted Entity" {
-		t.Fatalf("created entity field did not reach emit.fields: payload=%#v err=%v", payload, err)
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil || payload["label"] != "Updated Entity" {
+		t.Fatalf("updated constructed field did not reach emit.fields: payload=%#v err=%v", payload, err)
 	}
 }
 
@@ -611,7 +587,7 @@ func TestExecuteNodeContractHandlerRejectsMissingWriteSourceBeforeEmit(t *testin
 	t.Cleanup(cleanup)
 
 	pc, bus := newEmitPersistenceTestCoordinator(t, db)
-	const entityID = "11111111-1111-1111-1111-111111111111"
+	const entityID = testPipelineRunID
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -686,7 +662,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 	t.Cleanup(cleanup)
 
 	pc, bus := newEmitPersistenceTestCoordinator(t, db)
-	const entityID = "11111111-1111-1111-1111-111111111111"
+	const entityID = testPipelineRunID
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -776,7 +752,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: handlerDataAccumulationModule(t),
 	})
-	const entityID = "11111111-1111-1111-1111-111111111111"
+	const entityID = testPipelineRunID
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
@@ -839,7 +815,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: handlerDataAccumulationModule(t),
 	})
-	const entityID = "11111111-1111-1111-1111-111111111111"
+	const entityID = testPipelineRunID
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
@@ -892,7 +868,7 @@ func TestExecuteNodeContractHandlerPersistsExplicitAbsenceDecision(t *testing.T)
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: handlerDataAccumulationModule(t),
 	})
-	const entityID = "11111111-1111-1111-1111-111111111111"
+	const entityID = testPipelineRunID
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
@@ -935,56 +911,6 @@ func TestExecuteNodeContractHandlerPersistsExplicitAbsenceDecision(t *testing.T)
 	}
 }
 
-func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			EntitySchema: runtimecontracts.EntitySchema{
-				Groups: []runtimecontracts.EntitySchemaGroup{
-					{
-						Name: "identity",
-						Fields: []runtimecontracts.EntitySchemaField{
-							{Name: "name", Type: "text"},
-						},
-					},
-				},
-			},
-		},
-	})
-	handler := runtimecontracts.SystemNodeEventHandler{
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Same Flow")},
-			},
-		},
-	}
-	const entityID = "ent-1"
-	state := WorkflowState{EntityID: entityID}
-
-	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(source, "scoring", handler, entityID, handlerTestRootIngress(
-		"",
-		events.EventType("vertical.discovered"),
-		"",
-		"",
-		nil,
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		time.Time{},
-	),
-		&state)
-
-	if gotID != entityID {
-		t.Fatalf("entityID = %q, want %q", gotID, entityID)
-	}
-	if got := gotEvt.EntityID(); got != entityID {
-		t.Fatalf("event entity_id = %q, want %q", got, entityID)
-	}
-	if state.EntityID != entityID {
-		t.Fatalf("state entity_id = %q, want %q", state.EntityID, entityID)
-	}
-}
-
 func newEmitPersistenceTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, *recordingPipelineBus) {
 	t.Helper()
 	bus := &recordingPipelineBus{}
@@ -1005,257 +931,6 @@ func newEmitPersistenceTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoord
 		}),
 	}
 	return pc, bus
-}
-
-func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntity(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			EntitySchema: runtimecontracts.EntitySchema{
-				Groups: []runtimecontracts.EntitySchemaGroup{
-					{
-						Name: "identity",
-						Fields: []runtimecontracts.EntitySchemaField{
-							{Name: "name", Type: "text"},
-						},
-					},
-				},
-			},
-		},
-	})
-	handler := runtimecontracts.SystemNodeEventHandler{
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.LiteralExpression("New Flow Entity")},
-			},
-		},
-	}
-	const incomingEntityID = "ent-discovery"
-	state := WorkflowState{EntityID: incomingEntityID}
-
-	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(source, "scoring", handler, incomingEntityID, handlerTestRootIngress(
-		"",
-		events.EventType("vertical.discovered"),
-		"",
-		"",
-		mustJSON(map[string]any{"entity_id": incomingEntityID}),
-		0,
-		"",
-		"",
-		events.EventEnvelope{EntityID: incomingEntityID},
-		time.Time{},
-	),
-		&state)
-
-	if gotID != incomingEntityID {
-		t.Fatalf("entityID = %q, want preserved %q", gotID, incomingEntityID)
-	}
-	if got := gotEvt.EntityID(); got != incomingEntityID {
-		t.Fatalf("event entity_id = %q, want %q", got, incomingEntityID)
-	}
-	if state.EntityID != incomingEntityID {
-		t.Fatalf("state entity_id = %q, want %q", state.EntityID, incomingEntityID)
-	}
-}
-
-func TestResolveHandlerEntityIDForRootKeepsFlowScopedInboundEntity(t *testing.T) {
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Emit: runtimecontracts.EmitSpec{Event: "pipeline.complete"},
-	}
-	const inboundEntityID = "ent-child"
-	state := WorkflowState{
-		EntityID: inboundEntityID,
-		Metadata: map[string]any{},
-	}
-
-	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(nil, "", handler, inboundEntityID, handlerTestRootIngress(
-		"",
-		events.EventType("child/grandchild/task.done"),
-		"",
-		"",
-		nil,
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, inboundEntityID),
-		time.Time{},
-	),
-		&state)
-
-	if gotID != inboundEntityID {
-		t.Fatalf("entityID = %q, want inbound %q", gotID, inboundEntityID)
-	}
-	if got := gotEvt.EntityID(); got != inboundEntityID {
-		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, inboundEntityID)
-	}
-	if state.EntityID != inboundEntityID {
-		t.Fatalf("state entity_id = %q, want %q", state.EntityID, inboundEntityID)
-	}
-}
-
-func TestResolveHandlerEntityIDForFlowKeepsInboundEntityForDescendantScopedInbound(t *testing.T) {
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Emit: runtimecontracts.EmitSpec{Event: "step.result"},
-	}
-	const inboundEntityID = "ent-grandchild"
-	const parentEntityID = "ent-child"
-	state := WorkflowState{
-		EntityID: inboundEntityID,
-		Metadata: map[string]any{
-			"flow_path":        "child/grandchild/inst-1",
-			"parent_entity_id": parentEntityID,
-		},
-	}
-
-	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(nil, "child", handler, inboundEntityID, handlerTestRootIngress(
-		"",
-		events.EventType("child/grandchild/micro.done"),
-		"",
-		"",
-		nil,
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, inboundEntityID),
-		time.Time{},
-	),
-		&state)
-
-	if gotID != inboundEntityID {
-		t.Fatalf("entityID = %q, want inbound %q", gotID, inboundEntityID)
-	}
-	if got := gotEvt.EntityID(); got != inboundEntityID {
-		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, inboundEntityID)
-	}
-	if state.EntityID != inboundEntityID {
-		t.Fatalf("state entity_id = %q, want %q", state.EntityID, inboundEntityID)
-	}
-}
-
-func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *testing.T) {
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Emit: runtimecontracts.EmitSpec{Event: "step.result"},
-	}
-	const (
-		entityID = "ent-child"
-		rootID   = "ent-root"
-	)
-	state := WorkflowState{
-		EntityID: entityID,
-		Metadata: map[string]any{
-			"flow_path":        "child/inst-1",
-			"parent_entity_id": rootID,
-		},
-	}
-
-	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(nil, "child", handler, entityID, handlerTestRootIngress(
-		"",
-		events.EventType("child/grandchild/micro.done"),
-		"",
-		"",
-		nil,
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		time.Time{},
-	),
-		&state)
-
-	if gotID != entityID {
-		t.Fatalf("entityID = %q, want %q", gotID, entityID)
-	}
-	if got := gotEvt.EntityID(); got != entityID {
-		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, entityID)
-	}
-	if state.EntityID != entityID {
-		t.Fatalf("state entity_id = %q, want %q", state.EntityID, entityID)
-	}
-}
-
-func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefaults(t *testing.T) {
-	source := loadWorkflowTempSource(t, map[string]string{
-
-		"schema.yaml": "name: runtime-test\n",
-		"scoring/schema.yaml": `name: scoring
-stages:
-  queued: {initial: true}
-`,
-		"scoring/entities.yaml": `
-vertical:
-  revision_count:
-    type: integer
-    initial: 0
-  is_duplicate:
-    type: boolean
-    initial: false
-`,
-	})
-	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
-	const inboundEntityID = "ent-parent"
-	state := WorkflowState{
-		EntityID: inboundEntityID,
-		Stage:    WorkflowStateID("queued"),
-		Status:   "active",
-		Metadata: map[string]any{"name": "Parent"},
-	}
-	inbound := handlerTestRootIngress(
-		"",
-		events.EventType("vertical.discovered"),
-		"",
-		"",
-		mustJSON(map[string]any{"entity_id": inboundEntityID, "name": "Parent"}),
-		0,
-		"",
-		"",
-		events.EventEnvelope{EntityID: inboundEntityID},
-		time.Time{},
-	)
-
-	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(source, "scoring", handler, inboundEntityID, inbound, &state)
-
-	if gotID != FlowInstanceEntityID("scoring") {
-		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, FlowInstanceEntityID("scoring"))
-	}
-	if got := gotEvt.EntityID(); got != inboundEntityID {
-		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, inboundEntityID)
-	}
-	if state.EntityID != gotID {
-		t.Fatalf("state entity_id = %q, want %q", state.EntityID, gotID)
-	}
-	if state.Stage != "queued" {
-		t.Fatalf("state stage = %q, want queued", state.Stage)
-	}
-	if state.Status != "" {
-		t.Fatalf("state status = %q, want cleared", state.Status)
-	}
-	if state.Metadata == nil {
-		t.Fatal("state metadata = nil, want create entity metadata")
-	}
-	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != "" {
-		t.Fatalf("state subject_id = %q, want empty", got)
-	}
-	if got := strings.TrimSpace(state.Control.ParentEntityID); got != inboundEntityID {
-		t.Fatalf("state parent_entity_id = %q, want %q", got, inboundEntityID)
-	}
-	instanceID := strings.TrimSpace(state.Control.InstanceID)
-	if instanceID == "" {
-		t.Fatal("state instance_id is empty, want generated logical instance id")
-	}
-	if got := strings.TrimSpace(state.Control.FlowPath); got != "scoring" {
-		t.Fatalf("state flow_path = %q, want scoring", got)
-	}
-	if got := strings.TrimSpace(state.Control.StorageRef); got != "scoring" {
-		t.Fatalf("state storage_ref = %q, want scoring", got)
-	}
-	if got := state.Metadata["revision_count"]; !isZeroIntegerValue(got) {
-		t.Fatalf("state revision_count = %#v, want 0", got)
-	}
-	if got := state.Metadata["is_duplicate"]; got != false {
-		t.Fatalf("state is_duplicate = %#v, want false", got)
-	}
-	if wantEntityID := FlowInstanceEntityID("scoring"); gotID != wantEntityID {
-		t.Fatalf("entityID = %q, want persisted flow entity id %q", gotID, wantEntityID)
-	}
 }
 
 func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefaults(t *testing.T) {
@@ -1291,31 +966,6 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 	}
 	if got := snapshot.Fields["is_duplicate"]; got != false {
 		t.Fatalf("snapshot is_duplicate = %#v, want false", got)
-	}
-}
-
-func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testing.T) {
-	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
-	state := WorkflowState{}
-	bundle := admitSyntheticEntityContractsForTest(t, &runtimecontracts.WorkflowContractBundle{}, "", map[string]string{"scoring": "scoring_entity"})
-	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{
-		"scoring": runtimecontracts.BuildWorkflowStageTopology("scoring", "queued", []string{"queued"}, nil, nil, nil, nil),
-	}
-	source := semanticview.Wrap(bundle)
-
-	gotID, _, err := resolveHandlerEntityIDForFlow(source, "scoring", handler, "", handlerTestRootIngress("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &state)
-	if err != nil {
-		t.Fatalf("resolve handler entity identity: %v", err)
-	}
-
-	if want := FlowInstanceEntityID("scoring"); gotID != want {
-		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, want)
-	}
-	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != "" {
-		t.Fatalf("state subject_id = %q, want empty", got)
-	}
-	if strings.TrimSpace(state.Control.FlowPath) != "scoring" || strings.TrimSpace(state.Control.InstanceID) != "scoring" {
-		t.Fatalf("typed state control = %#v, want scoring and scoring", state.Control)
 	}
 }
 
@@ -1360,9 +1010,9 @@ node-a:
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
+	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, "validation", "node-a", trigger)
 	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
-		CreateEntity: true,
-		Guard:        &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && !has(entity.kill_reason)`},
+		Guard: &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && !has(entity.kill_reason)`},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "entity.created",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -1371,7 +1021,7 @@ node-a:
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: WorkflowState{},
+		State: state,
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -1450,12 +1100,14 @@ func TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext(t *test
 
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
+instance: validation_id
 stages:
   queued: {initial: true}
 `,
 		"validation/entities.yaml": `
 validation_request:
-  request_id: text
+  validation_id: uuid
+  request_id: text?
 `,
 		"validation/events.yaml": `
 request.received:
@@ -1485,12 +1137,11 @@ node-a:
 	const otherRunID = "88888888-8888-8888-8888-888888888888"
 	runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: otherRunID})
 	otherCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), otherRunID)
-	seedQueryEntitiesGuardInstance(t, pc.workflowStore, ctx, "11111111-1111-1111-1111-111111111111", "validation/existing-same", "req-existing")
-	seedQueryEntitiesGuardInstance(t, pc.workflowStore, otherCtx, "22222222-2222-2222-2222-222222222222", "validation/existing-other", "req-cross-run")
+	seedQueryEntitiesGuardInstance(t, pc, ctx, "11111111-1111-1111-1111-111111111111", "req-existing")
+	seedQueryEntitiesGuardInstance(t, pc, otherCtx, "22222222-2222-2222-2222-222222222222", "req-cross-run")
 
 	handler := runtimecontracts.SystemNodeEventHandler{
-		CreateEntity: true,
-		Guard:        &runtimecontracts.GuardSpec{Check: `query_entities(request_id == payload.request_id).count == 0`},
+		Guard: &runtimecontracts.GuardSpec{Check: `query_entities(request_id == payload.request_id).count == 0`},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "request.accepted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -1499,6 +1150,7 @@ node-a:
 		},
 	}
 	runHandler := func(entityID, requestID string) error {
+		instance := seedQueryEntitiesGuardInstance(t, pc, ctx, entityID, "")
 		event := handlerTestRootIngress(
 			uuid.NewString(),
 			events.EventType("request.received"),
@@ -1512,9 +1164,15 @@ node-a:
 			time.Time{},
 		)
 		seedPipelineEventRecord(t, ctx, db, event)
-		_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), handler, workflowTriggerContext{
+		node := pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a")
+		deliveryCtx := withClaimedWorkflowNodePublicationForTest(t, pc, ctx, event, events.DeliveryRoute{
+			Recipient: events.MustNodeDeliveryRecipient(node),
+			Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validation", FlowInstance: instance.StorageRef, EntityID: entityID}),
+		})
+		state := mustCurrentWorkflowState(t, pc, deliveryCtx, runtimeflowidentity.StoredRoute("validation", instance.InstanceID, instance.StorageRef), entityID)
+		_, err := executeNodeContractHandlerWithHandoff(t, pc, deliveryCtx, node, handler, workflowTriggerContext{
 			Event: event,
-			State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+			State: state,
 		}, false)
 		return err
 	}
@@ -1536,20 +1194,27 @@ node-a:
 	}
 }
 
-func seedQueryEntitiesGuardInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, storageRef, requestID string) {
+func seedQueryEntitiesGuardInstance(t *testing.T, pc *PipelineCoordinator, ctx context.Context, entityID, requestID string) WorkflowInstance {
 	t.Helper()
-	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	storageRef := "validation/" + entityID
+	// Paired pre-state isolates collection lookup/guard behavior, not construction.
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      runtimeflowidentity.LogicalInstanceID(storageRef),
 		StorageRef:      storageRef,
 		EntityID:        entityID,
-		WorkflowName:    ".",
-		WorkflowVersion: "1.0.0",
+		WorkflowName:    "validation",
+		WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
+		Mode:            "template",
+		StageDefined:    true,
 		CurrentState:    "queued",
-		Fields:          map[string]any{"request_id": requestID},
-		EntityType:      "test_entity",
-	})); err != nil {
+		Fields:          map[string]any{"validation_id": entityID, "request_id": requestID},
+		EntityType:      "validation_request",
+	})
+	instance.InitialFieldValues = cloneStringAnyMap(instance.Fields)
+	if err := pc.workflowStore.create(ctx, instance); err != nil {
 		t.Fatalf("seed query_entities guard instance %s: %v", entityID, err)
 	}
+	return instance
 }
 
 func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity(t *testing.T) {
@@ -1592,9 +1257,9 @@ node-a:
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("candidate.ready"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
+	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, "review", "node-a", trigger)
 	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
-		CreateEntity: true,
-		Guard:        &runtimecontracts.GuardSpec{Check: `entity.status == "pending"`},
+		Guard: &runtimecontracts.GuardSpec{Check: `entity.status == "pending"`},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "review.created",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -1603,7 +1268,7 @@ node-a:
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: WorkflowState{},
+		State: state,
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -1705,15 +1370,15 @@ node-a:
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
+	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, "validation", "node-a", trigger)
 	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
-		CreateEntity: true,
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
 			{Operation: runtimecontracts.WorkflowDataOperationClear, TargetRef: "entity.revision_count"},
 		}},
 		Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: WorkflowState{},
+		State: state,
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -1770,112 +1435,34 @@ node-a:
 	}
 }
 
-func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testing.T) {
-	source := loadWorkflowTempSource(t, map[string]string{
-
-		"schema.yaml": "name: runtime-test\n",
-		"validation/schema.yaml": `name: validation
-stages:
-  queued: {initial: true}
-`,
-		"validation/entities.yaml": `
-validation_entity:
-  revision_count:
-    type: integer
-    initial: 0
-  is_duplicate:
-    type: boolean
-    initial: false
-`,
-		"validation/events.yaml": `
-candidate.discovered:
-entity.created:
-`,
-		"validation/nodes.yaml": `
-node-a:
-  execution_type: system_node
-  event_handlers:
-    candidate.discovered:
-      create_entity: true
-      guard:
-        check: entity.revision_count == 0
-      emit: entity.created
-`,
-	})
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("expected temp workflow bundle")
-	}
-
-	previewSource := semanticview.Wrap(bundle)
-	preview, err := PreviewContractHandlerExecution(testAuthorActivityContext(t, context.Background()), bundle, pipelineOnlySourceNode(t, previewSource, "node-a"), handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), runtimeengine.StateSnapshot{}, nil)
-	if err != nil {
-		t.Fatalf("PreviewContractHandlerExecution: %v", err)
-	}
-	if got := preview.Metadata["revision_count"]; !isZeroIntegerValue(got) {
-		t.Fatalf("preview revision_count = %#v, want 0", got)
-	}
-	if got := preview.InitialValues["revision_count"]; !isZeroIntegerValue(got) {
-		t.Fatalf("preview initial revision_count = %#v, want 0", got)
-	}
-	if got := preview.InitialValues["is_duplicate"]; got != false {
-		t.Fatalf("preview initial is_duplicate = %#v, want false", got)
-	}
-}
-
-func isZeroIntegerValue(v any) bool {
-	switch typed := v.(type) {
-	case int:
-		return typed == 0
-	case int8:
-		return typed == 0
-	case int16:
-		return typed == 0
-	case int32:
-		return typed == 0
-	case int64:
-		return typed == 0
-	case uint:
-		return typed == 0
-	case uint8:
-		return typed == 0
-	case uint16:
-		return typed == 0
-	case uint32:
-		return typed == 0
-	case uint64:
-		return typed == 0
-	case float32:
-		return typed == 0
-	case float64:
-		return typed == 0
-	default:
-		return false
-	}
-}
-
 func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *testing.T) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml": "name: demo\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
 		"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [custom.trigger]\n  event_handlers:\n    custom.trigger: {}\n",
 		"events.yaml": "custom.trigger:\n",
 	})
-	pc := &PipelineCoordinator{
-		module: &previewWorkflowModule{bundle: bundle},
+	pc, _, ctx := newConstructorHandlerUnitCoordinator(t, &previewWorkflowModule{bundle: bundle})
+	event := handlerTestRootIngress(uuid.NewString(), "custom.trigger", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	ctx, _ = prepareConstructorUnitDelivery(t, pc, ctx, ".", "node-a", event)
+	instance, found, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstance(testPipelineRunID))
+	if err != nil || !found {
+		t.Fatalf("constructed terminal-control owner: found=%v err=%v", found, err)
 	}
-
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
-		State: WorkflowState{Stage: WorkflowStateID("done"), Metadata: map[string]any{}},
+	instance.CurrentState, instance.Status, instance.TerminatedAt = "done", "terminated", time.Now().UTC()
+	if err := pc.workflowStore.upsert(ctx, instance); err != nil {
+		t.Fatal(err)
+	}
+	state := mustCurrentWorkflowState(t, pc, ctx, runtimeflowidentity.StoredRoute(".", testPipelineRunID, testPipelineRunID), testPipelineRunID)
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
+		Event: event, State: state,
 	}, false)
-	if err != nil {
-		t.Fatalf("executeNodeContractHandler: %v", err)
+	var refusal *TerminalReceiverError
+	if !errors.As(err, &refusal) || refusal.Stage != "done" || refusal.FlowID != "." || result.Committed {
+		t.Fatalf("terminal target admission result=%#v err=%v, want exact terminal refusal before mutation", result, err)
 	}
-	if !result.Handled {
-		t.Fatal("expected handled result")
-	}
-	if result.Outcome == nil || result.Outcome.Status != HandlerOutcomeTerminalReject {
-		t.Fatalf("outcome = %#v, want terminal_reject", result.Outcome)
+	after, found, loadErr := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstance(testPipelineRunID))
+	if loadErr != nil || !found || after.Revision != instance.Revision+1 || after.CurrentState != "done" || pc.bus.(*recordingPipelineBus).publishedCount() != 0 {
+		t.Fatalf("terminal refusal changed durable state or published: found=%v revision=%d stage=%s err=%v", found, after.Revision, after.CurrentState, loadErr)
 	}
 }
 

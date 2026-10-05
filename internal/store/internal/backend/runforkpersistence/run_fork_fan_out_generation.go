@@ -29,7 +29,7 @@ func requireOriginalFanOutCarriage(ctx context.Context, source runForkSourceOwne
 	return original.RequireSource(fact.BundleHash())
 }
 
-func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, forkRunID string, plan runfork.RunForkPlan, obligation runfork.RunForkFanOutObligation, original semanticview.OriginalLoopCarriage) (fanoutobligation.Capsule, *loopruntime.ForkChildReference, error) {
+func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, obligation runfork.RunForkFanOutObligation, original semanticview.OriginalLoopCarriage) (fanoutobligation.Capsule, *loopruntime.ForkChildReference, error) {
 	capsule := obligation.Intent.Request.Capsule
 	if err := obligation.Intent.Request.ValidateSourceProjection(); err != nil {
 		return capsule, nil, err
@@ -130,7 +130,7 @@ func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, forkRunID stri
 	if err != nil {
 		return capsule, nil, err
 	}
-	actual, err := loadRunForkEntityActivations(ctx, tx, forkRunID, projection.Fork.EntityID)
+	actual, err := loadRunForkEntityActivations(ctx, tx, postgres, forkRunID, projection.Fork.EntityID, projection.Fork.FlowInstance, role.FlowID())
 	if err != nil {
 		return capsule, nil, err
 	}

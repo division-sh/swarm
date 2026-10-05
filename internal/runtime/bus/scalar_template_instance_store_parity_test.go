@@ -17,12 +17,15 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -114,7 +117,7 @@ func scalarTemplateKeyedDescriptors(descriptors []runtimebus.ActiveFlowInstanceD
 }
 
 type scalarTemplateInstanceParityStore interface {
-	runtimebus.EventStore
+	componentFlowConstructionStore
 	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.PreparedPublishEventReader
@@ -172,9 +175,31 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
 			selected, db := newScalarTemplateInstanceParityStore(t, backend, ctx)
-			seedCompleteEventDispatchRun(t, ctx, db, backend, runID, time.Now().UTC().Add(-time.Minute))
-			seedScalarTemplateFlowInstance(t, ctx, db, backend, runID)
-			entityID := uuid.NewString()
+			run := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: sourceFact, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC().Add(-time.Minute)}
+			if backend == "postgres" {
+				runlifecyclefixture.RequirePostgres(t, ctx, db, run)
+			} else {
+				runlifecyclefixture.RequireSQLite(t, ctx, db, run)
+			}
+			entityID := runtimeflowidentity.EntityID("account/one")
+			constructor, err := runtimepipeline.CompileFlowConstructor(source, "account", "account.ready")
+			if err != nil {
+				t.Fatal(err)
+			}
+			fields, err := constructor.InitialFields(map[string]any{"account_id": "acct-1"}, "acct-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			contract, declared := entityruntime.ResolveForFlow(source, "account")
+			if !declared {
+				t.Fatal("account fixture lost its state contract")
+			}
+			at := time.Now().UTC()
+			seedComponentFlowConstruction(t, ctx, selected, source, runtimepipeline.WorkflowInstance{
+				InstanceID: "one", StorageRef: "account/one", EntityID: entityID, WorkflowName: "account",
+				WorkflowVersion: source.WorkflowVersion(), InstanceKind: "template", EntityType: contract.EntityType,
+				Fields: fields, EnteredStageAt: at, CreatedAt: at,
+			})
 			selected.setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor{{
 				RunID:           runID,
 				InstanceID:      "one",
@@ -286,17 +311,6 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				t.Fatalf("replay descriptor calls = %d, want persisted route authority", calls)
 			}
 		})
-	}
-}
-
-func seedScalarTemplateFlowInstance(t *testing.T, ctx context.Context, db *sql.DB, backend, runID string) {
-	t.Helper()
-	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, 'account/one', 'account', 'template', '{}', 'active', ?)`
-	if backend == "postgres" {
-		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, 'account/one', 'account', 'template', '{}'::jsonb, 'active', $2)`
-	}
-	if _, err := db.ExecContext(ctx, query, runID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed scalar template flow instance: %v", err)
 	}
 }
 

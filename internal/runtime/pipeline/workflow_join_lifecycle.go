@@ -77,7 +77,12 @@ func joinTopLevelField(path, root string) string {
 	return field
 }
 
-func joinSchedule(source semanticview.Source, entityID string, instanceRoute runtimeflowidentity.Route, activation joinruntime.Activation, mode executionmode.Mode) (runtimegenericschedule.AdmissionCommand, error) {
+func joinSchedule(source semanticview.Source, owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, activation joinruntime.Activation, mode executionmode.Mode) (runtimegenericschedule.AdmissionCommand, error) {
+	constructed, err := instance.ConstructionIdentity(owner)
+	if err != nil {
+		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule constructed owner: %w", err)
+	}
+	entityID, instanceRoute := constructed.EntityID, constructed.Route()
 	if !mode.Valid() {
 		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule requires exact causal execution mode")
 	}
@@ -88,25 +93,31 @@ func joinSchedule(source semanticview.Source, entityID string, instanceRoute run
 	}
 	entry := ref.StageEntry()
 	if ref.Mode() == timeridentity.JoinRefModeArrival {
-		if err := entry.RequireOwner(entry.RunID, instanceRoute.ScopeKey, instanceRoute.InstanceID, instanceRoute.InstancePath, entityID, ref.Stage()); err != nil {
+		if err := entry.RequireOwner(owner.RunID, instanceRoute.ScopeKey, instanceRoute.InstanceID, instanceRoute.InstancePath, entityID, ref.Stage()); err != nil {
 			return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule contradicts its retained lifecycle entry: %w", err)
 		}
 	}
 	payload := handle.PayloadMetadata()
 	flowID := ref.FlowPath()
-	route := events.RouteIdentity{EntityID: entityID}
+	if flowID != constructed.TemplateID {
+		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule declaration conflicts with its constructed owner")
+	}
+	route := events.RouteIdentity{FlowID: flowID, FlowInstance: instanceRoute.InstancePath, EntityID: entityID}
 	scheduleFlowInstance := ""
 	if flowID != semanticview.RootExecutionFlowID(source) {
-		route.FlowID = flowID
-		route.FlowInstance = instanceRoute.InstancePath
 		scheduleFlowInstance = instanceRoute.InstancePath
 	}
-	executionSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(source, flowID, route)
+	executionSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(source, owner.RunID, constructed, route)
 	if err != nil {
 		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("admit join schedule source: %w", err)
 	}
 	routingSource := executionSource
-	if executionSource.Kind() != events.RoutingSourceRoot {
+	if flowID == semanticview.RootExecutionFlowID(source) {
+		routingSource, err = events.NewRootRoutingSource(entityID)
+		if err != nil {
+			return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("admit root join control source: %w", err)
+		}
+	} else {
 		routingSource, err = events.NewFlowOwnedControlRoutingSource(executionSource.Route())
 		if err != nil {
 			return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("admit join schedule control source: %w", err)

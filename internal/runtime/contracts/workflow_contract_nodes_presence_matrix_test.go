@@ -69,7 +69,7 @@ func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 	}{
 		{"node", "event_handlers: {}\n", func() any { return new(SystemNodeContract) }, map[string]string{"description": "Description", "execution_type": "ExecutionType", "state_table": "StateTable"}},
 		{"timer", "", func() any { return new(WorkflowTimerContract) }, map[string]string{"id": "ID", "stage": "Stage", "event": "Event", "owner": "Owner", "action": "Action", "cancellation": "Cancellation", "delay": "Delay", "start_on": "StartOn", "cancel_on": "CancelOn"}},
-		{"handler", "create_entity: false\n", func() any { return new(SystemNodeEventHandler) }, map[string]string{"description": "Description", "advances_to": "AdvancesTo"}},
+		{"handler", "emit: ready\n", func() any { return new(SystemNodeEventHandler) }, map[string]string{"description": "Description", "advances_to": "AdvancesTo"}},
 		{"state", "fields: {}\n", func() any { return new(NodeStateSchema) }, map[string]string{"description": "Description"}},
 		{"activity", "input: {}\n", func() any { return new(ActivitySpec) }, map[string]string{"id": "ID", "tool": "Tool"}},
 		{"guard", "checks: []\n", func() any { return new(GuardSpec) }, map[string]string{"id": "ID", "check": "Check", "policy_ref": "PolicyRef"}},
@@ -284,18 +284,14 @@ func proveNodePresence[T any](t *testing.T, shapes []nodePresenceShape, accepted
 }
 
 func TestW4HandlerFieldPresence(t *testing.T) {
-	proveNodePresence(t, nodePresenceShapes("true", "[true]", "{value: true}"),
-		[8]bool{true, false, false, true, false, false, false, false},
+	proveNodePresence[SystemNodeEventHandler](t, nodePresenceShapes("true", "[true]", "{value: true}"),
+		[8]bool{true, false, false, false, false, false, false, false},
 		func(shape nodePresenceShape) string {
 			if shape.name == "missing" {
 				return "description: ready\n"
 			}
 			return "create_entity: " + shape.value + "\n"
-		}, decodeNodeTestYAML, func(t *testing.T, name string, out SystemNodeEventHandler) {
-			if out.CreateEntity != (name == "scalar") {
-				t.Fatalf("create_entity=%t", out.CreateEntity)
-			}
-		})
+		}, decodeNodeTestYAML, nil)
 }
 
 func TestW4SetsGatePresence(t *testing.T) {

@@ -5,16 +5,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -140,15 +139,25 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 		if !ok {
 			return fmt.Errorf("pipeline test engine commit requires its mutation attempt")
 		}
-		if command.EntitylessTarget.Empty() {
-			if err := commitPipelineTestWorkflowState(txctx, store, command.State); err != nil {
-				return err
-			}
-			var err error
-			result.Lifecycle, err = commitPipelineTestWorkflowLifecycle(txctx, store, command.Lifecycle)
+		if command.State.Transition.PreservesState() {
+			target, err := store.LoadTargetPersistence(txctx, command.State.Identity, identity.NormalizeEntityID(command.State.EntityID))
 			if err != nil {
 				return err
 			}
+			instance, err := target.DecodeComplete(command.State.Identity.Route, identity.NormalizeEntityID(command.State.EntityID))
+			if err != nil {
+				return err
+			}
+			if instance.Revision != command.State.ExpectedRevision || instance.CurrentState != command.State.ExpectedState {
+				return fmt.Errorf("pipeline test preserved state revision changed")
+			}
+		} else if err := commitPipelineTestWorkflowState(txctx, store, command.State); err != nil {
+			return err
+		}
+		var err error
+		result.Lifecycle, err = commitPipelineTestWorkflowLifecycle(txctx, store, command.Lifecycle)
+		if err != nil {
+			return err
 		}
 		if len(command.ProposedEffects) != 0 {
 			return fmt.Errorf("pipeline test closed engine owner does not support proposed effects")
@@ -340,119 +349,6 @@ func (r *recordingRuntimeMutationRunner) commitHumanTaskRouteForTest(
 
 var _ WorkflowDecisionRouteOwner = (*recordingRuntimeMutationRunner)(nil)
 
-func (r *recordingRuntimeMutationRunner) CommitWorkflowInitialMaterialization(ctx context.Context, command WorkflowInitialMaterializationCommand) (CommittedWorkflowInitialMaterialization, error) {
-	if err := command.Validate(); err != nil {
-		return CommittedWorkflowInitialMaterialization{}, err
-	}
-	result := CommittedWorkflowInitialMaterialization{Result: WorkflowInitialMaterializationAlreadyExists}
-	err := r.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		tx, ok := sqlTxFromContext(txctx)
-		if !ok || tx == nil {
-			return fmt.Errorf("pipeline test initial materialization requires its private transaction")
-		}
-		record := command.Record
-		if r.dialect == workflowStoreDialectPostgres {
-			lockIdentity := fmt.Sprintf("%d:%s%s", len(record.State.Identity.RunID), record.State.Identity.RunID, record.State.Identity.Route.InstancePath)
-			if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
-				return err
-			}
-		}
-		query := `SELECT projection_version, projection, occurred_at FROM workflow_instance_initial_materializations WHERE run_id = ? AND entity_id = ? AND instance_path = ?`
-		if r.dialect == workflowStoreDialectPostgres {
-			query = `SELECT projection_version, projection, occurred_at FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3`
-		}
-		var version int
-		var projection []byte
-		var occurredAt time.Time
-		var occurredAtRaw any
-		destination := any(&occurredAt)
-		if r.dialect != workflowStoreDialectPostgres {
-			destination = &occurredAtRaw
-		}
-		err := tx.QueryRowContext(txctx, query, record.State.Identity.RunID, record.State.EntityID, record.State.Identity.Route.InstancePath).Scan(&version, &projection, destination)
-		if err == nil {
-			if r.dialect != workflowStoreDialectPostgres {
-				var present bool
-				occurredAt, present, err = sqliteWorkflowTimeValue(occurredAtRaw)
-				if err != nil || !present {
-					return fmt.Errorf("decode pipeline test initial occurrence")
-				}
-			}
-			readinessEqual, err := pipelineTestInitialReadinessEqual(txctx, r.dialect, record)
-			if err != nil {
-				return err
-			}
-			if version != record.ProjectionVersion || !pipelineTestJSONEqual(projection, record.Projection) ||
-				!canonicalWorkflowInstancePersistedTime(occurredAt).Equal(canonicalWorkflowInstancePersistedTime(record.OccurredAt)) || !readinessEqual {
-				return pipelineTestInitialConflict(record.State.Identity.Route.InstancePath)
-			}
-			snapshotQuery := `SELECT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = ? AND instance_path = ?), EXISTS (SELECT 1 FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?)`
-			snapshotArgs := []any{record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.State.Identity.RunID, record.State.EntityID, record.State.Identity.Route.InstancePath}
-			if r.dialect == workflowStoreDialectPostgres {
-				snapshotQuery = `SELECT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2), EXISTS (SELECT 1 FROM entity_state WHERE run_id = $1::uuid AND entity_id = $3::uuid AND flow_instance = $2)`
-				snapshotArgs = []any{record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.State.EntityID}
-			}
-			var flow, entity bool
-			if err := tx.QueryRowContext(txctx, snapshotQuery, snapshotArgs...).Scan(&flow, &entity); err != nil {
-				return err
-			}
-			if !flow || !entity {
-				return pipelineTestInitialConflict(record.State.Identity.Route.InstancePath)
-			}
-			return nil
-		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		occupiedQuery := `SELECT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = ? AND instance_path = ?), EXISTS (SELECT 1 FROM entity_state WHERE run_id = ? AND entity_id = ?), EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = ? AND entity_id = ?), EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?)`
-		occupiedArgs := []any{record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.State.Identity.RunID, record.State.EntityID, record.State.Identity.RunID, record.State.EntityID, record.State.Identity.RunID, record.State.Identity.Route.InstancePath}
-		if r.dialect == workflowStoreDialectPostgres {
-			occupiedQuery = `SELECT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2), EXISTS (SELECT 1 FROM entity_state WHERE run_id = $1::uuid AND entity_id = $3::uuid), EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND entity_id = $3::uuid), EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2)`
-			occupiedArgs = []any{record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.State.EntityID}
-		}
-		var flow, entity, initial, readiness bool
-		if err := tx.QueryRowContext(txctx, occupiedQuery, occupiedArgs...).Scan(&flow, &entity, &initial, &readiness); err != nil {
-			return err
-		}
-		if flow || entity || initial || readiness {
-			return pipelineTestInitialConflict(record.State.Identity.Route.InstancePath)
-		}
-		store := workflowStoreForRecordingRunner(r)
-		if err := commitPipelineTestWorkflowState(txctx, store, record.State); err != nil {
-			return err
-		}
-		insertInitial := `INSERT INTO workflow_instance_initial_materializations (run_id, entity_id, instance_path, projection_version, projection, occurred_at) VALUES (?, ?, ?, ?, ?, ?)`
-		if r.dialect == workflowStoreDialectPostgres {
-			insertInitial = `INSERT INTO workflow_instance_initial_materializations (run_id, entity_id, instance_path, projection_version, projection, occurred_at) VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6)`
-		}
-		if _, err := tx.ExecContext(txctx, insertInitial, record.State.Identity.RunID, record.State.EntityID, record.State.Identity.Route.InstancePath, record.ProjectionVersion, record.Projection, record.OccurredAt); err != nil {
-			return err
-		}
-		if len(record.Readiness) > 0 {
-			insertReadiness := `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?)`
-			args := []any{record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.Readiness, record.OccurredAt, record.OccurredAt}
-			if r.dialect == workflowStoreDialectPostgres {
-				insertReadiness = `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at) VALUES ($1::uuid, $2, $3::jsonb, NULL, NULL, $4, $4)`
-				args = []any{record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.Readiness, record.OccurredAt}
-			}
-			if _, err := tx.ExecContext(txctx, insertReadiness, args...); err != nil {
-				return err
-			}
-		}
-		result.Lifecycle, err = commitPipelineTestWorkflowLifecycle(txctx, store, command.Lifecycle)
-		if err != nil {
-			return err
-		}
-		result.Result = WorkflowInitialMaterializationCreated
-		return nil
-	})
-	if err != nil {
-		return CommittedWorkflowInitialMaterialization{}, err
-	}
-	result.Committed = true
-	return result, result.Validate()
-}
-
 func commitPipelineTestWorkflowLifecycle(ctx context.Context, store *workflowInstanceStore, plan WorkflowLifecycleMutationPlan) (CommittedWorkflowLifecycleMutation, error) {
 	result := CommittedWorkflowLifecycleMutation{}
 	for _, mutation := range plan.Timers {
@@ -548,26 +444,6 @@ func pipelineTestGenericScheduleActivation(command runtimegenericschedule.Admiss
 	return activation, activation.Validate()
 }
 
-func pipelineTestInitialReadinessEqual(ctx context.Context, dialect workflowStoreDialect, record WorkflowInitialMaterializationRecord) (bool, error) {
-	tx, ok := sqlTxFromContext(ctx)
-	if !ok || tx == nil {
-		return false, fmt.Errorf("pipeline test readiness comparison requires transaction")
-	}
-	query := `SELECT plan FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?`
-	if dialect == workflowStoreDialectPostgres {
-		query = `SELECT plan FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2`
-	}
-	var plan []byte
-	err := tx.QueryRowContext(ctx, query, record.State.Identity.RunID, record.State.Identity.Route.InstancePath).Scan(&plan)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return len(record.Readiness) == 0, nil
-		}
-		return false, err
-	}
-	return len(record.Readiness) > 0 && pipelineTestJSONEqual(plan, record.Readiness), nil
-}
-
 func pipelineTestJSONEqual(actual, expected []byte) bool {
 	actualValue, actualErr := canonicaljson.Decode(actual)
 	expectedValue, expectedErr := canonicaljson.Decode(expected)
@@ -577,10 +453,6 @@ func pipelineTestJSONEqual(actual, expected []byte) bool {
 	actualCanonical, actualErr := canonicaljson.Encode(actualValue)
 	expectedCanonical, expectedErr := canonicaljson.Encode(expectedValue)
 	return actualErr == nil && expectedErr == nil && bytes.Equal(actualCanonical, expectedCanonical)
-}
-
-func pipelineTestInitialConflict(instancePath string) error {
-	return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-lifecycle", "materialize_initial_entry", map[string]any{"flow_instance": instancePath})
 }
 
 func (r *recordingRuntimeMutationRunner) CommitWorkflowTimerOccurrence(ctx context.Context, command WorkflowTimerOccurrenceCommand) (CommittedWorkflowTimerOccurrence, error) {
@@ -669,6 +541,9 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 	if err := record.Validate(); err != nil {
 		return err
 	}
+	if record.Transition != WorkflowEngineStateTransitionCreateStateAndCompanion && record.Transition != WorkflowEngineStateTransitionUpdateStateAndCompanion {
+		return fmt.Errorf("pipeline unit fixture cannot repair missing construction")
+	}
 	tx, ok := sqlTxFromContext(ctx)
 	if !ok || tx == nil {
 		return fmt.Errorf("pipeline test workflow state commit requires its private transaction")
@@ -695,25 +570,25 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		return err
 	}
 	if record.Transition.CreatesState() {
-		flowQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(run_id, instance_path) DO NOTHING`
+		flowQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at, entity_id, entity_type, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, updated_at, stage_defined, slug, name, terminated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, 1, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?) ON CONFLICT(run_id, instance_path) DO NOTHING`
 		entityQuery := `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, slug, name,
-				current_state, gates, fields, accumulator, revision,
+				current_state, gates, fields, bookkeeping, accumulator, revision,
 				entered_state_at, created_at, updated_at
-			) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, 1, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, 1, ?, ?, ?)
 		`
 		if store.testDialect() == workflowStoreDialectPostgres {
-			flowQuery = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7) ON CONFLICT (run_id, instance_path) DO NOTHING`
+			flowQuery = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at, entity_id, entity_type, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, updated_at, stage_defined, slug, name, terminated_at) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8::uuid, NULLIF($9, ''), $10, $11::jsonb, $12::jsonb, $13::jsonb, 1, $14, $15, $16, NULLIF($17, ''), NULLIF($18, ''), $19) ON CONFLICT (run_id, instance_path) DO NOTHING`
 			entityQuery = `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, slug, name,
-					current_state, gates, fields, accumulator, revision,
+					current_state, gates, fields, bookkeeping, accumulator, revision,
 					entered_state_at, created_at, updated_at
-				) VALUES ($1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8::jsonb, $9::jsonb, $10::jsonb, 1, $11, $12, $12)
+				) VALUES ($1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, 1, $12, $13, $13)
 			`
 		}
-		result, err := tx.ExecContext(ctx, flowQuery, record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt)
+		result, err := tx.ExecContext(ctx, flowQuery, record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt, record.EntityID, record.EntityType, record.CurrentState, string(record.Gates), string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt, record.UpdatedAt, record.StageDefined, record.Slug, record.Name, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt))
 		if err != nil {
 			return fmt.Errorf("insert pipeline test workflow flow instance: %w", err)
 		}
@@ -738,14 +613,16 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		}
 		entityArgs := []any{
 			record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType, record.Slug, record.Name,
-			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Accumulator),
+			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
 			record.EnteredStageAt, record.CreatedAt,
 		}
 		if store.testDialect() == workflowStoreDialectSQLite {
 			entityArgs = append(entityArgs, record.CreatedAt)
 		}
-		if _, err := tx.ExecContext(ctx, entityQuery, entityArgs...); err != nil {
-			return fmt.Errorf("insert pipeline test workflow entity state with %d arguments: %w", len(entityArgs), err)
+		if record.EntityType != "" {
+			if _, err := tx.ExecContext(ctx, entityQuery, entityArgs...); err != nil {
+				return fmt.Errorf("insert pipeline test workflow entity state with %d arguments: %w", len(entityArgs), err)
+			}
 		}
 		if err := commitPipelineTestWorkflowBookkeeping(ctx, tx, store, record); err != nil {
 			return err
@@ -755,61 +632,45 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 	stateQuery := `
 		UPDATE entity_state
 		SET entity_type = ?, slug = NULLIF(?, ''), name = NULLIF(?, ''), current_state = ?,
-		    gates = ?, fields = ?, accumulator = ?, revision = revision + 1,
+		    gates = ?, fields = ?, bookkeeping = ?, accumulator = ?, revision = revision + 1,
 		    entered_state_at = ?, updated_at = ?
 		WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND revision = ? AND current_state = ?
 	`
-	flowQuery := `UPDATE flow_instances SET flow_template = ?, mode = ?, config = ?, status = ?, terminated_at = CASE WHEN ? = 'terminated' THEN COALESCE(terminated_at, ?) ELSE NULL END WHERE run_id = ? AND instance_path = ?`
+	flowQuery := `UPDATE flow_instances SET config = ?, status = ?, current_state = ?, gates = ?, bookkeeping = ?, accumulator = ?, revision = revision + 1, entered_state_at = ?, updated_at = ?, terminated_at = ?, slug = NULLIF(?, ''), name = NULLIF(?, '') WHERE run_id = ? AND instance_path = ? AND entity_id = ? AND revision = ? AND current_state = ?`
 	if store.testDialect() == workflowStoreDialectPostgres {
 		stateQuery = `
 			UPDATE entity_state
 			SET entity_type = $1, slug = NULLIF($2, ''), name = NULLIF($3, ''), current_state = $4,
-			    gates = $5::jsonb, fields = $6::jsonb, accumulator = $7::jsonb, revision = revision + 1,
-			    entered_state_at = $8, updated_at = $9
-			WHERE run_id = $10::uuid AND entity_id = $11::uuid AND flow_instance = $12 AND revision = $13 AND current_state = $14
+			    gates = $5::jsonb, fields = $6::jsonb, bookkeeping = $7::jsonb, accumulator = $8::jsonb, revision = revision + 1,
+			    entered_state_at = $9, updated_at = $10
+			WHERE run_id = $11::uuid AND entity_id = $12::uuid AND flow_instance = $13 AND revision = $14 AND current_state = $15
 		`
-		flowQuery = `UPDATE flow_instances SET flow_template = $1, mode = $2, config = $3::jsonb, status = $4, terminated_at = CASE WHEN $4 = 'terminated' THEN COALESCE(terminated_at, $5) ELSE NULL END WHERE run_id = $6::uuid AND instance_path = $7`
+		flowQuery = `UPDATE flow_instances SET config = $1::jsonb, status = $2, current_state = $3, gates = $4::jsonb, bookkeeping = $5::jsonb, accumulator = $6::jsonb, revision = revision + 1, entered_state_at = $7, updated_at = $8, terminated_at = $9, slug = NULLIF($10, ''), name = NULLIF($11, '') WHERE run_id = $12::uuid AND instance_path = $13 AND entity_id = $14::uuid AND revision = $15 AND current_state = $16`
 	}
-	result, err := tx.ExecContext(ctx, stateQuery,
-		record.EntityType, record.Slug, record.Name, record.CurrentState,
-		string(record.Gates), string(record.Fields), string(record.Accumulator),
-		record.EnteredStageAt, record.UpdatedAt, record.Identity.RunID, record.EntityID,
-		record.Identity.Route.InstancePath, record.ExpectedRevision, record.ExpectedState,
-	)
-	if err != nil {
-		return fmt.Errorf("update pipeline test workflow entity state: %w", err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil || rows != 1 {
+	if record.EntityType != "" {
+		result, err := tx.ExecContext(ctx, stateQuery,
+			record.EntityType, record.Slug, record.Name, record.CurrentState,
+			string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
+			record.EnteredStageAt, record.UpdatedAt, record.Identity.RunID, record.EntityID,
+			record.Identity.Route.InstancePath, record.ExpectedRevision, record.ExpectedState,
+		)
 		if err != nil {
-			return err
+			return fmt.Errorf("update pipeline test workflow entity state: %w", err)
 		}
-		return fmt.Errorf("pipeline test workflow state changed before commit")
-	}
-	if err := commitPipelineTestWorkflowBookkeeping(ctx, tx, store, record); err != nil {
-		return err
-	}
-	if record.Transition == WorkflowEngineStateTransitionUpdateStateCreateCompanion {
-		insert := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-		args := []any{record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.CreatedAt}
-		if store.testDialect() == workflowStoreDialectPostgres {
-			insert = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8)`
+		rows, err := result.RowsAffected()
+		if err != nil || rows != 1 {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("pipeline test workflow state changed before commit")
 		}
-		if _, err := tx.ExecContext(ctx, insert, args...); err != nil {
-			return fmt.Errorf("create pipeline test workflow lifecycle companion for existing state: %w", err)
-		}
-		return commitPipelineTestWorkflowMutationLog(ctx, tx, store, record, before)
 	}
-	flowArgs := []any{record.WorkflowName, record.Mode, string(record.Config), record.Status}
-	if store.testDialect() == workflowStoreDialectSQLite {
-		flowArgs = append(flowArgs, record.Status)
-	}
-	flowArgs = append(flowArgs, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.Identity.RunID, record.Identity.Route.InstancePath)
-	result, err = tx.ExecContext(ctx, flowQuery, flowArgs...)
+	flowArgs := []any{string(record.Config), record.Status, record.CurrentState, string(record.Gates), string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt, record.UpdatedAt, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.Slug, record.Name, record.Identity.RunID, record.Identity.Route.InstancePath, record.EntityID, record.ExpectedRevision, record.ExpectedState}
+	result, err := tx.ExecContext(ctx, flowQuery, flowArgs...)
 	if err != nil {
 		return fmt.Errorf("update pipeline test workflow flow instance with %d arguments: %w", len(flowArgs), err)
 	}
-	rows, err = result.RowsAffected()
+	rows, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
@@ -909,5 +770,4 @@ func commitPipelineTestWorkflowMutationLog(
 
 var _ EnginePublicationPlanner = (*recordingPipelineBus)(nil)
 var _ WorkflowEngineMutationOwner = (*recordingRuntimeMutationRunner)(nil)
-var _ WorkflowInitialMaterializationCommitOwner = (*recordingRuntimeMutationRunner)(nil)
 var _ WorkflowTimerOccurrenceOwner = (*recordingRuntimeMutationRunner)(nil)

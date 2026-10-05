@@ -59,15 +59,36 @@ func seedFlowRouteTestEntities(t *testing.T, ctx context.Context, exec flowRoute
 	t.Helper()
 	for _, flowInstance := range flowInstances {
 		if postgres {
-			if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'flow-route-test', 'active', '{}'::jsonb, now(), now())`, uuid.NewString(), flowRouteTestRunID, flowInstance); err != nil {
+			if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'flow-route-test', 'active', '{}'::jsonb, now(), now())`, runtimeflowidentity.EntityID(flowInstance), flowRouteTestRunID, flowInstance); err != nil {
 				t.Fatalf("seed flow route entity %s: %v", flowInstance, err)
 			}
 			continue
 		}
 		now := time.Now().UTC()
-		if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES (?, ?, ?, 'flow-route-test', 'active', '{}', ?, ?)`, uuid.NewString(), flowRouteTestRunID, flowInstance, now, now); err != nil {
+		if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES (?, ?, ?, 'flow-route-test', 'active', '{}', ?, ?)`, runtimeflowidentity.EntityID(flowInstance), flowRouteTestRunID, flowInstance, now, now); err != nil {
 			t.Fatalf("seed sqlite flow route entity %s: %v", flowInstance, err)
 		}
+	}
+}
+
+func seedFlowRouteHeaderFixture(t *testing.T, ctx context.Context, exec flowRouteTestExecutor, runID, path, flow, mode, status, entityID, entityType string) {
+	t.Helper()
+	at := time.Now().UTC()
+	seedWorkflowHeaderProjectionFixture(t, ctx, exec, runID, entityID, path, flow, entityType, "active", "{}", at)
+	payload, err := runtimepipeline.WorkflowInstanceConfigPayloadForRoute(runtimeflowidentity.RouteForInstancePath(path), "1.0.0", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var terminatedAt any
+	if status == "terminated" {
+		terminatedAt = at
+	}
+	if _, err := exec.ExecContext(ctx, `UPDATE flow_instances SET mode=$1, status=$2, terminated_at=$3, config=$4 WHERE run_id=$5 AND instance_path=$6`, mode, status, terminatedAt, string(config), runID, path); err != nil {
+		t.Fatalf("seed flow-route header controls: %v", err)
 	}
 }
 
@@ -135,12 +156,7 @@ func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
 		SourceFlow:     "review",
 	}
 	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'active', NOW())
-	`, flowRouteTestRunID, route.Identity.Route.InstancePath); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, route.Identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(route.Identity.Route.InstancePath), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, db, true, route.Identity.Route.InstancePath)
 	if err := pg.UpsertFlowInstanceRoute(ctx, route); err != nil {
 		t.Fatalf("UpsertFlowInstanceRoute: %v", err)
@@ -186,12 +202,7 @@ func TestPostgresStoreUpsertFlowInstanceRouteOwnsNamedTransaction(t *testing.T) 
 		SourceFlow:     "review",
 	}
 	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'active', NOW())
-	`, flowRouteTestRunID, route.Identity.Route.InstancePath); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, route.Identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(route.Identity.Route.InstancePath), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, db, true, route.Identity.Route.InstancePath)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -239,12 +250,7 @@ func TestPostgresStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactional(t *
 	ensureFlowInstanceRouteTables(t, ctx, db)
 	identity := flowRouteTestIdentity(runtimeflowidentity.DeriveRoute("review", "inst-exact"))
 	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'active', NOW())
-	`, flowRouteTestRunID, identity.Route.InstancePath); err != nil {
-		t.Fatalf("seed flow instance: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(identity.Route.InstancePath), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, db, true, identity.Route.InstancePath)
 	first := []runtimebus.FlowInstanceRouteRecord{
 		{
@@ -299,12 +305,7 @@ func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteOwnsNamedTransaction(t *testin
 		SourceFlow:     "review",
 	}
 	ctx = seedFlowRouteTestRun(t, ctx, store.backend.ConstructionHandle(), false)
-	if _, err := store.backend.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES (?, ?, 'review', 'template', '{}', 'active', ?)
-	`, flowRouteTestRunID, route.Identity.Route.InstancePath, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite flow_instances: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, store.backend.ConstructionHandle(), flowRouteTestRunID, route.Identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(route.Identity.Route.InstancePath), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, store.backend.ConstructionHandle(), false, route.Identity.Route.InstancePath)
 	tx, err := store.backend.ConstructionHandle().BeginTx(ctx, nil)
 	if err != nil {
@@ -345,12 +346,7 @@ func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsOwnsNamedTransaction(t
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	identity := flowRouteTestIdentity(runtimeflowidentity.DeriveRoute("review", "inst-exact"))
 	ctx = seedFlowRouteTestRun(t, ctx, store.backend.ConstructionHandle(), false)
-	if _, err := store.backend.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES (?, ?, 'review', 'template', '{}', 'active', ?)
-	`, flowRouteTestRunID, identity.Route.InstancePath, time.Now().UTC()); err != nil {
-		t.Fatalf("seed flow instance: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, store.backend.ConstructionHandle(), flowRouteTestRunID, identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(identity.Route.InstancePath), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, store.backend.ConstructionHandle(), false, identity.Route.InstancePath)
 	first := []runtimebus.FlowInstanceRouteRecord{
 		{
@@ -431,14 +427,17 @@ func TestFlowInstanceRouteTopologyReplacementPreservesOlderObserverSources(t *te
 				}
 				ctx = seedFlowRouteTestRun(t, ctx, db, postgres)
 				observer := flowRouteTestIdentity(runtimeflowidentity.DeriveRoute("review", "observer"))
+				entityID := runtimeflowidentity.EntityID(observer.Route.InstancePath)
 				if postgres {
-					if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'active', NOW())`, flowRouteTestRunID, observer.Route.InstancePath); err != nil {
+					if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision) VALUES ($1::uuid, $2, $3::uuid, 'flow-route-test', 'review', 'template', '{}'::jsonb, 'active', TRUE, 'active', NOW(), NOW(), NOW(), '{}', '{}', '{}', 1)`, flowRouteTestRunID, observer.Route.InstancePath, entityID); err != nil {
 						t.Fatal(err)
 					}
-				} else if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, ?, 'review', 'template', '{}', 'active', ?)`, flowRouteTestRunID, observer.Route.InstancePath, time.Now().UTC()); err != nil {
+				} else if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision) VALUES ($1, $2, $3, 'flow-route-test', 'review', 'template', '{}', 'active', TRUE, 'active', $4, $4, $4, '{}', '{}', '{}', 1)`, flowRouteTestRunID, observer.Route.InstancePath, entityID, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
-				seedFlowRouteTestEntities(t, ctx, db, postgres, observer.Route.InstancePath)
+				if _, err := db.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES ($1, $2, $3, 'flow-route-test', 'active', '{}', $4, $4)`, entityID, flowRouteTestRunID, observer.Route.InstancePath, time.Now().UTC()); err != nil {
+					t.Fatal(err)
+				}
 				patterns := []string{"producer/old-a/work.ready", "producer/old-b/work.ready", "other/old/other.ready"}
 				replace := func(patterns []string) {
 					t.Helper()
@@ -490,21 +489,7 @@ func testFlowInstanceRouteTopologyAtomicity(
 	}
 	ctx = seedFlowRouteTestRun(t, ctx, db, postgres)
 	for _, identity := range identities {
-		if postgres {
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-				VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'active', NOW())
-			`, flowRouteTestRunID, identity.Route.InstancePath); err != nil {
-				t.Fatalf("seed postgres flow instance %s: %v", identity.Route.InstancePath, err)
-			}
-			continue
-		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-			VALUES (?, ?, 'review', 'template', '{}', 'active', ?)
-		`, flowRouteTestRunID, identity.Route.InstancePath, time.Now().UTC()); err != nil {
-			t.Fatalf("seed sqlite flow instance %s: %v", identity.Route.InstancePath, err)
-		}
+		seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(identity.Route.InstancePath), "flow-route-test")
 	}
 	seedFlowRouteTestEntities(t, ctx, db, postgres, identities[0].Route.InstancePath, identities[1].Route.InstancePath)
 
@@ -639,12 +624,7 @@ func TestPostgresStoreDeleteFlowInstanceRouteOwnsNamedTransaction(t *testing.T) 
 		SourceFlow:     "review",
 	}
 	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at)
-		VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'terminated', NOW(), NOW())
-	`, flowRouteTestRunID, route.Identity.Route.InstancePath); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, route.Identity.Route.InstancePath, "review", "template", "terminated", runtimeflowidentity.EntityID(route.Identity.Route.InstancePath), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, db, true, route.Identity.Route.InstancePath)
 	if err := pg.UpsertFlowInstanceRoute(ctx, route); err != nil {
 		t.Fatalf("UpsertFlowInstanceRoute: %v", err)
@@ -699,12 +679,7 @@ func TestPostgresStoreRollbackFlowInstanceRouteOwnsNamedTransaction(t *testing.T
 		SourceFlow:     "review",
 	}
 	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'active', NOW())
-	`, flowRouteTestRunID, route.Identity.Route.InstancePath); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, route.Identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(route.Identity.Route.InstancePath), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, db, true, route.Identity.Route.InstancePath)
 	if err := pg.UpsertFlowInstanceRoute(ctx, route); err != nil {
 		t.Fatalf("UpsertFlowInstanceRoute: %v", err)
@@ -759,12 +734,7 @@ func TestPostgresStoreFlowInstanceRoutes_NestedTemplateScope(t *testing.T) {
 		SourceFlow:     "child/grandchild",
 	}
 	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, 'grandchild', 'template', '{}'::jsonb, 'active', NOW())
-	`, flowRouteTestRunID, route.Identity.Route.InstancePath); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, route.Identity.Route.InstancePath, "grandchild", "template", "active", runtimeflowidentity.EntityID(route.Identity.Route.InstancePath), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, db, true, route.Identity.Route.InstancePath)
 	if err := pg.UpsertFlowInstanceRoute(ctx, route); err != nil {
 		t.Fatalf("UpsertFlowInstanceRoute: %v", err)
@@ -822,12 +792,7 @@ func TestPostgresStoreFlowInstanceRouteDeletionRequiresCanonicalTermination(t *t
 
 	const instancePath = "review/inst-1"
 	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'active', NOW())
-	`, flowRouteTestRunID, instancePath); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, instancePath, "review", "template", "active", runtimeflowidentity.EntityID(instancePath), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, db, true, instancePath)
 	route := runtimebus.FlowInstanceRouteRecord{
 		Identity:       flowRouteTestIdentity(runtimeflowidentity.StoredRoute("", "", instancePath)),
@@ -876,14 +841,8 @@ func TestPostgresStoreListFlowInstanceRoutesFiltersTerminatedInstances(t *testin
 	ensureFlowInstanceRouteTables(t, ctx, db)
 
 	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES
-			($1::uuid, 'review/inst-active', 'review', 'template', '{}'::jsonb, 'active', NOW()),
-			($1::uuid, 'review/inst-terminated', 'review', 'template', '{}'::jsonb, 'terminated', NOW())
-	`, flowRouteTestRunID); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, "review/inst-active", "review", "template", "active", runtimeflowidentity.EntityID("review/inst-active"), "flow-route-test")
+	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, "review/inst-terminated", "review", "template", "terminated", runtimeflowidentity.EntityID("review/inst-terminated"), "flow-route-test")
 	seedFlowRouteTestEntities(t, ctx, db, true, "review/inst-active", "review/inst-terminated")
 	for _, route := range []runtimebus.FlowInstanceRouteRecord{
 		{
@@ -926,16 +885,10 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: foreignRunID})
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES
-			($1::uuid, 'component-scaffold/active', 'component-scaffold', 'template', '{}'::jsonb, 'active', NOW()),
-			($1::uuid, 'component-scaffold/terminated', 'component-scaffold', 'template', '{}'::jsonb, 'terminated', NOW()),
-			($1::uuid, 'service-owner', 'service-owner', 'static', '{}'::jsonb, 'active', NOW()),
-			($2::uuid, 'component-scaffold/active', 'component-scaffold', 'template', '{}'::jsonb, 'active', NOW())
-	`, runID, foreignRunID); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
+	seedFlowRouteHeaderFixture(t, ctx, db, runID, "component-scaffold/active", "component-scaffold", "template", "active", entityID, "component")
+	seedFlowRouteHeaderFixture(t, ctx, db, runID, "component-scaffold/terminated", "component-scaffold", "template", "terminated", runtimeflowidentity.EntityID("component-scaffold/terminated"), "component")
+	seedFlowRouteHeaderFixture(t, ctx, db, runID, "service-owner", "service-owner", "static", "active", runtimeflowidentity.EntityID("service-owner"), "component")
+	seedFlowRouteHeaderFixture(t, ctx, db, foreignRunID, "component-scaffold/active", "component-scaffold", "template", "active", "33333333-3333-4333-8333-333333333333", "component")
 	readinessOwner, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{
 			TemplateID: "component-scaffold", ScopeKey: "component-scaffold", InstanceID: "active",
@@ -952,9 +905,9 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 		t.Fatalf("marshal readiness plan: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-		VALUES ($1::uuid, 'component-scaffold/active', $2::jsonb, NOW(), NOW())
-	`, runID, readinessPlan); err != nil {
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+		VALUES ($1::uuid, 'component-scaffold/active', $2::jsonb, $3, NOW(), NOW())
+	`, runID, readinessPlan, readinessPlanFixtureHash(t, string(readinessPlan))); err != nil {
 		t.Fatalf("seed flow-instance readiness: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -1023,16 +976,11 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsDoesNotReadAmbientTransac
 		t.Fatalf("BeginTx: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	seedFlowRouteHeaderFixture(t, ctx, tx, runID, "component-scaffold/uncommitted", "component-scaffold", "template", "active", runtimeflowidentity.EntityID("component-scaffold/uncommitted"), "component")
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
-		VALUES ($1::uuid, 'component-scaffold/uncommitted', 'component-scaffold', 'template', '{}'::jsonb, 'active', NOW())
-	`, runID); err != nil {
-		t.Fatalf("seed flow_instances in tx: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
-		VALUES ($1::uuid, 'component-scaffold/uncommitted', '{"workflow_version":"1.0.0"}'::jsonb, NOW(), NOW())
-	`, runID); err != nil {
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, plan_hash, created_at, updated_at)
+		VALUES ($1::uuid, 'component-scaffold/uncommitted', '{"workflow_version":"1.0.0"}'::jsonb, $2, NOW(), NOW())
+	`, runID, readinessPlanFixtureHash(t, `{"workflow_version":"1.0.0"}`)); err != nil {
 		t.Fatalf("seed readiness in tx: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `

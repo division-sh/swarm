@@ -33,28 +33,28 @@ func TestWorkflowEngineStateRevisionConflictIsRetryable(t *testing.T) {
 
 func TestWorkflowEngineStateDecisionOwnsCompanionAndHistory(t *testing.T) {
 	for _, test := range []struct {
-		name            string
-		transition      runtimepipeline.WorkflowEngineStateTransition
-		createState     bool
-		createCompanion bool
-		historyStep     string
+		name        string
+		transition  runtimepipeline.WorkflowEngineStateTransition
+		createState bool
+		historyStep string
 	}{
-		{"create state and companion", runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion, true, true, "create"},
-		{"update state and companion", runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion, false, false, "mutate"},
-		{"update state create companion", runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion, false, true, "mutate"},
+		{"create state and companion", runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion, true, "create"},
+		{"update state and companion", runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion, false, "mutate"},
+		{"preserve state and companion", runtimepipeline.WorkflowEngineStateTransitionPreserveStateAndCompanion, false, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			decision, err := decideWorkflowEngineState(test.transition)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if decision.createState != test.createState || decision.createCompanion != test.createCompanion || decision.historyStep != test.historyStep {
-				t.Fatalf("decision = %+v, want createState=%t createCompanion=%t historyStep=%q", decision, test.createState, test.createCompanion, test.historyStep)
+			if decision.createState != test.createState || decision.historyStep != test.historyStep {
+				t.Fatalf("decision = %+v, want createState=%t historyStep=%q", decision, test.createState, test.historyStep)
 			}
 		})
 	}
 	for _, transition := range []runtimepipeline.WorkflowEngineStateTransition{
 		runtimepipeline.WorkflowEngineStateTransitionUnknown,
+		runtimepipeline.WorkflowEngineStateTransition(4),
 		runtimepipeline.WorkflowEngineStateTransition(255),
 	} {
 		if decision, err := decideWorkflowEngineState(transition); err == nil || decision != (workflowEngineStateDecision{}) {
@@ -75,15 +75,25 @@ func TestWorkflowEngineDialectWritersUseSharedDecision(t *testing.T) {
 	seen := map[string]bool{}
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Name.Name != "commitPostgresWorkflowEngineState" && function.Name.Name != "commitSQLiteWorkflowEngineState" {
+		if !ok || function.Name.Name != "commitPostgresWorkflowEngineState" && function.Name.Name != "commitSQLiteWorkflowEngineState" && function.Name.Name != "commitWorkflowHeaderAndFields" {
 			continue
 		}
 		seen[function.Name.Name] = true
-		usesStateDecision, usesCompanionDecision := false, false
+		sharedOwner := function.Name.Name == "commitWorkflowHeaderAndFields"
+		delegations := 0
+		usesStateDecision := false
 		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if call, ok := node.(*ast.CallExpr); ok {
+				if callee, ok := call.Fun.(*ast.Ident); ok && callee.Name == "commitWorkflowHeaderAndFields" {
+					delegations++
+				}
+			}
 			selector, ok := node.(*ast.SelectorExpr)
 			if !ok {
 				return true
+			}
+			if !sharedOwner && (selector.Sel.Name == "ExecContext" || selector.Sel.Name == "QueryContext" || selector.Sel.Name == "QueryRowContext") {
+				t.Errorf("%s bypasses the shared header/field writer", function.Name.Name)
 			}
 			owner, ok := selector.X.(*ast.Ident)
 			if !ok {
@@ -95,16 +105,17 @@ func TestWorkflowEngineDialectWritersUseSharedDecision(t *testing.T) {
 			if owner.Name == "decision" && selector.Sel.Name == "createState" {
 				usesStateDecision = true
 			}
-			if owner.Name == "decision" && selector.Sel.Name == "createCompanion" {
-				usesCompanionDecision = true
-			}
 			return true
 		})
-		if !usesStateDecision || !usesCompanionDecision {
-			t.Errorf("%s bypasses the shared state/companion decision", function.Name.Name)
+		if sharedOwner {
+			if !usesStateDecision {
+				t.Errorf("%s bypasses the shared construction/mutation decision", function.Name.Name)
+			}
+		} else if delegations != 1 || usesStateDecision {
+			t.Errorf("%s must delegate once without interpreting construction: delegations=%d", function.Name.Name, delegations)
 		}
 	}
-	if !seen["commitPostgresWorkflowEngineState"] || !seen["commitSQLiteWorkflowEngineState"] {
-		t.Fatal("a workflow engine dialect writer is missing")
+	if !seen["commitPostgresWorkflowEngineState"] || !seen["commitSQLiteWorkflowEngineState"] || !seen["commitWorkflowHeaderAndFields"] {
+		t.Fatal("a workflow engine dialect or shared writer is missing")
 	}
 }

@@ -130,22 +130,16 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
 	selectedErr := s.retireSelectedContextsLocked(ctx)
-	settlementErr := s.settlePendingSourceSetTransitionLocked(ctx)
-	if settlementErr != nil {
-		ownershipTerminal := false
-		if s.processCapability != nil {
-			_, ownershipTerminal = s.processCapability.TerminalResult()
-		}
-		if !ownershipTerminal {
-			return errors.Join(selectedErr, settlementErr)
-		}
-	}
 	s.mu.RLock()
 	manager := s.runtimeContexts
-	bundleHash := s.currentSourceArtifactFact.BundleHash()
 	current := s.currentRT
 	s.mu.RUnlock()
 	shutdownErr := selectedErr
+	if s.processCapability != nil {
+		if result, terminal := s.processCapability.TerminalResult(); terminal && result.Cause != runtimestartupownership.TerminalReleased {
+			shutdownErr = errors.Join(shutdownErr, &runtimestartupownership.PossessionError{Cause: result.Cause})
+		}
+	}
 	if len(s.resetRequests) > 0 {
 		s.mu.Lock()
 		s.resetting = true
@@ -167,8 +161,10 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 		if shutdownErr == nil {
 			shutdownErr = s.releaseResetProjections(ctx)
 		}
-	} else if manager != nil && bundleHash != "" {
-		shutdownErr = errors.Join(shutdownErr, manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnavailable, opts).ShutdownErr)
+	} else if manager != nil {
+		for _, result := range manager.DeactivateAllWithOptions(runtime.RuntimeContextCauseUnavailable, opts) {
+			shutdownErr = errors.Join(shutdownErr, result.ShutdownErr)
+		}
 	} else if current != nil {
 		shutdownErr = errors.Join(shutdownErr, s.stopRuntime(ctx, current, opts))
 	}
@@ -179,7 +175,7 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 		s.ready.Store(false)
 	}
 	s.mu.Unlock()
-	return errors.Join(settlementErr, shutdownErr)
+	return shutdownErr
 }
 
 // Final store release consults the supervisor, not a captured family from boot.
@@ -195,36 +191,6 @@ func (s *processLifecycleSupervisor) retireSelectedContextsLocked(ctx context.Co
 		return nil
 	}
 	return s.selected.RetireSelectedContexts(ctx)
-}
-
-func (s *processLifecycleSupervisor) settlePendingSourceSetTransitionLocked(ctx context.Context) error {
-	if s.processCapability == nil {
-		return nil
-	}
-	s.mu.RLock()
-	manager := s.runtimeContexts
-	s.mu.RUnlock()
-	if manager == nil || manager.Len() == 0 {
-		return nil
-	}
-	plan, exists, err := s.processCapability.CurrentSourceSet(ctx)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return errors.New("process shutdown cannot settle topology without an installed source set")
-	}
-	transition, err := manager.PreparePendingSourceSetTransition(ctx, plan)
-	if err != nil {
-		return err
-	}
-	if transition == nil {
-		return nil
-	}
-	if err := transition.Commit(ctx, s.processCapability); err != nil {
-		return err
-	}
-	return s.attachPrimaryRuntime(ctx, manager)
 }
 
 func (s *processLifecycleSupervisor) attachPrimaryRuntime(ctx context.Context, manager *runtime.RuntimeContextManager) error {

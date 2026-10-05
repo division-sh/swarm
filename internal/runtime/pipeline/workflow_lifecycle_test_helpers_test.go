@@ -136,6 +136,7 @@ func fireTypedWorkflowTimerTestWakeup(ctx context.Context, pc *PipelineCoordinat
 }
 
 func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, route runtimeflowidentity.Route, entityID string) error {
+	route = testRunScopedWorkflowRoute(ctx, route).Route
 	instance, found, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 	if err != nil {
 		return err
@@ -147,7 +148,7 @@ func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, r
 	if !ok {
 		mode = runtimeeffects.ExecutionModeLive
 	}
-	effect, err := runtimeworkflowlifecycle.NewInitialEntry(testWorkflowInstanceRoute(instance.StorageRef), identity.NormalizeEntityID(entityID), instance.CurrentState, mode, instance.EnteredStageAt)
+	effect, err := runtimeworkflowlifecycle.NewInitialEntry(route, identity.NormalizeEntityID(entityID), instance.CurrentState, mode, instance.EnteredStageAt)
 	if err != nil {
 		return err
 	}
@@ -397,7 +398,8 @@ func commitTestWorkflowLifecycleMutation(
 		return fmt.Errorf("test workflow lifecycle requires the selected workflow engine mutation owner")
 	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: route}.Normalize()
+	owner := testRunScopedWorkflowRoute(ctx, route)
+	route = owner.Route
 	prepared, err := pc.prepareWorkflowLifecycleMutation(ctx, owner, &instance, effects, len(effects) > 0)
 	if err != nil {
 		return err
