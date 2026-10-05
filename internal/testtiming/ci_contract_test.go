@@ -425,17 +425,19 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		"serveapp-channel", "serveapp-channel-learned", "serveapp-channel-delivery", "serveapp-channel-process-temporal", "serveapp-channel-lifecycle", "serveapp-channel-native", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
 		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
 		"serveapp-mailbox", "serveapp-mailbox-p-q",
-		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-standing",
+		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-preservation", "serveapp-standing",
 	}
-	var serveappPatterns []*regexp.Regexp
+	var serveappPartitions []testplanning.ProofUnit
 	for _, id := range serveappUnits {
 		unit, exists := policy.Units[id]
 		if !exists || !slices.Equal(unit.Packages, []string{serveappPackage}) || unit.Run == "" || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
 			t.Fatalf("%s unit = %#v, want complete uncached serveapp partition with unchanged budget", id, unit)
 		}
-		serveappPatterns = append(serveappPatterns, regexp.MustCompile(unit.Run))
+		serveappPartitions = append(serveappPartitions, testplanning.ProofUnit{ID: id, Packages: unit.Packages, Run: unit.Run, Skip: unit.Skip, GoTimeout: unit.GoTimeout, CountMode: unit.CountMode, BudgetClass: unit.BudgetClass})
 	}
-	assertGoProofPartition(t, filepath.Join(root, "internal", "serveapp"), serveappPatterns)
+	if err := testplanning.ValidateGoProofUnitPartition(filepath.Join(root, "internal", "serveapp"), serveappPartitions); err != nil {
+		t.Fatal(err)
+	}
 	contractsPatterns := make([]*regexp.Regexp, 0, 2)
 	for _, id := range []string{"contracts-first", "contracts-rest"} {
 		unit, exists := policy.Units[id]
