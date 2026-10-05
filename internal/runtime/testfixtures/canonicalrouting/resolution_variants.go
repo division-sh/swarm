@@ -73,6 +73,16 @@ account-ready-node:
 	return root
 }
 
+func CopyIntegerTemplateCreateThenSelectSameEvent(t testing.TB) string {
+	t.Helper()
+	root := CopyTemplateCreateThenSelectSameEvent(t)
+	for range 2 {
+		applyClosedReplacement(t, filepath.Join(root, "producer/events.yaml"), "account_id: text", "account_id: integer")
+	}
+	applyClosedReplacement(t, filepath.Join(root, "account/entities.yaml"), "type: text", "type: integer")
+	return root
+}
+
 // CopyTemplateSelectAgentOnlyWithUnrelatedNode proves that a connect-selected
 // agent delivery does not imply delivery authority for another node in the flow.
 func CopyTemplateSelectAgentOnlyWithUnrelatedNode(t testing.TB) string {

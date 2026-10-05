@@ -328,11 +328,15 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			}
 		}
 		if action == templateInstanceLifecycleActionPreviewCreate {
+			addresses, err := runtimepinrouting.DescriptorAddressFields(decision.Activation.Instance.Fields)
+			if err != nil {
+				return connectRoutePlanDispatch{}, err
+			}
 			descriptors = append(descriptors, runtimepinrouting.Descriptor{
 				ID:            strings.TrimSpace(decision.InstanceID),
 				EntityID:      strings.TrimSpace(decision.EntityID),
 				FlowInstance:  strings.Trim(strings.TrimSpace(decision.InstancePath), "/"),
-				AddressFields: decision.ActivationVariables(),
+				AddressFields: addresses,
 			})
 		}
 		_, routeCreatedInPlan := createdRoutes[decision.Route()]

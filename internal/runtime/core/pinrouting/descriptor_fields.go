@@ -22,6 +22,8 @@ func DescriptorAddressFields(values map[string]any) (map[string]string, error) {
 			scalar = strings.TrimSpace(typed)
 		case bool:
 			scalar = strconv.FormatBool(typed)
+		case int64:
+			scalar = strconv.FormatInt(typed, 10)
 		case float64:
 			scalar = strconv.FormatFloat(typed, 'g', -1, 64)
 		case json.Number:

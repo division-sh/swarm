@@ -269,8 +269,9 @@ swarm secrets set sendgrid_api_key --stdin
 swarm secrets check
 ```
 
-Handler actions are retired. Create template receivers through input-pin
-resolution and typed `initialize` bindings. Built-in local Git commits are not
+Handler actions are retired. Create keyed receivers through connection-owned
+resolution and same-name supplied state from the creating message. Pins are
+names-only; `initialize` and `instance_variables` are not admitted. Built-in local Git commits are not
 currently available; there is no replacement action or compatibility alias.
 
 ```bash
