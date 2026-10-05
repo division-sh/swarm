@@ -100,7 +100,7 @@ func (r Report) AdmissionDecision(policy AdmissionFindingPolicy) AdmissionDecisi
 			d.Complete = false
 			continue
 		}
-		if absentStores[observation.Subject] && observation.CheckID != "selected_store_access" {
+		if absentStores[observation.Subject] {
 			if observation.validAbsentStoreDependent() {
 				d.Complete = false
 				continue

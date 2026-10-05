@@ -72,6 +72,7 @@ func TestIssue2567VerifyMissingStoreFormatsAndFlagPrecedence(t *testing.T) {
 					}
 					found := false
 					independent := map[string]int{}
+					storeTail := map[string]int{}
 					for _, observation := range result.Observations {
 						if observation.CheckID == "selected_store_access" {
 							found = true
@@ -81,6 +82,12 @@ func TestIssue2567VerifyMissingStoreFormatsAndFlagPrecedence(t *testing.T) {
 						}
 						if observation.Status == bootverify.AdmissionPassed {
 							independent[observation.CheckID]++
+						}
+						if strings.HasPrefix(observation.Subject, "store:"+wantDir+string(filepath.Separator)) && observation.CheckID != "selected_store_access" {
+							if observation.Status != bootverify.AdmissionNotRun || observation.NotRunCause != nil || len(observation.Dependencies) != 1 || observation.Dependencies[0] != "selected_store_access" {
+								t.Fatalf("fabricated store read: %+v", observation)
+							}
+							storeTail[observation.CheckID]++
 						}
 					}
 					if !found {
@@ -93,6 +100,11 @@ func TestIssue2567VerifyMissingStoreFormatsAndFlagPrecedence(t *testing.T) {
 					}
 					if independent["listener_availability"] != 2 {
 						t.Fatalf("both listeners not observed: %v", independent)
+					}
+					for _, check := range []string{"selected_store_schema", "startup_process_possession", "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "startup_authority_lineage", "pending_reset_admission", "retained_route_admission", "retained_channel_admission", "selected_fork_recovery_admission", "retained_actor_admission", "selected_fork_source_dependencies", "retained_actor_provider_dependencies"} {
+						if storeTail[check] != 1 {
+							t.Fatalf("missing or duplicate dependent %s: %v", check, storeTail)
+						}
 					}
 				} else if !strings.Contains(out.String(), "*") || !strings.Contains(out.String(), "store admission: not evaluated") || !strings.Contains(out.String(), wantDir) || !strings.Contains(out.String(), "created on first serve") {
 					t.Fatalf("incomplete store hidden: %s", &out)
@@ -108,7 +120,7 @@ func TestIssue2567VerifyMissingStoreFormatsAndFlagPrecedence(t *testing.T) {
 }
 
 func TestIssue2567VerifyExistingBadStoreAndIndependentFailureStillRefuse(t *testing.T) {
-	for _, shape := range []string{"corrupt", "directory", "dangling_parent", "bad_binding", "blank_flag", "blank_config"} {
+	for _, shape := range []string{"corrupt", "permissions", "directory", "dangling_parent", "bad_binding", "blank_flag", "blank_config"} {
 		t.Run(shape, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			root := issue2567VerifySource(t)
@@ -117,6 +129,10 @@ func TestIssue2567VerifyExistingBadStoreAndIndependentFailureStillRefuse(t *test
 			switch shape {
 			case "corrupt":
 				if err := os.WriteFile(path, []byte("not sqlite"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "permissions":
+				if err := os.WriteFile(path, nil, 0000); err != nil {
 					t.Fatal(err)
 				}
 			case "directory":
@@ -151,6 +167,13 @@ func TestIssue2567VerifyExistingBadStoreAndIndependentFailureStillRefuse(t *test
 			}
 			if result.OK || result.AdmissionComplete {
 				t.Fatalf("bad result admitted: %+v", result)
+			}
+			if shape == "corrupt" || shape == "permissions" || shape == "directory" || shape == "dangling_parent" {
+				for _, observation := range result.Observations {
+					if observation.NotRunCause != nil {
+						t.Fatalf("bad existing coordinate became absence: %+v", observation)
+					}
+				}
 			}
 			if shape == "bad_binding" {
 				found := false

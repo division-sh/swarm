@@ -32,7 +32,7 @@ func TestIssue2567AbsentStoreReductionIsIncompleteNotFailure(t *testing.T) {
 }
 
 func TestIssue2567AbsentStoreReductionRejectsForgedEvidence(t *testing.T) {
-	for _, name := range []string{"unknown_cause", "relative_path", "unclean_path", "wrong_root_subject", "wrong_root_owner", "wrong_root_check", "wrong_status", "wrong_class", "missing_time", "root_failure", "blank_reason", "root_dependency", "structural", "orphan", "wrong_dependent_subject", "wrong_dependent_owner", "unknown_dependent", "provider_dependency", "wrong_dependency", "duplicate", "contradictory_pass"} {
+	for _, name := range []string{"unknown_cause", "relative_path", "unclean_path", "wrong_root_subject", "wrong_root_owner", "wrong_root_check", "wrong_status", "wrong_class", "missing_time", "root_failure", "blank_reason", "root_dependency", "structural", "orphan", "wrong_dependent_subject", "wrong_dependent_owner", "unknown_dependent", "provider_dependency", "wrong_dependency", "duplicate", "contradictory_pass", "contradictory_root_class"} {
 		t.Run(name, func(t *testing.T) {
 			report := absentStore2567Report()
 			root, child := &report.Observations[0], &report.Observations[1]
@@ -81,6 +81,12 @@ func TestIssue2567AbsentStoreReductionRejectsForgedEvidence(t *testing.T) {
 				child.Status = AdmissionPassed
 				child.StartedAt = root.StartedAt
 				child.FinishedAt = root.FinishedAt
+			case "contradictory_root_class":
+				contradiction := *root
+				contradiction.NotRunCause = nil
+				contradiction.Class = AdmissionSourceObservation
+				contradiction.Status = AdmissionPassed
+				report.Observations = append(report.Observations, contradiction)
 			}
 			got := report.AdmissionDecision(AdmissionFindingPolicy{})
 			if got.Complete || got.FailureClass == "" {

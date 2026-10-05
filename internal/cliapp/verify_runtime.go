@@ -187,7 +187,7 @@ func renderVerifyCommandResult(opts verifyCommandOptions, output verifyCommandRe
 			fmt.Fprintf(w, "verify failed: source=%s\n", output.SourceLabel)
 		} else {
 			marker := ""
-			if !output.AdmissionComplete {
+			if !output.AdmissionComplete && output.ValidationScope == "deployment" {
 				marker = "*"
 			}
 			fmt.Fprintf(w, "verify ok%s: source=%s\n", marker, output.SourceLabel)
@@ -254,7 +254,7 @@ func verifyAdmissionTextLines(output verifyCommandResult) []string {
 	} else if output.OK {
 		message = "admission checks passed; startup execution not performed"
 	}
-	if output.OK && !output.AdmissionComplete {
+	if output.OK && !output.AdmissionComplete && output.ValidationScope == "deployment" {
 		message += " * (admission incomplete; unperformed checks are listed below)"
 	}
 	lines := []string{message}
