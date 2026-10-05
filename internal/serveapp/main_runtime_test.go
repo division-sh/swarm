@@ -462,6 +462,97 @@ func TestProcessLifecycleShutdownDoesNotResumeTerminalSourceSetCapability(t *tes
 	}
 }
 
+func TestProcessLifecycleTerminalEvidencePreservesJoinedProjectionDisposition(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		joinFails    bool
+		releaseFails bool
+		persistent   bool
+	}{
+		{name: "joined"},
+		{name: "join_fail_once", joinFails: true},
+		{name: "join_persistent", joinFails: true, persistent: true},
+		{name: "release_fail_once", releaseFails: true},
+		{name: "release_persistent", releaseFails: true, persistent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &runtimepkg.Runtime{Bus: &runtimebus.EventBus{}}
+			hash := runtimeContextTestHash("a")
+			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+				SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash),
+				Runtime:            rt, WorkOwner: newSupervisorTestRuntimeOccurrence(t, hash),
+				Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			joinFailure, releaseFailure := errors.New("candidate join failure"), errors.New("workspace release failure")
+			joinFails, releaseFails := tc.joinFails, tc.releaseFails
+			joined, releases, sourceReleases := false, 0, 0
+			candidate := &runtimepkg.Runtime{}
+			workspace := serveRuntimeWorkspaceStub{release: func(context.Context) error {
+				if !joined {
+					t.Fatal("workspace released before candidate joined")
+				}
+				releases++
+				if releaseFails {
+					return releaseFailure
+				}
+				return nil
+			}}
+			supervisor := &processLifecycleSupervisor{
+				processCapability: terminalSourceSetCapability{t: t},
+				runtimeContexts:   manager, currentRT: rt,
+				resetRequests: []serveRuntimeBundleContextRequest{{}},
+				resetContexts: []serveRuntimeBundleContext{{runtime: candidate, workspaces: workspace,
+					loaded: serveRuntimeBundle{cleanup: func() error { sourceReleases++; return nil }}}},
+				shutdownRuntime: func(_ context.Context, got *runtimepkg.Runtime, _ runtimepkg.ShutdownOptions) error {
+					if got != candidate || manager.LookupBundleHashStatus(hash).Loaded() {
+						t.Fatal("candidate disposal bypassed aggregate retirement")
+					}
+					if joinFails {
+						return joinFailure
+					}
+					joined = true
+					return nil
+				},
+			}
+			check := func() {
+				t.Helper()
+				err := supervisor.ShutdownProcessWithOptions(context.Background(), runtimepkg.DefaultShutdownOptions())
+				var possession *runtimestartupownership.PossessionError
+				if !errors.As(err, &possession) || possession.Cause != runtimestartupownership.TerminalOwnershipUnprovable {
+					t.Fatalf("terminal evidence lost: %v", err)
+				}
+				if errors.Is(err, joinFailure) != joinFails || errors.Is(err, releaseFailure) != (!joinFails && releaseFails) {
+					t.Fatalf("cleanup failure lost or invented: %v", err)
+				}
+				if supervisor.CurrentRuntime() != nil || len(supervisor.resetContexts) != 1 {
+					t.Fatal("terminal cleanup revived runtime or lost candidate responsibility")
+				}
+			}
+			check()
+			if releases != map[bool]int{true: 0, false: 1}[tc.joinFails] || sourceReleases != map[bool]int{true: 0, false: 1}[tc.joinFails || tc.releaseFails] {
+				t.Fatalf("first cleanup: workspace=%d source=%d", releases, sourceReleases)
+			}
+			if !tc.joinFails && !tc.releaseFails {
+				return
+			}
+			if !tc.persistent {
+				joinFails, releaseFails = false, false
+			}
+			check()
+			if tc.persistent {
+				if sourceReleases != 0 || releases != map[bool]int{true: 0, false: 2}[tc.joinFails] {
+					t.Fatalf("persistent cleanup lost retained dependency: workspace=%d source=%d", releases, sourceReleases)
+				}
+			} else if sourceReleases != 1 || releases != map[bool]int{true: 1, false: 2}[tc.joinFails] {
+				t.Fatalf("retry did not settle exact retained resources: workspace=%d source=%d", releases, sourceReleases)
+			}
+		})
+	}
+}
+
 func TestServeLifecyclePresenterProjectsBootFactsByMode(t *testing.T) {
 	var quiet bytes.Buffer
 	concise := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &quiet})
