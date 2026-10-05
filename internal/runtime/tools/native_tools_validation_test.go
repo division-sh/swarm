@@ -75,6 +75,10 @@ func (mockCapabilityRuntimeStub) ProviderContract() llm.ProviderContract {
 	return llm.MockProviderContract()
 }
 
+func (mockCapabilityRuntimeStub) ProbeStartupVisibleToolSurface(context.Context, models.AgentConfig, string, []llm.ToolDefinition) (*llm.Response, error) {
+	return nil, errors.New("native capability fixture cannot prove workspace startup transport")
+}
+
 func nativeCapabilityRuntimeSet(t testing.TB, runtime llm.Runtime) *llm.AgentRuntimeSet {
 	t.Helper()
 	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
@@ -207,6 +211,9 @@ func TestNativeToolStaticInspectionUsesLoadedScopedDeclarations(t *testing.T) {
 }
 
 func TestExecutorNativeToolAdmissionUsesActorSelectedProviderContract(t *testing.T) {
+	if response, err := (mockCapabilityRuntimeStub{}).ProbeStartupVisibleToolSurface(context.Background(), models.AgentConfig{}, "", nil); err == nil || response != nil {
+		t.Fatalf("native capability fixture claimed startup proof: response=%#v err=%v", response, err)
+	}
 	mockActor := models.AgentConfig{ID: "mock-agent", NativeTools: models.NativeToolConfig{FileIO: true}}
 	liveActor := models.AgentConfig{ID: "live-agent", NativeTools: models.NativeToolConfig{FileIO: true}}
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{
