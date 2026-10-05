@@ -1093,6 +1093,7 @@ func sqliteFlowActivationRequest(bundle *runtimecontracts.WorkflowContractBundle
 func sqliteKeyedFlowActivationRequest(t *testing.T, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, instanceID string) runtimepipeline.FlowInstanceActivationRequest {
 	t.Helper()
 	req := sqliteFlowActivationRequest(bundle, "review", instanceID, "", "review/"+instanceID)
+	req.Config = map[string]any{"request_id": instanceID}
 	req.ConstructorInput, req.ResolvedKey = "task.started", instanceID
 	payload, err := json.Marshal(map[string]string{"request_id": instanceID})
 	if err != nil {
