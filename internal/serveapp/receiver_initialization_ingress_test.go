@@ -57,7 +57,7 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 		name, event, code string
 		payload           map[string]any
 	}{
-		{"private_child", "telegram-chat/chat.initialized", apiv1.EventNotDeclaredCode, map[string]any{"conversation_reference": "2307", "initial_text": "not a declared input", "message_number": 7, "enabled": false}},
+		{"private_child", "telegram-chat/chat.initialized", apiv1.EventNotDeclaredCode, map[string]any{"conversation_reference": "2307", "text": "not a declared input", "provider_message_reference": 7, "enabled": false}},
 		{"wrong_provider_integer", input, apiv1.PayloadValidationFailedCode, map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": "7", "text": "invalid"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,25 +86,32 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 	waitPublicationSiteCompletion(t, rt, seed.RunID)
 	const path = "telegram-chat/ti-1531b1e4416a29704d690346"
 	entityID := flowidentity.EntityID(path)
-	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(config AS TEXT) FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template='telegram-chat'`, seed.RunID, path).Scan(&raw); err != nil {
+	var raw, fieldsRaw string
+	if err := rt.DB.QueryRow(`SELECT CAST(f.config AS TEXT),CAST(e.fields AS TEXT) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.instance_path=$2 AND f.flow_template='telegram-chat'`, seed.RunID, path).Scan(&raw, &fieldsRaw); err != nil {
 		t.Fatal(err)
 	}
 	var descriptor map[string]any
 	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(raw), &descriptor); err != nil {
 		t.Fatal(err)
 	}
-	config, err := canonicaljson.CloneRuntimeValue(descriptor["config"])
+	var persisted map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(fieldsRaw), &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := descriptor["config"]; exists {
+		t.Fatalf("business copy in header: %s", raw)
+	}
+	config, err := canonicaljson.CloneRuntimeValue(persisted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"conversation_reference": "2307", "initial_text": "direct initialization", "message_number": int64(7), "enabled": false}
+	want := map[string]any{"conversation_reference": "2307", "text": "direct initialization", "provider_message_reference": int64(7), "enabled": false}
 	if !reflect.DeepEqual(config, want) {
 		t.Fatalf("provider-initialized typed config=%#v, want %#v", config, want)
 	}
 	var entity operatorread.OperatorEntityFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
-	wantFields := map[string]any{"conversation_reference": "2307", "initial_text": "direct initialization", "message_number": float64(7), "enabled": false}
+	wantFields := map[string]any{"conversation_reference": "2307", "text": "direct initialization", "provider_message_reference": float64(7), "enabled": false}
 	if entity.Entity.RunID != seed.RunID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || !reflect.DeepEqual(entity.Fields, wantFields) {
 		t.Fatalf("real child did not consume typed initialization: %+v", entity)
 	}

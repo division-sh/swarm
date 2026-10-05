@@ -114,8 +114,8 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 				t.Run(fmt.Sprintf("declared_%d/selected_%d/%s", declarations, selected, frontier), func(t *testing.T) {
 					loaded := selectedContractReadinessFixture(t, declarations)
 					source := loaded.Source
-					flowID, path, key, nodeID := "worker-flow", "worker-flow/instance-1", "worker_id", "worker-node"
-					flow, err := runtimemanager.TemplateFlowMaterialization(source, flowID, path, "entity-1", map[string]any{"worker_id": "instance-1"})
+					flowID, path, nodeID := "worker-flow", "worker-flow/instance-1", "worker-node"
+					flow, err := readinessTestMaterialization(t, source, flowID, path, "entity-1")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -155,7 +155,7 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 					if err != nil {
 						t.Fatal(err)
 					}
-					if len(prepared.States) != 1 || prepared.States[0].Config[key] != "recorded-business-key" || len(prepared.States[0].Agents) != declarations {
+					if len(prepared.States) != 1 || prepared.States[0].Route.InstancePath != path || len(prepared.States[0].Agents) != declarations {
 						t.Fatalf("flow-owned readiness = %#v", prepared.States)
 					}
 					factoryCalls := 0
@@ -217,7 +217,7 @@ func TestSelectedContractWorkflowStateProjectionUsesPlatformActivityRoutingSourc
 
 func TestSelectedContractPreparedActorCensusExactPlans(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 2)
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/instance-1", "entity-1", map[string]any{"worker_id": "instance-1"})
+	flow, err := readinessTestMaterialization(t, loaded.Source, "worker-flow", "worker-flow/instance-1", "entity-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestSelectedContractPreparedActorCensusExactPlans(t *testing.T) {
 	if _, err := runforkreadiness.PreparedActorCensus(live); err == nil {
 		t.Fatal("live actor configuration adopted into prospective census")
 	}
-	foreign, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/instance-2", "entity-2", map[string]any{"worker_id": "instance-2"})
+	foreign, err := readinessTestMaterialization(t, loaded.Source, "worker-flow", "worker-flow/instance-2", "entity-2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanti
 	if scope.Mode == "template" {
 		configValues["worker_id"] = "recorded-business-key"
 	}
-	payload, err := runtimepipeline.WorkflowInstanceConfigPayloadForIdentity(instance, source.WorkflowVersion(), configValues)
+	payload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, source.WorkflowVersion())
 	if err != nil {
 		t.Fatal(err)
 	}

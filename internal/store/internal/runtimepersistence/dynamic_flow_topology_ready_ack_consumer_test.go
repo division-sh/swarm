@@ -58,9 +58,10 @@ func TestDynamicFlowTopologyReadyAcknowledgedFaultCompletesCreationBothStores(t 
 				t.Fatal(err)
 			}
 			req := f.request("acknowledged-ready", "ti-acknowledged", "committed")
-			req.Config["nested"] = []any{int64(7), float64(7)}
+			supplied := receiverSuppliedPayload(t, req)
+			supplied["nested"] = []any{int64(7), float64(7)}
 			payload, err := canonicaljson.MarshalPreservingNumberKinds(map[string]any{
-				"request_id": req.ResolvedKey, "label": req.Config["label"], "enabled": true, "nested": req.Config["nested"],
+				"request_id": req.ResolvedKey, "label": supplied["label"], "nested": supplied["nested"],
 			})
 			if err != nil {
 				t.Fatal(err)

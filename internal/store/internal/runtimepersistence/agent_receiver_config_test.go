@@ -32,10 +32,8 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 				ID: "receiver-storage-proof", Identity: testAgentIdentity(t, "receiver-storage-proof", "review/item"),
 				ExecutionMode: "live", Role: "worker", Type: "worker", Model: "regular", LLMBackend: "claude_cli",
 				Memory: agentmemory.Plan{Enabled: true}, FlowPath: "review/item",
-				Config:         json.RawMessage(`{"opaque":[7,7.0,null]}`),
-				ReceiverConfig: json.RawMessage(`{"flow_path":"business-path","model":"business-model","mode":"business-mode","constraints":{"memory":"business-memory"},"nested":{"archived_record":{"system_prompt":"business"}},"list":[{"system_prompt":"business"},7,7.0,null],"exponent":7e0}`),
+				Config: json.RawMessage(`{"opaque":[7,7.0,null]}`),
 			})
-			wantReceiver := json.RawMessage(`{"flow_path":"business-path","model":"business-model","mode":"business-mode","constraints":{"memory":"business-memory"},"nested":{"archived_record":{"system_prompt":"business"}},"list":[{"system_prompt":"business"},7,7.0,null],"exponent":7.0}`)
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{Config: cfg, Status: "active"}); err != nil {
 				t.Fatal(err)
 			}
@@ -59,11 +57,10 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 				}
 				got := agents[0].Config
 				assertJSON(got.Config, cfg.Config)
-				assertJSON(got.ReceiverConfig, wantReceiver)
 				if got.Model != cfg.Model || got.Memory != cfg.Memory || got.FlowPath != cfg.FlowPath || !reflect.DeepEqual(got.Intent, cfg.Intent) || !got.Prompt.Empty() {
 					t.Fatalf("read %d changed runtime authority: %+v", read, got)
 				}
-				got.Config[0], got.ReceiverConfig[0] = '[', '['
+				got.Config[0] = '['
 			}
 			var stored []byte
 			if err := db.QueryRowContext(ctx, `SELECT config FROM agents WHERE agent_id=$1`, cfg.ID).Scan(&stored); err != nil {
@@ -73,18 +70,13 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 			if err := json.Unmarshal(stored, &fields); err != nil {
 				t.Fatal(err)
 			}
-			if len(fields) != 2 {
-				t.Fatalf("config envelope keys=%v", fields)
+			if _, present := fields["receiver_config"]; present {
+				t.Fatal("receiver configuration namespace restored")
 			}
-			assertJSON(fields["config"], cfg.Config)
-			assertJSON(fields["receiver_config"], wantReceiver)
+			assertJSON(stored, cfg.Config)
 			for _, tc := range []struct{ name, raw, want string }{
-				{"flattened", `{"flow_path":"business"}`, "requires exactly config and receiver_config"},
-				{"unknown", `{"config":{},"receiver_config":null,"extra":true}`, "requires exactly config and receiver_config"},
-				{"missing_receiver", `{"config":{}}`, "requires exactly config and receiver_config"},
-				{"receiver_array", `{"config":{},"receiver_config":[]}`, "receiver_config must be a JSON object or null"},
-				{"authority_model", `{"config":{"model":"override"},"receiver_config":{}}`, "config contains runtime-owned keys: model"},
-				{"authority_prompt", `{"config":{"nested":[{"system_prompt":"override"}]},"receiver_config":{}}`, "authored config.nested[0].system_prompt is unsupported"},
+				{"authority_model", `{"model":"override"}`, "config contains runtime-owned keys: model"},
+				{"authority_prompt", `{"nested":[{"system_prompt":"override"}]}`, "authored config.nested[0].system_prompt is unsupported"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1 WHERE agent_id=$2`, tc.raw, cfg.ID); err != nil {

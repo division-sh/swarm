@@ -47,25 +47,13 @@ work.ready:
 `,
 		"account/schema.yaml": `name: account
 instance: account_id
-instance_variables:
-  variables:
-    count: {type: integer, default: 3}
-    label: text
-    ratio: {type: numeric, default: 2.0}
-    active: boolean
-    attributes: json
 pins:
   inputs:
-    - event: work.ready
-      initialize:
-        active: payload.values.active
-        attributes: payload.values.attributes
-        count: payload.values.count
-        label: payload.values.label
-        ratio: payload.values.ratio
+    - work.ready
 `,
 		"account/entities.yaml": `account_state:
   account_id: {type: text, _unused_reason: receiver instance identity}
+  values: InitializationValues
   processed_count: {type: integer, initial: 0}
 `,
 		"account/nodes.yaml": `collector:

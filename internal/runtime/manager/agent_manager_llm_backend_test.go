@@ -194,7 +194,7 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 	}
 	instantiatedCfg, err := buildFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "template-support", "worker"), "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
 		ID: "template-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.Plan{}, Mock: artifact,
-	}), map[string]string{"instance_id": "inst-1"}, nil, nil)
+	}), map[string]string{"instance_id": "inst-1"}, nil)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)
 	}

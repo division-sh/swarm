@@ -144,7 +144,7 @@ func (f *receiverComposedFixture) prepareChildren(t *testing.T, keys []string, l
 			t.Fatalf("publication bypassed typed initialization: %d", len(command.Activations))
 		}
 		plan := command.Activations[0]
-		if plan.Instance.Config["enabled"] != true || len(plan.Readiness.Agents) != 1 {
+		if plan.Instance.Fields["enabled"] != true || len(plan.Readiness.Agents) != 1 {
 			t.Fatal("typed defaults or agent readiness missing")
 		}
 		f.activations = append(f.activations, plan)
@@ -364,7 +364,7 @@ func TestReceiverConfigDeclaredFanOutAtomicBothStores(t *testing.T) {
 				if len(activations) != 1 {
 					t.Fatalf("ordinal %d typed activations=%d", ordinal, len(activations))
 				}
-				wire, err := canonicaljson.MarshalPreservingNumberKinds(activations[0].Instance.Config)
+				wire, err := canonicaljson.MarshalPreservingNumberKinds(activations[0].Instance.Fields)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -414,7 +414,7 @@ func TestReceiverConfigPublicationContendersBothStores(t *testing.T) {
 				winner := f.activations[0]
 				losingPlans := f.prepareChildren(t, []string{"same"}, "loser-")
 				second := losingPlans[0].(bus.EnginePublicationPlan).PublicationCommand()
-				if !reflect.DeepEqual(winner.Identity, f.activations[0].Identity) || reflect.DeepEqual(winner.Instance.Config, f.activations[0].Instance.Config) {
+				if !reflect.DeepEqual(winner.Identity, f.activations[0].Identity) || reflect.DeepEqual(winner.Instance.Fields, f.activations[0].Instance.Fields) {
 					t.Fatal("contenders must share exact identity and differ in nonkey config")
 				}
 				owner := f.raw.(interface {

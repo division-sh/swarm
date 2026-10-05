@@ -47,7 +47,8 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 	}
 	expectFieldType(t, reflect.TypeOf(WorkflowStageTopologyEdge{}), "From", reflect.TypeOf(""))
 	expectFieldType(t, reflect.TypeOf(WorkflowDataWrite{}), "Value", reflect.TypeOf(ExpressionValue{}))
-	expectFieldType(t, reflect.TypeOf(FlowInstanceVariables{}), "Variables", reflect.TypeOf(map[string]FlowVariable{}))
+	expectMissingField(t, reflect.TypeOf(FlowSchemaDocument{}), "InstanceVariables")
+	expectMissingField(t, reflect.TypeOf(FlowInputEventPin{}), "Initialize")
 	expectMissingField(t, reflect.TypeOf(ToolInputSchema{}), "Type")
 	expectMissingField(t, reflect.TypeOf(ToolInputSchema{}), "Properties")
 	expectMissingField(t, reflect.TypeOf(ToolSchemaEntry{}), "InputSchema")

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -100,14 +99,6 @@ func bindRecoveredSelectedContractAgentRuntime(
 			instance.WorkflowName != state.FlowID || instance.WorkflowVersion != state.WorkflowVersion ||
 			instance.Mode != state.Mode || instance.StorageRef != state.Route.InstancePath || instance.InstanceID != state.Route.InstanceID {
 			return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract recovered workflow %s disagrees with exact entity/type/workflow descriptor", state.Route.InstancePath)
-		}
-		expectedJSON, err := canonicaljson.MarshalPreservingNumberKinds(state.Config)
-		if err != nil {
-			return selectedContractAgentRuntimePlan{}, err
-		}
-		actualJSON, err := canonicaljson.MarshalPreservingNumberKinds(instance.Config)
-		if err != nil || string(expectedJSON) != string(actualJSON) {
-			return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract recovered workflow %s disagrees with declaration configuration", state.Route.InstancePath)
 		}
 		readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(ctx, forkRunID, state.Route)
 		if err != nil {

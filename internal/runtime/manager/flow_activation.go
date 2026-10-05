@@ -238,14 +238,6 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	if !ok {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %s activation requires the admitted contract bundle", templateID)
 	}
-	configuration, err := bundle.ReceiverConfigurationForFlow(templateID)
-	if err != nil {
-		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %s receiver configuration: %w", templateID, err)
-	}
-	req.Config, err = configuration.Admit(req.Config)
-	if err != nil {
-		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %s receiver configuration: %w", templateID, err)
-	}
 	graph, found := semanticview.WorkflowStageTopology(req.ContractBundle, templateID)
 	if !found || graph.FlowID != templateID {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %q activation requires the selected compiled stage topology", templateID)
@@ -302,7 +294,7 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
-	readinessPlan, err := am.buildDynamicFlowRuntimeReadinessPlan(ctx, req, agentRecords, schema, autoEmitLineage, occurredAt)
+	readinessPlan, err := am.buildDynamicFlowRuntimeReadinessPlan(ctx, req, fields, agentRecords, schema, autoEmitLineage, occurredAt)
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
@@ -322,7 +314,6 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 			RuntimeReadiness:   &readinessPlan,
 			CurrentState:       initialState,
 			StageDefined:       graph.StageCount() != 0,
-			Config:             cloneFlowConfig(req.Config),
 			Fields:             cloneFlowConfig(fields),
 			Bookkeeping:        cloneFlowConfig(req.Bookkeeping),
 			EnteredStageAt:     occurredAt,
@@ -570,103 +561,27 @@ func (am *AgentManager) flowInstanceAgentRecords(runID string, req runtimepipeli
 	return records, nil
 }
 
-// TemplateFlowAgentMaterializationRecords derives declaration-owned agent
-// records for one exact template instance without mutating durable or process
-// topology. Callers must still provide a typed topology admission before
-// execution.
-func TemplateFlowAgentMaterializationRecords(runID string, source semanticview.Source, flowID, instancePath, entityID string, config map[string]any) ([]PersistedAgent, error) {
-	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, flowID, instancePath, entityID, config)
-	if err != nil {
-		return nil, err
-	}
-	return materializeStaticAgentBlueprints(runID, blueprints)
-}
-
-// TemplateFlowAgentMaterializationBlueprints derives declaration-owned agent
-// plans without fabricating a live run owner. The selected-store admission
-// owner materializes these plans only after it has committed the exact run.
-func TemplateFlowAgentMaterializationBlueprints(source semanticview.Source, flowID, instancePath, entityID string, config map[string]any) ([]AgentMaterializationBlueprint, error) {
-	plan, err := TemplateFlowMaterialization(source, flowID, instancePath, entityID, config)
-	return plan.Agents, err
-}
-
-// FlowInstanceMaterializationPlan owns configuration even when the flow declares
-// no agents. Agents are derived from that configuration, never its authority.
+// FlowInstanceMaterializationPlan projects attachment to an existing header.
 type FlowInstanceMaterializationPlan struct {
 	Instance            runtimeflowidentity.Instance
-	Config              map[string]any
 	Agents              []AgentMaterializationBlueprint
 	ActivationVariables map[string]string
 }
 
-// TemplateFlowMaterialization consumes committed configuration without applying
-// current defaults. Its caller must bind that evidence to the exact route/entity.
-func TemplateFlowMaterialization(source semanticview.Source, flowID, instancePath, entityID string, config map[string]any) (FlowInstanceMaterializationPlan, error) {
-	if source == nil {
-		return FlowInstanceMaterializationPlan{}, fmt.Errorf("template flow materialization requires semantic source")
-	}
-	if config == nil {
-		return FlowInstanceMaterializationPlan{}, fmt.Errorf("template flow materialization requires exact committed receiver configuration")
-	}
-	cloned, err := canonicaljson.CloneRuntimeValue(config)
-	if err != nil {
-		return FlowInstanceMaterializationPlan{}, fmt.Errorf("clone committed receiver configuration: %w", err)
-	}
-	config = cloned.(map[string]any)
-	flowID = strings.TrimSpace(flowID)
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	entityID = strings.TrimSpace(entityID)
-	scope, ok := semanticview.FlowScopeByID(source, flowID)
-	if !ok {
-		return FlowInstanceMaterializationPlan{}, fmt.Errorf("flow contract view not found: %s", flowID)
-	}
-	schema, ok := source.FlowSchemaByID(flowID)
-	if !ok || !strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), runtimecontracts.FlowModeTemplate) {
-		return FlowInstanceMaterializationPlan{}, fmt.Errorf("flow %s is not a template flow", flowID)
-	}
-	instanceID := runtimeflowidentity.LogicalInstanceID(instancePath)
-	if instanceID == "" || entityID == "" {
-		return FlowInstanceMaterializationPlan{}, fmt.Errorf("template flow materialization requires exact instance and entity identity")
-	}
-	instance := runtimeflowidentity.Stored(source, flowID, instancePath, instanceID, entityID, "")
-	scopeKey := runtimeflowidentity.ScopeKey(source, flowID)
-	if instance.Route() != runtimeflowidentity.StoredRoute(scopeKey, instanceID, instancePath) {
-		return FlowInstanceMaterializationPlan{}, fmt.Errorf("template flow materialization route %s disagrees with semantic scope %s", instancePath, scopeKey)
-	}
-	request := runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: source,
-		Instance:       instance,
-		Config:         config,
-	}
-	agents, err := flowInstanceAgentMaterializationBlueprints(request, schema, scope)
-	if err != nil {
-		return FlowInstanceMaterializationPlan{}, err
-	}
-	return FlowInstanceMaterializationPlan{Instance: instance, Config: config, Agents: agents, ActivationVariables: flowActivationVars(request)}, nil
-}
-
 // ConstructedFlowMaterialization projects an existing constructor/header, never
 // a declaration-only path. It does not create state or grant execution authority.
-func ConstructedFlowMaterialization(source semanticview.Source, runID string, instance runtimeflowidentity.Instance, config map[string]any) (FlowInstanceMaterializationPlan, error) {
+func ConstructedFlowMaterialization(source semanticview.Source, runID string, instance runtimeflowidentity.Instance) (FlowInstanceMaterializationPlan, error) {
 	if err := instance.ValidateConstruction(source, runID); err != nil {
 		return FlowInstanceMaterializationPlan{}, err
 	}
-	if config == nil {
-		return FlowInstanceMaterializationPlan{}, fmt.Errorf("constructed flow requires exact committed receiver configuration")
-	}
-	cloned, err := canonicaljson.CloneRuntimeValue(config)
-	if err != nil {
-		return FlowInstanceMaterializationPlan{}, err
-	}
-	config = cloned.(map[string]any)
 	schema, _ := source.FlowSchemaByID(instance.TemplateID)
 	scope, _ := source.FlowScopeByID(instance.TemplateID)
-	request := runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance, Config: config}
+	request := runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance}
 	agents, err := flowInstanceAgentMaterializationBlueprints(request, schema, scope)
 	if err != nil {
 		return FlowInstanceMaterializationPlan{}, err
 	}
-	return FlowInstanceMaterializationPlan{Instance: instance, Config: config, Agents: agents, ActivationVariables: flowActivationVars(request)}, nil
+	return FlowInstanceMaterializationPlan{Instance: instance, Agents: agents, ActivationVariables: flowActivationVars(request)}, nil
 }
 
 func flowInstanceAgentMaterializationRecords(runID string, req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) ([]PersistedAgent, error) {
@@ -678,17 +593,6 @@ func flowInstanceAgentMaterializationRecords(runID string, req runtimepipeline.F
 }
 
 func flowInstanceAgentMaterializationBlueprints(req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) ([]AgentMaterializationBlueprint, error) {
-	bundle, ok := semanticview.Bundle(req.ContractBundle)
-	if !ok {
-		return nil, fmt.Errorf("committed receiver configuration requires the selected contract bundle")
-	}
-	configuration, err := bundle.ReceiverConfigurationForFlow(req.Instance.TemplateID)
-	if err != nil {
-		return nil, fmt.Errorf("flow %s receiver configuration: %w", req.Instance.TemplateID, err)
-	}
-	if err := configuration.ValidateCommitted(req.Config); err != nil {
-		return nil, fmt.Errorf("flow %s receiver configuration: %w", req.Instance.TemplateID, err)
-	}
 	instance := req.Instance
 	vars := flowActivationVars(req)
 	localEvents := flowLocalEventSet(schema, scope)
@@ -716,7 +620,7 @@ func flowInstanceAgentMaterializationBlueprints(req runtimepipeline.FlowInstance
 			// to a declaration-owned static agent.
 			agentEntityID = ""
 		}
-		identity, cfg, err := buildFlowAgentBlueprint(req.ContractBundle, namePlan, instance.TemplateID, instance.InstanceID, agentEntityID, instance.InstancePath, key, entry, vars, localEvents, req.Config)
+		identity, cfg, err := buildFlowAgentBlueprint(req.ContractBundle, namePlan, instance.TemplateID, instance.InstanceID, agentEntityID, instance.InstancePath, key, entry, vars, localEvents)
 		if err != nil {
 			return nil, err
 		}
@@ -755,6 +659,7 @@ var dynamicFlowCreationEventNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("
 func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(
 	ctx context.Context,
 	req runtimepipeline.FlowInstanceActivationRequest,
+	fields map[string]any,
 	agentRecords []PersistedAgent,
 	schema runtimecontracts.FlowSchemaDocument,
 	lineage events.EventLineage,
@@ -796,7 +701,7 @@ func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(
 		req.Instance.InstancePath,
 		req.Instance.EntityID,
 		lineage,
-		req.Config,
+		fields,
 		req.Context,
 		occurredAt,
 	)
@@ -1300,7 +1205,6 @@ func buildFlowAgentBlueprint(
 	entry runtimecontracts.AgentRegistryEntry,
 	vars map[string]string,
 	localEvents map[string]struct{},
-	config map[string]any,
 ) (runtimeagentidentity.Plan, models.AgentConfig, error) {
 	name, err := namePlan.Materialize()
 	if err != nil {
@@ -1342,17 +1246,6 @@ func buildFlowAgentBlueprint(
 	}
 	rendered = dedupeStrings(rendered)
 
-	cfgPayload := map[string]any{}
-	for k, v := range config {
-		k = strings.TrimSpace(k)
-		if k != "" {
-			cfgPayload[k] = v
-		}
-	}
-	rawConfig, err := canonicaljson.MarshalPreservingNumberKinds(cfgPayload)
-	if err != nil {
-		return runtimeagentidentity.Plan{}, models.AgentConfig{}, err
-	}
 	prompt, err := assembleResolvedAgentPrompt(source, templateID, entry)
 	if err != nil {
 		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s intent: %w", key, err)
@@ -1392,7 +1285,6 @@ func buildFlowAgentBlueprint(
 		EntityID:        entityID,
 		ParentAgent:     strings.TrimSpace(entry.ManagerFallback),
 		Config:          json.RawMessage(`{}`),
-		ReceiverConfig:  rawConfig,
 	}
 	cfg.NormalizeRuntimeDescriptor()
 	if _, err := admitAgentConfigSubscriptions(source, &cfg, localEvents); err != nil {
@@ -1413,9 +1305,8 @@ func buildFlowAgentConfig(
 	entry runtimecontracts.AgentRegistryEntry,
 	vars map[string]string,
 	localEvents map[string]struct{},
-	config map[string]any,
 ) (models.AgentConfig, error) {
-	plan, cfg, err := buildFlowAgentBlueprint(source, namePlan, templateID, instanceID, entityID, flowPath, key, entry, vars, localEvents, config)
+	plan, cfg, err := buildFlowAgentBlueprint(source, namePlan, templateID, instanceID, entityID, flowPath, key, entry, vars, localEvents)
 	if err != nil {
 		return models.AgentConfig{}, err
 	}
@@ -1648,13 +1539,6 @@ func staticFlowLocalEventSetForEntries(entries []runtimecontracts.AgentRegistryE
 
 func flowActivationVars(req runtimepipeline.FlowInstanceActivationRequest) map[string]string {
 	vars := map[string]string{}
-	for key, value := range req.Config {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		vars[key] = stringifyPromptTemplateValue(value)
-	}
 	setFlowActivationBuiltin(vars, "entity_id", req.Instance.EntityID)
 	setFlowActivationBuiltin(vars, "instance_id", req.Instance.InstanceID)
 	setFlowActivationBuiltin(vars, "template_id", req.Instance.TemplateID)

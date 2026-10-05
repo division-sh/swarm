@@ -100,10 +100,6 @@ func decodeNodeTestYAML(body []byte, target any) error {
 		envelope, project = canonicalrouting.SchemaInputPinsParserEnvelope, func(s FlowSchemaDocument) { *out = s.Pins.Inputs }
 	case *FlowOutputPins:
 		envelope, project = canonicalrouting.SchemaOutputPinsParserEnvelope, func(s FlowSchemaDocument) { *out = s.Pins.Outputs }
-	case *FlowInstanceVariables:
-		envelope, project = "instance_variables:", func(s FlowSchemaDocument) { *out = s.InstanceVariables }
-	case *FlowVariable:
-		envelope, project = "instance_variables:\n  variables:\n    value:", func(s FlowSchemaDocument) { *out = s.InstanceVariables.Variables["value"] }
 	case *FlowStageDeclarations:
 		envelope, project = "stages:", func(s FlowSchemaDocument) { *out = s.StageDeclarations }
 	case *FlowStageGateDeclaration:

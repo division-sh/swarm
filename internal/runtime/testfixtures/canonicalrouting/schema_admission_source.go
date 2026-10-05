@@ -21,14 +21,9 @@ imports:
 connect: [{event: work.requested, from: source, to: worker, rename: work.received, resolution: create, key_from: event.id}]
 pins:
   inputs:
-    - event: work.requested
-      initialize: {note: payload.note}
+    - work.requested
   outputs: [work.completed]
 required_agents: [{role: worker, subscribes_to: [], emits: [work.completed], description: ''}]
-instance_variables:
-  description: Configuration
-  variables:
-    note: {type: text, default: '', length: {min: 0}}
 auto_emit_on_create: {event: work.started}
 stages:
   waiting:

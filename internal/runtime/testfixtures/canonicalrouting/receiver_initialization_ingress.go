@@ -13,30 +13,22 @@ imports:
   provider_trigger_events:
     - {provider: telegram, event: inbound.telegram.text_message}
 instance: conversation_reference
-instance_variables:
-  variables:
-    initial_text: text
-    message_number: integer
-    enabled: {type: boolean, default: false}
 auto_emit_on_create:
   event: chat.initialized
 pins:
   inputs:
-    - event: inbound.telegram.text_message
-      initialize:
-        initial_text: payload.text
-        message_number: payload.provider_message_reference
+    - inbound.telegram.text_message
 `)
 	writeClosedVariantFile(t, root, "telegram-chat/entities.yaml", `chat:
   conversation_reference: {type: text, _unused_reason: canonical receiver key}
-  initial_text: text
-  message_number: integer
-  enabled: boolean
+  text: text
+  provider_message_reference: integer
+  enabled: {type: boolean, initial: false}
 `)
 	writeClosedVariantFile(t, root, "telegram-chat/events.yaml", `chat.initialized:
   conversation_reference: text
-  initial_text: text
-  message_number: integer
+  text: text
+  provider_message_reference: integer
   enabled: boolean
 `)
 	writeClosedVariantFile(t, root, "telegram-chat/nodes.yaml", `receiver:
@@ -47,7 +39,7 @@ pins:
       guard: {check: payload.conversation_reference != ''}
     chat.initialized:
       data_accumulation:
-        writes: [initial_text, message_number, enabled]
+        writes: [text, provider_message_reference, enabled]
 `)
 	return root
 }

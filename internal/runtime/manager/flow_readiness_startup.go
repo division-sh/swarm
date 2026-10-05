@@ -454,7 +454,6 @@ func (am *AgentManager) verifyDynamicFlowRuntimeProcessTopology(ctx context.Cont
 	records, err := am.flowInstanceAgentRecords(plan.RunID, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source.source,
 		Instance:       projection.Identity,
-		Config:         projection.Config,
 	}, schema, scope)
 	if err != nil {
 		return err

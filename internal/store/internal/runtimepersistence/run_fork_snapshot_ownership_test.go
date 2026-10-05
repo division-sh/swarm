@@ -46,7 +46,6 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	req := sqliteFlowActivationRequest(construction.bundle, "owner", "one", "", "owner/one")
 	req.OccurredAt = at
-	req.Config = map[string]any{"subject_id": "one"}
 	req.ConstructorInput, req.ResolvedKey = "construct.requested", "one"
 	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, at)
 	activation, err := construction.manager.PrepareFlowInstanceActivation(f.ctx, req)

@@ -13,7 +13,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -120,19 +119,18 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := workflowOwnershipCompanionDatabase(t, backend)
-			for _, change := range []string{"fresh_then_exact_reuse", "missing_config", "duplicate_agents", "wrong_agent_route", "missing_readiness", "wrong_readiness", "inactive", "wrong_config", "wrong_numeric_kind", "wrong_entity_owner"} {
+			for _, change := range []string{"fresh_then_exact_reuse", "missing_config", "duplicate_agents", "wrong_agent_route", "missing_readiness", "wrong_readiness", "inactive", "wrong_config", "wrong_entity_owner"} {
 				t.Run(change, func(t *testing.T) {
 					plan, planning, state, modes, forkID := workflowOwnershipProjection(t, source, "consumer")
 					state.ExecutionMode = executionmode.Live
-					config, err := pipeline.WorkflowInstanceBusinessConfigForRoute(state.Route, plan.Entities[0].MaterializationMetadata.FlowConfig)
+					instance, _, found, err := runforkadmission.FixedConstructionForRoute(source, plan, state.Route)
+					if err != nil || !found {
+						t.Fatalf("missing constructed owner: %v", err)
+					}
+					flow, err := manager.ConstructedFlowMaterialization(source, plan.SourceRunID, instance)
 					if err != nil {
 						t.Fatal(err)
 					}
-					flow, err := manager.TemplateFlowMaterialization(source, state.FlowID, state.Route.InstancePath, state.EntityID, config)
-					if err != nil {
-						t.Fatal(err)
-					}
-					state.Config = flow.Config
 					for _, agent := range flow.Agents {
 						revision, err := manager.AgentConfigPlanRevision(agent.Config, agent.Identity)
 						if err != nil {
@@ -151,7 +149,7 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 						t.Fatalf("canonical template state missing: %+v", prepared.States)
 					}
 					canonical := prepared.States[0]
-					candidate := selectedContractWorkflowState{SourceRunID: plan.SourceRunID, RunID: forkID, EntityID: canonical.EntityID, EntityType: canonical.EntityType, WorkflowName: canonical.FlowID, WorkflowVersion: canonical.WorkflowVersion, Mode: canonical.Mode, ExecutionMode: canonical.ExecutionMode, Route: canonical.Route.InstancePath, Config: canonical.Config, Agents: canonical.Agents, History: plan.Entities[0]}
+					candidate := selectedContractWorkflowState{SourceRunID: plan.SourceRunID, RunID: forkID, EntityID: canonical.EntityID, EntityType: canonical.EntityType, WorkflowName: canonical.FlowID, WorkflowVersion: canonical.WorkflowVersion, Mode: canonical.Mode, ExecutionMode: canonical.ExecutionMode, Route: canonical.Route.InstancePath, Agents: canonical.Agents, History: plan.Entities[0]}
 					fact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 					if err != nil {
 						t.Fatal(err)
@@ -167,7 +165,7 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 					}
 					switch change {
 					case "missing_config":
-						candidate.Config = nil
+						candidate.History.MaterializationMetadata = nil
 					case "duplicate_agents":
 						candidate.Agents = append(candidate.Agents, candidate.Agents[0])
 					case "wrong_agent_route":
@@ -187,16 +185,8 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 					if err := tx.QueryRow(`SELECT config FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, candidate.RunID, candidate.Route).Scan(&persisted); err != nil {
 						t.Fatal(err)
 					}
-					readback, err := pipeline.WorkflowInstanceBusinessConfigForRoute(canonical.Route, persisted)
-					if err != nil {
+					if _, err := pipeline.DecodeWorkflowInstanceRecordedHeader(canonical.Route, persisted); err != nil {
 						t.Fatal(err)
-					}
-					wire, err := canonicaljson.MarshalPreservingNumberKinds(readback)
-					if err != nil || string(wire) != `{"flow_path":["business","path"],"nested":[7,7.0,null],"status":false,"vertical_id":"recorded-business-key"}` {
-						t.Fatalf("materialized business config = %s: %v", wire, err)
-					}
-					if change == "wrong_numeric_kind" {
-						candidate.Config["nested"].([]any)[1] = int64(7)
 					}
 					query := ""
 					switch change {
@@ -253,8 +243,8 @@ func TestSelectedForkHistoricalFieldlessHeaderBothStores(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						state := selectedContractWorkflowState{SourceRunID: sourceRun, RunID: childRun, EntityID: projection.Fork.EntityID, WorkflowName: "receiver", WorkflowVersion: "fixture", Mode: "static", ExecutionMode: executionmode.Mock, Route: projection.Fork.FlowInstance, Config: map[string]any{}, History: runfork.RunForkEntityState{EntityID: sourceEntity, CurrentState: "pending", EnteredStateAt: &entered, MaterializationMetadata: metadata}}
-						config, err := pipeline.WorkflowInstanceConfigPayloadForRoute(flowidentity.StoredRoute("receiver", "receiver", metadata.FlowInstance), state.WorkflowVersion, state.Config)
+						state := selectedContractWorkflowState{SourceRunID: sourceRun, RunID: childRun, EntityID: projection.Fork.EntityID, WorkflowName: "receiver", WorkflowVersion: "fixture", Mode: "static", ExecutionMode: executionmode.Mock, Route: projection.Fork.FlowInstance, History: runfork.RunForkEntityState{EntityID: sourceEntity, CurrentState: "pending", EnteredStateAt: &entered, MaterializationMetadata: metadata}}
+						config, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.StoredRoute("receiver", "receiver", metadata.FlowInstance), state.WorkflowVersion)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -382,7 +372,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		t.Fatal(err)
 	}
 	enteredAt := time.Now().UTC().Add(-time.Hour)
-	configPayload, err := pipeline.WorkflowInstanceConfigPayloadForIdentity(instance, source.WorkflowVersion(), nil)
+	configPayload, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, source.WorkflowVersion())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +395,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		metadata := *other.MaterializationMetadata
 		metadata.FlowInstance = otherInstance.InstancePath
 		metadata.FlowTemplate = sibling
-		payload, err := pipeline.WorkflowInstanceConfigPayloadForIdentity(otherInstance, source.WorkflowVersion(), nil)
+		payload, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(otherInstance, source.WorkflowVersion())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -417,7 +407,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		plan.Entities = append(plan.Entities, other)
 	}
 	if mode == "template" {
-		plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","config":{"vertical_id":"recorded-business-key","nested":[7,7.0,null],"status":false,"flow_path":["business","path"]}}`)
+		plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item"}`)
 	}
 	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})
 	eventName := "outer.requested"
@@ -460,7 +450,6 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	state := runfork.RunForkSelectedContractWorkflowState{SourceEventID: "event-a", EntityID: entityID, EntityType: entityType, FlowID: flow, WorkflowVersion: source.WorkflowVersion(), Mode: mode,
 		SourceEvents: []runfork.RunForkSelectedContractWorkflowStateSourceEvent{{SourceEventID: "event-a", ExecutionMode: executionmode.Live}, {SourceEventID: "event-b", ExecutionMode: executionmode.Live}},
 		AddressKind:  runfork.RunForkSelectedContractWorkflowStateExact, Route: flowidentity.StoredRoute(flowidentity.ScopeKey(source, flow), flowidentity.LogicalInstanceID(path), path)}
-	state.Config = map[string]any{}
 	if flow == "." {
 		state.AddressKind, state.Route = runfork.RunForkSelectedContractWorkflowStateRunScope, flowidentity.Route{}
 	}

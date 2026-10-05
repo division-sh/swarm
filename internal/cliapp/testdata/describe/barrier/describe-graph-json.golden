@@ -75,7 +75,7 @@
           "flow_path": "ingress",
           "producer_schema_digest": "sha256:07718adc1dd1daca2a4ffb0daa5ca4d42ed6e01197d148a874a694fbc6ff4049",
           "receiver_schema_digest": "sha256:07718adc1dd1daca2a4ffb0daa5ca4d42ed6e01197d148a874a694fbc6ff4049",
-          "pin_digest": "sha256:203632c2b58ac2ddffc6a72d111ee45540a35d44d6167361cca93203680a8c88",
+          "pin_digest": "sha256:b47c1fe8f580cd57fb1780dea92aba0cd4381bc2490f0a5608a558bb1b05023b",
           "source_file": "ingress/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -147,7 +147,7 @@
           "flow_path": "operating",
           "producer_schema_digest": "sha256:07718adc1dd1daca2a4ffb0daa5ca4d42ed6e01197d148a874a694fbc6ff4049",
           "receiver_schema_digest": "sha256:07718adc1dd1daca2a4ffb0daa5ca4d42ed6e01197d148a874a694fbc6ff4049",
-          "pin_digest": "sha256:0ae4b364ad9d84c9a68ba63732eee0d0f4b32303b9fdc7e69ccba897fbcc7de6",
+          "pin_digest": "sha256:11a19761149a226206b8a3421aca0f4023a21864ffa55ad21c128eb27ac2bc9d",
           "source_file": "operating/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -231,7 +231,7 @@
           "flow_path": "portfolio",
           "producer_schema_digest": "sha256:503624e2963aa526bc7aac294a7f3a6a1c79f7fdb5fc7b8c4c7554169758b0d3",
           "receiver_schema_digest": "sha256:503624e2963aa526bc7aac294a7f3a6a1c79f7fdb5fc7b8c4c7554169758b0d3",
-          "pin_digest": "sha256:bec0869183f59a854f49654f07889719d64b50cbf2988f0ef00825d781dcb5b7",
+          "pin_digest": "sha256:a37cf4d58d9d5cb659258340b861fef3b6747434bdfc430a95eba9b6ff80cc75",
           "source_file": "portfolio/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -242,7 +242,7 @@
           "flow_path": "portfolio",
           "producer_schema_digest": "sha256:f07f3ddccf876e43e23ad3a4ba46de2f8465eb2f1878e1a70a757dc858078630",
           "receiver_schema_digest": "sha256:f07f3ddccf876e43e23ad3a4ba46de2f8465eb2f1878e1a70a757dc858078630",
-          "pin_digest": "sha256:bfb84116b1b3c1fec8d6dc1983c9e271048d5a468aafdfbaf978ad96af6579aa",
+          "pin_digest": "sha256:7be3891ed209aebeaf2c892a6db6501cd5d3e34c7e7f973065d75eca4a7e5975",
           "source_file": "portfolio/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -325,7 +325,7 @@
           "flow_path": "portfolio/period",
           "producer_schema_digest": "sha256:503624e2963aa526bc7aac294a7f3a6a1c79f7fdb5fc7b8c4c7554169758b0d3",
           "receiver_schema_digest": "sha256:503624e2963aa526bc7aac294a7f3a6a1c79f7fdb5fc7b8c4c7554169758b0d3",
-          "pin_digest": "sha256:b39000c888c366d9ac6064bcc38b3cb86c02dafa347e6cc99e86ce40fbcd1e8c",
+          "pin_digest": "sha256:d40cb392b3b1ae753f8daa9a08d1c019d139422c92a3dc0082d52ba8974eb64e",
           "source_file": "portfolio/period/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -336,7 +336,7 @@
           "flow_path": "portfolio/period",
           "producer_schema_digest": "sha256:07718adc1dd1daca2a4ffb0daa5ca4d42ed6e01197d148a874a694fbc6ff4049",
           "receiver_schema_digest": "sha256:07718adc1dd1daca2a4ffb0daa5ca4d42ed6e01197d148a874a694fbc6ff4049",
-          "pin_digest": "sha256:b997363f3f513242b733848a152d9e33732cfe6a72a556b3ffd0621022cd7fa9",
+          "pin_digest": "sha256:c8bed3c0bc976436fd1ca2a3193f3c23feecb7a8b04fd48941dbf719539148af",
           "source_file": "portfolio/period/schema.yaml",
           "source_line": 1,
           "source_column": 1

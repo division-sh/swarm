@@ -50,7 +50,7 @@ func TestAdmissionSealsCompleteProjectionAndResolvedAgentAuthority(t *testing.T)
 			case "omitted_association":
 				copy.States[0].SourceEvents = copy.States[0].SourceEvents[:1]
 			case "wrong_instance_key":
-				copy.States[0].Config["instance_id"] = "foreign"
+				copy.States[0].Route.InstanceID = "foreign"
 			case "omitted_agent":
 				copy.States[0].Agents = nil
 			case "different_valid_revision":
@@ -60,7 +60,7 @@ func TestAdmissionSealsCompleteProjectionAndResolvedAgentAuthority(t *testing.T)
 			case "blueprint_config":
 				copy.Blueprints[0].Config.Model = "foreign"
 			case "flow_config":
-				copy.Flows[0].Config["vertical_id"] = "foreign"
+				copy.Flows[0].ActivationVariables["instance_id"] = "foreign"
 			case "original_source":
 				bundle, _ := semanticview.Bundle(req.Source)
 				bundle.Platform = contracts.PlatformSpecDocument{}
@@ -150,17 +150,6 @@ func TestAdmissionRejectsIncompleteOrForeignBindings(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestAdmissionProjectionPreservesIntegerTransport(t *testing.T) {
-	admitted := Admission{sealed: &admittedProjection{projection: []byte(`{"States":[{"Config":{"count":9007199254740991}}]}`)}}
-	projection, err := admitted.Projection()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := projection.States[0].Config["count"].(json.Number); !ok || got.String() != "9007199254740991" {
-		t.Fatalf("integer transport rounded or changed type: %#v", projection.States[0].Config["count"])
 	}
 }
 
@@ -361,25 +350,11 @@ func TestAdmissionRetainsExactRunlessPromptWithoutPersistingIt(t *testing.T) {
 
 func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 	t.Helper()
-	return templateAdmissionRequestWithVariables(t, nil)
-}
-
-func templateAdmissionRequestWithVariables(t *testing.T, variables map[string]contracts.FlowVariable) AdmissionRequest {
-	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{Consumer: canonicalrouting.TemplateInstanceAgentConsumer})
 	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{PlatformPackBase: packfixture.EmbeddedBase(t), AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if variables != nil {
-		schema := bundle.FlowSchemas["consumer"]
-		schema.InstanceVariables = contracts.FlowInstanceVariables{Variables: variables}
-		bundle.FlowSchemas["consumer"] = schema
-		bundle.FlowTree.ByID["consumer"].Schema = schema
-		if err := contracts.CompileWorkflowSemantics(bundle); err != nil {
-			t.Fatal(err)
-		}
 	}
 	hash, err := contracts.BundleHash(bundle)
 	if err != nil {
@@ -408,7 +383,7 @@ func templateAdmissionRequestWithVariables(t *testing.T, variables map[string]co
 			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 			FlowTemplate: "consumer", Mode: "template", StageDefined: graph.StageCount() != 0,
 			EntityType: "deployment", FlowInstance: "consumer/item",
-			FlowConfig: json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","config":{"vertical_id":"recorded-business-key"}}`),
+			FlowConfig: json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item"}`),
 		},
 	}}}
 	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})

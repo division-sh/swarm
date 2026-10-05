@@ -39,7 +39,7 @@ func humanTaskConstructedRequester(t *testing.T, ctx context.Context, selected h
 		StorageRef: instance.InstancePath, InstanceID: instance.InstanceID, EntityID: instance.EntityID,
 		ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,
 		CurrentState: "queued", Status: "active", CreatedAt: at, UpdatedAt: at, EnteredStageAt: at,
-		Fields: map[string]any{}, Config: map[string]any{},
+		Fields: map[string]any{},
 	}
 	command, err := flowactivationfixture.Command(effects.WithExecutionMode(ctx, executionmode.Live), header, pipeline.WorkflowLifecycleMutationPlan{}, at)
 	if err != nil {

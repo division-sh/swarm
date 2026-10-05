@@ -81,25 +81,14 @@ func TestRewriteNamesOnlyPreservesOtherSourceAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestRewritePreservesInitializePassengerExactly(t *testing.T) {
-	before := []byte("name: worker\ninstance: worker_id\npins:\n  inputs:\n    events:\n      - initialize: {label: payload.label, nested: payload.details}\n        event: worker.ready\n  outputs:\n    events: []\ninstance_variables: {variables: {label: text}}\n")
-	after, _ := rewritten(t, map[string][]byte{"worker/schema.yaml": before})
-	doc, err := parseTestSource(after["worker/schema.yaml"])
-	if err != nil {
-		t.Fatal(err)
+func TestRewriteRejectsRetiredInitializePassenger(t *testing.T) {
+	before := []byte("name: worker\npins:\n  inputs:\n    events:\n      - {event: worker.ready, initialize: {label: payload.label}}\n")
+	inputs := map[string][]byte{"worker/schema.yaml": before}
+	if _, err := planRewrite(inputs); err == nil {
+		t.Fatal("retired initializer preserved by rewrite")
 	}
-	pins, _ := lookup(doc.root, "pins")
-	inputs, _ := lookup(pins, "inputs")
-	item := inputs.Content[0]
-	event, _ := lookup(item, "event")
-	initialize, _ := lookup(item, "initialize")
-	label, _ := lookup(initialize, "label")
-	nested, _ := lookup(initialize, "nested")
-	if event.Value != "worker.ready" || label.Value != "payload.label" || nested.Value != "payload.details" || len(item.Content) != 4 {
-		t.Fatalf("initialization changed: %s", after["worker/schema.yaml"])
-	}
-	if !bytes.HasSuffix(after["worker/schema.yaml"], []byte("instance_variables: {variables: {label: text}}\n")) {
-		t.Fatal("deferred instance variables changed")
+	if !bytes.Equal(inputs["worker/schema.yaml"], before) {
+		t.Fatal("rejected rewrite mutated its input")
 	}
 }
 
@@ -376,7 +365,7 @@ func TestRewriteRejectsTrackedSymlinkBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestRewriteActualCorpusPreservesEventsAndDeferredInitialization(t *testing.T) {
+func TestRewriteActualCorpusPreservesNamesOnlyEvents(t *testing.T) {
 	root := filepath.Join("..", "..")
 	tracked, err := exec.Command("git", "-C", root, "ls-files", "-z").Output()
 	if err != nil {
@@ -401,7 +390,6 @@ func TestRewriteActualCorpusPreservesEventsAndDeferredInitialization(t *testing.
 		t.Fatal(err)
 	}
 	checkGenericSurvivorMutations(t, inputs, after)
-	initializers := 0
 	for name, data := range after {
 		before, err := parseTestSource(inputs[name])
 		if err != nil {
@@ -434,22 +422,14 @@ func TestRewriteActualCorpusPreservesEventsAndDeferredInitialization(t *testing.
 				if oldItem.Kind == yaml.MappingNode {
 					oldItem, _ = lookup(oldItem, "event")
 				}
-				if item.Kind == yaml.MappingNode {
-					initializer, _ := lookup(item, "initialize")
-					if direction != "inputs" || len(item.Content) != 4 || initializer == nil {
-						t.Fatalf("unexpected passenger: %s", name)
-					}
-					initializers++
-					item, _ = lookup(item, "event")
+				if item.Kind != yaml.ScalarNode {
+					t.Fatalf("unexpected pin passenger: %s", name)
 				}
 				if item.Value != oldItem.Value || item.Tag != oldItem.Tag {
 					t.Fatalf("event changed: %s %s #%d", name, direction, index)
 				}
 			}
 		}
-	}
-	if initializers != 3 {
-		t.Fatalf("expected the three deferred initialization carriers, got %d", initializers)
 	}
 	_, repeat := rewritten(t, after)
 	if len(repeat) != 0 {

@@ -90,7 +90,7 @@ func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interfac
 		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
 		WorkflowName: boundedProviderFlowID, WorkflowVersion: source.WorkflowVersion(),
 		Slug: slug, Name: "Customer A", CurrentState: "active", StageDefined: true,
-		CreatedAt: now, EnteredStageAt: now, Fields: map[string]any{}, Config: config,
+		CreatedAt: now, EnteredStageAt: now, Fields: config,
 	}, runtimepipeline.WorkflowLifecycleMutationPlan{}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -1158,11 +1158,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 
 func inboundGatewayWorkflowConfig(t *testing.T, flowInstance, provider, webhookSecret string) []byte {
 	t.Helper()
-	payload, err := runtimepipeline.WorkflowInstanceConfigPayloadForRoute(runtimeflowidentity.RouteForInstancePath(flowInstance), "", map[string]any{
-		"secrets": map[string]any{
-			"webhook_signing": map[string]any{provider: webhookSecret},
-		},
-	})
+	payload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForRoute(runtimeflowidentity.RouteForInstancePath(flowInstance), "")
 	if err != nil {
 		t.Fatalf("project inbound workflow config: %v", err)
 	}

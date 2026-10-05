@@ -2715,7 +2715,7 @@ func seedEventPublishConstructedFlow(t *testing.T, selected *store.PostgresStore
 	instance.ParentEntityID = parent.EntityID
 	plan, err := constructor.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source, Instance: instance, ConstructorInput: schema.Pins.Inputs.EventPins[0].Event,
-		ResolvedKey: key, Config: map[string]any{schema.Instance.Path(): key}, TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
+		ResolvedKey: key, TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
 	})
 	if err != nil {
 		t.Fatal(err)

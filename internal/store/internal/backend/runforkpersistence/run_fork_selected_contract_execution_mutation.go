@@ -139,7 +139,6 @@ type selectedContractWorkflowState struct {
 	ExecutionMode   executionmode.Mode
 	Mode            string
 	Route           string
-	Config          map[string]any
 	Agents          []runfork.RunForkSelectedContractAgentExpectation
 	History         runfork.RunForkEntityState
 }
@@ -182,7 +181,7 @@ func selectedContractAdmittedWorkflowStates(plan runfork.RunForkPlan, forkRunID 
 			SourceRunID: plan.SourceRunID, RunID: forkRunID, EntityID: owner.Fork.EntityID, EntityType: state.EntityType,
 			WorkflowName: state.FlowID, WorkflowVersion: state.WorkflowVersion,
 			ExecutionMode: state.ExecutionMode, Mode: state.Mode, Route: route.InstancePath,
-			Config: state.Config, Agents: state.Agents, History: history[state.EntityID],
+			Agents: state.Agents, History: history[state.EntityID],
 		})
 	}
 	return out, nil
@@ -215,11 +214,7 @@ func selectedContractWorkflowStateConfig(state selectedContractWorkflowState) ([
 	if err != nil {
 		return nil, err
 	}
-	descriptor := state.Config
-	if descriptor == nil {
-		return nil, fmt.Errorf("selected-contract workflow state requires exact committed activation config")
-	}
-	descriptor, err = runtimepipeline.WorkflowInstanceConfigPayloadForIdentity(identity, state.WorkflowVersion, descriptor)
+	descriptor, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, state.WorkflowVersion)
 	if err != nil {
 		return nil, fmt.Errorf("encode selected-contract workflow route config: %w", err)
 	}
@@ -240,7 +235,7 @@ func selectedContractWorkflowIdentity(state selectedContractWorkflowState) (runt
 		return runtimeflowidentity.Instance{}, fmt.Errorf("selected workflow identity disagrees with admitted entity projection")
 	}
 	route := runtimeflowidentity.StoredRoute(state.WorkflowName, runtimeflowidentity.LogicalInstanceID(state.Route), state.Route)
-	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedConfig(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
 	if err != nil {
 		return runtimeflowidentity.Instance{}, err
 	}
@@ -310,16 +305,9 @@ func requireSelectedContractWorkflowCompanion(ctx context.Context, tx *sql.Tx, p
 	if err != nil {
 		return false, fmt.Errorf("verify selected-contract workflow instance: %w", err)
 	}
-	business, configErr := runtimepipeline.WorkflowInstanceBusinessConfigForRoute(runtimeflowidentity.RouteForInstancePath(state.Route), persistedConfig)
-	persistedBusiness, persistedErr := runtimecanonicaljson.MarshalPreservingNumberKinds(business)
-	wantBusiness := state.Config
-	if wantBusiness == nil {
-		wantBusiness = map[string]any{}
-	}
-	expectedBusiness, expectedErr := runtimecanonicaljson.MarshalPreservingNumberKinds(wantBusiness)
 	if entityID != state.EntityID || entityType.String != state.EntityType || entityType.Valid != (state.EntityType != "") ||
 		stageDefined != state.History.MaterializationMetadata.StageDefined || persistedWorkflow != state.WorkflowName || persistedMode != state.Mode || persistedStatus != "active" || !unterminated ||
-		!workflowCommitJSONEqual(persistedConfig, config) || configErr != nil || persistedErr != nil || expectedErr != nil || string(persistedBusiness) != string(expectedBusiness) {
+		!workflowCommitJSONEqual(persistedConfig, config) {
 		return false, fmt.Errorf("selected-contract workflow instance %s disagrees with exact descriptor", state.Route)
 	}
 	return true, nil

@@ -28,10 +28,9 @@ type CompiledConnectionInputs struct {
 }
 
 type compiledConnectionInputsValue struct {
-	inputs               map[FlowConnect]CompiledConnectionInput
-	errors               map[FlowConnect]error
-	receivers            map[string]compiledReceiverEvents
-	initializationErrors []string
+	inputs    map[FlowConnect]CompiledConnectionInput
+	errors    map[FlowConnect]error
+	receivers map[string]compiledReceiverEvents
 }
 
 type compiledReceiverEvents struct {
@@ -100,7 +99,7 @@ func (p CompiledConnectionInputs) ValidateBindings() error {
 	if p.value == nil {
 		return nil
 	}
-	messages := append([]string(nil), p.value.initializationErrors...)
+	var messages []string
 	for connect, err := range p.value.errors {
 		if !errors.Is(err, errConnectionProducerUnbound) {
 			messages = append(messages, fmt.Sprintf("%s: %v", connect.AuthoredLocation(), err))
@@ -111,15 +110,6 @@ func (p CompiledConnectionInputs) ValidateBindings() error {
 		return nil
 	}
 	return fmt.Errorf("compiled connection input binding failed: %v", messages)
-}
-
-func (p CompiledConnectionInputs) ValidateInitialization() error {
-	if p.value == nil || len(p.value.initializationErrors) == 0 {
-		return nil
-	}
-	messages := append([]string(nil), p.value.initializationErrors...)
-	sort.Strings(messages)
-	return fmt.Errorf("compiled connection initialization failed: %v", messages)
 }
 
 // CompileConnectionInputs freezes the admitted source after any provider schema
@@ -141,7 +131,6 @@ func CompileConnectionInputs(bundle *WorkflowContractBundle, pins ConnectionInpu
 		}
 		value.inputs[connect] = input
 	}
-	value.initializationErrors = validateConnectionInitializers(bundle, pins)
 	value.receivers = compileReceiverEventBindings(bundle, pins, value.inputs)
 	return CompiledConnectionInputs{value: value}
 }
@@ -273,43 +262,4 @@ func commonConnectionReceiverSchema(flowID, event string, producer CompiledEvent
 		return producer
 	}
 	return common
-}
-
-func validateConnectionInitializers(bundle *WorkflowContractBundle, pins ConnectionInputPinProvider) []string {
-	var failures []string
-	for flowID := range bundle.compiledEventSchemas {
-		for _, pin := range pins.FlowInputEventPins(flowID) {
-			if len(pin.Initialization().Bindings()) == 0 {
-				continue
-			}
-			if err := validateInputCreatingConnections(bundle, flowID, pin.EventType()); err != nil {
-				failures = append(failures, fmt.Sprintf("%s input %s: %v", flowID, pin.EventType(), err))
-			}
-		}
-	}
-	return failures
-}
-
-func validateInputCreatingConnections(bundle *WorkflowContractBundle, flowID, event string) error {
-	found := false
-	for _, connect := range bundle.Semantics.CompositionConnects {
-		if connectEndpointFlowID(connect.OwnerFlowPath, connect.To) != flowID {
-			continue
-		}
-		receiverEvent := connect.Event
-		if connect.Rename != "" {
-			receiverEvent = connect.Rename
-		}
-		if packageEndpointLocalEvent(bundle, flowID, receiverEvent, true) != event {
-			continue
-		}
-		found = true
-		if connect.Resolution != FlowInputResolutionModeCreate && connect.Resolution != FlowInputResolutionModeSelectOrCreate {
-			return fmt.Errorf("input initialize requires a creating connection, not resolution: %s", FlowInputResolutionModeCode(connect.Resolution))
-		}
-	}
-	if !found {
-		return fmt.Errorf("input initialize requires a creating connection")
-	}
-	return nil
 }

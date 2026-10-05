@@ -96,16 +96,12 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 			if got := projection.Identity.ParentRoute; got.FlowID != "parent" || got.FlowInstance != "parent/root" || got.EntityID != parentEntityID {
 				t.Fatalf("projection parent route = %#v, want complete persisted parent", got)
 			}
-			if got := strings.TrimSpace(asString(projection.Config["vertical_id"])); got != "vertical-1" {
-				t.Fatalf("projection config vertical_id = %q, want vertical-1", got)
-			}
-			projection.Config["vertical_id"] = "mutated"
 			again, err := store.LoadRouteRecoveryProjection(ctx, flowIdentity)
 			if err != nil {
 				t.Fatalf("reload route recovery projection: %v", err)
 			}
-			if got := strings.TrimSpace(asString(again.Config["vertical_id"])); got != "vertical-1" {
-				t.Fatalf("persisted config aliased returned projection: got %q", got)
+			if again.Identity != projection.Identity {
+				t.Fatal("route identity changed on readback")
 			}
 
 			historicalRunID := uuid.NewString()
@@ -182,7 +178,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				}
 			})
 
-			badConfig := `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"` + instancePath + `","flow_path":7}`
+			badConfig := `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"` + instancePath + `","flow_path":7}`
 			updateConfig := "UPDATE flow_instances SET config = "
 			if tc.name == "sqlite" {
 				updateConfig += "? WHERE run_id = ? AND instance_path = ?"
@@ -235,7 +231,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjectionRejectsTerminatedTimest
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	route := runtimeflowidentity.StoredRoute("review", "inst-1", "review/inst-1")
 	flowIdentity := testRunScopedWorkflowRoute(ctx, route)
-	config := `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"review/inst-1","flow_path":"review/inst-1"}`
+	config := `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"review/inst-1","flow_path":"review/inst-1"}`
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, entity_id, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', TRUE, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)

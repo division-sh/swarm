@@ -172,7 +172,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 		eventID = input.ID()
 	}
-	materialized, err := manager.ConstructedFlowMaterialization(loaded.Source, runID, child, map[string]any{})
+	materialized, err := manager.ConstructedFlowMaterialization(loaded.Source, runID, child)
 	if err != nil || len(materialized.Agents) != 1 {
 		t.Fatalf("exact constructed child declaration: plan=%#v err=%v", materialized, err)
 	}

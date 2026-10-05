@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -69,24 +70,19 @@ func newReceiverConfigActivationFixtureWithTimerAndCommitter(t *testing.T, backe
 		"schema.yaml": "name: receiver-config-atomicity\n",
 		"review/schema.yaml": `name: review
 instance: request_id
-instance_variables:
-  variables:
-    label: {type: string}
-    enabled: {type: boolean, default: true}
-    nested: {type: json}
 stages:
   pending: {initial: true}
 pins:
   inputs:
-    - task.started
+    - task.create
 `,
-		"review/entities.yaml": "review_item:\n  request_id: string\n",
-		"review/events.yaml":   "task.started:\n",
+		"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
+		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n",
 	}
 	if autoEmit {
-		files["events.yaml"] = "request.started:\n  request_id: string\n  label: string\n  enabled: boolean\n  nested: json\n"
+		files["events.yaml"] = "request.started:\n  request_id: string\n  label: string\n  nested: json\n"
 		files["review/schema.yaml"] += "auto_emit_on_create: {event: task.started}\n"
-		files["review/events.yaml"] = "task.started:\n  request_id: string\n  label: string\n  enabled: boolean\n  nested: json\n"
+		files["review/events.yaml"] = "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n  request_id: string\n  label: string\n  enabled: boolean\n  nested: json\n"
 	}
 	if withTimer {
 		files["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending: {initial: true}", "  pending:\n    initial: true\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}", 1)
@@ -222,10 +218,21 @@ func (f receiverConfigActivationFixture) newRuntimeEventBus(t *testing.T, option
 
 func (f receiverConfigActivationFixture) request(key, instanceID, label string) pipeline.FlowInstanceActivationRequest {
 	req := sqliteFlowActivationRequest(f.bundle, "review", instanceID, "", "review/"+instanceID)
-	req.Config = map[string]any{"request_id": key, "label": label, "nested": []any{int64(7), float64(7), nil}}
-	req.ConstructorInput = "task.started"
+	pins := semanticview.Wrap(f.bundle).FlowInputEventPins("review")
+	if len(pins) != 1 {
+		panic("receiver fixture requires one exact creating input")
+	}
+	req.ConstructorInput = pins[0].EventType()
+	fields := map[string]any{"request_id": key}
+	if req.ConstructorInput == "task.create" {
+		fields["label"], fields["nested"] = label, []any{int64(7), float64(7), nil}
+	}
+	payload, err := canonicaljson.MarshalPreservingNumberKinds(fields)
+	if err != nil {
+		panic(err)
+	}
 	req.ResolvedKey = key
-	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "task.started", "constructor-fixture", "", []byte(`{}`), 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
+	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(req.ConstructorInput), "constructor-fixture", "", payload, 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
 	return req
 }
 
@@ -247,8 +254,10 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 					requests[1] = requests[0]
 				}
 				if strings.HasPrefix(scenario, "numeric_kind_") {
-					requests[1].Config["label"] = "first"
-					requests[1].Config["nested"].([]any)[1] = int64(7)
+					fields := receiverSuppliedPayload(t, requests[1])
+					fields["label"] = "first"
+					fields["nested"].([]any)[1] = int64(7)
+					setReceiverSuppliedPayload(t, &requests[1], fields)
 				}
 				if scenario == "different_keys" {
 					requests[1] = f.request("other-business-key", "ti-receiver-two", "second")
@@ -260,12 +269,12 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if plans[i].Instance.Config["enabled"] != true || len(plans[i].Readiness.Agents) != agentCount {
+					if plans[i].Instance.Fields["enabled"] != true || len(plans[i].Readiness.Agents) != agentCount {
 						t.Fatal("typed preparation omitted defaults or agent plan")
 					}
 				}
-				if agentCount != 0 && scenario != "exact" && plans[0].Readiness.Agents[0].ConfigRevision == plans[1].Readiness.Agents[0].ConfigRevision {
-					t.Fatal("different business config produced the same agent plan")
+				if agentCount != 0 && scenario != "different_keys" && plans[0].Readiness.Agents[0].ConfigRevision != plans[1].Readiness.Agents[0].ConfigRevision {
+					t.Fatal("instance business state changed actor configuration authority")
 				}
 				f.requireCounts(t, 0)
 				secondStore := f.store
@@ -343,7 +352,7 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 				} else if scenario == "same_key" || strings.HasPrefix(scenario, "numeric_kind_") {
 					failure, ok := failures.As(second.err)
 					if !ok || failure.Failure.Class != failures.ClassConflictingDuplicate || committed[1].Created {
-						t.Fatalf("losing preparation accepted: created=%v config=%#v err=%v", committed[1].Created, committed[1].Plan.Instance.Config, second.err)
+						t.Fatalf("losing preparation accepted: created=%v fields=%#v err=%v", committed[1].Created, committed[1].Plan.Instance.Fields, second.err)
 					}
 				} else if second.err != nil || !committed[1].Created {
 					t.Fatalf("second activation: %v", second.err)
@@ -381,18 +390,8 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 					if scenario == "different_keys" && agent.Config.Identity.FlowInstance() == plans[1].Identity.InstancePath {
 						want = plans[1]
 					}
-					wire, err := canonicaljson.MarshalPreservingNumberKinds(want.Instance.Config)
-					if err != nil {
-						t.Fatal(err)
-					}
-					var loaded any
-					if err := canonicaljson.DecodePreservingNumberLexemes(agent.Config.ReceiverConfig, &loaded); err != nil {
-						t.Fatal(err)
-					}
-					actual, err := canonicaljson.MarshalPreservingNumberKinds(loaded)
-					if err != nil || string(actual) != string(wire) {
-						t.Fatalf("agent consumed losing config: %s want %s: %v", agent.Config.ReceiverConfig, wire, err)
-					}
+					f.requireConfig(t, want)
+					requireNativeReceiverAgentCarrier(t, agent.Config)
 				}
 			})
 		}
@@ -416,11 +415,11 @@ func (f receiverConfigActivationFixture) requireConfig(t *testing.T, want pipeli
 	if err != nil || !found {
 		t.Fatalf("load committed instance: %v %v", found, err)
 	}
-	a, err := canonicaljson.MarshalPreservingNumberKinds(instance.Config)
+	a, err := canonicaljson.MarshalPreservingNumberKinds(instance.Fields)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := canonicaljson.MarshalPreservingNumberKinds(want.Instance.Config)
+	b, err := canonicaljson.MarshalPreservingNumberKinds(want.Instance.Fields)
 	if err != nil || string(a) != string(b) {
 		t.Fatalf("committed config=%s want=%s: %v", a, b, err)
 	}
@@ -436,4 +435,23 @@ func (f receiverConfigActivationFixture) requireConfig(t *testing.T, want pipeli
 	if err != nil || string(a) != string(b) {
 		t.Fatalf("committed readiness=%s want=%s: %v", a, b, err)
 	}
+}
+
+func receiverSuppliedPayload(t testing.TB, req pipeline.FlowInstanceActivationRequest) map[string]any {
+	t.Helper()
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(req.TriggerEvent.Payload(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+func setReceiverSuppliedPayload(t testing.TB, req *pipeline.FlowInstanceActivationRequest, payload map[string]any) {
+	t.Helper()
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := req.TriggerEvent
+	req.TriggerEvent = eventtest.ExistingRunRootIngress(event.ID(), event.Type(), event.SourceAgent(), event.TaskID(), json.RawMessage(raw), event.ChainDepth(), event.RunID(), event.Envelope(), event.CreatedAt())
 }

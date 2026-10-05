@@ -148,7 +148,6 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 		t.Fatal(err)
 	}
 	req := f.request("business-key", "timer-acquisition", "unchanged")
-	req.Config = map[string]any{"request_id": "business-key"}
 	req.OccurredAt = time.Now().UTC()
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 	if err != nil {

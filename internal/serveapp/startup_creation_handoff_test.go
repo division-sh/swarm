@@ -222,7 +222,6 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				rootPlan, err := candidate.runtime.Manager.PrepareFlowInstanceActivation(activationCtx, pipeline.FlowInstanceActivationRequest{
 					ContractBundle: loaded.source,
 					Instance:       flowidentity.Stored(loaded.source, ".", runID, runID, runID, ""),
-					Config:         map[string]any{},
 					OccurredAt:     time.Now().UTC(),
 				})
 				if err != nil {
@@ -246,7 +245,7 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				activation, err := candidate.runtime.Manager.PrepareFlowInstanceActivation(activationCtx, pipeline.FlowInstanceActivationRequest{
 					ContractBundle: loaded.source,
 					Instance:       flowidentity.Instance{TemplateID: "worker", ScopeKey: "worker", InstanceID: "startup-worker", InstancePath: "worker/startup-worker", EntityID: uuid.NewString(), HasStoredPath: true},
-					Config:         map[string]any{"instance_id": "startup-worker"}, TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
+					TriggerEvent:   trigger, OccurredAt: trigger.CreatedAt(),
 					ConstructorInput: "worker.requested", ResolvedKey: "startup-worker",
 				})
 				if err != nil {

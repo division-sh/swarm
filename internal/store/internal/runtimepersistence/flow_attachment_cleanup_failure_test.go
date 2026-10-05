@@ -193,7 +193,6 @@ func TestFlowAttachmentCleanupRetainsExactPredecessorBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					req := f.request("business-key", "cleanup-failure", "unchanged")
-					req.Config = map[string]any{"request_id": "business-key"}
 					req.OccurredAt = time.Now().UTC()
 					req.TriggerEvent = eventtest.ExistingRunRootIngress(req.TriggerEvent.ID(), "task.started", "constructor-fixture", "", []byte(`{}`), 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
 					plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)

@@ -75,7 +75,7 @@ func TestW2CompiledResolutionRejectsFieldsOutsideClosedMode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := admitSchemaFragment("pins: {inputs: [{event: work.completed, resolution: {" + tc.resolution + "}}]}\n")
-			if err == nil || !strings.Contains(err.Error(), `field "resolution" is not supported`) {
+			if err == nil || !strings.Contains(err.Error(), "must be a scalar text") {
 				t.Fatalf("admission error = %v, want retired input-resolution rejection", err)
 			}
 		})

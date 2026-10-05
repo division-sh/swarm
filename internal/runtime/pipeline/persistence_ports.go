@@ -123,7 +123,6 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 			}
 			if instance.TemplateID != activation.Instance.TemplateID {
 				activation.InitialState = ""
-				activation.Config = nil
 				activation.Bookkeeping = nil
 			}
 			activation.StandingGenerationReplacement = reconciliation.Generation > 1

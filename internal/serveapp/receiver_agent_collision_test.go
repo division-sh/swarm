@@ -45,8 +45,7 @@ func TestServedReceiverAgentBusinessNamespaceBothStores(t *testing.T) {
 			values := canonicalrouting.ReceiverAgentCollisionValues()
 			params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "idempotency_key": "collision-create", "payload": map[string]any{"account_id": "business-account", "values": values}}
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-			want := canonicalrouting.ReceiverAgentCollisionValues()
-			want["account_id"] = "business-account"
+			want := map[string]any{"account_id": "business-account", "values": canonicalrouting.ReceiverAgentCollisionValues()}
 			before := requireServedReceiverAgentCollision(t, rt, seed.RunID, want, 1)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			if duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID {
@@ -118,9 +117,9 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 		time.Sleep(20 * time.Millisecond)
 	}
 	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
-	var path, entityID, flowRaw, agentID, raw, descriptor, tools, permissions, model string
+	var path, entityID, flowRaw, fieldsRaw, agentID, raw, descriptor, tools, permissions, model string
 	var memory bool
-	if err := rt.DB.QueryRow(`SELECT f.instance_path,e.entity_id,CAST(f.config AS TEXT) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.flow_template='account'`, runID).Scan(&path, &entityID, &flowRaw); err != nil {
+	if err := rt.DB.QueryRow(`SELECT f.instance_path,e.entity_id,CAST(f.config AS TEXT),CAST(e.fields AS TEXT) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.flow_template='account'`, runID).Scan(&path, &entityID, &flowRaw, &fieldsRaw); err != nil {
 		t.Fatal(err)
 	}
 	if err := rt.DB.QueryRow(`SELECT agent_id,CAST(config AS TEXT),CAST(runtime_descriptor AS TEXT),CAST(tools AS TEXT),CAST(permissions AS TEXT),memory_enabled,model FROM agents WHERE run_id=$1 AND flow_instance=$2`, runID, path).Scan(&agentID, &raw, &descriptor, &tools, &permissions, &memory, &model); err != nil {
@@ -146,10 +145,16 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 			t.Fatalf("business config=%s want=%s", a, b)
 		}
 	}
-	check(flow["config"])
-	check(envelope["receiver_config"])
-	if len(envelope) != 2 || !reflect.DeepEqual(envelope["config"], map[string]any{}) {
-		t.Fatalf("not the closed agent config envelope: %s", raw)
+	var fields map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(fieldsRaw), &fields); err != nil {
+		t.Fatal(err)
+	}
+	check(map[string]any{"account_id": fields["account_id"], "values": fields["values"]})
+	if _, exists := flow["config"]; exists {
+		t.Fatalf("business copy in runtime header: %s", flowRaw)
+	}
+	if len(envelope) != 0 {
+		t.Fatalf("not ordinary opaque agent config: %s", raw)
 	}
 	matched := 0
 	for _, cfg := range rt.Runtime.Manager.ListAgentConfigs() {
@@ -157,11 +162,6 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 			continue
 		}
 		matched++
-		var values any
-		if err := canonicaljson.DecodePreservingNumberLexemes(cfg.ReceiverConfig, &values); err != nil {
-			t.Fatal(err)
-		}
-		check(values)
 		if string(cfg.Config) != "{}" || cfg.Model != "regular" || cfg.Memory.Enabled || len(cfg.Tools) != 0 || len(cfg.Permissions) != 0 || cfg.NativeTools.Any() {
 			t.Fatalf("live actor authority changed: %+v", cfg)
 		}

@@ -15,7 +15,7 @@ expected:
   flow_instance_created:
     template: worker-flow
     instance_id: ti-5c59b413ad4dd4f8d1321e7a
-    config:
+    fields:
       worker_id: worker-cfg-001
       max_retries: 3
       timeout_ms: 5000

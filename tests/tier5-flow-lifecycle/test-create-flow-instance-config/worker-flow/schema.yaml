@@ -5,17 +5,10 @@ stages:
   awaiting_ready: {}
   awaiting_spawned: {}
   complete: {terminal: true}
-instance_variables:
-  variables:
-    max_retries: integer
-    timeout_ms: integer
 auto_emit_on_create:
   event: worker.ready
 pins:
   inputs:
-    - event: flow.spawned
-      initialize:
-        max_retries: payload.config.max_retries
-        timeout_ms: payload.config.timeout_ms
+    - flow.spawned
   outputs:
     - worker.ready

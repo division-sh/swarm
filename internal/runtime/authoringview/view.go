@@ -291,17 +291,16 @@ type SingletonContainedFieldView struct {
 }
 
 type InputPinView struct {
-	Initialize           map[string]string `json:"initialize,omitempty"`
-	Event                string            `json:"event"`
-	ResolvedEvent        string            `json:"resolved_event"`
-	FlowPath             string            `json:"flow_path,omitempty"`
-	ProducerSchemaDigest string            `json:"producer_schema_digest,omitempty"`
-	ReceiverSchemaDigest string            `json:"receiver_schema_digest,omitempty"`
-	BusinessKey          string            `json:"business_key,omitempty"`
-	PinDigest            string            `json:"pin_digest"`
-	SourceFile           string            `json:"source_file,omitempty"`
-	SourceLine           int               `json:"source_line,omitempty"`
-	SourceColumn         int               `json:"source_column,omitempty"`
+	Event                string `json:"event"`
+	ResolvedEvent        string `json:"resolved_event"`
+	FlowPath             string `json:"flow_path,omitempty"`
+	ProducerSchemaDigest string `json:"producer_schema_digest,omitempty"`
+	ReceiverSchemaDigest string `json:"receiver_schema_digest,omitempty"`
+	BusinessKey          string `json:"business_key,omitempty"`
+	PinDigest            string `json:"pin_digest"`
+	SourceFile           string `json:"source_file,omitempty"`
+	SourceLine           int    `json:"source_line,omitempty"`
+	SourceColumn         int    `json:"source_column,omitempty"`
 }
 
 type OutputPinView struct {
@@ -1094,8 +1093,7 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 		receiverSchema, _ := pin.ReceiverEventSchema()
 		businessKey, _ := producerSchema.BusinessKey()
 		item := InputPinView{
-			Initialize: pin.Initialization().Bindings(),
-			Event:      pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
+			Event: pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
 			FlowPath:             pin.FlowPath(),
 			ProducerSchemaDigest: producerSchema.AcceptanceSchemaDigest(), ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(),
 			BusinessKey: businessKey.Field, PinDigest: pin.Digest(),

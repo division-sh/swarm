@@ -61,7 +61,6 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					if root {
 						req.Instance = flowidentity.Stored(req.ContractBundle, ".", f.runID, f.runID, f.runID, "")
 					} else {
-						req.Config = map[string]any{"owner_key": "one"}
 						req.ConstructorInput, req.ResolvedKey = "construct.requested", "one"
 						req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, at)
 					}

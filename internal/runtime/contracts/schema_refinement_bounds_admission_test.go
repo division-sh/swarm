@@ -14,8 +14,6 @@ func loadRefinementBound(t *testing.T, family, kind, refinement, source string) 
 	field := fmt.Sprintf("value: {type: %q, %s: %s}", kind, refinement, source)
 	file, text := family+".yaml", ""
 	switch family {
-	case "receiver":
-		file, text = "schema.yaml", "stages: []\ninstance_variables:\n  variables:\n    "+field+"\n"
 	case "types":
 		text = "types:\n  Probe:\n    " + field + "\n"
 	case "entities":
@@ -33,7 +31,7 @@ func loadRefinementBound(t *testing.T, family, kind, refinement, source string) 
 }
 
 func TestSharedRefinementBoundPresenceMatrix(t *testing.T) {
-	for _, family := range []string{"receiver", "types", "entities", "events"} {
+	for _, family := range []string{"types", "entities", "events"} {
 		for _, bound := range []string{"min", "max"} {
 			for _, tc := range []struct {
 				name, source    string
@@ -74,8 +72,6 @@ func TestSharedRefinementBoundPresenceMatrix(t *testing.T) {
 							}
 							var r SchemaRefinements
 							switch family {
-							case "receiver":
-								r = bundle.RootSchema.InstanceVariables.Variables["value"].Refinements
 							case "types":
 								r = bundle.RootTypes.Types["Probe"].Fields["value"].Refinements
 							case "entities":
@@ -105,7 +101,7 @@ func TestSharedRefinementBoundPresenceMatrix(t *testing.T) {
 }
 
 func TestSharedRefinementBoundMappingAndOrdering(t *testing.T) {
-	for _, family := range []string{"receiver", "types", "entities", "events"} {
+	for _, family := range []string{"types", "entities", "events"} {
 		for _, refinement := range []string{"length", "range"} {
 			for _, source := range []string{"{}", "null", "[]", "{min: 2, max: 1}", "{min: 0, min: 1}", "{other: 0}"} {
 				t.Run(family+"/"+refinement+"/"+source, func(t *testing.T) {

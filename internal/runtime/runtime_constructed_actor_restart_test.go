@@ -152,7 +152,7 @@ func proveRuntimeConstructedActorCensusBothStores(t *testing.T, journey string) 
 					trigger := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), "task.assigned", "operator", "", []byte(fmt.Sprintf(`{"work_id":%q}`, key)), 0, runID, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())
 					if err := rt.Manager.ActivateFlowInstance(owned, pipeline.FlowInstanceActivationRequest{
 						ContractBundle: source, Instance: instance, TriggerEvent: trigger, ConstructorInput: "task.assigned", ResolvedKey: key,
-						Config: map[string]any{"work_id": key}, OccurredAt: trigger.CreatedAt(),
+						OccurredAt: trigger.CreatedAt(),
 					}); err != nil {
 						t.Fatalf("canonical keyed tree construction: %v", err)
 					}
@@ -248,7 +248,7 @@ func proveRuntimeConstructedActorCensusBothStores(t *testing.T, journey string) 
 				after := requireNativeConstructedActors(t, ctx, successor, selected, source, runID, children)
 				for route, original := range before {
 					current := after[route]
-					if !reflect.DeepEqual(original.Fields, current.Fields) || !reflect.DeepEqual(original.Config, current.Config) || original.CurrentState != current.CurrentState || !original.CreatedAt.Equal(current.CreatedAt) {
+					if !reflect.DeepEqual(original.Fields, current.Fields) || original.CurrentState != current.CurrentState || !original.CreatedAt.Equal(current.CreatedAt) {
 						t.Fatalf("restart repeated construction or changed business state: route=%s", route)
 					}
 				}

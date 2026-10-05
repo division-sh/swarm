@@ -39,7 +39,6 @@ type FlowInstanceActivationRequest struct {
 	ContractBundle                semanticview.Source
 	Instance                      runtimeflowidentity.Instance
 	InitialState                  string
-	Config                        map[string]any
 	ConstructorInput              string
 	ResolvedKey                   any
 	PayloadProjection             events.DeliveryPayloadProjection
@@ -325,7 +324,6 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 }
 
 func (p FlowInstanceActivationPlan) Normalized() (FlowInstanceActivationPlan, error) {
-	p.Instance.Config = cloneMap(p.Instance.Config)
 	p.Instance.Fields = cloneMap(p.Instance.Fields)
 	p.Instance.Bookkeeping = cloneMap(p.Instance.Bookkeeping)
 	readiness, err := p.Readiness.Normalized()

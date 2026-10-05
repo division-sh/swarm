@@ -6,9 +6,111 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
+
+func TestConnectionResolvedIntegerKeysReachConstructionBothStores(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyIntegerConnectionPolicies(t), backend, true)
+			seedCatalogRootStateForRun(t, h, catalogRuntimeRunID)
+			h.publishAndWait(catalogTriggerStep{Event: "work.requested", inputKind: catalogReplayInputRootIngress, eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", Payload: map[string]any{"creation_id": int64(42), "reuse_id": int64(43)}}, catalogRuntimePublishTimeout)
+			h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+			instances, err := h.workflow.ListWorkflowInstances(h.ctx, catalogRuntimeRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen := map[int64]bool{}
+			for _, instance := range instances {
+				if instance.WorkflowName != "worker" {
+					continue
+				}
+				key, valid := instance.Fields["worker_id"].(int64)
+				if !valid || (key != 42 && key != 43) || seen[key] {
+					t.Fatalf("typed keys changed at construction/readback: %#v", instance.Fields)
+				}
+				seen[key] = true
+			}
+			if len(seen) != 2 {
+				t.Fatalf("distinct integer receivers=%v", seen)
+			}
+		})
+	}
+}
+
+func TestReceiverSuppliedStateMutationReuseRestartAndSelectedHistoryBothStores(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			root := canonicalrouting.CopyReceiverStateMutationGeometry(t)
+
+			h := newRuntimeHarnessForBackend(t, root, backend, true)
+			seedCatalogRootStateForRun(t, h, catalogRuntimeRunID)
+			initial := catalogTriggerStep{Event: "work.requested", inputKind: catalogReplayInputRootIngress, eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", Payload: map[string]any{"worker_id": "alpha", "label": "constructed", "count": int64(1)}}
+			h.publishAndWait(initial, catalogRuntimePublishTimeout)
+			h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+			var point string
+			if err := h.db.QueryRowContext(h.ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name LIKE '%/worker.ready'`, catalogRuntimeRunID).Scan(&point); err != nil {
+				t.Fatal(err)
+			}
+			assert := func(current string) {
+				instances, err := h.workflow.ListWorkflowInstances(h.ctx, catalogRuntimeRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				workers := 0
+				for _, instance := range instances {
+					if instance.WorkflowName == "worker" {
+						workers++
+						if instance.Fields["label"] != current {
+							t.Fatalf("current state was reinitialized: %+v", instance.Fields)
+						}
+					}
+				}
+				if workers != 1 {
+					t.Fatalf("worker headers=%d, want one", workers)
+				}
+				plan, err := runScopedCatalogStore(t, h).PlanRunFork(h.ctx, runfork.RunForkPlanRequest{SourceRunID: catalogRuntimeRunID, At: point})
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				for _, entity := range plan.Entities {
+					if entity.MaterializationMetadata != nil && entity.MaterializationMetadata.FlowTemplate == "worker" {
+						found = true
+						if entity.Fields["label"] != "constructed" {
+							t.Fatalf("selected history consumed current state: %+v", entity.Fields)
+						}
+					}
+				}
+				if !found {
+					t.Fatal("selected history omitted the constructed worker")
+				}
+				var occurrences int
+				if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name LIKE '%/worker.ready'`, catalogRuntimeRunID).Scan(&occurrences); err != nil || occurrences != 1 {
+					t.Fatalf("creating occurrences=%d err=%v", occurrences, err)
+				}
+			}
+			assert("constructed")
+			changed := catalogTriggerStep{Event: "work.requested", inputKind: catalogReplayInputRootIngress, eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", Payload: map[string]any{"worker_id": "alpha", "label": "lawfully-updated", "count": int64(9)}}
+			h.publishAndWait(changed, catalogRuntimePublishTimeout)
+			h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+			assert("lawfully-updated")
+			hash, err := runtimecontracts.BundleHash(h.bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest, err := catalogReplayPlatformSpecDigest(repoRootFromCatalogE2E(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			h = h.reopenFromTranscript(&catalogExecutionTranscript{version: catalogReplayTranscriptVersion, platformSpecDigest: digest, bundleHash: hash, runID: catalogRuntimeRunID, groups: []catalogTranscriptGroup{{steps: []catalogTriggerStep{initial}}, {steps: []catalogTriggerStep{changed}}}})
+			h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+			assert("lawfully-updated")
+		})
+	}
+}
 
 func TestReceiverInitializationNestedGeometryBothStores(t *testing.T) {
 	root := canonicalrouting.CopyReceiverInitializationGeometry(t)
@@ -96,8 +198,8 @@ func TestReceiverInitializationRestartBetweenNestedLevelsBothStores(t *testing.T
 				}
 				if instance.WorkflowName == "worker" {
 					parents++
-					if instance.Config["worker_id"] != "alpha" || instance.Config["label"] != "parent-A" || instance.Config["count"] != int64(0) {
-						t.Fatalf("parent config at interrupted boundary: %#v", instance.Config)
+					if instance.Fields["worker_id"] != "alpha" || instance.Fields["label"] != "parent-A" || instance.Fields["count"] != int64(0) {
+						t.Fatalf("parent config at interrupted boundary: %#v", instance.Fields)
 					}
 				}
 			}
@@ -155,13 +257,13 @@ func TestReceiverInitializationRestartBetweenNestedLevelsBothStores(t *testing.T
 				switch instance.WorkflowName {
 				case "worker":
 					parents++
-					if instance.Config["worker_id"] != "alpha" || instance.Config["label"] != "parent-A" || instance.Config["count"] != int64(0) {
-						t.Fatalf("parent config changed after restart: %#v", instance.Config)
+					if instance.Fields["worker_id"] != "alpha" || instance.Fields["label"] != "parent-A" || instance.Fields["count"] != int64(0) {
+						t.Fatalf("parent config changed after restart: %#v", instance.Fields)
 					}
 				case "worker/leaf":
 					leaves++
-					if instance.Config["worker_id"] != "alpha-leaf" || instance.Config["label"] != "leaf-parent-A" || instance.Config["count"] != int64(1) || instance.Fields["label"] != "leaf-parent-A" || instance.Fields["count"] != int64(1) {
-						t.Fatalf("grandchild did not consume exact config: config=%#v fields=%#v", instance.Config, instance.Fields)
+					if instance.Fields["worker_id"] != "alpha-leaf" || instance.Fields["label"] != "leaf-parent-A" || instance.Fields["count"] != int64(1) {
+						t.Fatalf("grandchild did not consume exact supplied state: fields=%#v", instance.Fields)
 					}
 				}
 			}
@@ -201,9 +303,9 @@ func assertNestedReceiverInitialization(t *testing.T, h *runtimeHarness) {
 	}
 	seen := map[string]bool{}
 	for _, instance := range instances {
-		key, ok := instance.Config["worker_id"].(string)
+		key, ok := instance.Fields["worker_id"].(string)
 		if !ok {
-			continue // Root flow has no receiver configuration.
+			continue // Root flow has no worker state.
 		}
 		if seen[key] {
 			t.Fatalf("duplicate receiver %s", key)
@@ -217,8 +319,8 @@ func assertNestedReceiverInitialization(t *testing.T, h *runtimeHarness) {
 			"alpha-leaf": {"leaf-parent-A", "worker/leaf", 1}, "beta-leaf": {"leaf-parent-B", "worker/leaf", 42},
 		}
 		w, ok := want[key]
-		if !ok || instance.WorkflowName != w.flow || instance.Config["label"] != w.label || instance.Config["count"] != w.count {
-			t.Fatalf("receiver %s: flow=%s config=%#v want=%+v", key, instance.WorkflowName, instance.Config, w)
+		if !ok || instance.WorkflowName != w.flow || instance.Fields["label"] != w.label || instance.Fields["count"] != w.count {
+			t.Fatalf("receiver %s: flow=%s config=%#v want=%+v", key, instance.WorkflowName, instance.Fields, w)
 		}
 		if w.flow == "worker/leaf" && (instance.Fields["label"] != w.label || instance.Fields["count"] != w.count) {
 			t.Fatalf("leaf final consumer did not observe initialized config: fields=%#v want=%+v", instance.Fields, w)

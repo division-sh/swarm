@@ -821,7 +821,7 @@ func projectRunForkHistoricalFields(sourceRunID, forkRunID, entityID, targetBund
 
 func projectRunForkHistoricalHeader(sourceRunID, forkRunID, entityID, path, targetBundleHash string, entity runfork.RunForkEntityState) (runtimepipeline.WorkflowEngineStateRecord, error) {
 	metadata := entity.MaterializationMetadata
-	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedConfig(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}

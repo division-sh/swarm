@@ -10,11 +10,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -30,14 +30,17 @@ func TestReceiverAgentBusinessNamespaceNativeBothStores(t *testing.T) {
 				f := newReceiverConfigActivationFixture(t, backend)
 				req := f.request("business-key", "ti-collision", "authored-label")
 				values := canonicalrouting.ReceiverAgentCollisionValues()
+				supplied := receiverSuppliedPayload(t, req)
+				nested := map[string]any{}
 				for key, value := range values {
 					prompt := key == "nested" || key == "records"
 					if (scenario == "inert_prompt_json") != prompt {
 						continue
 					}
-					f.bundle.FlowTree.ByID["review"].Schema.InstanceVariables.Variables[key] = contracts.FlowVariable{Type: "json"}
-					req.Config[key] = value
+					nested[key] = value
 				}
+				supplied["nested"] = nested
+				setReceiverSuppliedPayload(t, &req, supplied)
 				plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 				if err != nil {
 					t.Fatalf("admitted business values rejected before creation: %v", err)
@@ -53,7 +56,7 @@ func TestReceiverAgentBusinessNamespaceNativeBothStores(t *testing.T) {
 						t.Fatalf("agent hydration: agents=%d err=%v", len(agents), err)
 					}
 					cfg := agents[0].Config
-					requireNativeReceiverAgentCarrier(t, cfg, plan.Instance.Config)
+					requireNativeReceiverAgentCarrier(t, cfg)
 					if cfg.FlowPath != plan.Identity.InstancePath || cfg.Model != "regular" || cfg.Role != "reviewer" || len(cfg.Tools) != 0 || len(cfg.Permissions) != 0 || cfg.NativeTools.Any() {
 						t.Fatalf("business config replaced actor authority: %+v", cfg)
 					}
@@ -63,7 +66,6 @@ func TestReceiverAgentBusinessNamespaceNativeBothStores(t *testing.T) {
 					return cfg
 				}
 				before := read()
-				req.Config = map[string]any{"request_id": "foreign-key", "model": "replacement", "nested": false}
 				if created, err := f.manager.EnsureFlowInstance(f.ctx, req); err != nil || created {
 					t.Fatalf("reuse must retain committed config: created=%v err=%v", created, err)
 				}
@@ -87,7 +89,7 @@ func TestReceiverAgentBusinessNamespaceNativeBothStores(t *testing.T) {
 	}
 }
 
-// Native creation writes the historical config. Only the recipient frontier is
+// Native creation writes historical state. Only the recipient frontier is
 // a component projection input: this does not execute an unsupported template fork.
 func receiverAgentHistoricalProjection(t *testing.T, f receiverConfigActivationFixture, activation pipeline.FlowInstanceActivationPlan) func() {
 	t.Helper()
@@ -119,8 +121,60 @@ func receiverAgentHistoricalProjection(t *testing.T, f receiverConfigActivationF
 		if metadata.EntityID != activation.Identity.EntityID || metadata.FlowInstance != activation.Identity.InstancePath || metadata.ConstructionKind != "constructed" {
 			t.Fatalf("foreign historical metadata: %s", raw)
 		}
+		rows, err := f.db.QueryContext(f.ctx, `WITH ranked AS (
+			SELECT fact,present,ROW_NUMBER() OVER (PARTITION BY fact_key ORDER BY revision DESC) AS rank
+			FROM run_fork_fact_revisions WHERE run_id=$1 AND family='entity_mutations' AND revision<=$2
+		) SELECT CAST(fact AS TEXT) FROM ranked WHERE rank=1 AND present=TRUE`, activation.Readiness.RunID, revision)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var mutations []mutationlog.ProjectionMutation
+		for rows.Next() {
+			var fact string
+			if err := rows.Scan(&fact); err != nil {
+				t.Fatal(err)
+			}
+			var mutation struct {
+				EntityID string             `json:"entity_id"`
+				Domain   mutationlog.Domain `json:"domain"`
+				Path     string             `json:"path"`
+				NewValue json.RawMessage    `json:"new_value"`
+			}
+			if err := json.Unmarshal([]byte(fact), &mutation); err != nil {
+				t.Fatal(err)
+			}
+			if mutation.EntityID != metadata.EntityID {
+				continue
+			}
+			var value any
+			if err := canonicaljson.DecodePreservingNumberLexemes(mutation.NewValue, &value); err != nil {
+				t.Fatal(err)
+			}
+			mutations = append(mutations, mutationlog.ProjectionMutation{Domain: mutation.Domain, Path: mutation.Path, NewValue: value})
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+		state, err := mutationlog.ReconstructEntityStateProjection(mutations)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := canonicaljson.MarshalPreservingNumberKinds(activation.Instance.Fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := canonicaljson.MarshalPreservingNumberKinds(state.Fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Fatalf("historical supplied state differs: got=%s want=%s", got, want)
+		}
 		eventID := "11111111-1111-4111-8111-111111111111"
-		plan := runfork.RunForkPlan{SourceRunID: activation.Readiness.RunID, ForkPoint: runfork.RunForkPoint{Revision: revision}, Entities: []runfork.RunForkEntityState{{EntityID: metadata.EntityID, CurrentState: metadata.CurrentState, EnteredStateAt: &metadata.EnteredStateAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+		plan := runfork.RunForkPlan{SourceRunID: activation.Readiness.RunID, ForkPoint: runfork.RunForkPoint{Revision: revision}, Entities: []runfork.RunForkEntityState{{EntityID: metadata.EntityID, Fields: state.Fields, Bookkeeping: state.Bookkeeping, Gates: state.Gates, Accumulator: state.Accumulator, CurrentState: metadata.CurrentState, EnteredStateAt: &metadata.EnteredStateAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType, FlowConfig: metadata.FlowConfig,
 			FlowTemplate: metadata.FlowTemplate, Mode: metadata.Mode, Status: metadata.Status, StageDefined: metadata.StageDefined,
 			EnteredStateAt: metadata.EnteredStateAt, CreatedAt: metadata.CreatedAt, UpdatedAt: metadata.UpdatedAt,
@@ -147,20 +201,8 @@ func receiverAgentHistoricalProjection(t *testing.T, f receiverConfigActivationF
 		if len(projection.Blueprints) != 1 || len(projection.States) != 1 || len(projection.Flows) != 1 {
 			t.Fatalf("missing historical agent projection: %+v", projection)
 		}
-		requireNativeReceiverAgentCarrier(t, projection.Blueprints[0].Config, activation.Instance.Config)
-		for _, values := range []map[string]any{projection.States[0].Config, projection.Flows[0].Config} {
-			got, err := canonicaljson.MarshalPreservingNumberKinds(values)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want, err := canonicaljson.MarshalPreservingNumberKinds(activation.Instance.Config)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(got) != string(want) {
-				t.Fatalf("historical config=%s want=%s", got, want)
-			}
-		}
+		requireNativeReceiverAgentCarrier(t, projection.Blueprints[0].Config)
+
 	}
 	project()
 	return func() {
@@ -175,7 +217,7 @@ func receiverAgentHistoricalProjection(t *testing.T, f receiverConfigActivationF
 	}
 }
 
-func requireNativeReceiverAgentCarrier(t *testing.T, cfg actors.AgentConfig, want map[string]any) {
+func requireNativeReceiverAgentCarrier(t *testing.T, cfg actors.AgentConfig) {
 	t.Helper()
 	// Inspect the wire contract so the regression compiles on the pre-fix head.
 	wire, err := json.Marshal(cfg)
@@ -186,11 +228,9 @@ func requireNativeReceiverAgentCarrier(t *testing.T, cfg actors.AgentConfig, wan
 	if err := json.Unmarshal(wire, &carrier); err != nil {
 		t.Fatal(err)
 	}
-	expected, err := canonicaljson.MarshalPreservingNumberKinds(want)
-	if err != nil {
-		t.Fatal(err)
+	if _, present := carrier["receiver_config"]; present {
+		t.Fatal("receiver configuration copy restored")
 	}
-	requireReceiverConfigWire(t, carrier["receiver_config"], expected)
 	if string(cfg.Config) != "{}" {
 		t.Fatalf("receiver values leaked into opaque config: %s", cfg.Config)
 	}

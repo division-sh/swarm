@@ -20,9 +20,9 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 		reuse, descriptor, invalid bool
 	}{
 		{"typed zero false", `{"account_id":"acct-1","count":0,"ratio":2.0,"active":false,"label":"kept","attributes":{"nested":[1,2.0]}}`, false, false, false},
-		{"defaults", `{"account_id":"acct-1","active":true,"label":"kept","attributes":[]}`, false, false, false},
-		{"missing required", `{"account_id":"acct-1","active":true,"attributes":{}}`, false, false, true},
-		{"null is not default", `{"account_id":"acct-1","count":null,"active":true,"label":"kept","attributes":{}}`, false, false, true},
+		{"optional state omitted", `{"account_id":"acct-1","active":true,"label":"kept","attributes":[]}`, false, false, false},
+		{"missing required message field", `{"account_id":"acct-1","active":true,"attributes":{}}`, false, false, true},
+		{"null required message field", `{"account_id":"acct-1","active":true,"label":null,"attributes":{}}`, false, false, true},
 		{"wrong integer", `{"account_id":"acct-1","count":"3","active":true,"label":"kept","attributes":{}}`, false, false, true},
 		{"descriptor reuse missing initialization", `{"account_id":"acct-1"}`, true, true, false},
 		{"route reuse missing initialization", `{"account_id":"acct-1"}`, true, false, false},
@@ -98,15 +98,22 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 				if len(store.activations) != 1 {
 					t.Fatalf("activations=%d", len(store.activations))
 				}
-				config := store.activations[0].Config
+				config, err := testFlowActivationConstructorFields(store.activations[0])
+				if err != nil {
+					t.Fatal(err)
+				}
 				if config["account_id"] != "acct-1" || config["label"] != "kept" {
 					t.Fatalf("config=%#v", config)
 				}
 				if tc.name == "typed zero false" && (config["count"] != int64(0) || config["ratio"] != float64(2) || config["active"] != false || !reflect.DeepEqual(config["attributes"], map[string]any{"nested": []any{int64(1), float64(2)}})) {
 					t.Fatalf("typed values drifted: %#v", config)
 				}
-				if tc.name == "defaults" && (config["count"] != int64(3) || config["ratio"] != float64(2)) {
-					t.Fatalf("defaults=%#v", config)
+				if tc.name == "optional state omitted" {
+					for _, field := range []string{"count", "ratio"} {
+						if _, exists := config[field]; exists {
+							t.Fatalf("retired config default inferred: %#v", config)
+						}
+					}
 				}
 			}
 			if len(store.routes[eventID]) != 1 {

@@ -18,11 +18,38 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"gopkg.in/yaml.v3"
 )
 
 const canonicalFormsRegistryPath = "internal/runtime/conformance/testdata/canonical_forms_registry.yaml"
+
+func TestCanonicalFormsReceiverConfigurationRetirement(t *testing.T) {
+	for _, row := range []struct {
+		value any
+		field string
+	}{
+		{runtimecontracts.FlowSchemaDocument{}, "InstanceVariables"},
+		{runtimecontracts.FlowInputEventPin{}, "Initialize"},
+		{actors.AgentConfig{}, "ReceiverConfig"},
+		{pipeline.WorkflowInstance{}, "Config"},
+		{pipeline.FlowInstanceActivationRequest{}, "Config"},
+		{pipeline.WorkflowInstanceRouteRecoveryProjection{}, "Config"},
+		{manager.FlowInstanceMaterializationPlan{}, "Config"},
+		{runfork.RunForkSelectedContractWorkflowState{}, "Config"},
+	} {
+		if _, present := reflect.TypeOf(row.value).FieldByName(row.field); present {
+			t.Errorf("retired configuration carrier restored: %T.%s", row.value, row.field)
+		}
+	}
+	if restored := retiredEventAuthorityDeclarations(t, conformanceRepoRoot(t)); len(restored) != 0 {
+		t.Fatalf("retired authority declarations restored: %v", restored)
+	}
+}
 
 func TestCanonicalFormsEventAuthorityRetirement(t *testing.T) {
 	root := conformanceRepoRoot(t)
@@ -56,11 +83,23 @@ func TestCanonicalFormsEventAuthorityGuardDetectsRestoredPrivateConstructors(t *
 func retiredEventAuthorityDeclarations(t *testing.T, root string) []string {
 	t.Helper()
 	retired := map[string]bool{
-		"PublishPublicInputAcknowledged": true,
-		"FlowInputPinSourceExternal":     true,
-		"EventEmitterRef":                true,
-		"EventSwarmMetadata":             true,
-		"EventConsumerBoundary":          true,
+		"PublishPublicInputAcknowledged":             true,
+		"FlowInputPinSourceExternal":                 true,
+		"EventEmitterRef":                            true,
+		"EventSwarmMetadata":                         true,
+		"EventConsumerBoundary":                      true,
+		"FlowVariable":                               true,
+		"FlowInstanceVariables":                      true,
+		"ReceiverConfiguration":                      true,
+		"ReceiverInitializationBinding":              true,
+		"ReceiverConfigurationForFlow":               true,
+		"CompileReceiverInitializationBinding":       true,
+		"projectSchemaReceiverVariablesValue":        true,
+		"projectSchemaInitializeBindingsValue":       true,
+		"WorkflowInstanceBusinessConfigForRoute":     true,
+		"TemplateFlowMaterialization":                true,
+		"TemplateFlowAgentMaterializationBlueprints": true,
+		"TemplateFlowAgentMaterializationRecords":    true,
 	}
 	var restored []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -806,7 +845,7 @@ func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
 	if record.Wave2.Issue != 2352 || record.Wave2.Status != "closed" || !reflect.DeepEqual(record.Wave2.Rows, wantRows) || !reflect.DeepEqual(record.Wave2.RetiredSurfaces, wantRetired) || !reflect.DeepEqual(record.Wave2.CanonicalOwners, wantOwners) {
 		t.Fatalf("wave 2 registry = %#v", record.Wave2)
 	}
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowInputEventPin{}), []string{"event", "initialize"})
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowInputEventPin{}), []string{"event"})
 	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowOutputEventPin{}), []string{"event"})
 	for _, owner := range []reflect.Type{
 		reflect.TypeOf(runtimecontracts.CompiledFlowInputPin{}),

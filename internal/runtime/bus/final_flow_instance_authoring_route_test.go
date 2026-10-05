@@ -127,9 +127,9 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if activation.Config[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" ||
+	if activation.ResolvedKey != "acct-42" ||
 		fields[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" {
-		t.Fatalf("activation config/constructor fields = %#v/%#v, want account_id from receiver carry", activation.Config, fields)
+		t.Fatalf("activation key/constructor fields = %#v/%#v, want account_id from receiver carry", activation.ResolvedKey, fields)
 	}
 	if _, exists := fields["entity_type"]; exists {
 		t.Fatalf("constructor fields retain typed entity_type: %#v", fields)

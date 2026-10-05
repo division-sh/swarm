@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
+func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 	source := workflowOwnershipSource(t, canonicalrouting.CopyReceiverConfigHistory(t))
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -60,7 +60,7 @@ func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 			plan, planning, _, modes, _ := workflowOwnershipProjection(t, source, "consumer")
 			runID, entityID := plan.SourceRunID, plan.Entities[0].EntityID
 			const path = "consumer/item"
-			const config = `{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","workflow_version":"v1","config":{"vertical_id":"original-business-key","nested":[7,7.0,null],"status":false,"flow_path":["business","path"]}}`
+			const config = `{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","workflow_version":"v1"}`
 			if _, err := tx.Exec(`INSERT INTO runs VALUES ($1)`, runID); err != nil {
 				t.Fatal(err)
 			}
@@ -72,7 +72,7 @@ func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 			if _, err := tx.Exec(insertHeader, runID, path, entityID, config, plan.Entities[0].CurrentState); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tx.Exec(insertHeader, "44444444-4444-4444-8444-444444444444", path, entityID, `{"config":{"vertical_id":"foreign-run"}}`, plan.Entities[0].CurrentState); err != nil {
+			if _, err := tx.Exec(insertHeader, "44444444-4444-4444-8444-444444444444", path, entityID, strings.Replace(config, "v1", "foreign-run", 1), plan.Entities[0].CurrentState); err != nil {
 				t.Fatal(err)
 			}
 			var persisted string
@@ -104,15 +104,15 @@ func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 			if _, exists := record["flow_config"]; !exists {
 				t.Fatal("recorded entity metadata omitted existing flow_instances.config before snapshot or sealed-plan projection")
 			}
-			// A later current row cannot replace the selected historical config.
-			if _, err := tx.Exec(`UPDATE flow_instances SET config=$1 WHERE run_id=$2`, strings.Replace(config, "[7,7.0,null]", "[7,7,null]", 1), runID); err != nil {
+			// A later header cannot replace the selected historical version.
+			if _, err := tx.Exec(`UPDATE flow_instances SET config=$1 WHERE run_id=$2`, strings.Replace(config, "v1", "v2", 1), runID); err != nil {
 				t.Fatal(err)
 			}
 			numericChange, err := finalize(context.Background(), tx, effects)
 			if err != nil || !numericChange[runID].Changed || numericChange[runID].Revision != 2 {
-				t.Fatalf("numeric-kind change was not captured: %#v %v", numericChange, err)
+				t.Fatalf("version change was not captured: %#v %v", numericChange, err)
 			}
-			later := `{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","config":{"vertical_id":"later-business-key"}}`
+			later := strings.Replace(config, "v1", "v3", 1)
 			if _, err := tx.Exec(`UPDATE flow_instances SET config=$1 WHERE run_id=$2`, later, runID); err != nil {
 				t.Fatal(err)
 			}
@@ -138,12 +138,15 @@ func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := `{"flow_path":["business","path"],"nested":[7,7.0,null],"status":false,"vertical_id":"original-business-key"}`
-			for _, business := range []map[string]any{projection.States[0].Config, projection.Flows[0].Config} {
-				got, err := canonicaljson.MarshalPreservingNumberKinds(business)
-				if err != nil || string(got) != want {
-					t.Fatalf("fixed-revision config = %s, want %s: %v", got, want, err)
-				}
+			if projection.States[0].WorkflowVersion != source.WorkflowVersion() {
+				t.Fatalf("selected readiness lost the selected source: %+v", projection.States[0])
+			}
+			var historicalHeader map[string]any
+			if err := canonicaljson.DecodeInto(plan.Entities[0].MaterializationMetadata.FlowConfig, &historicalHeader); err != nil {
+				t.Fatal(err)
+			}
+			if historicalHeader["workflow_version"] != "v1" {
+				t.Fatalf("selected historical version replaced by current header: %+v", historicalHeader)
 			}
 			if string(plan.Entities[0].MaterializationMetadata.FlowConfig) != string(snapshot.EntityMetadata[0].FlowConfig) {
 				t.Fatal("snapshot config changed during readiness projection")
@@ -152,24 +155,20 @@ func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 	}
 }
 
-func TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions(t *testing.T) {
+func TestSelectedForkHeaderDoesNotDuplicateBusinessControlNames(t *testing.T) {
 	for _, flow := range []string{".", "branch", "branch/left"} {
 		t.Run(flow, func(t *testing.T) {
 			dir := canonicalrouting.CopyForkReceiverNestedOwnership(t, []canonicalrouting.ForkReceiver{
 				{Path: "left", Policy: canonicalrouting.ForkReceiverOptionalExisting},
 				{Path: "right", Policy: canonicalrouting.ForkReceiverOptionalExisting},
 			})
-			canonicalrouting.ApplyOverlay(t, dir, filepath.Join(flow, "schema.yaml"), `instance_variables:
-  variables:
-    status: boolean
-    flow_path: json
-    nested: json
-`)
 			source := workflowOwnershipSource(t, dir)
 			plan, planning, _, modes, forkID := workflowOwnershipProjection(t, source, flow)
 			business := map[string]any{"status": false, "flow_path": []any{"business", "path"}, "nested": []any{int64(7), float64(7)}}
+			plan.Entities[0].Fields = business
+			want, _ := canonicaljson.MarshalPreservingNumberKinds(business)
 			instance := workflowOwnershipKeylessInstance(t, source, plan.SourceRunID, flow)
-			payload, err := pipeline.WorkflowInstanceConfigPayloadForIdentity(instance, source.WorkflowVersion(), business)
+			payload, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, source.WorkflowVersion())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -192,19 +191,26 @@ func TestSelectedForkStaticReceiverConfigPreservesBusinessControlCollisions(t *t
 			}
 			encoded, err := selectedContractWorkflowStateConfig(selectedContractWorkflowState{
 				SourceRunID: plan.SourceRunID, RunID: forkID, EntityID: owner.Fork.EntityID, WorkflowName: state.FlowID,
-				Route: route.InstancePath, WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, Config: state.Config, History: plan.Entities[0],
+				Route: route.InstancePath, WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, History: plan.Entities[0],
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			readback, err := pipeline.WorkflowInstanceBusinessConfigForRoute(route, encoded)
-			if err != nil {
+			if _, err := pipeline.DecodeWorkflowInstanceRecordedHeader(route, encoded); err != nil {
 				t.Fatal(err)
 			}
-			got, err := canonicaljson.MarshalPreservingNumberKinds(readback)
-			want, _ := canonicaljson.MarshalPreservingNumberKinds(business)
+			var header map[string]any
+			if err := canonicaljson.DecodeInto(encoded, &header); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"config", "nested"} {
+				if _, exists := header[key]; exists {
+					t.Fatalf("business copy in header: %s", encoded)
+				}
+			}
+			got, err := canonicaljson.MarshalPreservingNumberKinds(plan.Entities[0].Fields)
 			if err != nil || string(got) != string(want) {
-				t.Fatalf("static fork receiver config = %s, want %s: %v", got, want, err)
+				t.Fatalf("header projection rewrote entity state = %s, want %s: %v", got, want, err)
 			}
 		})
 	}

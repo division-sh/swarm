@@ -17,7 +17,7 @@ import (
 func selectedWorkflowConstructionFixture(t *testing.T, state selectedContractWorkflowState) selectedContractWorkflowState {
 	t.Helper()
 	state.SourceRunID = "00000000-0000-0000-0000-000000000229"
-	config, err := pipeline.WorkflowInstanceConfigPayloadForRoute(flowidentity.StoredRoute(state.WorkflowName, flowidentity.LogicalInstanceID(state.Route), state.Route), state.WorkflowVersion, state.Config)
+	config, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.StoredRoute(state.WorkflowName, flowidentity.LogicalInstanceID(state.Route), state.Route), state.WorkflowVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,6 @@ func TestSelectedWorkflowReadinessAndConfigRetainRecordedParent(t *testing.T) {
 			state := selectedWorkflowConstructionFixture(t, selectedContractWorkflowState{
 				RunID: runID, EntityID: flowidentity.EntityID(path), WorkflowName: flow, Route: path,
 				WorkflowVersion: "v1", Mode: "static", ExecutionMode: executionmode.Mock,
-				Config: map[string]any{"business": "unchanged"},
 			})
 			parent := flowidentity.ParentRoute{FlowID: "outer/left/sink", FlowInstance: "outer/left/sink/revision", EntityID: flowidentity.EntityID("outer/left/sink/revision")}
 			if variant == "root_parent" {
@@ -113,7 +112,7 @@ func TestSelectedWorkflowReadinessAndConfigRetainRecordedParent(t *testing.T) {
 				TemplateID: flow, ScopeKey: flow, InstanceID: "final", InstancePath: path, EntityID: state.EntityID,
 				ParentRoute: parent, ParentEntityID: parent.EntityID, HasStoredPath: true,
 			}
-			config, err := pipeline.WorkflowInstanceConfigPayloadForIdentity(identity, "v1", state.Config)
+			config, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, "v1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,14 +146,11 @@ func TestSelectedWorkflowReadinessAndConfigRetainRecordedParent(t *testing.T) {
 			if plan.Identity != identity {
 				t.Fatalf("readiness lost construction identity: got=%+v want=%+v", plan.Identity, identity)
 			}
-			recorded, err := pipeline.DecodeWorkflowInstanceRecordedConfig(identity.Route(), encoded)
+			recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(identity.Route(), encoded)
 			if err != nil || recorded.ParentRoute() != identity.ParentRoute {
 				t.Fatalf("config lost exact parent: parent=%+v err=%v", recorded.ParentRoute(), err)
 			}
-			business, err := pipeline.WorkflowInstanceBusinessConfigForRoute(identity.Route(), encoded)
-			if err != nil || business["business"] != "unchanged" {
-				t.Fatalf("parent projection changed business config: %+v %v", business, err)
-			}
+
 		})
 	}
 }

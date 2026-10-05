@@ -26,6 +26,28 @@ func TestServedTypedReceiverInitializationBothStores(t *testing.T) {
 // Shared assertions run unchanged through both in-process HTTP and release-process HTTP.
 func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
+	for _, missing := range []string{"account_id", "values"} {
+		t.Run("missing_required_"+missing, func(t *testing.T) {
+			params := receiverInitializationPublishParams(rt, "missing-"+missing, "missing-"+missing, `{}`)
+			delete(params["payload"].(map[string]any), missing)
+			before := receiverIngressApplicationSnapshot(t, rt)
+			refusal := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
+			if refusal.Data["code"] != apiv1.PayloadValidationFailedCode {
+				t.Fatalf("required message refusal=%+v", refusal)
+			}
+			after := receiverIngressApplicationSnapshot(t, rt)
+			requireReceiverIngressRejectionDiagnostic(t, before, after, "work.requested")
+			for table, rows := range after {
+				if !reflect.DeepEqual(before[table], rows) {
+					t.Errorf("rejected input changed %s", table)
+				}
+			}
+			key := params["idempotency_key"].(string)
+			if count := servedEventPublishEventCountByIdempotencyKey(t, rt.DB, rt.Backend, key); count != 0 {
+				t.Fatalf("rejected message persisted %d events", count)
+			}
+		})
+	}
 	for _, tc := range []struct {
 		name, values string
 		config       map[string]any
@@ -33,13 +55,13 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 		{"zero_false", `{"count":0,"ratio":2.5,"active":false,"label":"kept","attributes":{"nested":[1,2.5]}}`, map[string]any{
 			"count": int64(0), "ratio": 2.5, "active": false, "label": "kept", "attributes": map[string]any{"nested": []any{int64(1), 2.5}},
 		}},
-		{"defaults", `{"active":true,"label":"kept","attributes":[]}`, map[string]any{
-			"count": int64(3), "ratio": float64(2), "active": true, "label": "kept", "attributes": []any{},
+		{"optional_fields_omitted", `{"active":true,"label":"kept","attributes":[]}`, map[string]any{
+			"active": true, "label": "kept", "attributes": []any{},
 		}},
 		// Public event-schema admission normalizes optional null to absence
-		// before initialize runs; this is not initializer-null admission.
+		// before same-name constructor projection; no default is reapplied.
 		{"optional_null_normalized", `{"count":null,"active":true,"label":"kept","attributes":{}}`, map[string]any{
-			"count": int64(3), "ratio": float64(2), "active": true, "label": "kept", "attributes": map[string]any{},
+			"active": true, "label": "kept", "attributes": map[string]any{},
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,8 +77,8 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 					t.Fatalf("optional-null normalization not visible in admitted payload: %+v", public.Payload)
 				}
 			}
-			tc.config["account_id"] = account
-			path, entityID := requireServedReceiverInitialization(t, rt, seed, tc.config, 1)
+			want := map[string]any{"account_id": account, "values": tc.config}
+			path, entityID := requireServedReceiverInitialization(t, rt, seed, want, 1)
 			before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			companions := readForkReceiverCompanions(t, rt, seed.RunID)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
@@ -70,43 +92,9 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 				reuseParams["run_id"] = seed.RunID
 				reuse := requireServedEventPublishRPCResult(t, rt.Endpoint, reuseParams)
 				waitPublicationSiteCompletion(t, rt, seed.RunID)
-				gotPath, gotEntity := requireServedReceiverInitialization(t, rt, reuse, tc.config, index+2)
+				gotPath, gotEntity := requireServedReceiverInitialization(t, rt, reuse, want, index+2)
 				if reuse.RunID != seed.RunID || gotPath != path || gotEntity != entityID {
 					t.Fatal("reuse changed receiver or run identity")
-				}
-			}
-		})
-	}
-	for _, tc := range []struct{ name, values string }{
-		{"missing_required", `{"active":true,"attributes":{}}`},
-		{"missing_active", `{"label":"kept","attributes":{}}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, receiverInitializationPublishParams(rt, tc.name, tc.name, tc.values))
-			producer, err := identity.ParseExecutableNode(".", "producer")
-			if err != nil {
-				t.Fatal(err)
-			}
-			waitServedEventPublishDeliveryStatusCount(t, rt.DB, rt.Backend, seed.EventID, "node", producer.Key(), "dead_letter", 1)
-			var settled int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='dead_letter'`, seed.EventID).Scan(&settled); err != nil {
-				t.Fatal(err)
-			}
-			if settled != 1 {
-				t.Fatalf("initialization refusal first-claim settlement=%d, want 1", settled)
-			}
-			for label, query := range map[string]string{
-				"receiver":    `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='account'`,
-				"readiness":   `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id=$1 AND instance_path LIKE 'account/%'`,
-				"entity":      `SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND flow_instance LIKE 'account/%'`,
-				"publication": `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='work.ready'`,
-			} {
-				var count int
-				if err := rt.DB.QueryRow(query, seed.RunID).Scan(&count); err != nil {
-					t.Fatal(err)
-				}
-				if count != 0 {
-					t.Errorf("failed initialization left %s rows=%d", label, count)
 				}
 			}
 		})
@@ -134,8 +122,8 @@ func receiverInitializationPublishParams(rt servedControlProofRuntime, key, acco
 
 func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRuntime, seed servedEventPublishRPCResult, want map[string]any, executions int) (string, string) {
 	t.Helper()
-	var path, entityID, raw string
-	if err := rt.DB.QueryRow(`SELECT f.instance_path,e.entity_id,CAST(f.config AS TEXT) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.flow_template='account'`, seed.RunID).Scan(&path, &entityID, &raw); err != nil {
+	var path, entityID, raw, fieldsRaw string
+	if err := rt.DB.QueryRow(`SELECT f.instance_path,e.entity_id,CAST(f.config AS TEXT),CAST(e.fields AS TEXT) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.flow_template='account'`, seed.RunID).Scan(&path, &entityID, &raw, &fieldsRaw); err != nil {
 		t.Fatal(err)
 	}
 	var config map[string]any
@@ -145,12 +133,21 @@ func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRunt
 	if config["flow_path"] != path || config["storage_ref"] != path || config["instance_kind"] != "template" {
 		t.Fatalf("receiver config has wrong durable coordinates: %s", raw)
 	}
-	// The durable companion wraps business config with runtime coordinates.
-	got, err := canonicaljson.CloneRuntimeValue(config["config"])
+	// Business state has one field owner; the companion contains runtime controls only.
+	var persisted map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(fieldsRaw), &persisted); err != nil {
+		t.Fatal(err)
+	}
+	got, err := canonicaljson.CloneRuntimeValue(persisted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
+	fields := got.(map[string]any)
+	delete(fields, "processed_count")
+	if _, exists := config["config"]; exists {
+		t.Fatalf("business copy in header: %s", raw)
+	}
+	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("persisted initialization=%#v, want %#v (raw %s)", got, want, raw)
 	}
 	var companions int
@@ -162,8 +159,16 @@ func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRunt
 	}
 	var entity operatorread.OperatorEntityFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
-	if entity.Entity.EntityID != entityID || entity.Entity.RunID != seed.RunID || !reflect.DeepEqual(entity.Fields, map[string]any{"account_id": want["account_id"], "processed_count": float64(executions)}) {
-		t.Fatalf("receiver public business state=%+v; initialization must not leak into entity fields", entity)
+	publicRaw, err := json.Marshal(want["values"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var publicValues any
+	if err := json.Unmarshal(publicRaw, &publicValues); err != nil {
+		t.Fatal(err)
+	}
+	if entity.Entity.EntityID != entityID || entity.Entity.RunID != seed.RunID || !reflect.DeepEqual(entity.Fields, map[string]any{"account_id": want["account_id"], "processed_count": float64(executions), "values": publicValues}) {
+		t.Fatalf("receiver public business state=%+v; supplied values must have the declared state owner", entity)
 	}
 	var eventID string
 	if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.ready' AND source_event_id=$2`, seed.RunID, seed.EventID).Scan(&eventID); err != nil {

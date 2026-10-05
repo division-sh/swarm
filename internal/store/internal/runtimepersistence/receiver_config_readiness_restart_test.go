@@ -57,9 +57,10 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 				}
 				publisher := newPublisher()
 				req := f.request("business-key", "ti-restart", "committed")
-				req.Config["nested"] = []any{int64(7), float64(7)}
+				supplied := receiverSuppliedPayload(t, req)
+				supplied["nested"] = []any{int64(7), float64(7)}
 				payload, err := canonicaljson.MarshalPreservingNumberKinds(map[string]any{
-					"request_id": req.ResolvedKey, "label": req.Config["label"], "enabled": true, "nested": req.Config["nested"],
+					"request_id": req.ResolvedKey, "label": supplied["label"], "nested": supplied["nested"],
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -146,7 +147,6 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 				}
 				// Reconstruct both consumers; only durable config/readiness survives.
 				restarted := f.restartedReceiverConfigManager(t, newPublisher())
-				req.Config = map[string]any{"request_id": "replacement", "label": false, "undeclared": true}
 				for i := 0; i < 2; i++ {
 					if created, err := restarted.manager.EnsureFlowInstance(f.ctx, req); err != nil || created {
 						t.Fatalf("restart/retry replaced initialization: created=%v err=%v", created, err)
@@ -159,14 +159,15 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 				if err != nil || len(agents) != 1 {
 					t.Fatalf("restarted agents=%d err=%v", len(agents), err)
 				}
-				want, err := canonicaljson.MarshalPreservingNumberKinds(plan.Instance.Config)
-				if err != nil {
-					t.Fatal(err)
-				}
-				requireReceiverConfigWire(t, agents[0].Config.ReceiverConfig, want)
+				requireNativeReceiverAgentCarrier(t, agents[0].Config)
 				for _, route := range restarted.bus.materializationRequests() {
-					if route.ActivationVariables["label"] != "committed" || route.ActivationVariables["request_id"] != "business-key" {
-						t.Fatalf("restart consumed incoming variables: %#v", route.ActivationVariables)
+					for _, field := range []string{"label", "request_id", "nested", "enabled"} {
+						if _, exists := route.ActivationVariables[field]; exists {
+							t.Fatalf("restart retained business activation variable: %#v", route.ActivationVariables)
+						}
+					}
+					if route.ActivationVariables["instance_id"] != plan.Identity.InstanceID {
+						t.Fatalf("restart lost exact activation identity: %#v", route.ActivationVariables)
 					}
 				}
 				if len(restarted.bus.routePaths()) != 1 {

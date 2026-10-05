@@ -666,9 +666,6 @@ func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
 }
 
 func ValidateAgentBuildConfiguration(cfg models.AgentConfig) error {
-	if err := cfg.ValidateReceiverConfig(); err != nil {
-		return err
-	}
 	if err := models.ValidateNoAuthoredSystemPrompt(cfg.Config); err != nil {
 		return err
 	}

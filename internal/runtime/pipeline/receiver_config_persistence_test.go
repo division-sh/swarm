@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -42,7 +41,7 @@ func TestReceiverConfigAndRuntimeControlsRoundTripBothStores(t *testing.T) {
 			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: "ti-not-the-business-key", StorageRef: "review/ti-not-the-business-key", EntityID: uuid.NewString(),
 				EntityType: "review_subject", WorkflowName: "review", WorkflowVersion: "runtime-version",
-				CurrentState: "active", Status: "active", InstanceKind: "template", Config: config,
+				CurrentState: "active", Status: "active", InstanceKind: "template", Fields: config,
 				ParentFlowID: "parent", ParentFlowInstance: "parent/one", ParentEntityID: uuid.NewString(),
 				TransitionHistory: []WorkflowTransitionRecord{lifecycleTransitionRecordFixtureForTest(t, "review", "queued", "active", "evt-1", now)},
 			})
@@ -56,8 +55,8 @@ func TestReceiverConfigAndRuntimeControlsRoundTripBothStores(t *testing.T) {
 				if err != nil || !found {
 					t.Fatalf("load: found=%v err=%v", found, err)
 				}
-				if !reflect.DeepEqual(loaded.Config, want) {
-					t.Fatalf("business config changed: got %#v want %#v", loaded.Config, want)
+				if !reflect.DeepEqual(loaded.Fields, want) {
+					t.Fatalf("business config changed: got %#v want %#v", loaded.Fields, want)
 				}
 				if loaded.Status != "active" || loaded.StorageRef != instance.StorageRef || loaded.InstanceID != instance.InstanceID || loaded.WorkflowVersion != instance.WorkflowVersion || loaded.ParentFlowID != instance.ParentFlowID || loaded.ParentEntityID != instance.ParentEntityID || len(loaded.TransitionHistory) != 1 {
 					t.Fatalf("business data replaced runtime controls: %#v", loaded)
@@ -66,53 +65,12 @@ func TestReceiverConfigAndRuntimeControlsRoundTripBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if projection.Identity.Route() != owner.Route || projection.Identity.EntityID != instance.EntityID || !reflect.DeepEqual(projection.Config, want) {
+				if projection.Identity.Route() != owner.Route || projection.Identity.EntityID != instance.EntityID {
 					t.Fatalf("route recovery changed exact config/identity: %#v", projection)
 				}
-				loaded.Config["nested"].([]any)[0].(map[string]any)["integer"] = int64(100)
-				projection.Config["config"].(map[string]any)["control"] = "mutated-readback"
+				loaded.Fields["nested"].([]any)[0].(map[string]any)["integer"] = int64(100)
 			}
 		})
-	}
-}
-
-func TestReceiverConfigCodecIsolatesNestedBusinessValues(t *testing.T) {
-	config := map[string]any{"nested": []any{map[string]any{"integer": int64(4), "double": float64(4), "number": json.Number("4.0"), "null": nil}}}
-	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-		StorageRef: "review/one", EntityID: uuid.NewString(), EntityType: "review_subject", WorkflowName: "review", Config: config,
-	})
-	projection, err := workflowInstancePersistedProjectionFromInstance(instance, instance.StorageRef)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := projection.ConfigPayload("version")
-	config["nested"].([]any)[0].(map[string]any)["integer"] = int64(99)
-	projection.Config["nested"].([]any)[0].(map[string]any)["double"] = float64(99)
-	raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, _, err := decodeWorkflowInstanceConfigPayload(raw, workflowInstancePersistedControl{StorageRef: instance.StorageRef})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]any{"nested": []any{map[string]any{"integer": int64(4), "double": float64(4), "number": float64(4), "null": nil}}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("aliasing or numeric kind drift: %#v", got)
-	}
-}
-
-func TestReceiverConfigCodecRejectsFlatAndMalformedBusinessObjects(t *testing.T) {
-	for _, raw := range []string{`{}`, `null`, `{"instance_id":"one","business":"old-flat-value"}`, `{"config":null}`, `{"config":[]}`, `{"config":"value"}`, `{"config":{},"unknown":"value"}`} {
-		t.Run(raw, func(t *testing.T) {
-			if _, _, err := decodeWorkflowInstanceConfigPayload([]byte(raw), workflowInstancePersistedControl{}); err == nil || !strings.Contains(err.Error(), "flow_instances.config") {
-				t.Fatalf("invalid config accepted: %v", err)
-			}
-		})
-	}
-	// An empty business object is evidence; absence or null is not.
-	if config, _, err := decodeWorkflowInstanceConfigPayload([]byte(`{"config":{}}`), workflowInstancePersistedControl{}); err != nil || config == nil || len(config) != 0 {
-		t.Fatalf("explicit empty config rejected: %#v %v", config, err)
 	}
 }
 
@@ -122,7 +80,7 @@ func TestHistoricalWorkflowConfigProjectsOnlyOwnership(t *testing.T) {
 		StorageRef: "parent/one/review", EntityID: uuid.NewString(), WorkflowName: "review",
 		WorkflowVersion: "source-version", InstanceKind: "static", TemplateVersion: "source-template",
 		Status: "active", ParentFlowID: parent.FlowID, ParentFlowInstance: parent.FlowInstance, ParentEntityID: parent.EntityID,
-		Config: map[string]any{"workflow_version": "business-version", "parent_entity_id": "business-parent", "nested": []any{int64(3), float64(3)}},
+		Fields: map[string]any{"workflow_version": "business-version", "parent_entity_id": "business-parent", "nested": []any{int64(3), float64(3)}},
 	})
 	projection, err := workflowInstancePersistedProjectionFromInstance(source, source.StorageRef)
 	if err != nil {
@@ -132,7 +90,7 @@ func TestHistoricalWorkflowConfigProjectsOnlyOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorded, err := DecodeWorkflowInstanceRecordedConfig(flowidentity.RouteForInstancePath(source.StorageRef), raw)
+	recorded, err := DecodeWorkflowInstanceRecordedHeader(flowidentity.RouteForInstancePath(source.StorageRef), raw)
 	if err != nil || recorded.WorkflowVersion() != source.WorkflowVersion || recorded.ParentRoute() != parent {
 		t.Fatalf("recorded controls: %+v %v", recorded, err)
 	}
@@ -142,19 +100,19 @@ func TestHistoricalWorkflowConfigProjectsOnlyOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	business, control, err := decodeWorkflowInstanceConfigPayload(projected, workflowInstancePersistedControl{})
-	if err != nil || !reflect.DeepEqual(business, source.Config) || control.WorkflowVersion != source.WorkflowVersion ||
+	control, err := decodeWorkflowInstanceHeaderPayload(projected, workflowInstancePersistedControl{})
+	if err != nil || control.WorkflowVersion != source.WorkflowVersion ||
 		control.InstanceKind != source.InstanceKind || control.TemplateVersion != source.TemplateVersion || control.Status != source.Status ||
 		control.StorageRef != target.InstancePath || control.FlowPath != target.InstancePath || control.InstanceID != target.InstanceID ||
 		control.ParentFlowInstance != projectedParent.FlowInstance || control.ParentEntityID != projectedParent.EntityID {
-		t.Fatalf("historical projection changed non-ownership controls: business=%+v controls=%+v err=%v", business, control, err)
+		t.Fatalf("historical projection changed non-ownership controls: controls=%+v err=%v", control, err)
 	}
 	for _, invalid := range []flowidentity.ParentRoute{{}, {FlowID: "different", FlowInstance: "parent/two", EntityID: projectedParent.EntityID}, {FlowID: parent.FlowID, FlowInstance: "parent/two"}} {
 		if _, err := recorded.Project(target, invalid); err == nil {
 			t.Fatalf("accepted incomplete/changed parent %+v", invalid)
 		}
 	}
-	if _, err := DecodeWorkflowInstanceRecordedConfig(flowidentity.RouteForInstancePath(source.StorageRef), []byte(strings.Replace(string(raw), `"workflow_version":"source-version"`, `"workflow_version":1`, 1))); err == nil {
+	if _, err := DecodeWorkflowInstanceRecordedHeader(flowidentity.RouteForInstancePath(source.StorageRef), []byte(strings.Replace(string(raw), `"workflow_version":"source-version"`, `"workflow_version":1`, 1))); err == nil {
 		t.Fatal("accepted malformed recorded workflow version")
 	}
 	again, err := recorded.Project(target, projectedParent)

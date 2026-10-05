@@ -648,7 +648,6 @@ func (r pipelineEngineEntityCollectionReader) QueryEntityCollection(ctx context.
 }
 
 func cloneWorkflowInstanceForEngineMutation(instance WorkflowInstance) WorkflowInstance {
-	instance.Config = cloneStringAnyMap(instance.Config)
 	instance.Fields = cloneStringAnyMap(instance.Fields)
 	instance.Bookkeeping = cloneStringAnyMap(instance.Bookkeeping)
 	instance.Gates = cloneWorkflowGates(instance.Gates)

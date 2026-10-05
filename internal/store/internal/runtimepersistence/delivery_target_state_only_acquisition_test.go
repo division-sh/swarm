@@ -153,7 +153,6 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						construction := sqliteFlowActivationRequest(bundle, scope.flow, "instance", "", instance)
 						construction.ConstructorInput = "test.node_emitted.selector"
 						construction.ResolvedKey = "instance"
-						construction.Config = map[string]any{"instance_key": "instance"}
 						construction.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.selector", "", "", []byte(`{"account_id":"different-business-key","instance_key":"instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 						constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), construction)
 					}

@@ -140,7 +140,7 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipeli
 
 func descriptorHeaderConfigJSON(t *testing.T, flow, path string) string {
 	t.Helper()
-	payload, err := pipeline.WorkflowInstanceConfigPayloadForRoute(flowidentity.StoredRoute(flow, flowidentity.LogicalInstanceID(path), path), "1.0.0", nil)
+	payload, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.StoredRoute(flow, flowidentity.LogicalInstanceID(path), path), "1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,6 @@ import (
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
@@ -86,28 +85,10 @@ type AgentConfig struct {
 	EntityID             string                           `json:"entity_id,omitempty"`
 	ParentAgent          string                           `json:"parent_agent_id,omitempty"`
 	Config               json.RawMessage                  `json:"config,omitempty"`
-	// ReceiverConfig is admitted business data, never agent configuration authority.
-	ReceiverConfig json.RawMessage `json:"receiver_config,omitempty"`
-	BudgetEnvelope float64         `json:"budget_envelope,omitempty"`
+	BudgetEnvelope       float64                          `json:"budget_envelope,omitempty"`
 }
 
 func (cfg AgentConfig) EffectiveEntityID() string { return strings.TrimSpace(cfg.EntityID) }
-
-// ValidateReceiverConfig checks the carrier, not declaration admission. Creation
-// and recovery validate its values with the selected ReceiverConfiguration owner.
-func (cfg AgentConfig) ValidateReceiverConfig() error {
-	if len(cfg.ReceiverConfig) == 0 {
-		return nil
-	}
-	value, err := canonicaljson.Decode(cfg.ReceiverConfig)
-	if err != nil {
-		return fmt.Errorf("receiver configuration: %w", err)
-	}
-	if _, ok := value.ObjectMap(); !ok {
-		return fmt.Errorf("receiver configuration must be a JSON object")
-	}
-	return nil
-}
 
 func (cfg AgentConfig) ValidateIntentCarrier() error {
 	if err := cfg.ValidateIntentInputs(); err != nil {
@@ -248,7 +229,6 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	cfg.Permissions = normalizeStringList(cfg.Permissions)
 	cfg.FlowDataAccess = normalizeStringList(cfg.FlowDataAccess)
 	cfg.Config = append(json.RawMessage(nil), cfg.Config...)
-	cfg.ReceiverConfig = append(json.RawMessage(nil), cfg.ReceiverConfig...)
 }
 
 func normalizeStringList(values []string) []string {

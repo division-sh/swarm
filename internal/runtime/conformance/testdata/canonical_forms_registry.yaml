@@ -198,16 +198,16 @@ rows:
     corpus: {loops: 0}
 
   - id: flow.pin_event_entry
-    ruled: issue-2438-slice-2b
-    paths: "schema.pins.inputs[], schema.pins.outputs[]; deferred input {event, initialize} until slice 2c"
+    ruled: issue-2438-slices-2b-2c
+    paths: "schema.pins.inputs[], schema.pins.outputs[]"
     owners: [projectSchemaPinValue, CompileFlowInputPin, CompileFlowOutputPin]
     information:
       fact: [exact_local_event_identity]
-      choice: [deferred_receiver_initialization]
+      choice: []
     spelling:
-      canonical: names_only_direction_lists_with_deferred_initialize_exception
-      retired_duplicates: [authored_name, qualified_event, wildcard_event, events_wrapper, source, sink]
-      distinct_overrides: [initialize_until_slice_2c]
+      canonical: names_only_direction_lists
+      retired_duplicates: [authored_name, qualified_event, wildcard_event, events_wrapper, source, sink, initialize]
+      distinct_overrides: []
     boundary_retirement: "#2304/#2438: selected-root public position and admitted provider declarations own ingress. Private inputs require actual producer relations. Harness markers have no authority."
     # Historical observations at census_head; not counts of the rewritten corpus.
     corpus:
@@ -248,15 +248,15 @@ rows:
 
   - id: flow.other_surface
     ruled: mechanical-ratified
-    paths: "schema.tool_surface.role_scoped_entity_tools, schema.required_agents, schema.instance_variables.description, schema.instance_variables.variables.<name>, schema.auto_emit_on_create.event, schema.auto_emit_on_create.description"
-    owners: [projectSchemaReceiverVariablesValue, decodeWave1FieldValue, projectSchemaRequiredAgentsValue, AdmitFlowSchemaValue]
+    paths: "schema.tool_surface.role_scoped_entity_tools, schema.required_agents, schema.auto_emit_on_create.event, schema.auto_emit_on_create.description"
+    owners: [projectSchemaRequiredAgentsValue, AdmitFlowSchemaValue]
     information:
-      choice: [variable declarations, auto_emit_on_create, explicit_required_agent_boundary]
+      choice: [auto_emit_on_create, explicit_required_agent_boundary]
       derived_projection: [required_agents]
       annotation: [descriptions]
     spelling:
       canonical_candidate: omit_required_agents_when_equal_to_agents_catalog
-      retired_duplicates: [tool_surface_opt_in, scalar_variable_description]
+      retired_duplicates: [tool_surface_opt_in, instance_variables]
       distinct_overrides: []
     corpus: {required_agents_explicit: 0, variables: 0, auto_emit: 0}
 

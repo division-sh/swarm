@@ -971,7 +971,6 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 			ContractBundle:   source,
 			Instance:         runtimeflowidentity.Stored(source, templatereply.RequesterFlowID, owner.FlowInstance, accountID, owner.EntityID, ""),
 			ConstructorInput: "requester.setup", ResolvedKey: accountID, TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
-			Config: map[string]any{"account_id": accountID},
 		}); err != nil {
 			t.Fatalf("construct and attach requester %s: %v", owner.FlowInstance, err)
 		}

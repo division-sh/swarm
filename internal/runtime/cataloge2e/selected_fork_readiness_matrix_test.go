@@ -565,7 +565,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						}
 						forkState, found, err := h.workflow.Load(ctx, forkOwner)
 						fenced := (frontier == "mixed" || frontier == "activity_rejected") && stage == "initial"
-						if err != nil || (fenced && found) || (!fenced && (!found || forkState.Config["worker_id"] != "worker-001")) {
+						if err != nil || (fenced && found) || (!fenced && (!found || forkState.Fields["worker_id"] != "worker-001")) {
 							logSelectedForkRecoveryFailure(t, ctx, h, forkRun, err)
 							t.Fatalf("fork flow: %#v found=%t err=%v", forkState, found, err)
 						}
@@ -635,7 +635,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							t.Fatalf("source after: %v %t", err, found)
 						}
 						routesAfter, err := selected.ListFlowInstanceRouteRecords(ctx, owner)
-						if err != nil || before.CurrentState != after.CurrentState || before.Revision != after.Revision || !reflect.DeepEqual(before.Config, after.Config) || !reflect.DeepEqual(routesBefore, routesAfter) {
+						if err != nil || before.CurrentState != after.CurrentState || before.Revision != after.Revision || !reflect.DeepEqual(before.Fields, after.Fields) || !reflect.DeepEqual(routesBefore, routesAfter) {
 							t.Fatalf("source changed: before=%#v after=%#v err=%v", before, after, err)
 						}
 					})

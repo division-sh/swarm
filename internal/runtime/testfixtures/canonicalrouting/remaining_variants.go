@@ -365,21 +365,16 @@ portfolio-node:
 `,
 		"operating/schema.yaml": `name: operating
 instance: instance_id
-instance_variables:
-  variables:
-    product_id: text
 stages:
   initializing: {initial: true}
   ready: {terminal: true}
 pins:
   inputs:
-    - event: opco.create_requested
-      initialize:
-        product_id: payload.product_id
+    - opco.create_requested
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state:\n  instance_id: {type: text, _unused_reason: receiver instance identity}\n",
+		"operating/entities.yaml": "operating_state:\n  instance_id: {type: text, _unused_reason: receiver instance identity}\n  product_id: text\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   instance_id: string
   product_id: string

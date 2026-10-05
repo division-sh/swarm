@@ -61,7 +61,7 @@
           "flow_path": "producer",
           "producer_schema_digest": "sha256:324692054b745d6a9d616b28daac4a967d9f4605ab4d634f9c121941f4671bbc",
           "receiver_schema_digest": "sha256:324692054b745d6a9d616b28daac4a967d9f4605ab4d634f9c121941f4671bbc",
-          "pin_digest": "sha256:2d17e2d66d46fdcea899b45aa9385aecbcda5daf692fc3361cd7a9b9ca39c0a9",
+          "pin_digest": "sha256:14688e8aabcaf135affdd7037009f300588fd052752499a262880c5f10127ff5",
           "source_file": "producer/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -73,7 +73,7 @@
           "producer_schema_digest": "sha256:465c4e00e5afb301dadd8a4e797a8538d6081dfefca31b3fd5598035e5aa6219",
           "receiver_schema_digest": "sha256:465c4e00e5afb301dadd8a4e797a8538d6081dfefca31b3fd5598035e5aa6219",
           "business_key": "validation_case_id",
-          "pin_digest": "sha256:4573597af6f38b038103aab7a38be89836b16b4c140f96f822d1e4e432c4f634",
+          "pin_digest": "sha256:0c52f676f3f1e6df5bce72ba4b1ec32669cf37f643199a61435f5e52879d03bf",
           "source_file": "producer/schema.yaml",
           "source_line": 1,
           "source_column": 1
@@ -142,7 +142,7 @@
           "flow_path": "validator",
           "producer_schema_digest": "sha256:324692054b745d6a9d616b28daac4a967d9f4605ab4d634f9c121941f4671bbc",
           "receiver_schema_digest": "sha256:324692054b745d6a9d616b28daac4a967d9f4605ab4d634f9c121941f4671bbc",
-          "pin_digest": "sha256:eb89f11d0e81093714614c543ea499cc421f6421b2d330d87895775ac2bd63fb",
+          "pin_digest": "sha256:0ce035036ab972720c8ec4d65110155e630227a9fe3e1b11a1a9af1148ecf3f3",
           "source_file": "validator/schema.yaml",
           "source_line": 1,
           "source_column": 1

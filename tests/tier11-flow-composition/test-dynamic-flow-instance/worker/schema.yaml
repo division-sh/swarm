@@ -3,15 +3,10 @@ instance: worker_id
 stages:
   idle: {initial: true}
   complete: {terminal: true}
-instance_variables:
-  variables:
-    task_label: text
 auto_emit_on_create:
   event: work.setup
 pins:
   inputs:
-    - event: worker.requested
-      initialize:
-        task_label: payload.task_label
+    - worker.requested
     - work.setup
     - work.assign

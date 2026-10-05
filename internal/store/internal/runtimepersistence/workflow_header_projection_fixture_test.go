@@ -40,7 +40,7 @@ func commitPreparedWorkflowAggregateFixture(t *testing.T, ctx context.Context, s
 // These fixtures are not public constructor or activation qualification.
 func seedWorkflowHeaderProjectionFixture(t *testing.T, ctx context.Context, db flowRouteTestExecutor, runID, entityID, path, flow, entityType, stage, accumulator string, at time.Time) {
 	t.Helper()
-	payload, err := pipeline.WorkflowInstanceConfigPayloadForRoute(flowidentity.StoredRoute(flow, flowidentity.LogicalInstanceID(path), path), "1", nil)
+	payload, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.StoredRoute(flow, flowidentity.LogicalInstanceID(path), path), "1")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,16 +3,7 @@ instance: worker_id
 stages:
   ready: {initial: true}
   done: {terminal: true}
-instance_variables:
-  variables:
-    name: text
-    priority: integer
-    owner: text
 pins:
   inputs:
-    - event: spawn.done
-      initialize:
-        name: payload.name
-        owner: payload.owner
-        priority: payload.priority
+    - spawn.done
     - task.assign

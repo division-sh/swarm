@@ -59,7 +59,7 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 			state.EntityType, state.Mode, state.StageDefined = instance.EntityType, instance.Mode, instance.StageDefined
 			state.WorkflowVersion = instance.WorkflowVersion
 			state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
-			config, err := pipeline.WorkflowInstanceConfigPayloadForRoute(identity.Route, instance.WorkflowVersion, instance.Config)
+			config, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(identity.Route, instance.WorkflowVersion)
 			if err != nil {
 				t.Fatal(err)
 			}

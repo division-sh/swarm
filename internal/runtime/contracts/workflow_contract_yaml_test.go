@@ -506,7 +506,7 @@ func TestFlowSchemaDocumentDecodeRejectsRetiredInputAddressOnPresence(t *testing
 		t.Run(string(specimen), func(t *testing.T) {
 			var doc FlowSchemaDocument
 			err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen), &doc)
-			if err == nil || !strings.Contains(err.Error(), `event pin field "address" is not supported`) {
+			if err == nil || !strings.Contains(err.Error(), `must be a scalar text`) {
 				t.Fatalf("yaml.Unmarshal error = %v, want retired input address rejection", err)
 			}
 		})
@@ -559,7 +559,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 	for _, source := range []string{"harness", "external", "null", "{}", "[]", "''"} {
 		var invalid FlowSchemaDocument
 		err := decodeNodeTestYAML([]byte("pins: {inputs: [{event: work.requested, source: "+source+"}]}"), &invalid)
-		if err == nil || !strings.Contains(err.Error(), `field "source" is not supported`) {
+		if err == nil || !strings.Contains(err.Error(), `must be a scalar text`) {
 			t.Fatalf("source %s: %v", source, err)
 		}
 	}
@@ -568,7 +568,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 func TestFlowSchemaDocumentDecodeRejectsRetiredAddressBeforeNestedFields(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestSnippet(t, canonicalrouting.RetiredReceiverRoutingParserSnippet(t, canonicalrouting.RetiredInputAddressUnsupportedNested), &doc)
-	if err == nil || !strings.Contains(err.Error(), `event pin field "address" is not supported`) {
+	if err == nil || !strings.Contains(err.Error(), `must be a scalar text`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired address rejection", err)
 	}
 }
@@ -605,17 +605,17 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 		{
 			name: "resolution",
 			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedResolutionField),
-			want: "is not supported",
+			want: "must be a scalar text",
 		},
 		{
 			name: "instance_key",
 			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedInstanceKeyField),
-			want: `field "resolution" is not supported`,
+			want: `must be a scalar text`,
 		},
 		{
 			name: "carries",
 			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedResolutionCarry),
-			want: `event pin field "carries" is not supported`,
+			want: `must be a scalar text`,
 		},
 	}
 	for _, tc := range tests {
@@ -632,7 +632,7 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 func TestFlowSchemaDocumentDecodeRejectsRetiredCarriesBeforeNestedSource(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := decodeNodeTestSnippet(t, canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.RetiredInstanceKeyCarry), &doc)
-	if err == nil || !strings.Contains(err.Error(), `event pin field "carries" is not supported`) {
+	if err == nil || !strings.Contains(err.Error(), `must be a scalar text`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want whole carries grammar retired before nested interpretation", err)
 	}
 }
@@ -1835,7 +1835,7 @@ func TestW2RejectsAuthoredPinName(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "input", raw: "pins:\n  inputs:\n    - name: work_requested\n      event: work.requested\n", want: `field "name" is not supported`},
+		{name: "input", raw: "pins:\n  inputs:\n    - name: work_requested\n      event: work.requested\n", want: `must be a scalar text`},
 		{name: "output", raw: "pins:\n  outputs:\n    - name: work_completed\n      event: work.completed\n", want: "must be a scalar text"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1854,7 +1854,7 @@ func TestW2RejectsRetiredPinMetadataAndNonLocalEvents(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "input carries", raw: "pins:\n  inputs:\n    - event: work.requested\n      carries:\n        work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: `event pin field "carries" is not supported`},
+		{name: "input carries", raw: "pins:\n  inputs:\n    - event: work.requested\n      carries:\n        work_id: {from: payload.work_id, type: string, optional: true, convert: text}\n", want: `must be a scalar text`},
 		{name: "output key", raw: "pins:\n  outputs:\n    - event: work.completed\n      key: work_id\n", want: "must be a scalar text"},
 		{name: "output carries", raw: "pins:\n  outputs:\n    - event: work.completed\n      carries: [work_id]\n", want: "must be a scalar text"},
 		{name: "qualified input", raw: "pins:\n  inputs: [producer/work.requested]\n", want: "exact local canonical event identity"},
@@ -1884,13 +1884,13 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		{name: "retired input wrapper", raw: "pins:\n  inputs:\n    events: [work.requested]\n", want: "is mapping, want sequence"},
 		{name: "retired output wrapper", raw: "pins:\n  outputs:\n    events: [work.completed]\n", want: "is mapping, want sequence"},
 		{name: "empty output list", raw: "pins:\n  outputs: []\n", want: "non-empty sequence"},
-		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    - event: work.requested\n", want: "mapping requires non-empty initialize"},
+		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    - event: work.requested\n", want: "must be a scalar text"},
 		{name: "optionless output mapping", raw: "pins:\n  outputs:\n    - event: work.completed\n", want: "must be a scalar text"},
 		{name: "duplicate event", raw: "pins:\n  inputs: [work.requested, work.requested]\n", want: "declared more than once"},
 		{name: "retired read grant", raw: "pins:\n  inputs:\n    reads: [entity.status, entity.status]\n", want: "is mapping, want sequence"},
 		{name: "retired write grant", raw: "pins:\n  outputs:\n    writes: [{field: entity.status}]\n", want: "is mapping, want sequence"},
 		{name: "unknown pin direction", raw: "pins:\n  ingress:\n    events: [work.requested]\n", want: "is not supported"},
-		{name: "unknown input field", raw: "pins:\n  inputs:\n    - event: work.requested\n      aliases: [work.requested]\n", want: `field "aliases" is not supported`},
+		{name: "unknown input field", raw: "pins:\n  inputs:\n    - event: work.requested\n      aliases: [work.requested]\n", want: `must be a scalar text`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var schema FlowSchemaDocument
@@ -1901,7 +1901,7 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		})
 	}
 	var schema FlowSchemaDocument
-	if err := decodeNodeTestSnippet(t, canonicalrouting.W2EmptyResolutionParserSnippet(t), &schema); err == nil || !strings.Contains(err.Error(), "inputs event pin field \"resolution\" is not supported") {
+	if err := decodeNodeTestSnippet(t, canonicalrouting.W2EmptyResolutionParserSnippet(t), &schema); err == nil || !strings.Contains(err.Error(), "must be a scalar text") {
 		t.Fatalf("empty resolution error = %v, want explicit-empty rejection", err)
 	}
 }
@@ -1916,8 +1916,8 @@ func TestW2RejectsNonExactAndBlankMappingKeysAtEveryLayer(t *testing.T) {
 		{name: "flow pins blank", snippet: canonicalrouting.W2FlowPinsBlankKey, want: "not supported"},
 		{name: "retired input direction surrounding", snippet: canonicalrouting.W2InputDirectionSurroundingKey, want: "mapping, want sequence"},
 		{name: "retired input direction blank", snippet: canonicalrouting.W2InputDirectionBlankKey, want: "mapping, want sequence"},
-		{name: "input event surrounding", snippet: canonicalrouting.W2InputEventSurroundingKey, want: "not supported"},
-		{name: "input event blank", snippet: canonicalrouting.W2InputEventBlankKey, want: "not supported"},
+		{name: "input event surrounding", snippet: canonicalrouting.W2InputEventSurroundingKey, want: "scalar text"},
+		{name: "input event blank", snippet: canonicalrouting.W2InputEventBlankKey, want: "scalar text"},
 		{name: "retired output event surrounding", snippet: canonicalrouting.W2OutputEventSurroundingKey, want: "scalar text"},
 		{name: "retired output event blank", snippet: canonicalrouting.W2OutputEventBlankKey, want: "scalar text"},
 		{name: "connection resolution surrounding", snippet: canonicalrouting.W2ResolutionSurroundingKey, want: "not supported"},
@@ -1942,8 +1942,8 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 		root func(testing.TB) string
 		want string
 	}{
-		{name: "fan-in", root: canonicalrouting.CopyRetiredFanInPin, want: `field "resolution" is not supported`},
-		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom, want: `field "from" is not supported`},
+		{name: "fan-in", root: canonicalrouting.CopyRetiredFanInPin, want: "must be a scalar text"},
+		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom, want: "must be a scalar text"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := LoadWorkflowContractBundleWithOverrides(repo, tc.root(t), DefaultPlatformSpecFile(repo))

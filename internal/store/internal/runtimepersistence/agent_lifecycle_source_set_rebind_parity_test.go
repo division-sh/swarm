@@ -794,7 +794,6 @@ func seedLifecycleReadinessOwner(
 	construction, err := manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle), Instance: plan.Identity, OccurredAt: now,
 		ConstructorInput: "lifecycle.constructed", ResolvedKey: plan.Identity.InstanceID,
-		Config:       map[string]any{"fixture_key": plan.Identity.InstanceID},
 		TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "lifecycle.constructed", "fixture", "", []byte(`{"fixture_key":"`+plan.Identity.InstanceID+`"}`), 0, plan.RunID, events.EventEnvelope{}, now),
 	})
 	if err != nil {

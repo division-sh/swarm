@@ -4,15 +4,6 @@ stages:
   approved: {initial: true}
   completed: {terminal: true}
   rejected: {terminal: true}
-instance_variables:
-  description: Dynamic delivery instance values.
-  variables:
-    instance_id:
-      type: string
-      description: Delivery instance id.
-    item_label:
-      type: string
-      description: Human label for the item.
 auto_emit_on_create:
   event: item.completed
   description: Seed delivery completion checks when a template instance is created.

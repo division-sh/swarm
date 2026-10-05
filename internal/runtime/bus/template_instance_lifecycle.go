@@ -213,9 +213,9 @@ func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan
 	instance.ParentEntityID = instance.ParentRoute.EntityID
 	var payload map[string]any
 	if err := canonicaljson.DecodePreservingNumberLexemes(evt.Payload(), &payload); err != nil {
-		return runtimepipeline.FlowInstanceActivationRequest{}, TemplateInstanceLifecycleDecision{}, fmt.Errorf("receiver initialization payload: %w", err)
+		return runtimepipeline.FlowInstanceActivationRequest{}, TemplateInstanceLifecycleDecision{}, fmt.Errorf("constructor payload: %w", err)
 	}
-	config, err := plan.ReceiverInitializationConfig(o.source, payload, evt.ID())
+	resolvedKey, err := plan.ResolvedInstanceKey(payload, evt.ID())
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, TemplateInstanceLifecycleDecision{}, err
 	}
@@ -237,9 +237,8 @@ func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan
 	return runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle:    o.source,
 		Instance:          instance,
-		Config:            config,
 		ConstructorInput:  string(plan.ReceiverLocalEvent()),
-		ResolvedKey:       config[instanceContract.Field.Path()],
+		ResolvedKey:       resolvedKey,
 		PayloadProjection: projection,
 		Bookkeeping:       bookkeeping,
 		TriggerEvent:      evt,

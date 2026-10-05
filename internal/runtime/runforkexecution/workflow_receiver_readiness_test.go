@@ -15,10 +15,22 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func readinessTestMaterialization(t *testing.T, source semanticview.Source, flowID, path, entityID string) (runtimemanager.FlowInstanceMaterializationPlan, error) {
+	t.Helper()
+	entity := selectedContractConstructedReadinessTestEntity(t, source, flowID, entityID, path, "worker")
+	plan := runfork.RunForkPlan{SourceRunID: selectedContractAgentTestRunID, Entities: []runfork.RunForkEntityState{entity}}
+	instances, err := runforkadmission.ConstructedInstances(source, plan)
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("fixture has no exact constructed owner: %v", err)
+	}
+	return runtimemanager.ConstructedFlowMaterialization(source, plan.SourceRunID, instances[0])
+}
 
 func selectedContractReceiverReadinessSource(t *testing.T, policy canonicalrouting.ForkReceiverPolicy) LoadedSelectedContractSource {
 	t.Helper()
@@ -161,7 +173,7 @@ func TestSelectedContractReceiverReadinessRetainsEveryEventAssociation(t *testin
 
 func TestSelectedContractReceiverReadinessTemplateAgentDoesNotElectFromHistory(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 1)
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/one", "selected-entity", map[string]any{"worker_id": "one"})
+	flow, err := readinessTestMaterialization(t, loaded.Source, "worker-flow", "worker-flow/one", "selected-entity")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +210,7 @@ func TestSelectedContractReceiverReadinessTemplateAgentDoesNotElectFromHistory(t
 func TestSelectedContractReceiverReadinessTemplateRequiresOneGenerationMode(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 1)
 	const path = "worker-flow/one"
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", path, "receiver-entity", map[string]any{"worker_id": "one"})
+	flow, err := readinessTestMaterialization(t, loaded.Source, "worker-flow", path, "receiver-entity")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +256,7 @@ func TestSelectedContractReceiverReadinessTemplateRequiresOneGenerationMode(t *t
 func TestSelectedContractReceiverReadinessTemplateConsumesExactPlanRoute(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 1)
 	const path = "worker-flow/one"
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", path, "receiver-entity", map[string]any{"worker_id": "one"})
+	flow, err := readinessTestMaterialization(t, loaded.Source, "worker-flow", path, "receiver-entity")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,24 +306,13 @@ func TestSelectedContractReceiverReadinessTemplateConsumesExactPlanRoute(t *test
 
 func TestSelectedContractReceiverReadinessRejectsUnsupportedConfigDependencyAuthoring(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 1)
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/one", "receiver-entity", map[string]any{"worker_id": "one"})
+	flow, err := readinessTestMaterialization(t, loaded.Source, "worker-flow", "worker-flow/one", "receiver-entity")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(flow.Config, map[string]any{"worker_id": "one"}) {
-		t.Fatalf("fresh template config gained unproven inputs: %#v", flow.Config)
-	}
+
 	if _, exists := flow.ActivationVariables["foo"]; exists {
 		t.Fatalf("fresh activation inferred unavailable foo: %#v", flow.ActivationVariables)
-	}
-	for _, blueprint := range flow.Agents {
-		var config map[string]any
-		if err := json.Unmarshal(blueprint.Config.ReceiverConfig, &config); err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(config, map[string]any{"worker_id": "one"}) {
-			t.Fatalf("agent acquired undeclared activation inputs: %#v", config)
-		}
 	}
 	// These are hostile authority-boundary inputs, not an admitted arbitrary
 	// config-dependent template or a historical configuration recovery proof.

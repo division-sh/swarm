@@ -79,7 +79,6 @@ func TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores(t *tes
 					options.WorkflowInstances = lifecycle
 				})
 				req := f.request("receipt", "receipt", "unchanged")
-				req.Config = map[string]any{"request_id": "receipt"}
 				if err := f.manager.ActivateFlowInstance(f.ctx, req); !errors.Is(err, fault) {
 					t.Fatalf("constructor lost commit failure: %v", err)
 				}
@@ -164,7 +163,6 @@ func TestFlowConstructorActivationConsumesExactInputBothStores(t *testing.T) {
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 				req := sqliteFlowActivationRequest(f.bundle, "review", "r1", "", "review/r1")
-				req.Config = map[string]any{"request_id": "r1"}
 				req.ConstructorInput = "task.started"
 				if test.input != "" {
 					req.ConstructorInput = test.input
@@ -208,7 +206,6 @@ func TestFlowConstructorPersistsCreatingInputWithoutAutoEmitBothStores(t *testin
 		t.Run(backend, func(t *testing.T) {
 			f := newEagerFlowConstructorFixture(t, backend)
 			req := f.request("business-key", "r1", "first")
-			req.Config = map[string]any{"request_id": "business-key"}
 			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 			if err != nil {
 				t.Fatal(err)
