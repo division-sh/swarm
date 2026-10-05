@@ -1135,3 +1135,33 @@ Source selection, credentials, recovery inventory and selected-store mutation
 remain their existing separate owners; no local guard or refusal is deleted.
 The negative census mutation still rejects an unaudited startup refusal.
 Regeneration is not credited as execution proof; core must pass again.
+
+## Persistence authority integration census
+
+The next core pass caught 19 unclassified findings, all named in the approved
+consumer map. Classify them explicitly before regenerating/checking the ledger:
+
+- Seven typed process-local callbacks: normal workspace admission (Manager
+  field/options), unpublished activation validation (MCP hook and selected
+  gateway parameter), selected factory manager binding, exact target release,
+  and current native artifact observation. None carries a SQL handle or opens
+  a runtime transaction; the callback is not another persistence owner.
+- Four typed context carrier/read findings: fork-chat target dispatch and
+  transported output-call metadata. They preserve the existing exact authority
+  and output owner, not raw transaction access or new ambient permission.
+- Two typed facade observations plus two typed interfaces: current fork-chat
+  workspace authority and the isolated workspace resolver. The store method
+  observes exact prepared/executing sandbox authority without claiming provider
+  dispatch or exposing raw SQL; completion admission still owns the transition.
+- Four raw operations remain private to effectpersistence's renamed PostgreSQL/
+  SQLite admitted-authority readers. The existing completion current-authority
+  reader remains stricter; no raw operation moves into runtime or facade code.
+
+Remove only the five stale renamed/helper-signature records. Keep the unknown
+finding and raw-facade rejection tests unchanged. Runtime/worker, exact selected
+gateway, dual-store workspace-authority and real public fork-chat/refusal proofs
+are the execution evidence; the regenerated ledger alone is not proof.
+
+The native PostgreSQL quoted-path control also requires a short disk-backed
+TMPDIR. Use `/home/youmew/g-2555-tmp` on server2 rather than relaxing the
+conservative Unix-socket bound or falling back to RAM-backed `/tmp`.
