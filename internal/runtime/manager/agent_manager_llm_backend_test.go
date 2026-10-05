@@ -91,7 +91,7 @@ func TestResolveAgentModelMockCommandSelectsExactArtifactWithEveryLiveBackend(t 
 				t.Fatalf("selected backend/mode = %q/%q, want mock/mock", cfg.ResolvedLLMBackend, cfg.ExecutionMode)
 			}
 			if cfg.ResolvedLLMProvider != llmselection.ProviderMock || cfg.ResolvedLLMTransport != llmselection.TransportMock {
-				t.Fatalf("resolved provider/transport = %q/%q, want mock/in_process", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport)
+				t.Fatalf("resolved provider/transport = %q/%q, want mock/cli", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport)
 			}
 			if !reflect.DeepEqual(cfg.Mock, artifact) {
 				t.Fatalf("captured artifact = %#v, want %#v", cfg.Mock, artifact)
@@ -110,7 +110,7 @@ func TestResolveAgentModelMaterializesSelectionWithoutOptionalModel(t *testing.T
 		t.Fatalf("selected backend/mode = %q/%q, want mock/mock", cfg.ResolvedLLMBackend, cfg.ExecutionMode)
 	}
 	if cfg.ResolvedLLMProvider != llmselection.ProviderMock || cfg.ResolvedLLMTransport != llmselection.TransportMock {
-		t.Fatalf("resolved provider/transport = %q/%q, want mock/in_process", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport)
+		t.Fatalf("resolved provider/transport = %q/%q, want mock/cli", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport)
 	}
 	if cfg.ResolvedModel != "" {
 		t.Fatalf("resolved model = %q, want empty for optional model", cfg.ResolvedModel)
