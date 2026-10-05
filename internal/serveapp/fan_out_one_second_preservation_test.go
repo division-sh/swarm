@@ -126,6 +126,7 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 				t.Fatalf("CLI changed settled summary: %+v err=%v", cliStatus.FanOut, err)
 			}
 			if after := issue2394SurfaceSnapshot(t, rt.DB, runID); !reflect.DeepEqual(before, after) {
+				t.Logf("preservation snapshot differences:\n%s", issue2394SurfaceSnapshotDifference(before, after))
 				t.Fatal("supported readback changed durable preservation evidence")
 			}
 			receipt := transactions.Snapshot()
