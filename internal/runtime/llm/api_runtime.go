@@ -30,7 +30,7 @@ type AnthropicAPIRuntime struct {
 	lockOwner            string
 	httpClient           *http.Client
 	apiURL               string
-	apiKey               string
+	credentialCache      providerCredentialCache
 	events               EventPublisher
 	providerAdmission    *ProviderAdmissionRegistry
 	credentials          ProviderCredentialResolver
@@ -239,12 +239,8 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(r.apiKey) == "" {
-		credential, err := r.credentials.Resolve(ctx, profile)
-		if err != nil {
-			return nil, err
-		}
-		r.apiKey = credential.Value
+	if err := r.credentialCache.resolve(ctx, r.credentials, profile); err != nil {
+		return nil, err
 	}
 
 	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
@@ -470,7 +466,7 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 		return nil, anthropicResponse{}, nil, fmt.Errorf("build anthropic request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("x-api-key", r.apiKey)
+	req.Header.Set("x-api-key", r.credentialCache.snapshot())
 	req.Header.Set("anthropic-version", "2023-06-01")
 	var attempt *runtimeeffects.Handle
 	if managed == nil {
