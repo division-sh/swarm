@@ -19,8 +19,6 @@ func workflowEntityContract(source semanticview.Source, flowID string) (entityru
 	return entityruntime.ResolveForFlow(source, flowID)
 }
 
-
-
 func WorkflowEntitySchemaInitialValueFields(source semanticview.Source) map[string]struct{} {
 	if source == nil {
 		return nil

@@ -55,7 +55,7 @@ func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 			if tc.handler == canonicalrouting.StaticRetirementCreate {
 				repo := conformanceRepoRoot(t)
 				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-					if err == nil || !strings.Contains(err.Error(), `handler field "create_entity" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
+				if err == nil || !strings.Contains(err.Error(), `handler field "create_entity" is not supported`) || !strings.Contains(err.Error(), "Valid fields:") {
 					t.Fatalf("handler creation must fail strict loading: %v", err)
 				}
 				return

@@ -22,7 +22,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
 func TestCatalogCausalOrderPreservesParentsAndIndependentOrder(t *testing.T) {
 	rows := []catalogStoredEvent{
 		{ID: "a-child", SourceEventID: "z-parent"},
@@ -44,7 +43,6 @@ func TestCatalogCausalOrderPreservesParentsAndIndependentOrder(t *testing.T) {
 		t.Fatal("causal ordering mutated input")
 	}
 }
-
 
 func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
