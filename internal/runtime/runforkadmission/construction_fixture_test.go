@@ -23,7 +23,7 @@ func withConstructedHeader(t testing.TB, plan runfork.RunForkPlan, source semant
 	config, err := json.Marshal(map[string]any{
 		"instance_id": instance.InstanceID, "storage_ref": instance.InstancePath, "flow_path": instance.InstancePath,
 		"parent_flow_id": instance.ParentRoute.FlowID, "parent_flow_instance": instance.ParentRoute.FlowInstance,
-		"parent_entity_id": instance.ParentEntityID, "config": map[string]any{},
+		"parent_entity_id": instance.ParentEntityID,
 	})
 	if err != nil {
 		t.Fatal(err)

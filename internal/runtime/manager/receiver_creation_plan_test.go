@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -52,7 +53,12 @@ func TestRebuildPendingCreationConsumesCompiledReceiverOccurrence(t *testing.T) 
 		t.Fatalf("rebuilt occurrence lacks its compiled receiver proof: %+v", proof)
 	}
 	for _, invalid := range []map[string]any{{}, {"worker_id": 17}, {"worker_id": "worker-001", "unexpected": true}} {
-		if _, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(current, false, source, schema, identity); err == nil {
+		bad := *current
+		bad.Payload, err = canonicaljson.MarshalPreservingNumberKinds(invalid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(&bad, false, source, schema, identity); err == nil {
 			t.Fatalf("rebuild accepted invalid receiver payload: %+v", invalid)
 		}
 	}

@@ -385,7 +385,7 @@ func classifyReceiverHistoryMinimalRunLiterals(path string, file *ast.File) (map
 	// This native revision-capture test shadows runs with a transaction-local
 	// one-column TEMP table. It cannot create a semantic runtime run. Require
 	// that exact schema and insert in the same named test, not a file exemption.
-	const scope = "TestReceiverConfigHistoricalCaptureAndReadinessBothStores"
+	const scope = "TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores"
 	const schema = "CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY)"
 	const insert = "INSERT INTO runs VALUES ($1)"
 	schemas, inserts := 0, 0
@@ -416,7 +416,7 @@ func classifyReceiverHistoryMinimalRunLiterals(path string, file *ast.File) (map
 
 func TestReceiverHistoryMinimalRunFixtureClassificationIsExact(t *testing.T) {
 	const path = "internal/store/internal/backend/runforkpersistence/receiver_config_history_test.go"
-	const scope = "TestReceiverConfigHistoricalCaptureAndReadinessBothStores"
+	const scope = "TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores"
 	const schema = "CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY)"
 	const insert = "INSERT INTO runs VALUES ($1)"
 	const extra = "UPDATE runs SET status='running' WHERE run_id=$1"

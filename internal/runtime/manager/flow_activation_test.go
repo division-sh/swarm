@@ -2114,11 +2114,6 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	compileFlowActivationFixture(t, bundle)
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "entity_id": "business-value"})
-	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "unexpected": "value"})
-	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "template_id": "application-basic-v1"})
-	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "component_id": "component-1"})
-	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "vertical_id": "11111111-1111-4111-8111-111111111111"})
 	req.InitialState = "queued"
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	if err != nil {
@@ -2185,8 +2180,8 @@ func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T)
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	bundle = loadFlowActivationEntityContracts(t, bundle, map[string]string{"unrelated": "other_entity"})
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil {
-		t.Fatal("missing canonical entity contract passed compiled admission")
+	if _, err := bundle.ResolveFlowTemplateInstance("review"); err == nil {
+		t.Fatal("missing canonical entity contract passed instance admission")
 	}
 
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
@@ -4571,22 +4566,22 @@ func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict
 	}
 }
 
-func TestActivateFlowInstancePassesActivationConfigToRouteMaterialization(t *testing.T) {
+func TestActivateFlowInstanceRouteMaterializationExcludesBusinessState(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"vertical_id": {Type: "string"}})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	setSuppliedFields(t, &req, map[string]any{"vertical_id": "11111111-1111-4111-8111-111111111111"})
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(bus.addedRouteRequests) != 1 {
 		t.Fatalf("route materialization requests = %#v, want one", bus.addedRouteRequests)
 	}
-	got := bus.addedRouteRequests[0].ActivationVariables["vertical_id"]
-	if got != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("route activation variable vertical_id = %q, want config value", got)
+	if _, found := bus.addedRouteRequests[0].ActivationVariables["vertical_id"]; found {
+		t.Fatal("business state leaked into route activation variables")
 	}
 	if got := bus.addedRouteRequests[0].ActivationVariables["instance_id"]; got != "inst-1" {
 		t.Fatalf("route activation variable instance_id = %q, want inst-1", got)
@@ -4792,7 +4787,7 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 	}
 }
 
-func TestActivateFlowInstanceCommittedAutoEmitUsesProjectedConfigPayload(t *testing.T) {
+func TestActivateFlowInstanceCommittedAutoEmitUsesInitialStatePayload(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry(t, "component.scaffold.start", runtimecontracts.EventCatalogEntry{
@@ -4806,6 +4801,7 @@ func TestActivateFlowInstanceCommittedAutoEmitUsesProjectedConfigPayload(t *test
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"component_id": {Type: "string"}})
 	ctx := testAuthorActivityContext(context.Background())
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	setSuppliedFields(t, &req, map[string]any{"component_id": "component-1"})
 
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4835,6 +4831,7 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 	})
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"template_id": {Type: "string"}})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	setSuppliedFields(t, &req, map[string]any{"template_id": "application-basic-v1"})
 
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4951,6 +4948,7 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	setSuppliedFields(t, &req, map[string]any{"unexpected": "value"})
 
 	err := activateFlowInstanceForTest(am, ctx, req)
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "unexpected is not allowed") {
@@ -4983,6 +4981,7 @@ func TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigFi
 	bundle := testFlowBundle(t, "task.started")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"entity_id": {Type: "string"}})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	setSuppliedFields(t, &req, map[string]any{"entity_id": "business-value"})
 
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "entity_id is not allowed") {

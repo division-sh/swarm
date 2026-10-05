@@ -210,7 +210,7 @@ func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeBootVerification(t
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "field \"from\" is not supported") {
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["pins"]["inputs"]`) {
 				t.Fatalf("bundle load error = %v, want canonical rejection before boot verification", err)
 			}
 		})
@@ -376,7 +376,7 @@ func TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot(t *testing.T) {
 		repoRoot := repoRootForBootverifyTest(t)
 		root := canonicalrouting.CopyRetiredFanInPin(t)
 		_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-		if err == nil || !strings.Contains(err.Error(), "portfolio/schema.yaml") || !strings.Contains(err.Error(), "resolution") {
+		if err == nil || !strings.Contains(err.Error(), "portfolio/schema.yaml") || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["pins"]["inputs"]`) {
 			t.Fatalf("retired canonical pin reached boot verification: %v", err)
 		}
 	})
@@ -384,8 +384,8 @@ func TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot(t *testing.T) {
 		name, diagnostic string
 		variant          canonicalrouting.RetiredFanInGrammar
 	}{
-		{"pin mode", "resolution", canonicalrouting.RetiredFanInPinMode},
-		{"legacy aggregate", "resolution", canonicalrouting.RetiredFanInAggregate},
+		{"pin mode", "must be a scalar text", canonicalrouting.RetiredFanInPinMode},
+		{"legacy aggregate", "must be a scalar text", canonicalrouting.RetiredFanInAggregate},
 		{"connect mode", "connect.resolution", canonicalrouting.RetiredFanInConnectMode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

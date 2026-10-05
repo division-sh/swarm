@@ -402,7 +402,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
 		EntityType:      "workflow_subject",
-		Fields:          map[string]any{"business_brief": "first"},
+		Fields:          map[string]any{"business_brief": "first", "name": "alpha"},
 		StateBuckets: map[string]any{
 			"score": map[string]any{"value": float64(1)},
 		},
@@ -413,7 +413,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 
 	duplicate := first
 	duplicate.CurrentState = "mutated"
-	duplicate.Fields = map[string]any{"business_brief": "second"}
+	duplicate.Fields = map[string]any{"business_brief": "second", "name": "beta"}
 	duplicate.StateBuckets = map[string]any{
 		"score": map[string]any{"value": float64(99)},
 	}
@@ -447,7 +447,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		fieldsRaw  []byte
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT es.revision, COALESCE(fi.config->'config'->>'name', ''), es.fields
+		SELECT es.revision, COALESCE(es.fields->>'name', ''), es.fields
 		FROM entity_state es
 		JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid
@@ -458,7 +458,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		t.Fatalf("entity_state.revision = %d, want 1", revision)
 	}
 	if configName != "alpha" {
-		t.Fatalf("flow_instances.config name = %q, want alpha", configName)
+		t.Fatalf("entity_state.fields name = %q, want alpha", configName)
 	}
 	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -40,22 +41,37 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Semantic public ingress maps 7, 7.0 and 7e0 to CEL int. Declared
-			// typed defaults are not ingress and must retain their double kind.
+			// Internal state literals are not ingress and retain their double kind.
 			want := map[string]any{"account_id": "business-key", "count": int64(7), "ratio": int64(7), "active": false, "label": "recorded business config", "attributes": map[string]any{"nested": []any{int64(7), int64(7)}},
 				"status": false, "flow_path": "business/path", "instance_id": "business-instance", "workflow_version": float64(7)}
-			var raw string
-			if err := rt.DB.QueryRow(`SELECT CAST(config AS TEXT) FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template='account'`, seed.RunID, path).Scan(&raw); err != nil {
+			var raw, fieldsRaw string
+			if err := rt.DB.QueryRow(`SELECT CAST(fi.config AS TEXT), CAST(es.fields AS TEXT) FROM flow_instances fi JOIN entity_state es ON es.run_id=fi.run_id AND es.entity_id=fi.entity_id WHERE fi.run_id=$1 AND fi.instance_path=$2 AND fi.flow_template='account'`, seed.RunID, path).Scan(&raw, &fieldsRaw); err != nil {
 				t.Fatal(err)
 			}
 			var envelope map[string]any
 			if err := canonicaljson.DecodePreservingNumberLexemes([]byte(raw), &envelope); err != nil {
 				t.Fatal(err)
 			}
-			config, err := canonicaljson.CloneRuntimeValue(envelope["config"])
-			if err != nil || !reflect.DeepEqual(config, want) {
-				gotWire, _ := canonicaljson.MarshalPreservingNumberKinds(config)
+			if _, found := envelope["config"]; found {
+				t.Fatal("recorded header contains a business config copy")
+			}
+			var fields map[string]any
+			if err := canonicaljson.DecodePreservingNumberLexemes([]byte(fieldsRaw), &fields); err != nil {
+				t.Fatal(err)
+			}
+			cloned, err := canonicaljson.CloneRuntimeValue(fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := cloned.(map[string]any)
+			if state["processed_count"] != int64(1) {
+				t.Fatalf("first ordinary consumer did not update state once: %#v", state)
+			}
+			delete(state, "processed_count")
+			if !reflect.DeepEqual(state, want) {
+				gotWire, _ := canonicaljson.MarshalPreservingNumberKinds(state)
 				wantWire, _ := canonicaljson.MarshalPreservingNumberKinds(want)
-				t.Fatalf("recorded config lost kinds/business identity: got=%s want=%s raw=%s err=%v", gotWire, wantWire, raw, err)
+				t.Fatalf("recorded state lost kinds/business identity: got=%s want=%s raw=%s", gotWire, wantWire, fieldsRaw)
 			}
 			if envelope["instance_id"] != "ti-138096d2b56ac1568ac40ea7" || envelope["flow_path"] != path || envelope["storage_ref"] != path {
 				t.Fatalf("business names overwrote physical control identity: %#v", envelope)
@@ -92,8 +108,31 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, consumed).Scan(&claims); err != nil || claims != 1 {
 				t.Fatalf("config consumer claims=%d err=%v", claims, err)
 			}
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='mutate' AND domain='authored_field' AND path IN ('count','label','ratio','active','attributes','status','flow_path','instance_id','workflow_version')`, seed.RunID, entityID, consumed).Scan(&writes); err != nil || writes != 9 {
-				t.Fatalf("final node config-derived writes=%d err=%v", writes, err)
+			var initialRaw string
+			if err := rt.DB.QueryRow(`SELECT CAST(projection AS TEXT) FROM workflow_instance_initial_materializations WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, seed.RunID, entityID, path).Scan(&initialRaw); err != nil {
+				t.Fatal(err)
+			}
+			owner := flowidentity.RunScopedFlowInstance{RunID: seed.RunID, Route: flowidentity.StoredRoute("account", "ti-138096d2b56ac1568ac40ea7", path)}
+			if err := pipeline.ValidateFlowConstructionPublication([]byte(initialRaw), owner, entityID, creating); err != nil {
+				t.Fatalf("exact creating publication/materialization receipt: %v", err)
+			}
+			var initial map[string]any
+			if err := canonicaljson.DecodePreservingNumberLexemes([]byte(initialRaw), &initial); err != nil {
+				t.Fatal(err)
+			}
+			persisted, ok := initial["persisted"].(map[string]any)
+			if !ok {
+				t.Fatalf("constructor receipt has no persisted state: %#v", initial)
+			}
+			if _, found := persisted["config"]; found {
+				t.Fatal("constructor receipt retains a parallel business configuration")
+			}
+			initialFields, err := canonicaljson.CloneRuntimeValue(persisted["fields"])
+			if err != nil || !reflect.DeepEqual(initialFields, want) {
+				t.Fatalf("all nine business fields must exist at construction, not be initialized by the automatic consumer: %#v err=%v", initialFields, err)
+			}
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='mutate' AND domain='authored_field' AND path IN ('count','label','ratio','active','attributes','status','flow_path','instance_id','workflow_version')`, seed.RunID, entityID, consumed).Scan(&writes); err != nil || writes != 0 {
+				t.Fatalf("automatic consumer reconstructed supplied state: writes=%d err=%v", writes, err)
 			}
 			// Delivery settlement precedes the completion owner's candidate cleanup.
 			deadline := time.Now().Add(servedProofPollDeadline)
