@@ -119,7 +119,7 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 		t.Fatalf("activate run status delivery authority: %v", err)
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		ContractBundle:     runStatusSubscriptionSource(),
+		ContractBundle:      runStatusSubscriptionSource(),
 		ExecutionPosture:    executionposture.Live,
 		RuntimeInstanceID:   runStatusTestRuntimeInstanceID,
 		SourceArtifactFact:  sourceFact,

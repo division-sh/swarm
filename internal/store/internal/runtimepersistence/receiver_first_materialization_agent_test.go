@@ -309,7 +309,6 @@ func TestReceiverConstructionAndObserverIsolationBothStores(t *testing.T) {
 	}
 }
 
-
 func mustReceiverDeliveryID(t *testing.T, eventID string, route events.DeliveryRoute) string {
 	t.Helper()
 	id, err := deliverylifecycle.DeliveryID(eventID, route)
