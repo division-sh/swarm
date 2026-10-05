@@ -344,17 +344,12 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	terminal PreparedFlowInstanceDeactivation,
 ) (result runtimeengine.CommittedEngineMutation, resultErr error) {
 	terminalPending := terminal != nil
-	terminalEvidence := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			resultErr = errors.Join(resultErr, fmt.Errorf("workflow engine mutation panic: %v", recovered))
 		}
 		if terminalPending {
-			if terminalEvidence {
-				resultErr = errors.Join(resultErr, o.finishCommittedFlowDeactivation(ctx, terminal))
-			} else {
-				resultErr = errors.Join(resultErr, abortPreparedFlowDeactivation(terminal))
-			}
+			resultErr = errors.Join(resultErr, abortPreparedFlowDeactivation(terminal))
 		}
 	}()
 	moveOrReleasePlans := func(err error) error {
@@ -379,6 +374,10 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 		return runtimeengine.CommittedEngineMutation{}, moveOrReleasePlans(commitErr)
 	}
 	result.Committed = true
+	if terminal != nil && committed.PostCommit.FlowDeactivation != nil {
+		result.FlowDeactivation = committedEngineFlowDeactivation{owner: o, terminal: terminal}
+		terminalPending = false
+	}
 	resultErr = commitErr
 	// Retain the whole declared follow-up before any acknowledged cleanup hook.
 	emissions, requests, publicationErr := committedEnginePublicationIntents(command.Publications, committed.Publications, mutation.ActivityIntents)
@@ -387,7 +386,6 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 		result.ActivityIntents = append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...)
 	}
 	resultErr = errors.Join(resultErr, publicationErr)
-	terminalEvidence = committed.PostCommit.FlowDeactivation != nil
 	// Retain exact committed claim evidence before a post-commit hook may fail.
 	if committed.DeliverySuccess != nil && deliverySuccess != nil && committed.DeliverySuccess.Same(deliverySuccess.Claim) {
 		claim := *committed.DeliverySuccess
@@ -396,10 +394,6 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	settledClaim, settlementErr := finishWorkflowEngineDeliverySuccess(deliverySuccess, settlementGuard, committed.DeliverySuccess)
 	result.SettledDeliveryClaim = settledClaim
 	resultErr = errors.Join(resultErr, settlementErr)
-	if terminal != nil && terminalEvidence {
-		terminalPending = false
-		resultErr = errors.Join(resultErr, o.finishCommittedFlowDeactivation(ctx, terminal))
-	}
 	if mutation.FanOutIntent != nil {
 		o.state.coordinator.signalFanOutWork()
 	}
@@ -408,6 +402,15 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	}
 	resultErr = errors.Join(resultErr, o.finishCommittedWorkflowLifecycle(ctx, committed.Lifecycle))
 	return result, resultErr
+}
+
+type committedEngineFlowDeactivation struct {
+	owner    pipelineEngineMutationOwner
+	terminal PreparedFlowInstanceDeactivation
+}
+
+func (d committedEngineFlowDeactivation) FinalizeFlowDeactivation(ctx context.Context) error {
+	return d.owner.finishCommittedFlowDeactivation(ctx, d.terminal)
 }
 
 func committedEnginePublicationIntents(planned []runtimeengine.DurablePublicationPlan, committed []runtimeengine.CommittedDurablePublication, activities []runtimeengine.ActivityIntent) ([]runtimeengine.EmitIntent, []runtimeengine.EmitIntent, error) {
