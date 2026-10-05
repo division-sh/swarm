@@ -315,6 +315,14 @@ func writerBoundaryFileViolations(path string, file *ast.File) []writerBoundaryV
 	for _, declaration := range file.Decls {
 		switch decl := declaration.(type) {
 		case *ast.FuncDecl:
+			if decl.Name.Name == "commitPreparedEngineMutation" {
+				ast.Inspect(decl.Body, func(node ast.Node) bool {
+					if call, ok := node.(*ast.CallExpr); ok && writerBoundaryCall(call, "finishCommittedFlowDeactivation") {
+						violations = append(violations, writerBoundaryViolation{"terminal_finalize_under_entity_lock", call.Pos()})
+					}
+					return true
+				})
+			}
 			if decl.Name.Name == "SaveEntityField" || decl.Name.Name == "savePostgresEntityField" || decl.Name.Name == "saveSQLiteEntityField" {
 				violations = append(violations, writerBoundaryViolation{"raw_save_authority", decl.Pos()})
 			}
@@ -453,6 +461,7 @@ func (s *workflowInstanceStore) MarkTerminated(ctx context.Context) error {
 		{"gate_read_before_lock", "internal/runtime/pipeline/workflow_gate_decision.go", "unlock := pc.lockWorkflowEntity(anchor.EntityID)", "pc.workflowStore.Load(ctx, flowIdentity)\n unlock := pc.lockWorkflowEntity(anchor.EntityID)", "read_before_lock"},
 		{"gate_finalizer_locked", "internal/runtime/pipeline/workflow_gate_decision.go", "unlock()\n\tunlock = nil\n\tif planner", "unlock = nil\n if planner", "postcommit_unlock"},
 		{"unlocked_termination", "internal/runtime/pipeline/workflow_gate_terminal.go", "unlock := pc.lockWorkflowEntity(entityID.String())", "unlock := func() {}", "entity_lock"},
+		{"terminal_handoff_locked", "internal/runtime/pipeline/engine_adapter.go", "result.FlowDeactivation = committedEngineFlowDeactivation{owner: o, terminal: terminal}", "resultErr = errors.Join(resultErr, o.finishCommittedFlowDeactivation(ctx, terminal))", "terminal_finalize_under_entity_lock"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source, ok := sources[tc.path]
