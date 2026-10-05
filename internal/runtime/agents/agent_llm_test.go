@@ -82,6 +82,10 @@ func (r *agentTestRuntimeAdapter) ProviderContract() llm.ProviderContract {
 	return llm.MockProviderContract()
 }
 
+func (*agentTestRuntimeAdapter) ProbeStartupVisibleToolSurface(context.Context, models.AgentConfig, string, []llm.ToolDefinition) (*llm.Response, error) {
+	return nil, errors.New("agent behavior fixture cannot prove workspace startup transport")
+}
+
 func (r *agentTestRuntimeAdapter) StartSession(ctx context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
 	session, err := r.Runtime.StartSession(ctx, agentID, systemPrompt, tools)
 	if err != nil {
@@ -208,6 +212,10 @@ func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 }
 
 func TestNewLLMAgent_ConsumesExactProviderPromptAssemblyWithoutConfigExpansion(t *testing.T) {
+	probe := wrapAgentTestRuntime(nil).(llm.StartupVisibleToolSurfaceProber)
+	if response, err := probe.ProbeStartupVisibleToolSurface(context.Background(), models.AgentConfig{}, "", nil); err == nil || response != nil {
+		t.Fatalf("agent behavior fixture claimed startup proof: response=%#v err=%v", response, err)
+	}
 	content := "You are the operations lead for {{team_name}}.\n"
 	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.ops-lead.intent", content)
 	if err != nil {
