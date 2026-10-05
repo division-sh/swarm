@@ -23,6 +23,7 @@ type activationGatewayFault struct {
 	token     effects.LifecycleToken
 	container string
 	network   string
+	probes    int
 }
 
 type activationGatewayDockerWorkspace struct {
@@ -39,7 +40,11 @@ func (w *activationGatewayDockerWorkspace) ResolveWorkspaceForCapabilityAdmissio
 	surface, ok := managedcapabilities.FromContext(ctx)
 	w.fault.mu.Lock()
 	defer w.fault.mu.Unlock()
-	if !w.fault.armed || !ok || actor.Identity.IsZero() || surface.Authority.Kind != managedcapabilities.AuthorityStartupProbe || surface.Authority.ExecutionKind != managedcapabilities.ExecutionNormalAgent {
+	if !ok || actor.Identity.IsZero() || surface.Authority.Kind != managedcapabilities.AuthorityStartupProbe || surface.Authority.ExecutionKind != managedcapabilities.ExecutionNormalAgent {
+		return target, nil
+	}
+	w.fault.probes++
+	if !w.fault.armed {
 		return target, nil
 	}
 	w.fault.armed = false
@@ -71,6 +76,7 @@ func proveDockerActivationRefusalRetry(t *testing.T, rt servedControlProofRuntim
 	}
 	before := load()
 	fault.mu.Lock()
+	beforeProbes := fault.probes
 	fault.armed = true
 	fault.mu.Unlock()
 	params := map[string]any{"run_id": actor.Identity.RunID, "agent_id": actor.ID, "flow_instance": actor.Identity.FlowInstance(), "idempotency_key": "docker-activation-refused"}
@@ -98,11 +104,18 @@ func proveDockerActivationRefusalRetry(t *testing.T, rt servedControlProofRuntim
 	token, container, network := fault.token, fault.container, fault.network
 	fault.mu.Unlock()
 	after := load()
-	if !token.Valid() || token.Identity != actor.Identity || after.RuntimeEpoch != token.RuntimeEpoch || after.Generation != token.Generation || after.Generation <= before.Generation || after.Phase != manager.AgentLifecycleRegistered || after.RunMode != manager.AgentRunModeStopped {
+	if !token.Valid() || token.Identity != actor.Identity || after.RuntimeEpoch != token.RuntimeEpoch || after.Generation != token.Generation || after.Generation != before.Generation+1 || after.Phase != manager.AgentLifecycleRegistered || after.RunMode != manager.AgentRunModeStopped {
 		t.Fatalf("refused activation has no exact stopped compensation: before=%+v token=%+v after=%+v", before, token, after)
 	}
 	if rt.Runtime.Manager.ProveUnpublishedActivation(token) == nil {
 		t.Fatal("compensated generation retained executable admission")
+	}
+	var compensation int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_operations o JOIN agent_lifecycle_transition_facts f ON f.operation_id=o.operation_id
+		WHERE o.run_id=$1 AND o.agent_id=$2 AND o.flow_instance=$3 AND o.operation_kind='self_release' AND o.target_generation=$4
+		AND o.target_phase='registered' AND o.run_mode='stopped' AND o.state='succeeded' AND f.trigger='start_failed'
+		AND f.previous_generation=$4 AND f.next_generation=$4`, actor.Identity.RunID, actor.ID, actor.Identity.FlowInstance(), token.Generation).Scan(&compensation); err != nil || compensation != 1 {
+		t.Fatalf("exact merged compensation operation missing: count=%d err=%v", compensation, err)
 	}
 	top, err := owner.RunDocker(ctx, "top", container, "-eo", "pid,args")
 	if err != nil || strings.Contains(top, worker.Argument) {
@@ -117,8 +130,14 @@ func proveDockerActivationRefusalRetry(t *testing.T, rt servedControlProofRuntim
 		t.Fatalf("clean new activation attempt failed: %+v", response.Error)
 	}
 	retried := load()
-	if retried.Phase != manager.AgentLifecycleRunning || retried.RunMode == manager.AgentRunModeStopped || retried.RuntimeEpoch != after.RuntimeEpoch || retried.Generation <= after.Generation {
+	if retried.Phase != manager.AgentLifecycleRunning || retried.RunMode == manager.AgentRunModeStopped || retried.RuntimeEpoch != after.RuntimeEpoch || retried.Generation != after.Generation+1 {
 		t.Fatalf("retry did not issue a fresh executable generation: refused=%+v retried=%+v", after, retried)
+	}
+	fault.mu.Lock()
+	probes := fault.probes
+	fault.mu.Unlock()
+	if probes != beforeProbes+2 {
+		t.Fatalf("refusal/retry did not observe exactly once per new attempt: before=%d after=%d", beforeProbes, probes)
 	}
 	var turns, completions int
 	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND agent_id=$2`, actor.Identity.RunID, actor.ID).Scan(&turns); err != nil {
