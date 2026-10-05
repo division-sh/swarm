@@ -25,6 +25,7 @@ func TestDecodeHistoricalSnapshotCompleteRouteRoundTrip(t *testing.T) {
 			for _, status := range []deliverylifecycle.Status{
 				deliverylifecycle.StatusPending, deliverylifecycle.StatusInProgress,
 				deliverylifecycle.StatusFailed, deliverylifecycle.StatusDelivered, deliverylifecycle.StatusDeadLetter,
+				deliverylifecycle.StatusCanceled,
 			} {
 				t.Run(string(status), func(t *testing.T) {
 					fact := historicalRouteFact(t, fixture.route, status)
@@ -467,6 +468,8 @@ func historicalRouteFact(t testing.TB, route events.DeliveryRoute, status delive
 		}
 	case deliverylifecycle.StatusDelivered:
 		fact["settled_at"] = now
+	case deliverylifecycle.StatusCanceled:
+		fact["reason_code"], fact["settled_at"] = string(deliverylifecycle.CancellationTerminate), now
 	default:
 		t.Fatalf("unsupported test status %q", status)
 	}
@@ -479,7 +482,7 @@ func historicalRouteFact(t testing.TB, route events.DeliveryRoute, status delive
 
 func TestHistoricalSelectionPresenceUsesCapturedStatus(t *testing.T) {
 	route := historicalRouteFixtures(t)[0].route
-	for _, status := range []deliverylifecycle.Status{deliverylifecycle.StatusPending, deliverylifecycle.StatusInProgress, deliverylifecycle.StatusFailed, deliverylifecycle.StatusDelivered, deliverylifecycle.StatusDeadLetter} {
+	for _, status := range []deliverylifecycle.Status{deliverylifecycle.StatusPending, deliverylifecycle.StatusInProgress, deliverylifecycle.StatusFailed, deliverylifecycle.StatusDelivered, deliverylifecycle.StatusDeadLetter, deliverylifecycle.StatusCanceled} {
 		for _, present := range []bool{false, true} {
 			fact := historicalRouteFact(t, route, status)
 			fact["final_selection"] = deliverylifecycle.AbsentSelection()
@@ -487,7 +490,7 @@ func TestHistoricalSelectionPresenceUsesCapturedStatus(t *testing.T) {
 				fact["final_selection"] = deliverylifecycle.PresentSelection(handlerselection.NotApplicable())
 			}
 			got, err := deliverylifecycle.DecodeHistoricalSnapshot(historicalJSON(t, fact))
-			wantErr := present != (status == deliverylifecycle.StatusDelivered || status == deliverylifecycle.StatusDeadLetter)
+			wantErr := status != deliverylifecycle.StatusCanceled && present != (status == deliverylifecycle.StatusDelivered || status == deliverylifecycle.StatusDeadLetter)
 			if (err != nil) != wantErr {
 				t.Fatalf("%s/present=%v: %v", status, present, err)
 			}
@@ -504,6 +507,29 @@ func TestHistoricalSelectionPresenceUsesCapturedStatus(t *testing.T) {
 		delete(fact, "final_selection")
 		assertHistoricalRejects(t, fact)
 	}
+}
+
+func TestHistoricalCancellationRejectsIntentAndOperationalFallback(t *testing.T) {
+	route := historicalRouteFixtures(t)[0].route
+	for _, reason := range []string{"terminate", "turn_timeout"} {
+		fact := historicalRouteFact(t, route, deliverylifecycle.StatusCanceled)
+		fact["reason_code"] = reason
+		decoded, err := deliverylifecycle.DecodeHistoricalSnapshot(historicalJSON(t, fact))
+		if err != nil || decoded.ReasonCode != reason || !decoded.Terminal() {
+			t.Fatalf("historical authored cancellation: %+v err=%v", decoded, err)
+		}
+	}
+	for _, reason := range []any{nil, "", "shutdown", "context_canceled", " terminate ", "TERMINATE"} {
+		fact := historicalRouteFact(t, route, deliverylifecycle.StatusCanceled)
+		fact["reason_code"] = reason
+		assertHistoricalRejects(t, fact)
+	}
+	fact := historicalRouteFact(t, route, deliverylifecycle.StatusCanceled)
+	delete(fact, "settled_at")
+	assertHistoricalRejects(t, fact)
+	fact = historicalRouteFact(t, route, deliverylifecycle.StatusCanceled)
+	fact["failure"] = historicalRouteFact(t, route, deliverylifecycle.StatusDeadLetter)["failure"]
+	assertHistoricalRejects(t, fact)
 }
 
 func historicalClaimFields(t testing.TB, claim events.ConnectExecutionClaim) map[string]any {

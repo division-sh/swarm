@@ -442,7 +442,7 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 			return result, nil
 		}
 		previous = ClaimReclaimable
-	case StatusDelivered, StatusDeadLetter:
+	case StatusDelivered, StatusDeadLetter, StatusCanceled:
 		result.Disposition = ClaimTerminal
 		result.Snapshot = snapshotAt(record, now)
 		return result, nil
@@ -900,7 +900,7 @@ func continuationDisposition(record deliveryRecord, now time.Time) ClaimDisposit
 			return ClaimBusy
 		}
 		return ClaimReclaimable
-	case StatusDelivered, StatusDeadLetter:
+	case StatusDelivered, StatusDeadLetter, StatusCanceled:
 		return ClaimTerminal
 	default:
 		return ClaimInvariantInvalid
@@ -1765,6 +1765,8 @@ func (a *Adapter) SummarizeRun(ctx context.Context, q queryer, runID string) (Ru
 			summary.Delivered += count
 		case StatusDeadLetter:
 			summary.DeadLetter += count
+		case StatusCanceled:
+			summary.Canceled += count
 		}
 		if parsed, ok, err := parseNullableTime(next); err != nil {
 			return RunSummary{}, err
@@ -2566,7 +2568,7 @@ func (a *Adapter) terminalizeDeliveries(ctx context.Context, tx *sql.Tx, attempt
 		if err != nil {
 			return nil, err
 		}
-		if record.Status == StatusDelivered || record.Status == StatusDeadLetter {
+		if record.Status.Terminal() {
 			continue
 		}
 		version := record.ClaimVersion + 1
@@ -3089,6 +3091,13 @@ func validateRecordShape(record deliveryRecord) error {
 	case StatusDeadLetter:
 		if !record.NextEligibleAt.IsZero() || !claimClear || record.SettledAt.IsZero() || strings.TrimSpace(record.ReasonCode) == "" || record.Failure == nil {
 			return conflict("has invalid dead-letter shape")
+		}
+	case StatusCanceled:
+		if !claimClear {
+			return conflict("has an open canceled claim")
+		}
+		if err := ValidateCanceledSnapshot(record.Snapshot); err != nil {
+			return conflict(err.Error())
 		}
 	default:
 		return conflict("has unknown lifecycle state")

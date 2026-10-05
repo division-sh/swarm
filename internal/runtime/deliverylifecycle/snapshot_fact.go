@@ -74,6 +74,11 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if status == StatusCanceled {
+		if _, err := ParseCancellationReason(fact.ReasonCode); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	recipient, err := deliveryRecipientForClass(class, fact.SubscriberID)
 	if err != nil {
 		return Snapshot{}, err
@@ -131,6 +136,9 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 }
 
 func validateHistoricalSnapshot(snapshot Snapshot) error {
+	if err := ValidateCanceledSnapshot(snapshot); err != nil {
+		return fmt.Errorf("%w: historical cancellation: %v", ErrConflict, err)
+	}
 	if err := ValidateSelectionPresence(snapshot.Status, snapshot.FinalSelection); err != nil {
 		return fmt.Errorf("%w: historical final selection: %v", ErrConflict, err)
 	}
@@ -152,7 +160,7 @@ func validateHistoricalSnapshot(snapshot Snapshot) error {
 		if snapshot.RetryCount == 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.ClaimExpiresAt.IsZero() || !snapshot.SettledAt.IsZero() {
 			return fmt.Errorf("%w: historical failed delivery has conflicting lifecycle facts", ErrConflict)
 		}
-	case StatusDelivered, StatusDeadLetter:
+	case StatusDelivered, StatusDeadLetter, StatusCanceled:
 		if snapshot.SettledAt.IsZero() || !snapshot.NextEligibleAt.IsZero() || !snapshot.ClaimExpiresAt.IsZero() {
 			return fmt.Errorf("%w: historical terminal delivery has conflicting lifecycle facts", ErrConflict)
 		}
