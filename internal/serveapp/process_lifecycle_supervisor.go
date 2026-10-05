@@ -135,9 +135,10 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	current := s.currentRT
 	s.mu.RUnlock()
 	shutdownErr := selectedErr
+	var terminalErr error
 	if s.processCapability != nil {
 		if result, terminal := s.processCapability.TerminalResult(); terminal && result.Cause != runtimestartupownership.TerminalReleased {
-			shutdownErr = errors.Join(shutdownErr, &runtimestartupownership.PossessionError{Cause: result.Cause})
+			terminalErr = &runtimestartupownership.PossessionError{Cause: result.Cause}
 		}
 	}
 	if len(s.resetRequests) > 0 {
@@ -175,7 +176,7 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 		s.ready.Store(false)
 	}
 	s.mu.Unlock()
-	return shutdownErr
+	return errors.Join(terminalErr, shutdownErr)
 }
 
 // Final store release consults the supervisor, not a captured family from boot.
