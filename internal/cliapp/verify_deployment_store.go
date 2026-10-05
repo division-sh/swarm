@@ -68,27 +68,7 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		return err
 	})
 	if !opened {
-		access := result.BootReport.Observations[len(result.BootReport.Observations)-1]
-		if access.NotRunCause != nil {
-			subject = access.Subject
-			accountVerifyStoreTail(result, subject, access.Reason, false)
-			for _, check := range []bootverify.SelectedStoreAdmissionCheck{
-				{ID: "selected_store_schema", Owner: "internal/store/selected.AdmissionInspection.Inspect"},
-				{ID: "startup_process_possession", Owner: "internal/store/selected.AdmissionInspection.ProbePossession"},
-			} {
-				result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
-					CheckID: check.ID, Owner: check.Owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
-					Status: bootverify.AdmissionNotRun, Reason: access.Reason, Dependencies: []string{"selected_store_access"},
-				})
-			}
-			return
-		}
-		blockVerifyStoreTail(result, subject, "selected store access did not complete")
-		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
-			CheckID: "startup_process_possession", Owner: "internal/store/selected.AdmissionInspection.ProbePossession", Subject: subject,
-			Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotRun,
-			Reason: "selected store access did not complete", Dependencies: []string{"selected_store_access"},
-		})
+		accountVerifyStoreAccessFailure(result, subject)
 		return
 	}
 	if verifyDeploymentBoundedObservation(ctx, storeBudget, result, "startup_process_possession", "internal/store/selected.AdmissionInspection.ProbePossession", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
@@ -146,6 +126,25 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	if retained != nil {
 		inspectVerifyRetainedDependencies(ctx, retained, schemaOK, cfg, source, opts, workspaces, workspaceOK, result)
 	}
+}
+
+func accountVerifyStoreAccessFailure(result *runtime.WorkflowContractValidationResult, subject string) {
+	access := result.BootReport.Observations[len(result.BootReport.Observations)-1]
+	if access.NotRunCause != nil {
+		for _, check := range bootverify.SelectedStoreAbsentAdmissionChecks() {
+			result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+				CheckID: check.ID, Owner: check.Owner, Subject: access.Subject, Class: bootverify.AdmissionDeploymentObservation,
+				Status: bootverify.AdmissionNotRun, Reason: access.Reason, Dependencies: []string{"selected_store_access"},
+			})
+		}
+		return
+	}
+	blockVerifyStoreTail(result, subject, "selected store access did not complete")
+	result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+		CheckID: "startup_process_possession", Owner: "internal/store/selected.AdmissionInspection.ProbePossession", Subject: subject,
+		Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotRun,
+		Reason: "selected store access did not complete", Dependencies: []string{"selected_store_access"},
+	})
 }
 
 func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, swarmDirOpts cliSwarmDirOptions, source semanticview.Source) (storeselected.AuthorityRequest, store.SchemaBootstrapRequest, error) {
