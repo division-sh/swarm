@@ -17,12 +17,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
-// Committed join work retains its refusal semantics after a close winner makes
-// the receiver terminal. This never authorizes a fresh publication or execution.
+// Join admission belongs to the exact retained entry, independently of graph
+// terminality. This never authorizes fresh publication or execution.
 func validateAdmittedReceiverAvailability(ctx context.Context, source semanticview.Source, flowID string, evt events.Event, instance WorkflowInstance) error {
 	err := NewDeliveryTargetAvailability(instance.CurrentState, instance.Status, !instance.TerminatedAt.IsZero()).Validate(source, flowID)
 	var terminal *TerminalReceiverError
-	if !errors.As(err, &terminal) {
+	if err != nil && !errors.As(err, &terminal) {
 		return err
 	}
 	route, admitted := workflowNodeDeliveryRoute(ctx)
@@ -38,9 +38,16 @@ func validateAdmittedReceiverAvailability(ctx context.Context, source semanticvi
 			if receipt.Disposition == events.JoinAdmissionEarly {
 				return failures.New(failures.ClassEarlyArrival, "join_not_armed", "runtime.pipeline", "receiver_preparation", map[string]any{"flow_id": flowID})
 			}
+			if receipt.Ref.Stage() != instance.CurrentState {
+				return failures.New(failures.ClassStaleArrival, "join_stage_closed", "runtime.pipeline", "receiver_preparation", map[string]any{"flow_id": flowID, "stage": instance.CurrentState})
+			}
 		}
 		join = true
-	} else if isJoinLifecycleEvent(evt.Type()) {
+	}
+	if !errors.As(err, &terminal) {
+		return err
+	}
+	if !join && isJoinLifecycleEvent(evt.Type()) {
 		_, _, _, join, err = ResolveWorkflowJoinOccurrenceDeliveryTarget(source, evt)
 		if err != nil {
 			return err

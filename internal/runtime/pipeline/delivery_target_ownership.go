@@ -45,6 +45,9 @@ func NewDeliveryTargetAvailability(stage, status string, terminated bool) Delive
 }
 
 func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID string) error {
+	if a.inactive {
+		return fmt.Errorf("receiver target owner is unavailable: lifecycle is not active")
+	}
 	if a.stage != "" {
 		graph, ok := semanticview.WorkflowStageTopology(source, flowID)
 		if !ok || graph.FlowID != flowID {
@@ -57,9 +60,6 @@ func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID 
 		if stage.IsTerminal() {
 			return &TerminalReceiverError{FlowID: flowID, Stage: stage.ID()}
 		}
-	}
-	if a.inactive {
-		return fmt.Errorf("receiver target owner is unavailable: lifecycle is not active")
 	}
 	return nil
 }
