@@ -2168,15 +2168,9 @@ func newNotifyAllChildrenRuntime(
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinatorOptions := runtimepipeline.PipelineCoordinatorOptions{
-		ExecutionPosture:   posture,
-		Module:             module,
-		SourceArtifactFact: sourceArtifactFact,
-		InstanceDeactivationPreparer: func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) (runtimepipeline.PreparedFlowInstanceDeactivation, error) {
-			if manager == nil {
-				return nil, fmt.Errorf("agent manager is not initialized")
-			}
-			return manager.PrepareFlowInstanceDeactivation(ctx, req)
-		},
+		ExecutionPosture:        posture,
+		Module:                  module,
+		SourceArtifactFact:      sourceArtifactFact,
 		Persistence:             workflowPersistence,
 		RunLifecycle:            backend,
 		PipelineObligations:     backend.PipelineObligations(),

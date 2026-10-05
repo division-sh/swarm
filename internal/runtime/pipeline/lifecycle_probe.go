@@ -10,15 +10,6 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 )
 
-func (pc *PipelineCoordinator) notifyTestWorkflowTerminalCommitted(ctx context.Context) {
-	if pc == nil || pc.testLifecycleProbe == nil {
-		return
-	}
-	if evt, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-		pc.testLifecycleProbe.NotifyLifecycle(ctx, lifecycleNodeSignal(runtimelifecycleprobe.WorkflowTerminalCommitted, "", evt, "committed"))
-	}
-}
-
 func (pc *PipelineCoordinator) notifyTestFlowTerminationCommitted(ctx context.Context) {
 	if pc == nil || pc.testLifecycleProbe == nil {
 		return

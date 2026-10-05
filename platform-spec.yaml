@@ -6264,8 +6264,8 @@ engine:
         and decision history for post-mortem analysis.
       behavior:
       - Entity stops accepting new events (handlers reject events for terminal entities)
-      - Timers are cancelled
-      - Agent sessions are terminated
+      - Stage changes, including entry to a sink, do not cancel accepted agent work or discard late results. A stage deadline only advances the stage.
+      - Stage transitions cannot declare operational flow retirement. Authored cancellation and work-derived resource cleanup are separate from graph terminality.
       - All persisted state remains in the database
       - Entity remains queryable through explicit read/query surfaces; for normal agents this means generated current-entity
         reads, while legacy query_entities remains a trusted runtime-internal compatibility surface.
