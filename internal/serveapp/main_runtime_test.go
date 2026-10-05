@@ -476,7 +476,7 @@ func TestProcessLifecycleTerminalEvidencePreservesJoinedProjectionDisposition(t 
 		{name: "release_persistent", releaseFails: true, persistent: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rt := &runtimepkg.Runtime{Bus: &runtimebus.EventBus{}}
+			rt := &runtimepkg.Runtime{}
 			hash := runtimeContextTestHash("a")
 			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 				SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash),
