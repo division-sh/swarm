@@ -140,7 +140,7 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 func TestForkMaterializationLiveClaimRefusalBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
-			f := newForkContentionFixture(t, backend)
+			f := newForkActivationFrontierFixture(t, backend, false)
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "item.received", "freeze-test", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
 			if err := insertCanonicalEventRecordFixture(f.ctx, f.store, event); err != nil {
 				t.Fatal(err)
@@ -169,7 +169,7 @@ func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 			for _, rollback := range []bool{false, true} {
 				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateDelivered} {
 					t.Run(fmt.Sprintf("%s/selected=%t/rollback=%t/%s", backend.name, selected, rollback, deliveryState), func(t *testing.T) {
-						f := newForkContentionFixture(t, backend)
+						f := newForkActivationFrontierFixture(t, backend, selected)
 						descriptors, err := runtimepkg.AuthorActivityEventDescriptors(f.source)
 						if err != nil {
 							t.Fatal(err)

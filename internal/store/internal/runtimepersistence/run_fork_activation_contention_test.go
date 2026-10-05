@@ -52,7 +52,7 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 			for _, outcome := range []string{"commit", "rollback", "cancel_winner", "cancel_loser"} {
 				t.Run(backend.name+"/"+first+"/"+outcome, func(t *testing.T) {
 					barrier := newForkContentionBarrier(t, backend.name, outcome == "rollback" || outcome == "cancel_loser")
-					f := newForkContentionFixture(t, backend)
+					f := newForkActivationFrontierFixture(t, backend, selected)
 					staged, selectedRequest := stageForkContentionFixture(t, f, selected)
 					var err error
 					writer := f.store
@@ -225,10 +225,18 @@ func requireForkContentionState(t *testing.T, db *sql.DB, f forkContentionFixtur
 		}
 		wantState, wantName, wantRevision := "pending", "At R", int64(1)
 		if id == f.runID {
-			wantRevision = 3
+			wantRevision = 2
+			if f.gateOwned {
+				wantRevision = 3
+			}
 			if writerCommitted {
-				wantState, wantRevision = "done", 4
-			} else if activated {
+				wantRevision++
+				if f.gateOwned {
+					wantState = "done"
+				} else {
+					wantName = "After writer"
+				}
+			} else if activated && f.gateOwned {
 				// Freezing the source durably supersedes its exact open gate.
 				// That header CAS is a real activation write, not a field shadow.
 				wantRevision = 4
@@ -237,6 +245,24 @@ func requireForkContentionState(t *testing.T, db *sql.DB, f forkContentionFixtur
 		if state != wantState || name != wantName || revision != wantRevision {
 			t.Fatalf("%s entity state=%s/%s/r%d, want %s/%s/r%d", id, state, name, revision, wantState, wantName, wantRevision)
 		}
+	}
+	if !f.gateOwned {
+		var raw string
+		if err := db.QueryRow(`SELECT bookkeeping FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var before, after map[string]any
+		if err := json.Unmarshal(f.state.Bookkeeping, &before); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(raw), &after); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(before, after) {
+			t.Fatal("root-only field mutation or freeze repeated construction/stage entry")
+		}
+		requireForkContentionChildStatus(t, db, child, activated)
+		return
 	}
 	var accumulatorRaw string
 	if err := db.QueryRow(`SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID).Scan(&accumulatorRaw); err != nil {
@@ -281,6 +307,11 @@ func requireForkContentionState(t *testing.T, db *sql.DB, f forkContentionFixtur
 			t.Fatalf("writer did not commit its exact admitted new StageEntry: %+v %t %v", entry, found, err)
 		}
 	}
+	requireForkContentionChildStatus(t, db, child, activated)
+}
+
+func requireForkContentionChildStatus(t *testing.T, db *sql.DB, child string, activated bool) {
+	t.Helper()
 	var status string
 	if err := db.QueryRow(`SELECT status FROM runs WHERE run_id=$1`, child).Scan(&status); err != nil {
 		t.Fatal(err)
@@ -327,9 +358,55 @@ func forkContentionRowsForRun(t *testing.T, snapshot map[string][]string, run st
 
 type forkContentionFixture struct {
 	snapshotOwnershipFixture
-	write  func(context.Context, snapshotOwnershipStore) error
-	cardID string
-	source semanticview.Source
+	write     func(context.Context, snapshotOwnershipStore) error
+	cardID    string
+	gateOwned bool
+	source    semanticview.Source
+}
+
+func newForkActivationFrontierFixture(t *testing.T, backend eventRecordContractBackend, selected bool) forkContentionFixture {
+	t.Helper()
+	if selected {
+		return newForkContentionFixture(t, backend)
+	}
+	f := newReceiverConfigActivationFixtureWithDocuments(t, backend.name, false, map[string]string{
+		"schema.yaml":   "name: generic-frontier\nstages:\n  pending: {initial: true}\n  done: {}\n",
+		"entities.yaml": "subject:\n  name: {type: text, initial: 'At R'}\n",
+		"events.yaml":   "item.received:\n",
+	}, nil)
+	runID := runtimecorrelation.RunIDFromContext(f.ctx)
+	fixture := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{
+		store: f.store.(snapshotOwnershipStore), db: f.db, ctx: f.ctx,
+		runID: runID, entityID: runID, eventID: uuid.NewString(),
+	}, source: semanticview.Wrap(f.bundle)}
+	req := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+	req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
+	req.OccurredAt = time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	plan := constructHistoricalSourceFixture(t, fixture.ctx, f.store.(agentFixtureFlowStore), req)
+	persisted, err := plan.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.state = persisted.State
+	fixture.state.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+	fixture.state.ExpectedState, fixture.state.ExpectedRevision = "pending", 1
+	fixture.state.Name = "At R"
+	if _, err := fixture.store.CommitWorkflowEngineMutation(fixture.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: fixture.state}); err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.ExistingRunRootIngress(fixture.eventID, "item.received", "frontier-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+	if err := commitSemanticPipelineProcessedEventFixture(fixture.ctx, fixture.store, event); err != nil {
+		t.Fatal(err)
+	}
+	fixture.write = func(ctx context.Context, selected snapshotOwnershipStore) error {
+		state := fixture.state
+		state.ExpectedRevision = 2
+		state.Name, state.Fields = "After writer", json.RawMessage(`{"name":"After writer"}`)
+		state.UpdatedAt = time.Now().UTC()
+		_, err := selected.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: state})
+		return err
+	}
+	return fixture
 }
 
 func newForkContentionFixture(t *testing.T, backend eventRecordContractBackend) forkContentionFixture {
@@ -360,7 +437,7 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 		t.Fatal(err)
 	}
 	runID := uuid.NewString()
-	f := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: runID, entityID: runID, eventID: uuid.NewString()}, source: semanticview.Wrap(bundle)}
+	f := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: runID, entityID: runID, eventID: uuid.NewString()}, gateOwned: true, source: semanticview.Wrap(bundle)}
 	f.ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), f.runID)
 	f.ctx, err = eventreceiver.NormalExecution().Bind(f.ctx, executionmode.Live)
 	if err != nil {
@@ -452,7 +529,7 @@ func TestRunForkActivationContentionFixtureControlBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		for _, selected := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/selected=%t", backend.name, selected), func(t *testing.T) {
-				f := newForkContentionFixture(t, backend)
+				f := newForkActivationFrontierFixture(t, backend, selected)
 				staged, req := stageForkContentionFixture(t, f, selected)
 				var activation runfork.RunForkActivation
 				var err error
@@ -466,6 +543,24 @@ func TestRunForkActivationContentionFixtureControlBothStores(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestGenericConstructedGateForkPreservesRouteHistoryRefusalBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			f := newForkContentionFixture(t, backend)
+			before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
+			for attempt := 0; attempt < 2; attempt++ {
+				result, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+				if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerFlowRouteHistoryUnproven) || result.ForkRunID != "" {
+					t.Fatalf("generic flow-owned gate history escaped its replay boundary: %+v %v", result, err)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")) {
+					t.Fatal("generic gate history refusal changed source or child state")
+				}
+			}
+		})
 	}
 }
 
