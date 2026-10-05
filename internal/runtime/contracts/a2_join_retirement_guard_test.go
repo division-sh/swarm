@@ -553,8 +553,8 @@ func TestA2JoinRetirementGuardNegativeSpecimenIsExactAndRejected(t *testing.T) {
 	source := canonicalrouting.RetiredFanInCoordinatorSchema()
 	a2AssertExactNegativeGeneratorSpecimen(t, path, scope, source)
 	var schema FlowSchemaDocument
-	if err := decodeNodeTestYAML([]byte(source), &schema); err == nil || !strings.Contains(err.Error(), "resolution") {
-		t.Fatalf("whitelisted negative schema is no longer rejected at resolution admission: %v", err)
+	if err := decodeNodeTestYAML([]byte(source), &schema); err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["pins"]["inputs"][0]`) {
+		t.Fatalf("whitelisted negative schema is no longer rejected at scalar pin admission: %v", err)
 	}
 	if mode, err := ParseFlowInputResolutionMode("fan-in"); err == nil || mode.Valid() {
 		t.Fatalf("retired mode admitted independently of other retired fields: %v, %v", mode, err)
