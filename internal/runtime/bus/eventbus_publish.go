@@ -1646,6 +1646,7 @@ func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt ev
 		}, err
 	}
 	routePassthrough, routeDeferred, routeOutcome, routeErr := eb.runNodeDeliveryRouteInterceptors(ctx, evt, nodeRoutes, routeInterceptors)
+	routeOutcome = routeOutcome.RetainStageReceipts(outcome)
 	if routeErr != nil && !routeOutcome.Committed {
 		return deliveryRouteInterception{EventPassthrough: passthrough, NodePassthrough: routePassthrough, Deferred: append(deferred, routeDeferred...), Outcome: routeOutcome}, errors.Join(err, routeErr)
 	}
@@ -1813,8 +1814,9 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 		}
 		for _, it := range interceptors {
 			pass, out, outcome, err := it.InterceptDeliveryRoute(routeCtx, projected, route)
+			result = result.RetainStageReceipts(outcome)
 			if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
-				return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, err)
+				return passthrough, deferred, runtimepipelineobligation.Continue().RetainStageReceipts(result), errors.Join(postCommitErr, err)
 			}
 			postCommitErr = errors.Join(postCommitErr, err)
 			result.Committed = result.Committed || outcome.Committed
@@ -1827,7 +1829,7 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 			}
 			deferred = append(deferred, admitted...)
 			if !outcome.ContinueDispatch() {
-				return passthrough, deferred, outcome, postCommitErr
+				return passthrough, deferred, outcome.RetainStageReceipts(result), postCommitErr
 			}
 		}
 	}
@@ -1961,6 +1963,7 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 	var postCommitErr error
 	for _, it := range interceptors {
 		pass, out, outcome, err := it.Intercept(ctx, evt)
+		result = result.RetainStageReceipts(outcome)
 		if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
 			interceptorErr := fmt.Errorf("event interceptor failed for %s (%s): %w", evt.ID(), evt.Type(), err)
 			if _, typed := runtimefailures.As(err); !typed && !runtimefailures.IsContextInterruption(err) {
@@ -1968,7 +1971,7 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 					"event_id": evt.ID(), "event_type": string(evt.Type()),
 				}, err)
 			}
-			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, interceptorErr)
+			return passthrough, deferred, runtimepipelineobligation.Continue().RetainStageReceipts(result), errors.Join(postCommitErr, interceptorErr)
 		}
 		postCommitErr = errors.Join(postCommitErr, err)
 		result.Committed = result.Committed || outcome.Committed
@@ -1977,11 +1980,11 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 		}
 		admitted, err := eb.admitDeferredEvents(ctx, out)
 		if err != nil {
-			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, err)
+			return passthrough, deferred, runtimepipelineobligation.Continue().RetainStageReceipts(result), errors.Join(postCommitErr, err)
 		}
 		deferred = append(deferred, admitted...)
 		if !outcome.ContinueDispatch() {
-			return passthrough, deferred, outcome, postCommitErr
+			return passthrough, deferred, outcome.RetainStageReceipts(result), postCommitErr
 		}
 	}
 	return passthrough, deferred, result, postCommitErr
