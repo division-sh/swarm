@@ -25,8 +25,8 @@ func (deliveryContextEffectStore) IsExternalEffectAuthorityCurrent(context.Conte
 func (deliveryContextEffectStore) AuthorizeExternalAttempt(context.Context, runtimeeffects.Authority, runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
 	return runtimeeffects.Attempt{}, nil
 }
-func (deliveryContextEffectStore) MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) error {
-	return nil
+func (deliveryContextEffectStore) MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	return runtimeeffects.ExternalAttemptLaunch{Committed: true}, nil
 }
 func (deliveryContextEffectStore) MarkExternalAttemptResponseObserved(context.Context, runtimeeffects.Attempt, map[string]any, time.Time) error {
 	return nil

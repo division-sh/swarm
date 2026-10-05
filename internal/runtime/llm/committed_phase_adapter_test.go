@@ -54,14 +54,15 @@ func (s *committedPhaseEffectStore) HeartbeatCompletionAttempt(ctx context.Conte
 	return err
 }
 
-func (s *committedPhaseEffectStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) error {
-	if err := s.Harness.MarkExternalAttemptLaunched(ctx, attempt, at); err != nil {
-		return err
+func (s *committedPhaseEffectStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	launch, err := s.Harness.MarkExternalAttemptLaunched(ctx, attempt, at)
+	if err != nil {
+		return launch, err
 	}
 	if s.afterLaunch != nil {
 		s.afterLaunch()
 	}
-	return runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, s.launchFault)
+	return launch, runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, s.launchFault)
 }
 
 func (s *committedPhaseEffectStore) MarkExternalAttemptResponseObserved(ctx context.Context, attempt runtimeeffects.Attempt, evidence map[string]any, at time.Time) error {

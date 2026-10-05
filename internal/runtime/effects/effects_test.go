@@ -180,9 +180,9 @@ func (p *effectStoreProbe) AuthorizeExternalAttempt(_ context.Context, authority
 	return attempt, p.authorizeErr
 }
 
-func (p *effectStoreProbe) MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) error {
+func (p *effectStoreProbe) MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) (ExternalAttemptLaunch, error) {
 	p.launches++
-	return p.launchErr
+	return ExternalAttemptLaunch{Committed: p.launchErr == nil}, p.launchErr
 }
 
 func (p *effectStoreProbe) MarkExternalAttemptResponseObserved(context.Context, Attempt, map[string]any, time.Time) error {

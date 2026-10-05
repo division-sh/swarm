@@ -854,7 +854,7 @@ func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record
 	return s.activityPostgresOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) error {
+func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) (effects.ExternalAttemptLaunch, error) {
 	return s.effectPostgresOwner.MarkExternalAttemptLaunched(ctx, attempt, now)
 }
 
@@ -1048,6 +1048,10 @@ func (s *PostgresStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, se
 
 func (s *PostgresStore) RequestCompletionCandidate(ctx context.Context, request runlifecycle.CandidateRequest) (runlifecycle.CandidateRequestDisposition, error) {
 	return s.runLifecyclePostgresOwner.RequestCompletionCandidate(ctx, request)
+}
+
+func (s *PostgresStore) RequestTurnTimeout(ctx context.Context, attempt effects.Attempt, now time.Time) (effects.TurnCancellation, error) {
+	return s.effectPostgresOwner.RequestTurnTimeout(ctx, attempt, now)
 }
 
 func (s *PostgresStore) RequireActiveRun(ctx context.Context, runID string) error {
@@ -2070,7 +2074,7 @@ func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, r
 	return s.activitySQLiteOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) error {
+func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) (effects.ExternalAttemptLaunch, error) {
 	return s.effectSQLiteOwner.MarkExternalAttemptLaunched(ctx, attempt, now)
 }
 
@@ -2268,6 +2272,10 @@ func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopology(ctx context.Contex
 
 func (s *SQLiteRuntimeStore) RequestCompletionCandidate(ctx context.Context, request runlifecycle.CandidateRequest) (runlifecycle.CandidateRequestDisposition, error) {
 	return s.runLifecycleSQLiteOwner.RequestCompletionCandidate(ctx, request)
+}
+
+func (s *SQLiteRuntimeStore) RequestTurnTimeout(ctx context.Context, attempt effects.Attempt, now time.Time) (effects.TurnCancellation, error) {
+	return s.effectSQLiteOwner.RequestTurnTimeout(ctx, attempt, now)
 }
 
 func (s *SQLiteRuntimeStore) RequireActiveRun(ctx context.Context, runID string) error {

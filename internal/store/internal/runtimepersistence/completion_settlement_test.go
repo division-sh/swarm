@@ -805,7 +805,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 					}
 					altered := handle.Attempt()
 					altered.SessionGrantID = replacement.GrantID
-					if err := fixture.store.MarkExternalAttemptLaunched(ctx, altered, time.Now().UTC()); err == nil {
+					if _, err := fixture.store.MarkExternalAttemptLaunched(ctx, altered, time.Now().UTC()); err == nil {
 						t.Fatal("borrowed new grant launched old attempt")
 					}
 					requireExternalAttemptState(t, selected.db, !selected.postgres, handle.Attempt().AttemptID, runtimeeffects.StateAuthorized)

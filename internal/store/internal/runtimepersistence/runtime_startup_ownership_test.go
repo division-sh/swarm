@@ -175,7 +175,7 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 					t.Fatalf("authorize launch rollback: %v", err)
 				}
 				restore := installExternalEffectAttemptFault(t, db, tc.name == "postgres", "UPDATE", attempt.AttemptID, string(runtimeeffects.StateLaunched))
-				if err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err == nil {
+				if _, err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err == nil {
 					t.Fatal("launch succeeded across injected state persistence failure")
 				}
 				restore()
@@ -204,7 +204,7 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 						t.Fatalf("authorize first prelaunch attempt: %v", err)
 					}
 					if marker.committed {
-						if err := store.MarkExternalAttemptLaunched(ctx, first, time.Now().UTC()); err != nil {
+						if _, err := store.MarkExternalAttemptLaunched(ctx, first, time.Now().UTC()); err != nil {
 							t.Fatalf("commit launch marker: %v", err)
 						}
 					}
@@ -302,7 +302,7 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("authorize settle rollback: %v", err)
 				}
-				if err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err != nil {
+				if _, err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err != nil {
 					t.Fatalf("launch settle rollback: %v", err)
 				}
 				restore := installExternalEffectAttemptFault(t, db, tc.name == "postgres", "UPDATE", attempt.AttemptID, string(runtimeeffects.StateSettled))
@@ -337,7 +337,7 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("AuthorizeExternalAttempt: %v", err)
 			}
-			if err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err != nil {
+			if _, err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err != nil {
 				t.Fatalf("MarkExternalAttemptLaunched: %v", err)
 			}
 			if err := store.MarkExternalAttemptResponseObserved(ctx, attempt, map[string]any{"matched": true}, time.Now().UTC()); err != nil {
@@ -368,7 +368,7 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("authorize successor apply: %v", err)
 			}
-			if err := store.MarkExternalAttemptLaunched(successorCtx, uncertain, time.Now().UTC().Add(-time.Hour)); err != nil {
+			if _, err := store.MarkExternalAttemptLaunched(successorCtx, uncertain, time.Now().UTC().Add(-time.Hour)); err != nil {
 				t.Fatalf("launch successor apply: %v", err)
 			}
 			if _, err := store.ReconcileExternalEffectAttempts(successorCtx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {

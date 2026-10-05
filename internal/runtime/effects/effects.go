@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
@@ -15,6 +16,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -248,6 +250,7 @@ func RegistrationFor(adapter string) (Registration, bool) {
 }
 
 type AuthorizeRequest struct {
+	TurnTimeout        *timeridentity.TurnTimeout
 	SessionGrantID     string
 	SessionLockOwner   string
 	OperationID        string
@@ -265,6 +268,7 @@ type AuthorizeRequest struct {
 }
 
 type Attempt struct {
+	TurnTimeout      *timeridentity.TurnTimeout
 	SessionGrantID   string
 	SessionLockOwner string
 	OperationID      string
@@ -447,7 +451,7 @@ type Settlement struct {
 type Store interface {
 	IsExternalEffectAuthorityCurrent(context.Context, Authority) (bool, error)
 	AuthorizeExternalAttempt(context.Context, Authority, AuthorizeRequest) (Attempt, error)
-	MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) error
+	MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) (ExternalAttemptLaunch, error)
 	MarkExternalAttemptResponseObserved(context.Context, Attempt, map[string]any, time.Time) error
 	SettleExternalAttempt(context.Context, Settlement) error
 }
@@ -700,6 +704,7 @@ type Handle struct {
 	differentOwner    DifferentOwner
 	recovered         bool
 	continuationGrant SessionGrant
+	turnClock         atomic.Pointer[LogicalTurnClock]
 }
 
 func (h *Handle) BindRecoveredContinuationGrant(grant SessionGrant) error {
@@ -1232,7 +1237,35 @@ func (h *Handle) MarkLaunched(ctx context.Context) error {
 	if _, continuation := h.attempt.CompletionContinuation(); continuation {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_dispatch_forbidden", "external-effects", "launch_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
-	return reportPostCommitMutation(h.controller.MarkLaunched(ctx, h.attempt))
+	launch, err := h.controller.MarkLaunched(ctx, h.attempt)
+	if !launch.Committed && err == nil {
+		return runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "external_effect_launch_acknowledgment_missing", "external-effects", "launch_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
+	}
+	if launch.Committed && h.attempt.TurnTimeout != nil && launch.Turn == nil {
+		return errors.Join(reportPostCommitMutation(err), fmt.Errorf("bounded provider launch omitted its logical turn clock"))
+	}
+	if launch.Committed && launch.Turn != nil {
+		if clockErr := launch.Turn.Validate(); clockErr != nil {
+			return errors.Join(reportPostCommitMutation(err), clockErr)
+		}
+		if !launch.Turn.Origin.Same(h.attempt.Origin) {
+			return errors.Join(reportPostCommitMutation(err), fmt.Errorf("provider launch returned a foreign logical turn clock"))
+		}
+		clock := cloneLogicalTurnClock(*launch.Turn)
+		h.turnClock.Store(&clock)
+	}
+	return reportPostCommitMutation(err)
+}
+
+func (h *Handle) LogicalTurnClock() (LogicalTurnClock, bool) {
+	if h == nil {
+		return LogicalTurnClock{}, false
+	}
+	clock := h.turnClock.Load()
+	if clock == nil {
+		return LogicalTurnClock{}, false
+	}
+	return cloneLogicalTurnClock(*clock), true
 }
 
 func (h *Handle) Heartbeat(ctx context.Context, lease time.Duration) error {
@@ -1423,6 +1456,12 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 		}, err)
 	}
 	if registration.Kind == KindProviderTurn {
+		req.TurnTimeout = turnTimeoutFromContext(ctx)
+		if req.TurnTimeout != nil {
+			if err := req.TurnTimeout.Validate(); err != nil {
+				return Attempt{}, err
+			}
+		}
 		if err := authority.ValidateCompletionAdapter(req.Adapter); err != nil {
 			return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
 		}
@@ -1551,9 +1590,9 @@ func AttemptID(operationID string, ordinal int) (string, error) {
 	return uuid.NewSHA1(operationUUID, []byte(fmt.Sprintf("attempt:%d", ordinal))).String(), nil
 }
 
-func (c *Controller) MarkLaunched(ctx context.Context, attempt Attempt) error {
+func (c *Controller) MarkLaunched(ctx context.Context, attempt Attempt) (ExternalAttemptLaunch, error) {
 	if c == nil || c.store == nil || attempt.AttemptID == "" {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "launch_attempt", nil)
+		return ExternalAttemptLaunch{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "launch_attempt", nil)
 	}
 	return c.store.MarkExternalAttemptLaunched(context.WithoutCancel(ctx), attempt, time.Now().UTC())
 }

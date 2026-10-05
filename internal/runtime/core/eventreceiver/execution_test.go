@@ -27,8 +27,8 @@ func (receiverEffectStore) AuthorizeExternalAttempt(context.Context, runtimeeffe
 	return runtimeeffects.Attempt{}, nil
 }
 
-func (receiverEffectStore) MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) error {
-	return nil
+func (receiverEffectStore) MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	return runtimeeffects.ExternalAttemptLaunch{Committed: true}, nil
 }
 
 func (receiverEffectStore) MarkExternalAttemptResponseObserved(context.Context, runtimeeffects.Attempt, map[string]any, time.Time) error {
