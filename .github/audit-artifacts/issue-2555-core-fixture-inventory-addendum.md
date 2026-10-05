@@ -20,9 +20,12 @@ tests earn no A/N/M transport credit.
 
 `internal/releasee2e/testdata/workspace_mcp` is the new compiled mock HTTP
 transport source. Register it in the existing canonical-routing artifact
-census as a different-concept transport proof, with the direct executable
-`TestWorkspaceMCPCompiledHostConformance` call to `canonicalrouting.Prove`.
-That same test actually consumes the fixture in compiled public host test.
+census as a different-concept transport fixture, with the direct executable
+`TestWorkspaceMCPTransportFixtureLoadsAndVerifies` call to `Prove` inside the
+canonical fixture-owner tests. Separately,
+`TestWorkspaceMCPCompiledHostConformance` actually consumes this same fixture
+through the compiled public host test. The structural registration test does
+not earn transport credit, and release E2E must not import runtime helpers.
 The fixture has already passed canonical source admission and the finite
 scalar rewrite; no legacy input or extra routing framework is restored.
 

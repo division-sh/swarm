@@ -15,8 +15,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 const realDockerProxyArgument = "--test-real-workspace-docker-proxy"
@@ -250,7 +248,6 @@ func TestCompiledWorkspaceWorkerIdentityEntry(t *testing.T) {
 }
 
 func TestWorkspaceMCPCompiledHostConformance(t *testing.T) {
-	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/releasee2e/testdata/workspace_mcp"))
 	root := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, root)
 	env := goldenProcessEnv(t, root, "", 0)

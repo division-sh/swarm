@@ -242,6 +242,19 @@ func TestReleaseE2EGoldenAgentWorkloadFixtureLoadsAndVerifies(t *testing.T) {
 	Prove(t, ArtifactID("internal/releasee2e/testdata/golden_agent_workload"))
 }
 
+func TestWorkspaceMCPTransportFixtureLoadsAndVerifies(t *testing.T) {
+	Prove(t, ArtifactID("internal/releasee2e/testdata/workspace_mcp"))
+	repo := RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(repo, "internal/releasee2e/testdata/workspace_mcp"), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+	if findings := report.HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("hard invalidities: %#v", findings)
+	}
+}
+
 func TestReleaseE2EFullLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	const fixture = ArtifactID("internal/releasee2e/testdata/full_lifecycle/standing_telegram")
 	Prove(t, ArtifactID("internal/releasee2e/testdata/full_lifecycle/standing_telegram"))
