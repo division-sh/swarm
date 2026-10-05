@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,6 +129,65 @@ func TestReleaseRPCObserverRunsOnlyAfterFailureWithoutRetry(t *testing.T) {
 			}
 			if observations.Load() != want || calls.Load() != 1 {
 				t.Fatalf("observer=%d requests=%d, want observer=%d requests=1", observations.Load(), calls.Load(), want)
+			}
+		})
+	}
+}
+
+func TestReleaseRPCContextFailureEvidence(t *testing.T) {
+	for _, mode := range []string{"expired_before_call", "client_timeout", "caller_cancel_after_dispatch"} {
+		t.Run(mode, func(t *testing.T) {
+			var calls atomic.Int32
+			entered, joined := make(chan struct{}), make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				_, _ = io.Copy(io.Discard, r.Body)
+				close(entered)
+				<-r.Context().Done()
+				close(joined)
+			}))
+			defer server.Close()
+			ctx := context.Background()
+			client := server.Client()
+			wantEntry, wantAfter := "<nil>", "<nil>"
+			wantCause := context.DeadlineExceeded
+			wantCalls := int32(1)
+			switch mode {
+			case "expired_before_call":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				defer cancel()
+				wantEntry, wantAfter = context.DeadlineExceeded.Error(), context.DeadlineExceeded.Error()
+				wantCalls = 0
+			case "client_timeout":
+				client.Timeout = 100 * time.Millisecond
+			case "caller_cancel_after_dispatch":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				defer cancel()
+				wantAfter, wantCause = context.Canceled.Error(), context.Canceled
+				go func() { <-entered; cancel() }()
+			}
+			rpc := &releaseRPCClient{endpoint: server.URL, client: client}
+			var result any
+			err := rpc.call(ctx, "entity.list", map[string]any{"private": "private-parameter"}, &result)
+			if !errors.Is(err, wantCause) || calls.Load() != wantCalls {
+				t.Fatalf("mode=%s calls=%d cause=%v", mode, calls.Load(), err)
+			}
+			for _, want := range []string{"rpc_context_at_entry=" + wantEntry, "rpc_context_after=" + wantAfter, "rpc_budget_at_entry=", "rpc_elapsed="} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("missing %s: %v", want, err)
+				}
+			}
+			if strings.Contains(err.Error(), "private-parameter") {
+				t.Fatal("context evidence leaked request parameters")
+			}
+			if wantCalls != 0 {
+				select {
+				case <-joined:
+				case <-time.After(2 * time.Second):
+					t.Fatal("failed RPC left its HTTP request running")
+				}
 			}
 		})
 	}
