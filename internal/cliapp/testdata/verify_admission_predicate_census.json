@@ -369,7 +369,7 @@
     "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentObservation",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
     "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
-    "body_sha256": "adbb5989bcfaf97cb8603150f6fcdaab778ea6dcb1fe2ab1a6bbe98183297b21"
+    "body_sha256": "2ea786aaecedadbef58c3984bb44f3fa0c9b3753c3bf08d0522691473fb71235"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::verifyDeploymentWorkflowOptions",
@@ -412,6 +412,12 @@
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
     "body_sha256": "0a6826e735ff9aa4ab736596e73837c74c2f1f9ab1e52a44c8623236e1ea95e5"
+  },
+  {
+    "owner": "internal/cliapp/verify_deployment_store.go::verifyAbsentSQLiteStoreCause",
+    "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
+    "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
+    "body_sha256": "5532b12a1aa5397c958cacf861ec0ef3a97d29a2af7f623bd4abf24d69e294b6"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::verifyRetainedSourceLoader",

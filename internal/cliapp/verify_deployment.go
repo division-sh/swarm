@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
-	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
 const (
@@ -105,13 +104,13 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 		result.BootReport.Observations = append(result.BootReport.Observations, observation)
 		return true
 	}
-	var absent *storeselected.AbsentSQLiteStore
+	absent := verifyAbsentSQLiteStoreCause(err)
 	if id == "selected_store_access" && owner == bootverify.SelectedStoreAccessOwner &&
-		ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && errors.As(err, &absent) {
+		ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && absent != nil {
 		observation.Status = bootverify.AdmissionNotRun
 		observation.Subject = "store:" + absent.Path
-		observation.Reason = absent.Error()
-		observation.NotRunCause = &bootverify.AdmissionNotRunCause{Kind: bootverify.AdmissionAbsentSQLiteStore, Path: absent.Path}
+		observation.Reason = err.Error()
+		observation.NotRunCause = absent
 		result.BootReport.Observations = append(result.BootReport.Observations, observation)
 		return false
 	}
