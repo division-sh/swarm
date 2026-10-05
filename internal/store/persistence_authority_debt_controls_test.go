@@ -107,6 +107,34 @@ func TestPersistenceAuthorityDebtCensusRetainsAliasesCallbacksAndOpaqueConstruct
 	}
 }
 
+func TestPersistenceAuthorityDebtCensusRetainsNonSQLConstructionAcrossOrdinaryPackages(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/authorityprobe\n\ngo 1.25.0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{"internal/apiv1", "internal/cliapp", "internal/testutil/ordinaryfixture"} {
+		path := filepath.Join(root, directory)
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
+		source := "package probe;type SQLiteRuntimeStore struct{};func replacement()*SQLiteRuntimeStore{return nil};func legacy(){factory:=replacement;_ = factory()}\n"
+		if err := os.WriteFile(filepath.Join(path, "legacy_test.go"), []byte(source), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	findings := debtLoadPersistenceAuthorityFindings(t, root)
+	sites := authorityDebtSites(findings)
+	for _, directory := range []string{"internal/apiv1", "internal/cliapp", "internal/testutil/ordinaryfixture"} {
+		found := false
+		for _, site := range sites {
+			found = found || site.File == directory+"/legacy_test.go" && site.Kind == "selected-store-construction"
+		}
+		if !found {
+			t.Errorf("ordinary-package non-SQL constructor escaped: %s; findings=%+v", directory, findings)
+		}
+	}
+}
+
 func TestPersistenceAuthorityDebtIdentityIgnoresLinesAndEarlierOrdinalRemoval(t *testing.T) {
 	path := "internal/runtime/legacy_test.go"
 	before := `package probe;import "database/sql";func legacy(db *sql.DB){db.QueryRow("one");db.QueryRow("two")}`

@@ -66,7 +66,7 @@ func debtLoadPersistenceAuthorityFindings(t *testing.T, root string) []authority
 			fileFindings := scan.debtCollectAuthorityFindings(rel, file, pkg.TypesInfo)
 			if !debtAuthorityTypedContractScope(rel) {
 				fileFindings = slices.DeleteFunc(fileFindings, func(finding authorityFinding) bool {
-					return !finding.RawSQL && finding.Kind != "forbidden-test-consumption"
+					return !finding.RawSQL && finding.Kind != "forbidden-test-consumption" && finding.Kind != "selected-store-construction"
 				})
 			}
 			for _, finding := range fileFindings {
@@ -427,10 +427,6 @@ func (scan *debtAuthorityTypeScan) debtContainsRawCallbackInput(valueType types.
 		}
 	}
 	return false
-}
-
-func debtCollectAuthorityFindings(path string, file *ast.File, info *types.Info) []authorityFinding {
-	return debtNewAuthorityTypeScan().debtCollectAuthorityFindings(path, file, info)
 }
 
 func (scan *debtAuthorityTypeScan) debtCollectFixtureStoreConstruction(path string, file *ast.File, info *types.Info) []authorityFinding {
