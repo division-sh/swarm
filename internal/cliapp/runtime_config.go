@@ -46,10 +46,11 @@ func (r RuntimeConfigLoadResult) ResolveServeListeners(opts ServeOptions, apiFla
 	if r.Config == nil {
 		return "", "", fmt.Errorf("admitted runtime configuration is required")
 	}
-	return resolveCLIServeListenerAddressesFromConfig(cliServeListenerAddressOptions{
+	api, mcp, _, err := resolveCLIServeListenerAddressesFromConfig(cliServeListenerAddressOptions{
 		APIListenAddr: opts.APIListenAddr, MCPListenAddr: opts.MCPListenAddr,
 		APIListenAddrFlagSet: apiFlagSet, MCPListenAddrFlagSet: mcpFlagSet,
 	}, r.cli)
+	return api, mcp, err
 }
 
 func (r RuntimeConfigLoadResult) ResolveServeAPIAuth(root InvocationRoot, opts ServeOptions) (apiv1.AuthTokenResolution, error) {
