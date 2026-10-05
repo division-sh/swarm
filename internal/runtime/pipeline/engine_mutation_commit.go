@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -457,6 +458,7 @@ func canonicalWorkflowInstanceOptionalPersistedTime(value time.Time) time.Time {
 type CommittedWorkflowEngineMutation struct {
 	// Committed is set only after the selected store acknowledges COMMIT.
 	Committed       bool
+	Stage           runtimeengine.CommittedStage
 	Publications    []runtimeengine.CommittedDurablePublication
 	Lifecycle       CommittedWorkflowLifecycleMutation
 	RouteRetirement *WorkflowEngineRouteRetirement
@@ -465,6 +467,12 @@ type CommittedWorkflowEngineMutation struct {
 }
 
 func (r CommittedWorkflowEngineMutation) Validate() error {
+	if !r.Committed {
+		return fmt.Errorf("workflow engine mutation requires commit acknowledgment")
+	}
+	if err := r.Stage.Validate(); err != nil {
+		return err
+	}
 	for index, publication := range r.Publications {
 		if publication == nil {
 			return fmt.Errorf("committed workflow engine publication %d is required", index)
@@ -495,6 +503,28 @@ func (r CommittedWorkflowEngineMutation) Validate() error {
 		}
 	}
 	return nil
+}
+
+// CommittedWorkflowStage projects the exact CAS result. Only an acknowledged
+// mutation owner may attach this value to a committed result.
+func CommittedWorkflowStage(record WorkflowEngineStateRecord) (runtimeengine.CommittedStage, error) {
+	if err := record.Validate(); err != nil {
+		return runtimeengine.CommittedStage{}, err
+	}
+	revision := record.ExpectedRevision
+	switch record.Transition {
+	case WorkflowEngineStateTransitionCreateStateAndCompanion:
+		revision = 1
+	case WorkflowEngineStateTransitionUpdateStateAndCompanion:
+		if revision == math.MaxInt64 {
+			return runtimeengine.CommittedStage{}, fmt.Errorf("workflow stage revision exhausted")
+		}
+		revision++
+	}
+	return runtimeengine.CommittedStage{
+		Instance: record.Identity, EntityID: record.EntityID,
+		Stage: record.CurrentState, StageDefined: record.StageDefined, Revision: revision,
+	}, nil
 }
 
 // WorkflowEngineMutationOwner owns the complete state/publication transaction.

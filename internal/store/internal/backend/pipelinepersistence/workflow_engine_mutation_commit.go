@@ -398,8 +398,13 @@ func commitWorkflowEngineMutation(
 	if command.State.Transition.PreservesState() && command.DeliverySuccess == nil {
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("accepted-event preservation requires exact inbound delivery settlement")
 	}
+	stage, err := runtimepipeline.CommittedWorkflowStage(command.State)
+	if err != nil {
+		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+	}
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
 		result := runtimepipeline.CommittedWorkflowEngineMutation{
+			Stage:        stage,
 			Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Publications)),
 			PostCommit:   command.PostCommit,
 		}

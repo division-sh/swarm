@@ -82,8 +82,8 @@ type EmitPersistenceVerifier interface {
 }
 
 type EngineMutation struct {
-	Address StateAddress
-	State   StateMutation
+	Address        StateAddress
+	State          StateMutation
 	EvaluatedState StateSnapshot
 	// PreserveConstructedState admits accepted-event reactions, not state writes.
 	PreserveConstructedState *StateSnapshot
@@ -116,6 +116,7 @@ type CommittedDurablePublication interface {
 
 type CommittedEngineMutation struct {
 	Committed              bool
+	Stage                  *CommittedStage
 	ActivityIntents        []ActivityIntent
 	ActivityRequestIntents []EmitIntent
 	EmitIntents            []EmitIntent

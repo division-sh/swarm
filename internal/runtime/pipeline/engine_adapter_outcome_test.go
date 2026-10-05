@@ -72,6 +72,16 @@ func outcomeConstructedMutation(t *testing.T) (runtimeengine.EngineMutation, Wor
 	return runtimeengine.EngineMutation{Address: runtimeengine.StateAddress{FlowInstance: flow}}, command
 }
 
+func outcomeCommittedStage(t *testing.T) runtimeengine.CommittedStage {
+	t.Helper()
+	_, command := outcomeConstructedMutation(t)
+	stage, err := CommittedWorkflowStage(command.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stage
+}
+
 func TestConstructedEngineMissingAcknowledgementDoesNotFinalize(t *testing.T) {
 	storeOwner := &missingAcknowledgementEngineOwner{}
 	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}}
@@ -93,13 +103,16 @@ func TestConstructedEngineKeepsAcknowledgementThroughCleanupFailureAndPanic(t *t
 		{name: "cleanup_panic", panicNow: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}}
+			storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Stage: outcomeCommittedStage(t), Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}}
 			planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}, finalizeErr: test.postErr, finalizePanic: test.panicNow}
 			owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
 			mutation, command := outcomeConstructedMutation(t)
 			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, nil)
 			if !result.Committed || planner.finalizes != 1 || planner.releases != 0 || err == nil {
 				t.Fatalf("result=%+v error=%v finalizes=%d releases=%d", result, err, planner.finalizes, planner.releases)
+			}
+			if result.Stage == nil || *result.Stage != storeOwner.result.Stage {
+				t.Fatalf("cleanup lost the exact committed stage: %+v", result)
 			}
 			if test.postErr != nil && !errors.Is(err, test.postErr) {
 				t.Fatalf("cleanup cause lost: %v", err)
@@ -114,7 +127,7 @@ func TestConstructedEngineKeepsAcknowledgementThroughCleanupFailureAndPanic(t *t
 func TestConstructedEngineKeepsAcknowledgementAfterCommitCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}, afterCommit: cancel}
+	storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Stage: outcomeCommittedStage(t), Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}, afterCommit: cancel}
 	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}, finalizeErr: context.Canceled}
 	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
 	mutation, command := outcomeConstructedMutation(t)
@@ -122,11 +135,15 @@ func TestConstructedEngineKeepsAcknowledgementAfterCommitCancellation(t *testing
 	if !result.Committed || !errors.Is(err, context.Canceled) || planner.finalizes != 1 || planner.releases != 0 {
 		t.Fatalf("result=%+v error=%v finalizes=%d releases=%d", result, err, planner.finalizes, planner.releases)
 	}
+	if result.Stage == nil || *result.Stage != storeOwner.result.Stage {
+		t.Fatalf("cancellation lost the exact committed stage: %+v", result)
+	}
 }
 
 func TestCommittedEngineAttemptsIndependentFinalizersAfterPublicationPanic(t *testing.T) {
 	storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{
 		Committed: true,
+		Stage:     outcomeCommittedStage(t),
 		Lifecycle: CommittedWorkflowLifecycleMutation{Wakeups: []timeridentity.WorkflowTimerActivationRef{{}}},
 	}}
 	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}, finalizePanic: true}
@@ -138,5 +155,31 @@ func TestCommittedEngineAttemptsIndependentFinalizersAfterPublicationPanic(t *te
 	if !result.Committed || planner.finalizes != 1 || planner.releases != 0 || err == nil ||
 		!strings.Contains(err.Error(), "publication cleanup panic") || !strings.Contains(err.Error(), "wakeup evidence 0 is invalid") {
 		t.Fatalf("result=%+v error=%v finalizes=%d releases=%d", result, err, planner.finalizes, planner.releases)
+	}
+}
+
+func TestConstructedEngineRejectsForeignOrMissingCommittedStageWithoutRepeatingCommit(t *testing.T) {
+	for _, variant := range []string{"missing", "foreign_instance", "wrong_stage", "wrong_revision"} {
+		t.Run(variant, func(t *testing.T) {
+			stage := outcomeCommittedStage(t)
+			switch variant {
+			case "missing":
+				stage = runtimeengine.CommittedStage{}
+			case "foreign_instance":
+				stage.Instance.RunID = eventtest.UUID("other-run")
+			case "wrong_stage":
+				stage.Stage = "other-stage"
+			case "wrong_revision":
+				stage.Revision++
+			}
+			storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Stage: stage, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}}
+			planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}}
+			owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
+			mutation, command := outcomeConstructedMutation(t)
+			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, nil)
+			if err == nil || !result.Committed || result.Stage != nil || planner.releases != 0 || planner.finalizes != 1 {
+				t.Fatalf("invalid receipt reused or guessed: %+v err=%v releases=%d finalizes=%d", result, err, planner.releases, planner.finalizes)
+			}
+		})
 	}
 }

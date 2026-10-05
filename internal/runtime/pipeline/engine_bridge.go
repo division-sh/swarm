@@ -47,6 +47,7 @@ type handlerExecutionOutcome struct {
 
 type contractHandlerExecutionResult struct {
 	Committed            bool
+	CommittedStage       *runtimeengine.CommittedStage
 	Plan                 handlerExecutionPlan
 	Outcome              *handlerExecutionOutcome
 	GuardsEvaluated      []string
@@ -249,6 +250,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return contractHandlerExecutionResult{
 			Committed:            result.Committed,
+			CommittedStage:       result.CommittedStage,
 			Handled:              handled,
 			FollowUp:             followUp,
 			DiagnosticEmissions:  diagnostics.immutableEvents(),
@@ -272,6 +274,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	plan.DataAccumulation = outcome.DataAccumulation
 	return contractHandlerExecutionResult{
 		Committed:            result.Committed,
+		CommittedStage:       result.CommittedStage,
 		Plan:                 plan,
 		Outcome:              outcome,
 		GuardsEvaluated:      append([]string{}, outcome.GuardsEvaluated...),

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
@@ -26,6 +27,8 @@ func (o *outcomeMutationOwner) CommitEngineMutation(_ context.Context, mutation 
 		return CommittedEngineMutation{}, o.err
 	}
 	result := CommittedEngineMutation{Committed: true, ActivityIntents: mutation.ActivityIntents,
+		Stage: &CommittedStage{Instance: runtimeflowidentity.RunScopedFlowInstance{RunID: "run-1", Route: runtimeflowidentity.RouteForInstancePath("research")},
+			EntityID: mutation.Address.EntityID.String(), Stage: "committed-stage", StageDefined: true, Revision: 17},
 		EmitIntents: []EmitIntent{{Event: eventtest.RunCreatingRootIngress("child", "source.requested", "", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Time{})}}}
 	if o.malformedClaim {
 		result.SettledDeliveryClaim = &runtimedelivery.Claim{}
@@ -53,6 +56,9 @@ func TestExecutorRetainsAcknowledgedIntentsWithIndependentError(t *testing.T) {
 				t.Fatalf("result=%+v err=%v commits=%d", result, err, owner.calls)
 			}
 			if owner.committed {
+				if result.CommittedStage == nil || result.CommittedStage.Stage != "committed-stage" || result.CommittedStage.Revision != 17 {
+					t.Fatalf("lost exact receipt across independent error: %+v", result)
+				}
 				if len(result.EmitIntents) != 1 || len(result.ActivityIntents) != 1 || result.Status == OutcomeRejected || result.Failure != nil {
 					t.Fatalf("lost acknowledged work or rejected commit: %+v", result)
 				}

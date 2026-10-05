@@ -5277,6 +5277,20 @@ handler_specification:
         emit. Explicit on_success.emit is additive only as a second distinct success event.
 engine:
   description: Specification for the platform engine — how it loads, validates, and executes flows.
+  committed_stage_evidence:
+    owner: existing acknowledged workflow engine mutation result
+    rule: >-
+      A constructed workflow mutation returns its exact run, instance, entity,
+      stage, stage-defined flag and committed revision from the guarded write.
+      An update returns the accepted predecessor revision plus one; accepted-event
+      preservation returns the unchanged revision. No later read may fill in or
+      replace this evidence. Failed or unresolved acknowledgment returns no
+      committed stage. Acknowledged commit with auxiliary cleanup failure retains
+      the original stage and cannot authorize repeating the mutation. Missing or
+      contradictory result evidence fails closed while retaining acknowledged
+      cleanup and publication responsibility. The receipt describes this handler's
+      instance only; a receiver receipt is not the emitting actor's own stage, and
+      queued publication acceptance is not an unexecuted handler's completion.
   committed_publication_handoff:
     owner: existing workflow engine mutation result
     rule: >-

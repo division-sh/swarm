@@ -72,6 +72,12 @@ func (w *preservedTimerMutationWitness) CommitWorkflowEngineMutation(ctx context
 		command.DeliverySuccess.Claim = foreign
 	}
 	result, err := w.WorkflowEngineMutationOwner.CommitWorkflowEngineMutation(ctx, command)
+	if result.Committed {
+		stage, stageErr := CommittedWorkflowStage(command.State)
+		if stageErr != nil || result.Stage != stage || result.Stage.Revision != command.State.ExpectedRevision {
+			w.test.Fatalf("preserving settlement changed the committed stage receipt: %+v want=%+v err=%v", result.Stage, stage, stageErr)
+		}
+	}
 	if w.fault == "committed_cleanup" && result.Committed {
 		err = errors.Join(err, errPreservedTimerCleanup)
 	}
