@@ -6,7 +6,7 @@ test-node:
     digest.requested:
       query:
         entities: items
-        filter: "has(entity.state)"
+        filter: has(entity.state)
         group_by: state
         count: true
       emit:
