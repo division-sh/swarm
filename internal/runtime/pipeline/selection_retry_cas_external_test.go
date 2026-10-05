@@ -10,18 +10,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -31,11 +28,15 @@ type selectionCASPersistence struct {
 	fired     bool
 	selection handlerselection.HandlerRuleSelectionFact
 	err       error
+	losses    int
 }
 
 func (p *selectionCASPersistence) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
-	if command.DeliverySuccess != nil && command.DeliverySuccess.RuleSelection.DisplayLabel() == "first" && !p.fired {
-		p.selection = command.DeliverySuccess.RuleSelection
+	if command.DeliverySuccess != nil && p.losses < 9 &&
+		(command.DeliverySuccess.RuleSelection.DisplayLabel() == "first" || command.DeliverySuccess.RuleSelection.DisplayLabel() == "second") {
+		if !p.fired {
+			p.selection = command.DeliverySuccess.RuleSelection
+		}
 		// Model a different writer after the real engine's read, not a forged
 		// command revision or a synthetic CAS error returned by the test.
 		tx, err := p.db.BeginTx(ctx, nil)
@@ -61,6 +62,7 @@ func (p *selectionCASPersistence) CommitWorkflowEngineMutation(ctx context.Conte
 			return pipeline.CommittedWorkflowEngineMutation{}, err
 		}
 		p.fired = true
+		p.losses++
 	}
 	result, err := p.WorkflowPersistenceOwner.CommitWorkflowEngineMutation(ctx, command)
 	if err != nil {
@@ -127,69 +129,18 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 				t.Fatalf("did not reach exact selected CAS rejection: fired=%v selection=%#v err=%v diagnostic=%s", fault.fired, fault.selection, fault.err, proposedEffectProofFailure(t, selected, event.ID()))
 			}
 			var id, status string
-			if err := selected.db.QueryRow(`SELECT delivery_id,status FROM event_deliveries WHERE event_id=$1`, event.ID()).Scan(&id, &status); err != nil || status != "failed" {
-				t.Fatalf("CAS conflict lost retry: %s %v", status, err)
+			var retries, attempts, count int
+			if err := selected.db.QueryRow(`SELECT delivery_id,status,retry_count FROM event_deliveries WHERE event_id=$1`, event.ID()).Scan(&id, &status, &retries); err != nil || status != "delivered" || retries != 0 || fault.losses != 9 {
+				t.Fatalf("contention charged delivery budget: status=%s retries=%d losses=%d err=%v", status, retries, fault.losses, err)
 			}
-			var count int
-			selections, err := storetest.ReadHandlerSelectionStorage(ctx, selected.events, event.ID())
-			if err != nil {
-				t.Fatal(err)
+			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1`, id).Scan(&attempts); err != nil || attempts != 1 {
+				t.Fatalf("contention created attempts: %d %v", attempts, err)
 			}
-			for _, selection := range selections {
-				if selection.DeliveryID == id {
-					count++
-				}
+			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, id).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("final selection facts: %d %v", count, err)
 			}
-			if count != 0 {
-				t.Fatalf("failed CAS froze fact: %d", count)
-			}
-			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name IN ('selected','ack')`, runID).Scan(&count); err != nil || count != 0 {
-				t.Fatalf("failed CAS leaked effects: %d %v", count, err)
-			}
-			rows, _, err := selected.trace.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 100})
-			if err != nil {
-				t.Fatal(err)
-			}
-			seen := false
-			for _, row := range rows {
-				if row.EventID == event.ID() {
-					seen = true
-					if row.HandlerRuleSelection != nil {
-						t.Fatal("retry trace fabricated final selection")
-					}
-				}
-			}
-			if !seen {
-				t.Fatal("trace omitted retry")
-			}
-			// Reconstruct the coordinator, then reclaim the same durable route.
-			// SQL accelerates only the finite eligibility delay in this component proof.
-			if _, err := selected.db.Exec(`UPDATE event_deliveries SET next_eligible_at=$1 WHERE delivery_id=$2`, time.Now().UTC().Add(-time.Second), id); err != nil {
-				t.Fatal(err)
-			}
-			coordinator := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module})
-			bus.SetInterceptors(coordinator)
-			prepared, found, err := selected.events.LoadPreparedPublishEvent(ctx, event.ID())
-			if err != nil || !found || len(prepared.DeliveryRoutes) != 1 {
-				t.Fatalf("recovered route: %#v %v", prepared, err)
-			}
-			if err := bus.ReleaseDeliveryContinuation(id); err != nil {
-				t.Fatal(err)
-			}
-			proof, err := selected.events.ProveHandoff(ctx, event.ID(), prepared.DeliveryRoutes[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := bus.AcceptCommittedDeliveryHandoffs([]deliverylifecycle.DurableHandoffProof{proof}); err != nil {
-				t.Fatal(err)
-			}
-			if result := bus.DispatchDeliveryContinuation(ctx, prepared.Event.Event(), prepared.DeliveryRoutes[0]); result.Failure() != nil {
-				t.Fatal(result.Failure())
-			}
-			wait, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
-			if err := bus.WaitForQuiescence(wait); err != nil {
-				t.Fatal(err)
+			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM dead_letters WHERE original_event_id=$1`, event.ID()).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("state contention dead letter: %d %v", count, err)
 			}
 			assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")
 			assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")

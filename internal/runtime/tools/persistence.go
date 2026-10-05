@@ -5,7 +5,6 @@ import (
 
 	corestate "github.com/division-sh/swarm/internal/runtime/core/state"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type MailboxItem = corestate.MailboxItem
@@ -19,18 +18,11 @@ type MailboxPersistence interface {
 	ExpireMailboxItems(ctx context.Context, limit int) ([]MailboxItem, error)
 }
 
-// EntityPersistence is the backend-neutral store owner for entity tool reads
-// and writes. Executor code owns tool semantics; store implementations own SQL.
+// EntityPersistence exposes read products only. Live writes use the pipeline's
+// entity lock and canonical workflow mutation owner.
 type EntityPersistence interface {
 	LoadEntityState(ctx context.Context, identity EntityIdentity) (map[string]any, bool, error)
 	QueryEntityStates(ctx context.Context, query EntityStateQuery) ([]map[string]any, error)
-	SaveEntityField(ctx context.Context, update EntityFieldUpdate) (EntityFieldWriteResult, error)
-}
-
-type EntityFieldWriteResult struct {
-	Revision int
-	// Acknowledged is set only when the selected-store commit returns a value.
-	Acknowledged bool
 }
 
 type EntityIdentity struct {
@@ -56,21 +48,6 @@ type EntityStateQuery struct {
 	CurrentState       string
 	FieldEquals        []EntityFieldEquals
 	OrderByCreatedDesc bool
-}
-
-type EntityMutationWriter struct {
-	Type        string
-	ID          string
-	HandlerStep string
-}
-
-type EntityFieldUpdate struct {
-	Source    semanticview.Source
-	RunID     string
-	EntityID  string
-	FieldPath string
-	Value     any
-	Writer    EntityMutationWriter
 }
 
 type HumanTaskCardStore = decisioncard.HumanTaskAcknowledgedCreationStore

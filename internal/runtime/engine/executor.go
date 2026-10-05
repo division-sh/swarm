@@ -473,75 +473,87 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		postCommitErr    error
 	)
 	err := e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
-		loaded, err := e.loadState(lockCtx, req)
-		if err != nil {
-			SetExecutionFailure(&result, err, "runtime.engine", "load_state")
-			return err
-		}
-		req.State = loaded
-		frame, err := e.newExecutionFrame(lockCtx, req)
-		if err != nil {
-			SetExecutionFailure(&result, err, "runtime.engine", "base_context")
-			return err
-		}
-		if err := e.runSteps(&frame); err != nil {
-			result = frame.result
-			var moduleErr *computemodule.Error
-			if errors.As(err, &moduleErr) && moduleErr.Code == computemodule.CodeReplay {
-				SetExecutionFailure(&result, err, "runtime.engine", "compute_replay")
+		for {
+			if err := lockCtx.Err(); err != nil {
 				return err
 			}
-			if replayErr := verifyComputeModuleReplayTraceCount(frame); replayErr != nil {
-				SetExecutionFailure(&result, replayErr, "runtime.engine", "compute_replay_trace")
-				return replayErr
+			attemptErr := func() error {
+				loaded, err := e.loadState(lockCtx, req)
+				if err != nil {
+					SetExecutionFailure(&result, err, "runtime.engine", "load_state")
+					return err
+				}
+				req.State = loaded
+				frame, err := e.newExecutionFrame(lockCtx, req)
+				if err != nil {
+					SetExecutionFailure(&result, err, "runtime.engine", "base_context")
+					return err
+				}
+				if err := e.runSteps(&frame); err != nil {
+					result = frame.result
+					var moduleErr *computemodule.Error
+					if errors.As(err, &moduleErr) && moduleErr.Code == computemodule.CodeReplay {
+						SetExecutionFailure(&result, err, "runtime.engine", "compute_replay")
+						return err
+					}
+					if replayErr := verifyComputeModuleReplayTraceCount(frame); replayErr != nil {
+						SetExecutionFailure(&result, replayErr, "runtime.engine", "compute_replay_trace")
+						return replayErr
+					}
+					SetExecutionFailure(&result, err, "runtime.engine", "execute_steps")
+					return err
+				}
+				if err := verifyComputeModuleReplayTraceCount(frame); err != nil {
+					result = frame.result
+					SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
+					return err
+				}
+				if frame.discardedJoin {
+					// An obsolete join occurrence has no accepted state effect. Its exact
+					// claim still settles through the coordinator's no-op outcome path;
+					// committing an unchanged snapshot would mutate the new entry's revision.
+					result = frame.result
+					return nil
+				}
+				if err := e.validateEntityMutationList(&frame); err != nil {
+					result = frame.result
+					SetExecutionFailure(&result, err, "runtime.engine", "entity_final_candidate")
+					return err
+				}
+				result = frame.result
+				if req.Preview {
+					// Preview evaluates the same candidate but cannot prepare durable
+					// lifecycle occurrences or claim a successful mutation.
+					return nil
+				}
+				committed, err := e.persist(lockCtx, frame)
+				result = frame.result
+				result.Committed = committed.Committed
+				if err != nil && !committed.Committed {
+					result.EmitIntents = nil
+					result.ActivityIntents = nil
+					result.ActivityRequestIntents = nil
+					return err
+				}
+				postCommitErr = err
+				intents = append([]EmitIntent(nil), committed.EmitIntents...)
+				activityIntents = append([]ActivityIntent(nil), committed.ActivityIntents...)
+				activityRequests = append([]EmitIntent(nil), committed.ActivityRequestIntents...)
+				if committed.SettledDeliveryClaim != nil {
+					if claimErr := committed.SettledDeliveryClaim.Validate(); claimErr != nil {
+						return fmt.Errorf("committed engine delivery settlement: %w", claimErr)
+					}
+					claim := *committed.SettledDeliveryClaim
+					result.SettledDeliveryClaim = &claim
+				}
+				return nil
+			}()
+			if !result.Committed && failures.IsStateContention(attemptErr) {
+				result = ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}
+				continue
 			}
-			SetExecutionFailure(&result, err, "runtime.engine", "execute_steps")
-			return err
+			return attemptErr
 		}
-		if err := verifyComputeModuleReplayTraceCount(frame); err != nil {
-			result = frame.result
-			SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
-			return err
-		}
-		if frame.discardedJoin {
-			// An obsolete join occurrence has no accepted state effect. Its exact
-			// claim still settles through the coordinator's no-op outcome path;
-			// committing an unchanged snapshot would mutate the new entry's revision.
-			result = frame.result
-			return nil
-		}
-		if err := e.validateEntityMutationList(&frame); err != nil {
-			result = frame.result
-			SetExecutionFailure(&result, err, "runtime.engine", "entity_final_candidate")
-			return err
-		}
-		result = frame.result
-		if req.Preview {
-			// Preview evaluates the same candidate but cannot prepare durable
-			// lifecycle occurrences or claim a successful mutation.
-			return nil
-		}
-		committed, err := e.persist(lockCtx, frame)
-		result = frame.result
-		result.Committed = committed.Committed
-		if err != nil && !committed.Committed {
-			result.EmitIntents = nil
-			result.ActivityIntents = nil
-			result.ActivityRequestIntents = nil
-			return err
-		}
-		postCommitErr = err
-		intents = append([]EmitIntent(nil), committed.EmitIntents...)
-		activityIntents = append([]ActivityIntent(nil), committed.ActivityIntents...)
-		activityRequests = append([]EmitIntent(nil), committed.ActivityRequestIntents...)
-		if committed.SettledDeliveryClaim != nil {
-			if claimErr := committed.SettledDeliveryClaim.Validate(); claimErr != nil {
-				return fmt.Errorf("committed engine delivery settlement: %w", claimErr)
-			}
-			claim := *committed.SettledDeliveryClaim
-			result.SettledDeliveryClaim = &claim
-		}
-		return nil
 	})
 	if err != nil && !result.Committed {
 		if errors.Is(err, ErrEmitPersistencePrerequisite) || errors.Is(err, ErrEmitPayloadContractViolation) {
@@ -615,6 +627,7 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 		return executionFrame{}, err
 	}
 	req.State = state
+	state.StateCarrier = NewStateCarrierWithOwners(state.Fields, state.Bookkeeping, state.Control, state.Gates, state.StateBuckets)
 	currentState := strings.TrimSpace(state.CurrentState)
 	collectionPlan, err := e.resolveHandlerCollectionPlan(req)
 	if err != nil {
@@ -2838,6 +2851,7 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 	return e.deps.MutationOwner.CommitEngineMutation(ctx, EngineMutation{
 		Address:                  frame.req.StateAddress(),
 		State:                    frame.result.StateMutation,
+		EvaluatedState:           frame.req.State,
 		PreserveConstructedState: preserved,
 		HandlerRuleSelection:     selection,
 		LifecycleEffects:         effects,

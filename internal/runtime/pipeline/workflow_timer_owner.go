@@ -88,6 +88,8 @@ func (c workflowTimerCause) validateForActivation() error {
 type WorkflowTimerFireOutcome string
 
 const (
+	// Committed acknowledges the occurrence publication, not its stage transition.
+	// The publication's existing pipeline obligation owns rejected transitions.
 	WorkflowTimerFireCommitted WorkflowTimerFireOutcome = "committed"
 	WorkflowTimerFireRetry     WorkflowTimerFireOutcome = "retry"
 	WorkflowTimerFireTerminal  WorkflowTimerFireOutcome = "terminal"
@@ -873,7 +875,7 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 	if finalizeErr := l.publication.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); finalizeErr != nil {
 		err = errors.Join(err, finalizeErr)
 	}
-	if dispatchErr := l.dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); dispatchErr != nil {
+	if dispatchErr := l.dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{committed.Publication.CommittedDurablePublicationIntent()}); dispatchErr != nil {
 		err = errors.Join(err, dispatchErr)
 	}
 	return WorkflowTimerFireCommitted, committed.Next.Status == workflowTimerStatusActive, err

@@ -180,7 +180,8 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	}
 	atomic.StoreInt32(&runner.calls, 0)
 
-	if err := store.MarkTerminated(ctx, testRunScopedWorkflowInstanceFromContext(ctx, storageRef), identity.NormalizeEntityID(entityID), terminatedAt); err != nil {
+	coordinator := &PipelineCoordinator{workflowStore: store}
+	if err := coordinator.MarkTerminated(ctx, testRunScopedWorkflowInstanceFromContext(ctx, storageRef), identity.NormalizeEntityID(entityID), terminatedAt); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	if got := atomic.LoadInt32(&runner.calls); got != 1 {
