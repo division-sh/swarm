@@ -288,5 +288,20 @@
     "slots": [
       "numeric registration supporting guard.check is CEL has(entity.threshold); preserve constructor supplied-field proof and exact generator replacement anchors"
     ]
+  },
+  {
+    "file": "tests/tier4-cross-entity/test-query-group-by/nodes.yaml",
+    "before_hash": "0b8ad34fa7212b58a21187686aaae7c2659c62caca88cf2763cc359e4239637e",
+    "after_hash": "253aaf2a20e888d45aa7c33bc2e51b2a441ca3257dbef6c0f5db65e236f1c2d5",
+    "edits": [
+      {
+        "start": 8,
+        "remove": ["        filter: \"has(entity.state)\""],
+        "add": ["        filter: has(entity.state)"]
+      }
+    ],
+    "slots": [
+      "query.filter is unquoted CEL; preserve the existing optional-state presence predicate, grouping and count"
+    ]
   }
 ]
