@@ -25,6 +25,13 @@ strings are standalone YAML. The compact ledger contains only changed lines;
 input/output hashes refuse any ambiguous application. Ordinary application
 does not require Git history or census artifacts. Historical rewrite tests do
 not freeze future modifications to the corpus.
+
+`2496-intent.json` is the finite R5.1 fixture addendum, captured against
+`620b66fd7` after rebasing onto the #2556 value semantics. It records exact
+constructor predicate, standing guard, native integer and literal-text choices.
+Apply it with `-ledger scripts/rewrite-value-slots-2556/2496-intent.json`.
+It does not replace the original historical corpus ledger or reinterpret
+schema defaults, refusal fixtures, routing identities or lifecycle assertions.
 Reviewed flow-style sources containing CEL that requires block scalars are
 expanded to block mappings. Native number, bool and null values preserve their tags.
 

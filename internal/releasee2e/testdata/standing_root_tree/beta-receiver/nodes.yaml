@@ -3,6 +3,6 @@ observer:
   subscribes_to: [inbound.telegram.text_message, inbound.telegram.callback_action]
   event_handlers:
     inbound.telegram.text_message:
-      guard: {id: admit, check: 'true'}
+      guard: {id: admit, check: true}
     inbound.telegram.callback_action:
-      guard: {id: admit, check: 'true'}
+      guard: {id: admit, check: true}

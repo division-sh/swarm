@@ -1,0 +1,273 @@
+[
+  {
+    "file": "internal/releasee2e/testdata/standing_root_tree/alpha-receiver/nodes.yaml",
+    "before_hash": "c1a3405d19097f5b30b372d25f36a16603d01e1b435d2e424dd40ab6d729d92b",
+    "after_hash": "dbac03f64a7d38b209a8284546626c2139746ba311742eacd6bf8f1470f01da6",
+    "edits": [
+      {
+        "start": 5,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      },
+      {
+        "start": 7,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      }
+    ],
+    "slots": [
+      "authored guard.check is a boolean, not quoted text; generator and exact replacement anchor agree"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/standing_root_tree/beta-receiver/nodes.yaml",
+    "before_hash": "c1a3405d19097f5b30b372d25f36a16603d01e1b435d2e424dd40ab6d729d92b",
+    "after_hash": "dbac03f64a7d38b209a8284546626c2139746ba311742eacd6bf8f1470f01da6",
+    "edits": [
+      {
+        "start": 5,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      },
+      {
+        "start": 7,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      }
+    ],
+    "slots": [
+      "authored guard.check is a boolean, not quoted text; generator and exact replacement anchor agree"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/standing_root_tree/beta/nodes.yaml",
+    "before_hash": "973c2a1bc0eb38e557a1c4f604247f3f2e8e963cf251c93f2664a58713bab940",
+    "after_hash": "8a24dd547d734d97dabc4827e2839b17b5b1e92646c91df9dffcc37c4e3f596a",
+    "edits": [
+      {
+        "start": 5,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      },
+      {
+        "start": 7,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      },
+      {
+        "start": 9,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      }
+    ],
+    "slots": [
+      "authored guard.check is a boolean, not quoted text; generator and exact replacement anchor agree"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/standing_root_tree/nodes.yaml",
+    "before_hash": "973c2a1bc0eb38e557a1c4f604247f3f2e8e963cf251c93f2664a58713bab940",
+    "after_hash": "8a24dd547d734d97dabc4827e2839b17b5b1e92646c91df9dffcc37c4e3f596a",
+    "edits": [
+      {
+        "start": 5,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      },
+      {
+        "start": 7,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      },
+      {
+        "start": 9,
+        "remove": [
+          "      guard: {id: admit, check: 'true'}"
+        ],
+        "add": [
+          "      guard: {id: admit, check: true}"
+        ]
+      }
+    ],
+    "slots": [
+      "authored guard.check is a boolean, not quoted text; generator and exact replacement anchor agree"
+    ]
+  },
+  {
+    "file": "internal/runtime/bootverify/flow_constructor_test.go",
+    "before_hash": "bf1e2eab543da4495829da2140af81fa0f89267e389b84625dbf257529599d8a",
+    "after_hash": "802168cc8dcffc1c67bd28d054fdaabab2ca7d35d21f6ad7a2f1e2e50b2b1397",
+    "edits": [
+      {
+        "start": 82,
+        "remove": [
+          "\t\t{\"guard cannot borrow later write\", \"\", \"      guard: {check: entity.brief != ''}\\n      data_accumulation:\\n        writes: [{target_field: brief, value: supplied}]\\n\", false},",
+          "\t\t{\"read after definite write\", \"\", \"      data_accumulation:\\n        writes: [{target_field: brief, value: supplied}, {target_field: copy, value: '${entity.brief}'}]\\n\", true},",
+          "\t\t{\"explicit optional presence\", \"  brief: text?\\n\", \"      guard: {check: '!has(entity.brief) || entity.brief != \\\"\\\"'}\\n\", true},"
+        ],
+        "add": [
+          "\t\t{\"guard cannot borrow later write\", \"\", \"      guard: {check: entity.brief != ''}\\n      data_accumulation:\\n        writes: [{target_field: brief, value: 'supplied'}]\\n\", false},",
+          "\t\t{\"read after definite write\", \"\", \"      data_accumulation:\\n        writes: [{target_field: brief, value: 'supplied'}, {target_field: copy, value: entity.brief}]\\n\", true},",
+          "\t\t{\"explicit optional presence\", \"  brief: text?\\n\", \"      guard:\\n        check: \u003e-\\n          !has(entity.brief) || entity.brief != \\\"\\\"\\n\", true},"
+        ]
+      }
+    ],
+    "slots": [
+      "constructor assignment proof: data_accumulation.writes.copy is CEL entity.brief, not a quoted text interpolation",
+      "constructor eligibility proof: guard.check is unquoted CEL in a block scalar; optional presence semantics unchanged",
+      "definite-assignment supporting write is literal text supplied, not CEL variable supplied",
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/runtime/conformance/primary_entity_conformance_test.go",
+    "before_hash": "3c3f3029387695bd07e025e9f10e223965463652dbaa3e972e325333dbe098c8",
+    "after_hash": "813a1def46d4769d828c8a7023579fcecea4c707d6a217cbd7c4eaa723721eaa",
+    "edits": [
+      {
+        "start": 59,
+        "remove": [
+          "\t\t\t\twritePrimaryEntityConformanceFile(t, filepath.Join(root, \"scoring\", \"nodes.yaml\"), \"writer:\\n  execution_type: system_node\\n  event_handlers:\\n    score.requested:\\n      data_accumulation:\\n        writes:\\n          - {target_field: value, value: {literal: 1}}\\n      advances_to: done\\n\")"
+        ],
+        "add": [
+          "\t\t\t\twritePrimaryEntityConformanceFile(t, filepath.Join(root, \"scoring\", \"nodes.yaml\"), \"writer:\\n  execution_type: system_node\\n  event_handlers:\\n    score.requested:\\n      data_accumulation:\\n        writes:\\n          - {target_field: value, value: 1}\\n      advances_to: done\\n\")"
+        ]
+      }
+    ],
+    "slots": [
+      "positive primary-entity write uses native integer 1; no literal escape",
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/constructed_gate_fork.go",
+    "before_hash": "d78307057ddbcec967bbc1d812d461cbbdda873bc2e057457963586cea2629a7",
+    "after_hash": "cba9bb138a7221af11911c56448f5b666a8b31de69826ead82f90e4d7505c348",
+    "edits": [
+      {
+        "start": 20,
+        "remove": [
+          "\t\t\"nodes.yaml\":  \"frontier:\\n  execution_type: system_node\\n  subscribes_to: [item.received]\\n  event_handlers:\\n    item.received:\\n      guard: {id: retained_frontier, check: 'true'}\\n\","
+        ],
+        "add": [
+          "\t\t\"nodes.yaml\":  \"frontier:\\n  execution_type: system_node\\n  subscribes_to: [item.received]\\n  event_handlers:\\n    item.received:\\n      guard: {id: retained_frontier, check: true}\\n\","
+        ]
+      }
+    ],
+    "slots": [
+      "authored guard.check is a boolean, not quoted text; generator and exact replacement anchor agree",
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/constructor_proofs.go",
+    "before_hash": "eacf640dddf6405fbddc46bc66b86d835f9b59a90586e79b94ea54d919553519",
+    "after_hash": "72a9be01f5e88a92e8072aae71394e54d7d0e4553d61ac58fe5bd896bf5c5153",
+    "edits": [
+      {
+        "start": 3,
+        "remove": [
+          "\t\"strings\""
+        ]
+      },
+      {
+        "start": 86,
+        "remove": [
+          "\twriteClosedVariantFile(t, root, \"consumer/nodes.yaml\", \"consumer-node:\\n  execution_type: system_node\\n  event_handlers:\\n    deploy.done:\\n      guard: {check: '\"+strings.ReplaceAll(read, \"'\", \"''\")+\"'}\\n\")"
+        ],
+        "add": [
+          "\twriteClosedVariantFile(t, root, \"consumer/nodes.yaml\", \"consumer-node:\\n  execution_type: system_node\\n  event_handlers:\\n    deploy.done:\\n      guard:\\n        check: \u003e-\\n          \"+read+\"\\n\")"
+        ]
+      }
+    ],
+    "slots": [
+      "nested constructor fixture: authored guard.check remains exact CEL; block scalar replaces YAML quoting, no apostrophe rewriting",
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/standing_root_tree.go",
+    "before_hash": "f1a26ae0803e12882c62a4c14ff76680076b743ffc69323223ae34223d2f8aa3",
+    "after_hash": "bbc66655aa78220d23a5e2f8cdcf8aebcc3c7fe3d93aad1a1eddce871a540bb3",
+    "edits": [
+      {
+        "start": 15,
+        "remove": [
+          "\tconst nodes = \"observer:\\n  execution_type: system_node\\n  subscribes_to: [inbound.telegram, inbound.telegram.text_message, inbound.telegram.callback_action]\\n  event_handlers:\\n    inbound.telegram:\\n      guard: {id: admit, check: 'true'}\\n    inbound.telegram.text_message:\\n      guard: {id: admit, check: 'true'}\\n    inbound.telegram.callback_action:\\n      guard: {id: admit, check: 'true'}\\n\""
+        ],
+        "add": [
+          "\tconst nodes = \"observer:\\n  execution_type: system_node\\n  subscribes_to: [inbound.telegram, inbound.telegram.text_message, inbound.telegram.callback_action]\\n  event_handlers:\\n    inbound.telegram:\\n      guard: {id: admit, check: true}\\n    inbound.telegram.text_message:\\n      guard: {id: admit, check: true}\\n    inbound.telegram.callback_action:\\n      guard: {id: admit, check: true}\\n\""
+        ]
+      },
+      {
+        "start": 25,
+        "remove": [
+          "\t\tfiles[alias+\"-receiver/nodes.yaml\"] = strings.Replace(strings.Replace(nodes, \"subscribes_to: [inbound.telegram, \", \"subscribes_to: [\", 1), \"    inbound.telegram:\\n      guard: {id: admit, check: 'true'}\\n\", \"\", 1)"
+        ],
+        "add": [
+          "\t\tfiles[alias+\"-receiver/nodes.yaml\"] = strings.Replace(strings.Replace(nodes, \"subscribes_to: [inbound.telegram, \", \"subscribes_to: [\", 1), \"    inbound.telegram:\\n      guard: {id: admit, check: true}\\n\", \"\", 1)"
+        ]
+      }
+    ],
+    "slots": [
+      "authored guard.check is a boolean, not quoted text; generator and exact replacement anchor agree",
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/fieldless_handler_construction_test.go",
+    "before_hash": "1254a9b70ee195c6bdb4aa3d41266b296be24dc715754035be2e4319df573ff4",
+    "after_hash": "f0d053885b1f62fcac8535a74abf1221d8c8240ac98cf3279cc7a4b2c716b9a2",
+    "edits": [
+      {
+        "start": 126,
+        "remove": [
+          "\t\t\t{name: \"fielded_accumulation\", entity: \"review_item\", effects: \"      data_accumulation:\\n        writes:\\n          - {target_field: marker, value: changed}\\n\", wantMarker: \"changed\"},"
+        ],
+        "add": [
+          "\t\t\t{name: \"fielded_accumulation\", entity: \"review_item\", effects: \"      data_accumulation:\\n        writes:\\n          - {target_field: marker, value: 'changed'}\\n\", wantMarker: \"changed\"},"
+        ]
+      }
+    ],
+    "slots": [
+      "constructed ordinary-handler write preserves text changed; quoted text replaces invalid CEL variable",
+      "reviewed generator, partial replacement anchors and typed/negative oracles migrate together; no data-file grammar change"
+    ]
+  }
+]
