@@ -104,10 +104,15 @@ const (
 	RootReplyCorrelationIncompatible
 	RootReplyLocalConsumerAbsent
 	RootReplyExportObserverAbsent
+	RootReplyExportPinAbsent
 )
 
 func ApplyRootReplyBoundaryNegativeMutation(t testing.TB, root string, rootRequester bool, mutation RootReplyNegativeMutation) {
 	t.Helper()
+	if mutation == RootReplyExportPinAbsent {
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs: [request.finished]\n", "")
+		return
+	}
 	if mutation == RootReplyLocalConsumerAbsent || mutation == RootReplyExportObserverAbsent {
 		path := filepath.Join(root, "nodes.yaml")
 		doc := readYAMLDocument(t, path)
@@ -211,4 +216,13 @@ func RemoveRootReplyConsumer(t testing.TB, owner string, rootRequester, agent bo
 		ApplyRootReplyBoundaryNegativeMutation(t, owner, rootRequester, RootReplyLocalConsumerAbsent)
 	}
 	return func() { writeYAMLDocument(t, path, original) }
+}
+
+func AddRootReplyConsumerAgent(t testing.TB, owner string, rootRequester bool) {
+	t.Helper()
+	event := "provider.requested"
+	if rootRequester {
+		event = "provider.replied"
+	}
+	writeClosedVariantFile(t, owner, "agents.yaml", "local-consumer:\n  intent: {inline: Observe the connected event.}\n  model: regular\n  subscriptions: ["+event+"]\n")
 }

@@ -58,10 +58,12 @@ type Endpoint struct {
 }
 
 type BoundaryExposure struct {
-	ID       string        `json:"id"`
-	Event    EventIdentity `json:"event"`
-	Producer Endpoint      `json:"producer"`
-	Output   Endpoint      `json:"output"`
+	ID         string        `json:"id"`
+	Event      EventIdentity `json:"event"`
+	Producer   Endpoint      `json:"producer"`
+	Output     Endpoint      `json:"output"`
+	Boundary   *Boundary     `json:"boundary,omitempty"`
+	Resolution *Resolution   `json:"resolution,omitempty"`
 }
 
 type RootInputSource struct {
@@ -104,12 +106,16 @@ type TypedPubSub struct {
 }
 
 type Boundary struct {
-	OwnerFlowPath    string `json:"owner_flow_path,omitempty"`
-	AuthoredLocation string `json:"authored_location,omitempty"`
-	From             string `json:"from"`
-	To               string `json:"to"`
-	OutputPin        string `json:"output_pin"`
-	InputPin         string `json:"input_pin"`
+	OwnerFlowPath             string `json:"owner_flow_path,omitempty"`
+	AuthoredLocation          string `json:"authored_location,omitempty"`
+	From                      string `json:"from"`
+	To                        string `json:"to"`
+	OutputPin                 string `json:"output_pin"`
+	InputPin                  string `json:"input_pin"`
+	SourceLocal               bool   `json:"source_local,omitempty"`
+	ReceiverLocal             bool   `json:"receiver_local,omitempty"`
+	SourceEventSchemaDigest   string `json:"source_event_schema_digest,omitempty"`
+	ReceiverEventSchemaDigest string `json:"receiver_event_schema_digest,omitempty"`
 }
 
 type Resolution struct {
@@ -173,6 +179,7 @@ func Build(source semanticview.Source) Topology {
 	connectGraph := pinrouting.CompileConnectGraph(source)
 	plans, planIssues := connectGraph.Plans(), connectGraph.Issues()
 	builder := topologyBuilder{
+		source:        source,
 		census:        census,
 		seenEdges:     map[string]struct{}{},
 		seenExposures: map[string]struct{}{},
@@ -283,6 +290,7 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 }
 
 type topologyBuilder struct {
+	source        semanticview.Source
 	census        semanticview.AuthoredEventEndpointCensus
 	edges         []Edge
 	exposures     []BoundaryExposure
@@ -323,12 +331,7 @@ func (b *topologyBuilder) addBoundaryExposures() {
 				Producer: endpointView(producer),
 				Output:   endpointView(output),
 			}
-			exposure.ID = strings.Join([]string{producer.ID, output.ID}, "->")
-			if _, exists := b.seenExposures[exposure.ID]; exists {
-				continue
-			}
-			b.seenExposures[exposure.ID] = struct{}{}
-			b.exposures = append(b.exposures, exposure)
+			b.addBoundaryExposure(exposure)
 		}
 	}
 }
@@ -337,31 +340,85 @@ func (b *topologyBuilder) addConnectEdges(plans []pinrouting.ConnectRoutePlan) {
 	for _, plan := range plans {
 		source := plan.SourceEndpoint().Readback()
 		receiver := plan.ReceiverEndpoint().Readback()
-		producerEndpoints := b.census.MatchingProducers(source.FlowID, source.ResolvedEvent)
-		if len(producerEndpoints) == 0 {
-			producerEndpoints = b.census.MatchingProducers(source.FlowID, source.LocalEvent)
-		}
-		if len(producerEndpoints) == 0 {
-			if endpoint, ok := findPinEndpoint(b.census.OutputPins(), source.FlowID, source.Pin); ok {
-				producerEndpoints = []semanticview.AuthoredEventEndpoint{endpoint}
+		consumers := b.connectConsumerEndpoints(receiver)
+		for _, producer := range b.connectProducerEndpoints(source) {
+			for _, consumer := range consumers {
+				b.addEdge(Edge{
+					Scope:                     DeliveryScopeInterFlowConnect,
+					Event:                     eventIdentity(source.LocalEvent, source.ResolvedEvent),
+					Producer:                  endpointView(producer),
+					Consumer:                  endpointView(consumer),
+					Boundary:                  boundaryView(plan),
+					Resolution:                resolutionView(plan),
+					RequiresRuntimeResolution: plan.RequiresRuntimeResolution(),
+				})
 			}
-		}
-		consumer, ok := findPinEndpoint(b.census.InputPins(), receiver.FlowID, receiver.Pin)
-		if !ok {
-			continue
-		}
-		for _, producer := range producerEndpoints {
-			b.addEdge(Edge{
-				Scope:                     DeliveryScopeInterFlowConnect,
-				Event:                     eventIdentity(source.LocalEvent, source.ResolvedEvent),
-				Producer:                  endpointView(producer),
-				Consumer:                  endpointView(consumer),
-				Boundary:                  boundaryView(plan),
-				Resolution:                resolutionView(plan),
-				RequiresRuntimeResolution: plan.RequiresRuntimeResolution(),
-			})
+			b.addConnectExport(plan, producer)
 		}
 	}
+}
+
+func (b *topologyBuilder) connectProducerEndpoints(source pinrouting.ConnectRoutePlanEndpointReadback) []semanticview.AuthoredEventEndpoint {
+	producers := b.census.MatchingProducers(source.FlowID, source.ResolvedEvent)
+	if len(producers) == 0 {
+		producers = b.census.MatchingProducers(source.FlowID, source.LocalEvent)
+	}
+	if len(producers) != 0 {
+		return producers
+	}
+	pins := b.census.OutputPins()
+	if source.LocalEndpoint {
+		pins = b.census.InputPins()
+	}
+	if endpoint, ok := findPinEndpoint(pins, source.FlowID, source.Pin); ok {
+		return []semanticview.AuthoredEventEndpoint{endpoint}
+	}
+	return nil
+}
+
+func (b *topologyBuilder) connectConsumerEndpoints(receiver pinrouting.ConnectRoutePlanEndpointReadback) []semanticview.AuthoredEventEndpoint {
+	if !receiver.LocalEndpoint {
+		if endpoint, ok := findPinEndpoint(b.census.InputPins(), receiver.FlowID, receiver.Pin); ok {
+			return []semanticview.AuthoredEventEndpoint{endpoint}
+		}
+		return nil
+	}
+	// The compiled receiver identity, including rename, is already admitted.
+	matches := b.census.ResolveTypedPubSubConsumerMatches(semanticview.AuthoredEventEndpoint{
+		FlowID: receiver.FlowID,
+		Event:  semanticview.ResolveFlowEventProof(b.source, receiver.FlowID, receiver.LocalEvent),
+	})
+	consumers := make([]semanticview.AuthoredEventEndpoint, 0, len(matches))
+	for _, match := range matches {
+		consumers = append(consumers, match.Consumer)
+	}
+	return consumers
+}
+
+func (b *topologyBuilder) addConnectExport(plan pinrouting.ConnectRoutePlan, producer semanticview.AuthoredEventEndpoint) {
+	receiver := plan.ReceiverEndpoint().Readback()
+	if !receiver.LocalEndpoint || !plan.ReceiverEndpoint().IsRoot() {
+		return
+	}
+	if output, ok := findPinEndpoint(b.census.OutputPins(), receiver.FlowID, receiver.Pin); ok {
+		b.addBoundaryExposure(BoundaryExposure{
+			Event: eventIdentity(receiver.LocalEvent, receiver.ResolvedEvent), Producer: endpointView(producer), Output: endpointView(output),
+			Boundary: boundaryView(plan), Resolution: resolutionView(plan),
+		})
+	}
+}
+
+func (b *topologyBuilder) addBoundaryExposure(exposure BoundaryExposure) {
+	parts := []string{exposure.Producer.ID, exposure.Output.ID}
+	if exposure.Boundary != nil {
+		parts = append(parts, exposure.Boundary.OwnerFlowPath, exposure.Boundary.From, exposure.Boundary.To)
+	}
+	exposure.ID = strings.Join(parts, "->")
+	if _, exists := b.seenExposures[exposure.ID]; exists {
+		return
+	}
+	b.seenExposures[exposure.ID] = struct{}{}
+	b.exposures = append(b.exposures, exposure)
 }
 
 func (b *topologyBuilder) addEdge(edge Edge) {
@@ -464,12 +521,16 @@ func boundaryView(plan pinrouting.ConnectRoutePlan) *Boundary {
 	source := plan.SourceEndpoint().Readback()
 	receiver := plan.ReceiverEndpoint().Readback()
 	return &Boundary{
-		OwnerFlowPath:    planReadback.FlowPath,
-		AuthoredLocation: planReadback.AuthoredLocation,
-		From:             connectEndpointRef(plan.SourceEndpoint()),
-		To:               connectEndpointRef(plan.ReceiverEndpoint()),
-		OutputPin:        source.Pin,
-		InputPin:         receiver.Pin,
+		OwnerFlowPath:             planReadback.FlowPath,
+		AuthoredLocation:          planReadback.AuthoredLocation,
+		From:                      connectEndpointRef(plan.SourceEndpoint()),
+		To:                        connectEndpointRef(plan.ReceiverEndpoint()),
+		OutputPin:                 source.Pin,
+		InputPin:                  receiver.Pin,
+		SourceLocal:               source.LocalEndpoint,
+		ReceiverLocal:             receiver.LocalEndpoint,
+		SourceEventSchemaDigest:   source.EventSchemaDigest,
+		ReceiverEventSchemaDigest: receiver.EventSchemaDigest,
 	}
 }
 

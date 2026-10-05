@@ -49,6 +49,52 @@ func TestBuildShowsReplyPairedTopology(t *testing.T) {
 	}
 }
 
+func TestBuildShowsParentLocalConnectionsWithoutPublicPins(t *testing.T) {
+	for _, requester := range []bool{false, true} {
+		root := canonicalrouting.CopyRootReplyBoundary(t, requester, true)
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := semanticview.Wrap(bundle)
+		report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+		if len(report.Errors()) != 0 {
+			t.Fatalf("valid root reply refused verification: %+v", report.Errors())
+		}
+		view := mustBuild(t, source, &report)
+		roles := map[string]int{}
+		for _, edge := range interFlowRouteEdges(view.RoutingTopology) {
+			if edge.Boundary.ReceiverLocal && edge.Resolution.Reply != nil {
+				roles[edge.Resolution.Reply.Role]++
+				if edge.Consumer.Direction != semanticview.EventEndpointConsumer || edge.Boundary.ReceiverEventSchemaDigest == "" {
+					t.Fatalf("describe conflated local consumer and public input: %+v", edge)
+				}
+			}
+		}
+		role := "request"
+		if requester {
+			role = "response"
+		}
+		if roles[role] != 1 {
+			t.Fatalf("describe lost the local %s relation: %+v", role, roles)
+		}
+		for _, flow := range view.Flows {
+			if flow.ID != "." {
+				continue
+			}
+			if len(flow.InputPins) != 2 || len(flow.OutputPins) != 1 || flow.OutputPins[0].Event != "request.finished" {
+				t.Fatalf("root publication pins changed: %+v", flow)
+			}
+			for _, pin := range flow.InputPins {
+				if pin.Event != "request.started" && pin.Event != "request.stop" {
+					t.Fatalf("private return acquired publication input: %+v", pin)
+				}
+			}
+		}
+	}
+}
+
 func TestBuildExposesComposedNodeAndEventProvenance(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
