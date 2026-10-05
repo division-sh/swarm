@@ -447,7 +447,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-full-06",
 	}
 	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits, "store/internal/runtimepersistence": storeRuntimeUnits} {
-		var selectors []string
+		var units []testplanning.ProofUnit
 		for _, id := range ids {
 			unit, ok := policy.Units[id]
 			budgetClass := "full"
@@ -457,9 +457,9 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 			if !ok || len(unit.Packages) != 1 || unit.Packages[0] != "github.com/division-sh/swarm/internal/"+pkg || unit.CountMode != "count-1" || unit.BudgetClass != budgetClass {
 				t.Fatalf("invalid full-coverage partition %s: %+v", id, unit)
 			}
-			selectors = append(selectors, unit.Run)
+			units = append(units, testplanning.ProofUnit{ID: id, Packages: unit.Packages, Run: unit.Run, Skip: unit.Skip, GoTimeout: unit.GoTimeout, CountMode: unit.CountMode, BudgetClass: unit.BudgetClass})
 		}
-		if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal", pkg), selectors); err != nil {
+		if err := testplanning.ValidateGoProofUnitPartition(filepath.Join(catalogRepoRoot(t), "internal", pkg), units); err != nil {
 			t.Fatal(err)
 		}
 	}
