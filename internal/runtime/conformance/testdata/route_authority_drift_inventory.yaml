@@ -818,20 +818,21 @@ seam_families:
       pending route history consume the opaque result. Receiver event-key
       reconstruction, local subscriber rematching, and RouteTable shadow
       decisions are retired and prohibited.
-  - id: compiled_receiver_initialization_consumer
+  - id: compiled_receiver_instance_key_consumer
     layer: route_plan_consumers
     classification: valid_consumer
     paths:
-      - internal/runtime/core/pinrouting/receiver_initialization.go
+      - internal/runtime/core/pinrouting/resolved_instance_key.go
     search_dimensions: [connect_route_plan]
     invalid_authority:
-      - interpreting stringified route-match values as typed receiver configuration
-      - reading initialization from a pin whose digest differs from the compiled route
+      - interpreting stringified route-match values as typed constructor keys
+      - deriving instance identity from business configuration or route text
     notes: >
-      ConnectRoutePlan.ReceiverInitializationConfig consumes the exact compiled
-      input pin and its initialization evaluator. It preserves typed producer
-      payload and admitted instance-key evidence; it does not add a route owner
-      or reinterpret configuration from descriptor address strings.
+      ConnectRoutePlan.ResolvedInstanceKey consumes the admitted connection key
+      source and existing intrinsic key material. It transports the original
+      typed payload value independently of constructor state. The canonical
+      constructor normalizes its type; descriptor address strings are selection
+      projections, never typed creating arguments or configuration authority.
   - id: descriptor_evidence_non_authority
     layer: descriptor_evidence_non_authority
     classification: non_authoritative_observer_projection
