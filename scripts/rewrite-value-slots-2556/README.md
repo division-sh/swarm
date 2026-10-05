@@ -29,6 +29,8 @@ not freeze future modifications to the corpus.
 `2496-intent.json` is the finite R5.1 fixture addendum, captured against
 `620b66fd7` after rebasing onto the #2556 value semantics. It records exact
 constructor predicate, standing guard, native integer and literal-text choices.
+The numeric-registration generator entry separately records its exact
+`12c14366e` input; core exposed that quoted supporting predicate after rebase.
 Apply it with `-ledger scripts/rewrite-value-slots-2556/2496-intent.json`.
 It does not replace the original historical corpus ledger or reinterpret
 schema defaults, refusal fixtures, routing identities or lifecycle assertions.
