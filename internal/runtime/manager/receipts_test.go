@@ -939,6 +939,9 @@ func (a *descendantLaneAgent) OnEvent(ctx context.Context, evt events.Event) ([]
 		a.mu.Lock()
 		a.active--
 		a.mu.Unlock()
+		if evt.Type() == "test.lane.child" {
+			close(a.childCompleted)
+		}
 	}()
 
 	switch evt.Type() {
@@ -963,7 +966,6 @@ func (a *descendantLaneAgent) OnEvent(ctx context.Context, evt events.Event) ([]
 		}
 	case "test.lane.child":
 		close(a.childStarted)
-		close(a.childCompleted)
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unexpected lane test event type %q", evt.Type())
