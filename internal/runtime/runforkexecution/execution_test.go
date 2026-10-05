@@ -5294,17 +5294,6 @@ func materializeSelectedExecutionForkForTest(
 	return materialized
 }
 
-func seedSelectedExecutionSourceRun(
-	t *testing.T,
-	db *sql.DB,
-	sourceRunID, entityID, sourceEventID, eventName string,
-	at time.Time,
-	entityType string,
-	sourceFacts ...runtimecorrelation.SourceArtifactFact,
-) {
-	seedSelectedExecutionSourceRunWithRoutes(t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType, nil, sourceFacts...)
-}
-
 func selectedExecutionTestAgentRoute(t testing.TB, runID, agentID, flowInstance string) events.DeliveryRoute {
 	t.Helper()
 	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: selectedContractTestAgentIdentityForRun(t, runID, agentID, flowInstance)}
@@ -5393,19 +5382,6 @@ func seedSelectedExecutionStateOnlySourceRun(
 	commitRunForkTestEvent(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event, nil)
 }
 
-func seedSelectedExecutionSourceRunWithRoutes(
-	t *testing.T,
-	db *sql.DB,
-	sourceRunID, entityID, sourceEventID, eventName string,
-	at time.Time,
-	entityType string,
-	extraRoutes []events.DeliveryRoute,
-	sourceFacts ...runtimecorrelation.SourceArtifactFact,
-) events.Event {
-	return seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
-		selectedExecutionEntitylessNodeRoute("test-node"), extraRoutes, sourceFacts...)
-}
-
 func selectedExecutionEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
 	return events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(mustRunForkRootNode(nodeID)),
@@ -5432,25 +5408,6 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, selectedExecutionInputFixture{}, sourceFacts...,
-	)
-}
-
-func seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(
-	t *testing.T,
-	db *sql.DB,
-	sourceRunID, entityID, sourceEventID, eventName string,
-	at time.Time,
-	entityType string,
-	mode executionmode.Mode,
-	primaryRoute events.DeliveryRoute,
-	extraRoutes []events.DeliveryRoute,
-	sourceFacts ...runtimecorrelation.SourceArtifactFact,
-) events.Event {
-	routingSource := events.NoRoutingSource()
-	envelope := events.EventEnvelope{}
-	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
-		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
-		mode, primaryRoute, extraRoutes, routingSource, envelope, selectedExecutionInputFixture{}, sourceFacts...,
 	)
 }
 
