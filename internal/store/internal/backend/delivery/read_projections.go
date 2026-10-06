@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -727,4 +728,48 @@ func FixtureDeliveryCardinalityTx(ctx context.Context, tx *sql.Tx) (int, error) 
 		return 0, fmt.Errorf("read delivery cardinality evidence: %w", err)
 	}
 	return count, nil
+}
+
+// FixtureNotifyAllChildrenDiagnostic is detached physical evidence, not a
+// lifecycle selector. The original selected read transaction owns its snapshot.
+type FixtureNotifyAllChildrenDiagnostic struct {
+	Columns []string
+	Rows    [][]any
+}
+
+func FixtureNotifyAllChildrenDiagnosticTx(ctx context.Context, tx *sql.Tx) (section FixtureNotifyAllChildrenDiagnostic, err error) {
+	if tx == nil {
+		return section, fmt.Errorf("delivery diagnostic evidence requires a read transaction")
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), ''), COALESCE(CAST(delivery_target_route AS TEXT), '') FROM event_deliveries ORDER BY event_id, subscriber_type, subscriber_id`)
+	if err != nil {
+		return section, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			section = FixtureNotifyAllChildrenDiagnostic{}
+		}
+	}()
+	section.Columns, err = rows.Columns()
+	if err != nil {
+		return section, err
+	}
+	for rows.Next() {
+		values := make([]any, len(section.Columns))
+		destinations := make([]any, len(values))
+		for index := range values {
+			destinations[index] = &values[index]
+		}
+		if err := rows.Scan(destinations...); err != nil {
+			return section, err
+		}
+		for index, value := range values {
+			if raw, ok := value.([]byte); ok {
+				values[index] = string(raw)
+			}
+		}
+		section.Rows = append(section.Rows, values)
+	}
+	return section, rows.Err()
 }
