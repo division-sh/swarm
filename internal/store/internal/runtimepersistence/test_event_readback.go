@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 	"strings"
 )
@@ -94,7 +93,7 @@ func ReadSemanticEventFixtureEvidenceForTest(ctx context.Context, selected any, 
 		DeliveryStatuses:    make(map[string]string),
 	}
 	read := func(ctx context.Context, tx *sql.Tx) error {
-		if err := readSemanticEventFacts(ctx, tx, dialect, runID, eventID, &evidence); err != nil {
+		if err := readSemanticEventFacts(ctx, tx, string(dialect) == "postgres", runID, eventID, &evidence); err != nil {
 			return err
 		}
 		if err := readSemanticEventPipelineReceipt(ctx, tx, eventID, &evidence); err != nil {
@@ -120,9 +119,9 @@ func ReadSemanticEventFixtureEvidenceForTest(ctx context.Context, selected any, 
 	return evidence, nil
 }
 
-func readSemanticEventFacts(ctx context.Context, tx *sql.Tx, dialect authoractivityfixture.Dialect, runID, eventID string, evidence *SemanticEventFixtureEvidence) error {
+func readSemanticEventFacts(ctx context.Context, tx *sql.Tx, postgres bool, runID, eventID string, evidence *SemanticEventFixtureEvidence) error {
 	var err error
-	if dialect == authoractivityfixture.DialectPostgres {
+	if postgres {
 		evidence.Record, evidence.RecordFound, err = eventrecordpostgres.Load(ctx, tx, eventID)
 	} else {
 		evidence.Record, evidence.RecordFound, err = eventrecordsqlite.Load(ctx, tx, eventID)
