@@ -39,6 +39,7 @@ Post-Implementation Proof Audit, a core qualification receipt, or merge readines
 | Exact selected output versus unrelated output; keyed service producer is not constructed; recursive keyless receiver children | `TestFiniteStartSelectedFeedsUseExactRoutesAndRecursiveConstructors`; race/count-three pass |
 | Final loop source passes verifier but runtime refuses | `TestReviewer2566LoopStartFromFinalIsRejectedBeforeRuntime`; race/count-three pass |
 | Loop start/admit/repeat/close/escape and join completion/deadline source restrictions | `TestFinalStageExplicitLoopAndJoinSourcesCannotWidenEligibility`; final/non-final controls and exact carrier admission, race/count-three pass |
+| Cycle-2 F2 remainder: non-advancing join outcomes evade source admission | `TestReviewer2566FinalJoinEmitOnlyStillRejects`, `TestFinalJoinStageAdmissionDoesNotDependOnOutcomeOrDeadline`, `TestFinalJoinDeclarationApplicabilityPreservesLoopAndFanOutKinds`; advance/emit/data outcomes, with/without deadline, loop-arrival and stage-free fan-out controls, race/count-three pass |
 | Missing non-disk permanent entry oracles | `TestRewrite2566EntryGoldenMatchesTypedCorpus`, `TestRewrite2566EntryGoldenInventoryCoversEveryReviewedSite`; 553 independently reviewed selectors, including catalog fixture/spec embeddings |
 | Generated versus lexer-only evidence | `TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens`, `TestWorkflowEntryGoldensProtectMovedGateAndJoinGeneratedSources`; actual generated/loaded output, race/count-three pass |
 | Sorted, still-reachable source silently selects another entry | `TestRewrite2566EntryGoldenRejectsSortedDumpWithoutStranding`; retained hostile control |
@@ -66,9 +67,18 @@ The full combined contention command is not reported green or waived. Its comple
 qualification remains due under the reviewer-bound tier.
 
 All prior failed logs are retained in `test-results/agent-d-2566-cheap/`; none is
-treated as a passing receipt. Server2 remains user-controlled. Core, lifecycle and
+treated as a passing receipt. After the user's server2 handover, core at
+`86b4b5950` stopped twice: first before tests because pg_config selected missing
+PostgreSQL 18 server binaries (the installed PostgreSQL 16 binaries are selected
+through the existing TEST_POSTGRES_BIN setting), then on the static-data
+invocation identity oracle. The latter has unchanged content and two generated
+IDs changed by rewritten bundle bytes. The existing updater regenerated only
+those IDs; `TestStaticDataInvocationGoldenConsumesAdmittedIdentity` and catalog
+oracle guards pass race/count-three with corruption assertions intact. Interrupted
+units earn no qualification. The declaration-boundary repair changes production
+code, so the replacement head requires a fresh core run. Lifecycle and
 named supplements, hosted full, ten-family completion, and composed A/E supported
-proof remain outstanding. No CI/PR was opened for these local repairs.
+proof remain outstanding. No CI/PR was opened for these repairs.
 
 Existing watchlist mappings remain
 `canonical_authored_grammar_effective_semantics_ownership` and

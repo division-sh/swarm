@@ -3756,7 +3756,10 @@ state_machine_authority:
       end choice; omission or false is non-final. No handler executes and no
       new timer arms there. Explicit loop and join source restrictions cannot
       widen this eligibility: an authored final source is rejected during
-      verification and is excluded from executable topology. Final entry alone
+      verification and is excluded from executable topology. Arrival-join
+      stage applicability is checked once for the declaration, whether its
+      outcomes advance, emit, or write data and whether it owns a deadline;
+      stage-free fan-out delivery joins retain their separate semantics. Final entry alone
       cancels no accepted work, revokes no acknowledged writes, and creates no
       resource-cleanup authority. No-final flows are valid services that never
       complete; finite run.start rejects their selected constructor/route
