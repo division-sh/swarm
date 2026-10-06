@@ -690,13 +690,17 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		defer func() { _ = heartbeatLease.Done() }()
 		runDirectiveExecutionHeartbeat(heartbeatCtx, heartbeatDone, store, admitted.OperationID, ownerID, heartbeatConfig)
 	}()
-	response, executionErr := chatAgent.BoardStep(directiveCtx, runtimeagentcontrol.BoardDirective{
+	turnCtx, turnOwner := runtimeeffects.WithTurnExecution(directiveCtx)
+	defer func() { _, _ = turnOwner.Finish() }()
+	response, executionErr := chatAgent.BoardStep(turnCtx, runtimeagentcontrol.BoardDirective{
 		Directive:       admitted.Directive,
 		Event:           directiveEvent,
 		RunIDResolution: admitted.RunIDResolution,
 		OperatorID:      admitted.OperatorID,
 		Source:          admitted.Source,
 	})
+	turn, turnFinishErr := turnOwner.Finish()
+	executionErr = errors.Join(executionErr, turnFinishErr)
 	providerSettlement := completionSettlement()
 	stopHeartbeat()
 	heartbeatShutdown := time.NewTimer(heartbeatConfig.shutdownTimeout)
@@ -716,6 +720,16 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 			Err:       runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate,
 			Operation: admitted,
 		}
+	}
+	if turn.Cancellation.Requested {
+		if turn.Attempt.Origin.Kind != runtimeeffects.CompletionOriginDirective || !turn.Attempt.Origin.Directive.Same(directiveOrigin) {
+			return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, errors.New("canceled directive substituted its admitted operation"))
+		}
+		canceled, settleErr := am.settleCanceledDirective(directiveCtx, turn)
+		if !canceled.Acknowledged || canceled.Validate() != nil {
+			return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, settleErr)
+		}
+		return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(runtimeagentcontrol.ErrorForDirectiveOperation(canceled.Directive), executionErr, settleErr)
 	}
 	if executionErr != nil {
 		if terminal, terminalErr := consumeProviderSettledDirective(ctx, store, admitted, directiveOrigin, providerSettlement); terminal || terminalErr != nil {

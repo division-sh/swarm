@@ -37,6 +37,7 @@ func (c TurnCancellation) ValidateIntent() error {
 type TurnExecutionResult struct {
 	Attempt      Attempt
 	Cancellation TurnCancellation
+	Clock        *LogicalTurnClock
 }
 
 type TurnExecution struct {
@@ -160,6 +161,10 @@ func (o *TurnExecution) Finish() (TurnExecutionResult, error) {
 	}
 	o.mu.Lock()
 	result, err := o.result, o.err
+	if o.clock != nil {
+		clock := cloneLogicalTurnClock(*o.clock)
+		result.Clock = &clock
+	}
 	o.mu.Unlock()
 	o.cancel(nil)
 	return result, err

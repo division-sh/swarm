@@ -25,7 +25,7 @@ func TestLogicalTurnExecutionCancelsAndSettlesRealDeliveryOriginBothStores(t *te
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		authority := fixture.authority
 		authority.BudgetScopes = nil
-		parent := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Nanosecond, Emit: "investigation.aborted"})
+		parent := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Nanosecond, Emit: "test.node_emitted"})
 		parent = withManagedCompletionTestSurface(t, parent, authority, "claude_cli")
 		ctx, owner := runtimeeffects.WithTurnExecution(parent)
 		defer func() { _, _ = owner.Finish() }()
@@ -38,16 +38,17 @@ func TestLogicalTurnExecutionCancelsAndSettlesRealDeliveryOriginBothStores(t *te
 		if err != nil || joined.Cancellation.ValidateIntent() != nil || !joined.Cancellation.Origin.Same(handle.Attempt().Origin) {
 			t.Fatalf("owned cancellation join: %+v err=%v", joined, err)
 		}
-		canceled := store.(runtimeeffects.CanceledDeliveryTurnStore)
-		if result, err := canceled.SettleCanceledDeliveryTurn(parent, joined.Attempt); err == nil || result.Acknowledged {
+		canceled := store.(runtimeeffects.CanceledTurnStore)
+		command := runtimeeffects.CanceledTurnCommand{Attempt: joined.Attempt, Publication: prepareCanceledReactionForTest(t, parent, fixture, *joined.Clock, joined.Cancellation.RequestedAt)}
+		if result, err := canceled.CommitCanceledTurn(parent, command); err == nil || result.Acknowledged {
 			t.Fatalf("live physical tail was skipped: %+v err=%v", result, err)
 		}
 		failure := runtimefailures.FromError(context.Canceled, "provider-test", "physical_join").Failure
 		if err := handle.Settle(parent, runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{"physical_joined": true}); err != nil {
 			t.Fatal(err)
 		}
-		result, err := canceled.SettleCanceledDeliveryTurn(parent, joined.Attempt)
-		if err != nil || !result.Acknowledged || result.Snapshot.Status != deliverylifecycle.StatusCanceled || result.Snapshot.ReasonCode != "turn_timeout" {
+		result, err := canceled.CommitCanceledTurn(parent, command)
+		if err != nil || !result.Acknowledged || result.Delivery.Status != deliverylifecycle.StatusCanceled || result.Delivery.ReasonCode != "turn_timeout" {
 			t.Fatalf("real canceled delivery receipt: %+v err=%v", result, err)
 		}
 	})
@@ -59,7 +60,7 @@ func TestLogicalTurnExecutionCancelsRealDirectiveWithoutDeliveryBothStores(t *te
 		origin, _, event := admitProviderDirectiveOrigin(t, fixture, store, "owned-directive-timeout")
 		before := providerDirectiveDeliveryCount(t, fixture)
 		parent := providerDirectiveContext(t, fixture, origin, event, "owned-directive-timeout")
-		parent = runtimeeffects.WithTurnTimeout(parent, &timeridentity.TurnTimeout{After: time.Nanosecond, Emit: "investigation.aborted"})
+		parent = runtimeeffects.WithTurnTimeout(parent, &timeridentity.TurnTimeout{After: time.Nanosecond, Emit: "test.node_emitted"})
 		ctx, owner := runtimeeffects.WithTurnExecution(parent)
 		defer func() { _, _ = owner.Finish() }()
 		handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("owned-directive-timeout"))
@@ -74,11 +75,12 @@ func TestLogicalTurnExecutionCancelsRealDirectiveWithoutDeliveryBothStores(t *te
 		if err != nil || !joined.Cancellation.Origin.Same(handle.Attempt().Origin) {
 			t.Fatalf("directive cancellation join: %+v err=%v", joined, err)
 		}
-		canceled := store.(runtimeeffects.CanceledDirectiveTurnStore)
+		canceled := store.(runtimeeffects.CanceledTurnStore)
+		command := runtimeeffects.CanceledTurnCommand{Attempt: joined.Attempt, Publication: prepareCanceledReactionForTest(t, parent, fixture, *joined.Clock, joined.Cancellation.RequestedAt)}
 		if result, err := store.RecordDirectiveExecuted(parent, origin.OperationID, origin.ExecutionOwnerID, []byte(`{"reply":"too late"}`), time.Now().UTC()); err == nil || result.Acknowledged {
 			t.Fatalf("ordinary directive response bypassed canceled intent: %+v err=%v", result, err)
 		}
-		if result, err := canceled.SettleCanceledDirectiveTurn(parent, joined.Attempt); err == nil || result.Acknowledged {
+		if result, err := canceled.CommitCanceledTurn(parent, command); err == nil || result.Acknowledged {
 			t.Fatalf("directive skipped live physical tail: %+v err=%v", result, err)
 		}
 		failure := runtimefailures.FromError(context.Canceled, "provider-test", "physical_join").Failure
@@ -88,7 +90,8 @@ func TestLogicalTurnExecutionCancelsRealDirectiveWithoutDeliveryBothStores(t *te
 		if err := handle.Settle(parent, runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{"physical_joined": true}); err != nil {
 			t.Fatal(err)
 		}
-		result, err := canceled.SettleCanceledDirectiveTurn(parent, joined.Attempt)
+		commit, err := canceled.CommitCanceledTurn(parent, command)
+		result := commit.Directive
 		if err != nil || !result.Acknowledged || result.State != agentcontrol.DirectiveOperationCanceled || result.CancellationReason != deliverylifecycle.CancellationTurnTimeout || result.Failure != nil || len(result.Response) != 0 {
 			t.Fatalf("real canceled directive receipt: %+v err=%v", result, err)
 		}
@@ -98,7 +101,8 @@ func TestLogicalTurnExecutionCancelsRealDirectiveWithoutDeliveryBothStores(t *te
 		if !errors.Is(agentcontrol.ErrorForDirectiveOperation(result), agentcontrol.ErrDirectiveCanceled) {
 			t.Fatal("canceled directive was reinterpreted as a generic failure")
 		}
-		repeat, err := canceled.SettleCanceledDirectiveTurn(parent, joined.Attempt)
+		repeated, err := canceled.CommitCanceledTurn(parent, command)
+		repeat := repeated.Directive
 		if err != nil || !repeat.Acknowledged || !repeat.CompletedAt.Equal(result.CompletedAt) {
 			t.Fatalf("canceled directive retry changed evidence: %+v err=%v", repeat, err)
 		}

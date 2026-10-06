@@ -163,7 +163,7 @@ func TestProcessEventCancellationRetainsFinalReceipt(t *testing.T) {
 	}}
 	ctx = managerClaimedDeliveryContext(t, am, ctx, evt, agent.ID())
 	if result := am.processEventDetailed(ctx, agent, evt); result.err != nil {
-		t.Fatalf("accepted handler lost its final settlement: %+v", result)
+		t.Fatalf("accepted handler lost its final settlement: %+v: %v", result, result.err)
 	}
 	if reader.checks != 2 {
 		t.Fatalf("quiescence checks=%d, want before and after handler", reader.checks)

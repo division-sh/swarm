@@ -10,30 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func (s *EffectPostgresOwner) SettleCanceledDirectiveTurn(ctx context.Context, attempt runtimeeffects.Attempt) (agentcontrol.DirectiveOperation, error) {
-	if err := s.requireCurrent(); err != nil {
-		return agentcontrol.DirectiveOperation{}, err
-	}
-	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(ctx context.Context, mutation *mutationprotocol.Attempt) (agentcontrol.DirectiveOperation, error) {
-		return settleCanceledDirectiveTurn(ctx, mutation, true, s.directives, attempt)
-	})
-	op, acknowledged := result.Value()
-	op.Acknowledged = acknowledged
-	return op, result.Err()
-}
-
-func (s *EffectSQLiteOwner) SettleCanceledDirectiveTurn(ctx context.Context, attempt runtimeeffects.Attempt) (agentcontrol.DirectiveOperation, error) {
-	if err := s.requireCurrent(); err != nil {
-		return agentcontrol.DirectiveOperation{}, err
-	}
-	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite settle canceled directive turn", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(ctx context.Context, mutation *mutationprotocol.Attempt) (agentcontrol.DirectiveOperation, error) {
-		return settleCanceledDirectiveTurn(ctx, mutation, false, s.directives, attempt)
-	})
-	op, acknowledged := result.Value()
-	op.Acknowledged = acknowledged
-	return op, result.Err()
-}
-
 func settleCanceledDirectiveTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, directives providerDrainDirectiveOwner, attempt runtimeeffects.Attempt) (agentcontrol.DirectiveOperation, error) {
 	if directives == nil || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Origin.Kind != runtimeeffects.CompletionOriginDirective || attempt.Origin.Validate() != nil {
 		return agentcontrol.DirectiveOperation{}, fmt.Errorf("canceled directive turn requires its exact admitted provider origin")

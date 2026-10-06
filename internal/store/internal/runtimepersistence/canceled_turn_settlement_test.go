@@ -13,7 +13,7 @@ import (
 )
 
 type canceledTurnTestStore interface {
-	SettleCanceledDeliveryTurn(context.Context, runtimeeffects.Attempt) (deliverylifecycle.ClaimCommit, error)
+	runtimeeffects.CanceledTurnStore
 	DeliveryLifecycleSnapshotPageForAgent(context.Context, deliverylifecycle.AgentLifecyclePageQuery) (deliverylifecycle.SnapshotPage, error)
 }
 
@@ -30,7 +30,7 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		authority := fixture.authority
 		authority.BudgetScopes = nil
-		ctx := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Minute, Emit: "investigation.aborted"})
+		ctx := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
 		ctx = withManagedCompletionTestSurface(t, ctx, authority, "claude_cli")
 		first := beginLogicalClockCompletion(t, ctx, "canceled-physical-tail")
 		launch, err := store.MarkExternalAttemptLaunched(ctx, first.Attempt(), time.Now().UTC())
@@ -38,17 +38,19 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 			t.Fatalf("launch: %+v err=%v", launch, err)
 		}
 		second := beginLogicalClockCompletion(t, ctx, "canceled-authorized-tool-round")
-		if result, err := canceled.SettleCanceledDeliveryTurn(ctx, first.Attempt()); err == nil || result.Acknowledged {
+		command := runtimeeffects.CanceledTurnCommand{Attempt: first.Attempt()}
+		if result, err := canceled.CommitCanceledTurn(ctx, command); err == nil || result.Acknowledged {
 			t.Fatalf("missing authored intent admitted cancellation: %+v err=%v", result, err)
 		}
 		intent, err := store.(runtimeeffects.TurnLifetimeStore).RequestTurnTimeout(ctx, first.Attempt(), launch.Turn.DeadlineAt)
 		if err != nil || !intent.Committed || !intent.Requested {
 			t.Fatalf("timeout: %+v err=%v", intent, err)
 		}
+		command.Publication = prepareCanceledReactionForTest(t, ctx, fixture, *launch.Turn, intent.RequestedAt)
 		if _, err := store.(deliverylifecycle.Store).SettleSuccess(ctx, fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err == nil {
 			t.Fatal("ordinary success bypassed committed cancellation intent")
 		}
-		if result, err := canceled.SettleCanceledDeliveryTurn(ctx, first.Attempt()); err == nil || result.Acknowledged {
+		if result, err := canceled.CommitCanceledTurn(ctx, command); err == nil || result.Acknowledged {
 			t.Fatalf("unsettled physical work admitted cancellation: %+v err=%v", result, err)
 		}
 		requireExternalAttemptState(t, selected.db, !selected.postgres, first.Attempt().AttemptID, runtimeeffects.StateLaunched)
@@ -62,7 +64,7 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		if err != nil || !physical.Committed {
 			t.Fatalf("settle accepted physical evidence: %+v err=%v", physical, err)
 		}
-		if result, err := canceled.SettleCanceledDeliveryTurn(ctx, first.Attempt()); err == nil || result.Acknowledged {
+		if result, err := canceled.CommitCanceledTurn(ctx, command); err == nil || result.Acknowledged {
 			t.Fatalf("another accepted attempt was overlooked: %+v err=%v", result, err)
 		}
 		if err := second.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure, map[string]any{"launch_rejected": true}); err != nil {
@@ -72,28 +74,28 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		if err := selected.db.QueryRowContext(ctx, `SELECT CAST(response_payload AS TEXT) FROM agent_turns WHERE turn_id=$1`, settlement.AgentTurn.TurnID).Scan(&responseBefore); err != nil {
 			t.Fatal(err)
 		}
-		settled, err := canceled.SettleCanceledDeliveryTurn(ctx, first.Attempt())
-		if err != nil || !settled.Acknowledged || settled.Snapshot.Status != deliverylifecycle.StatusCanceled ||
-			settled.Snapshot.ReasonCode != string(deliverylifecycle.CancellationTurnTimeout) || !settled.Snapshot.MatchesSettlementClaim(fixture.origin) {
+		settled, err := canceled.CommitCanceledTurn(ctx, command)
+		if err != nil || !settled.Acknowledged || settled.Delivery.Status != deliverylifecycle.StatusCanceled ||
+			settled.Delivery.ReasonCode != string(deliverylifecycle.CancellationTurnTimeout) || !settled.Delivery.MatchesSettlementClaim(fixture.origin) {
 			t.Fatalf("canceled exact origin: %+v err=%v", settled, err)
 		}
-		if err := deliverylifecycle.ValidateCanceledSnapshot(settled.Snapshot); err != nil {
+		if err := deliverylifecycle.ValidateCanceledSnapshot(settled.Delivery); err != nil {
 			t.Fatal(err)
 		}
-		repeated, err := canceled.SettleCanceledDeliveryTurn(ctx, first.Attempt())
-		if err != nil || !repeated.Acknowledged || !repeated.Snapshot.SettledAt.Equal(settled.Snapshot.SettledAt) {
+		repeated, err := canceled.CommitCanceledTurn(ctx, command)
+		if err != nil || !repeated.Acknowledged || !repeated.Delivery.SettledAt.Equal(settled.Delivery.SettledAt) {
 			t.Fatalf("cancellation retry changed the receipt: %+v err=%v", repeated, err)
 		}
 		var outcomes, deadLetters int
 		if err := selected.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND outcome='canceled'`, fixture.origin.DeliveryID()).Scan(&outcomes); err != nil || outcomes != 1 {
 			t.Fatalf("exact canceled attempt: count=%d err=%v", outcomes, err)
 		}
-		if err := selected.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letters WHERE original_event_id=$1`, settled.Snapshot.EventID).Scan(&deadLetters); err != nil || deadLetters != 0 {
+		if err := selected.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letters WHERE original_event_id=$1`, settled.Delivery.EventID).Scan(&deadLetters); err != nil || deadLetters != 0 {
 			t.Fatalf("authored cancellation became a dead letter: count=%d err=%v", deadLetters, err)
 		}
 		reader := store.(deliverylifecycle.Store)
 		history, err := reader.Outcomes(ctx, fixture.origin.DeliveryID())
-		if err != nil || len(history) != 1 || history[0].Outcome != "canceled" || history[0].Failure != nil || history[0].ReasonCode != settled.Snapshot.ReasonCode {
+		if err != nil || len(history) != 1 || history[0].Outcome != "canceled" || history[0].Failure != nil || history[0].ReasonCode != settled.Delivery.ReasonCode {
 			t.Fatalf("canceled outcome history: %+v err=%v", history, err)
 		}
 		summary, err := reader.SummarizeRun(ctx, fixture.origin.RunID())
@@ -106,7 +108,7 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		if err != nil || len(page.Snapshots) != 1 || page.Snapshots[0].Status != deliverylifecycle.StatusCanceled {
 			t.Fatalf("canceled diagnostic page: %+v err=%v", page, err)
 		}
-		proveCanceledDeliveryFanOutFold(t, ctx, selected, fixture, settled.Snapshot)
+		proveCanceledDeliveryFanOutFold(t, ctx, selected, fixture, settled.Delivery)
 		requireExternalAttemptState(t, selected.db, !selected.postgres, first.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 		requireCompletionSettlementRows(t, fixture, first.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateOutcomeUncertain, 1, 0)
 		var response string
@@ -143,7 +145,7 @@ func TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores(t *testing.T) 
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		authority := fixture.authority
 		authority.BudgetScopes = nil
-		ctx := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Minute, Emit: "investigation.aborted"})
+		ctx := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
 		ctx = withManagedCompletionTestSurface(t, ctx, authority, "claude_cli")
 		handle := beginLogicalClockCompletion(t, ctx, "canceled-rollback")
 		launch, err := store.MarkExternalAttemptLaunched(ctx, handle.Attempt(), time.Now().UTC())
@@ -154,6 +156,7 @@ func TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores(t *testing.T) 
 		if err != nil || !intent.Requested {
 			t.Fatalf("timeout: %+v err=%v", intent, err)
 		}
+		command := runtimeeffects.CanceledTurnCommand{Attempt: handle.Attempt(), Publication: prepareCanceledReactionForTest(t, ctx, fixture, *launch.Turn, intent.RequestedAt)}
 		failure := runtimefailures.FromError(context.Canceled, "provider-test", "physical_join").Failure
 		if err := handle.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{"physical_joined": true}); err != nil {
 			t.Fatal(err)
@@ -170,7 +173,7 @@ func TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores(t *testing.T) 
 			}
 		}
 		canceled := store.(canceledTurnTestStore)
-		result, err := canceled.SettleCanceledDeliveryTurn(ctx, handle.Attempt())
+		result, err := canceled.CommitCanceledTurn(ctx, command)
 		if err == nil || result.Acknowledged {
 			t.Fatalf("late failure acknowledged partial cancellation: %+v err=%v", result, err)
 		}
@@ -188,8 +191,8 @@ func TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores(t *testing.T) 
 				t.Fatal(err)
 			}
 		}
-		result, err = canceled.SettleCanceledDeliveryTurn(ctx, handle.Attempt())
-		if err != nil || !result.Acknowledged || result.Snapshot.Status != deliverylifecycle.StatusCanceled {
+		result, err = canceled.CommitCanceledTurn(ctx, command)
+		if err != nil || !result.Acknowledged || result.Delivery.Status != deliverylifecycle.StatusCanceled {
 			t.Fatalf("rollback did not retain cancellation responsibility: %+v err=%v", result, err)
 		}
 	})

@@ -16830,6 +16830,17 @@ platform_tables:
         acknowledged result carries the original canceled origin and exact
         committed publication for owned post-commit dispatch; known rollback
         carries neither, and exact retry cannot append a second reaction.
+        Manager delivery and directive carriers install the logical-turn owner
+        before invoking the agent. The agent supplies its immutable admitted
+        turn_timeout configuration, not a reload from a newer generation.
+        Finishing the invocation joins timeout mutation before exact origin
+        settlement. Delivery settlement stops claim renewal and releases its
+        exact continuation before dispatching the committed reaction. Directives
+        return typed canceled operation evidence instead of a second ordinary
+        failure write. Reaction production preserves the constructed source
+        coordinate and never turns that source into an explicit target. The
+        settlement-only canceled-delivery/directive ports are retired; normal
+        foreground cancellation consumes CommitCanceledTurn.
         Immutable response, spend and uncertainty evidence survive; cancellation
         does not become retry or dead-letter failure. Lost acknowledgment retries
         return the exact existing outcome. Canceled source history is lineage only,

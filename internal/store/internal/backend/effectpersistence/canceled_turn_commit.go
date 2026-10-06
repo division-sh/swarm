@@ -101,6 +101,7 @@ func validateTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, atte
 	source := event.RoutingSource()
 	if !present || source.Kind() != events.RoutingSourceFlowOwnedControl ||
 		source.Route().FlowID != flowID || source.Route().FlowInstance != path || !event.TargetRoute().Empty() ||
+		source.Route().EntityID != attempt.Authority.Target.EntityID ||
 		event.ProducerType() != events.EventProducerPlatform || event.Producer().ID() != runtimeeffects.TurnTimeoutProducerID() {
 		return fmt.Errorf("canceled turn reaction changed its exact flow-owned producer")
 	}

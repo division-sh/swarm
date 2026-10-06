@@ -69,6 +69,14 @@ func TestTurnExecutionStartsOnlyOnAcknowledgedLaunchAndNeverResets(t *testing.T)
 	if err != nil || result.Cancellation.Requested || result.Attempt.AttemptID != attempt.AttemptID || ctx.Err() == nil {
 		t.Fatalf("finish lost owner or inferred cancellation: %+v err=%v", result, err)
 	}
+	if result.Clock == nil || result.Clock.Validate() != nil || result.Clock.Timeout.After != clock.Timeout.After {
+		t.Fatal("logical carrier lost its exact acknowledged clock")
+	}
+	result.Clock.Timeout.After = time.Hour
+	again, _ := owner.Finish()
+	if again.Clock.Timeout.After != clock.Timeout.After {
+		t.Fatal("carrier result exposed mutable clock evidence")
+	}
 	if err := next.MarkLaunched(ctx); err == nil {
 		t.Fatal("closed logical turn admitted another execution")
 	}

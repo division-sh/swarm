@@ -43,6 +43,12 @@ type CanceledTurnStore interface {
 
 func TurnTimeoutProducerID() string { return "agent-turn-timeout" }
 
+type TurnTimeoutReactionOwner interface {
+	PrepareTurnTimeoutReaction(context.Context, TurnExecutionResult) (TurnReactionPlan, error)
+	ReleaseTurnTimeoutReaction(context.Context, TurnReactionPlan) error
+	DispatchTurnTimeoutReaction(context.Context, CommittedTurnReaction) error
+}
+
 func (c CanceledTurnCommit) Validate() error {
 	if !c.Acknowledged || c.Origin.Validate() != nil || c.Cancellation.ValidateIntent() != nil ||
 		!c.Cancellation.OriginSettled || !c.Origin.Same(c.Cancellation.Origin) {

@@ -1202,14 +1202,6 @@ func (s *PostgresStore) SetRuntimeIngressTransitionEvent(ctx context.Context, ta
 	return s.runtimeIngressPostgresOwner.SetRuntimeIngressTransitionEvent(ctx, target, eventID, transitionAt)
 }
 
-func (s *PostgresStore) SettleCanceledDeliveryTurn(ctx context.Context, attempt effects.Attempt) (deliverylifecycle.ClaimCommit, error) {
-	return s.effectPostgresOwner.SettleCanceledDeliveryTurn(ctx, attempt)
-}
-
-func (s *PostgresStore) SettleCanceledDirectiveTurn(ctx context.Context, attempt effects.Attempt) (agentcontrol.DirectiveOperation, error) {
-	return s.effectPostgresOwner.SettleCanceledDirectiveTurn(ctx, attempt)
-}
-
 func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt effects.Attempt, settlement effects.CompletionSettlement) (effects.CompletionSettlementResult, error) {
 	return s.effectPostgresOwner.SettleCompletion(ctx, attempt, settlement)
 }
@@ -2436,14 +2428,6 @@ func (s *SQLiteRuntimeStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitte
 
 func (s *SQLiteRuntimeStore) SetRuntimeIngressTransitionEvent(ctx context.Context, target ingress.Status, eventID string, transitionAt time.Time) (bool, error) {
 	return s.runtimeIngressSQLiteOwner.SetRuntimeIngressTransitionEvent(ctx, target, eventID, transitionAt)
-}
-
-func (s *SQLiteRuntimeStore) SettleCanceledDeliveryTurn(ctx context.Context, attempt effects.Attempt) (deliverylifecycle.ClaimCommit, error) {
-	return s.effectSQLiteOwner.SettleCanceledDeliveryTurn(ctx, attempt)
-}
-
-func (s *SQLiteRuntimeStore) SettleCanceledDirectiveTurn(ctx context.Context, attempt effects.Attempt) (agentcontrol.DirectiveOperation, error) {
-	return s.effectSQLiteOwner.SettleCanceledDirectiveTurn(ctx, attempt)
 }
 
 func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt effects.Attempt, settlement effects.CompletionSettlement) (effects.CompletionSettlementResult, error) {

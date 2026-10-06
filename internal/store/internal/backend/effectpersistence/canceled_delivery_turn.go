@@ -11,28 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func (s *EffectPostgresOwner) SettleCanceledDeliveryTurn(ctx context.Context, attempt runtimeeffects.Attempt) (deliverylifecycle.ClaimCommit, error) {
-	if err := s.requireCurrent(); err != nil {
-		return deliverylifecycle.ClaimCommit{}, err
-	}
-	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(ctx context.Context, mutation *mutationprotocol.Attempt) (deliverylifecycle.Snapshot, error) {
-		return settleCanceledDeliveryTurn(ctx, mutation, true, s.delivery, attempt)
-	})
-	snapshot, acknowledged := result.Value()
-	return deliverylifecycle.ClaimCommit{Snapshot: snapshot, Acknowledged: acknowledged}, result.Err()
-}
-
-func (s *EffectSQLiteOwner) SettleCanceledDeliveryTurn(ctx context.Context, attempt runtimeeffects.Attempt) (deliverylifecycle.ClaimCommit, error) {
-	if err := s.requireCurrent(); err != nil {
-		return deliverylifecycle.ClaimCommit{}, err
-	}
-	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite settle canceled delivery turn", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(ctx context.Context, mutation *mutationprotocol.Attempt) (deliverylifecycle.Snapshot, error) {
-		return settleCanceledDeliveryTurn(ctx, mutation, false, s.delivery, attempt)
-	})
-	snapshot, acknowledged := result.Value()
-	return deliverylifecycle.ClaimCommit{Snapshot: snapshot, Acknowledged: acknowledged}, result.Err()
-}
-
 func settleCanceledDeliveryTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, attempt runtimeeffects.Attempt) (deliverylifecycle.Snapshot, error) {
 	if delivery == nil || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent ||
 		attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Origin.Kind != runtimeeffects.CompletionOriginDelivery || attempt.Origin.Validate() != nil {
