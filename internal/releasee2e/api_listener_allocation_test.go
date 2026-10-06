@@ -44,11 +44,12 @@ func TestReleaseAPIListenerEvidence(t *testing.T) {
 func TestReleaseEndpointHandoffConsumerCensus(t *testing.T) {
 	// These APIs require explicit nonzero/fixed addresses. They do not consume
 	// the serve harness's ephemeral endpoint contract. Keep this list exact.
-	allowed := map[string]string{
-		"TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults":     "foreground --api-port and default MCP contract",
-		"TestClaudeCLIPaidAgenticLifecycleFromReleaseBinaryDefaults": "optional live foreground --api-port/default MCP contract",
-		"TestRunStartForegroundObserverOverflowFromReleaseBinary":    "foreground --api-port with blocked stdout observer",
-		"TestChannelOnboardingReleaseBinaryJourneys":                 "externally registered fixed public webhook callback",
+	allowed := map[string]int{
+		"TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults":     1, // Foreground --api-port and default MCP contract.
+		"TestClaudeCLIPaidAgenticLifecycleFromReleaseBinaryDefaults": 1, // Optional live foreground --api-port/default MCP contract.
+		"TestRunStartForegroundObserverOverflowFromReleaseBinary":    1, // Foreground --api-port with blocked stdout observer.
+		"TestChannelOnboardingReleaseBinaryJourneys":                 1, // Externally registered fixed public webhook callback.
+		"TestDeclaredClockFiniteAndPublicReadbackBothStores":         2, // Local finite startup and parked-deployment startup require fixed --mcp-port.
 	}
 	files, err := filepath.Glob(filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/*_test.go"))
 	if err != nil {
@@ -75,16 +76,16 @@ func TestReleaseEndpointHandoffConsumerCensus(t *testing.T) {
 					return true
 				}
 				seen[fn.Name.Name]++
-				if allowed[fn.Name.Name] == "" {
+				if allowed[fn.Name.Name] == 0 {
 					t.Errorf("unowned endpoint handoff in %s", fn.Name.Name)
 				}
 				return true
 			})
 		}
 	}
-	for name := range allowed {
-		if seen[name] != 1 {
-			t.Errorf("fixed-contract census %s = %d calls, want 1", name, seen[name])
+	for name, want := range allowed {
+		if seen[name] != want {
+			t.Errorf("fixed-contract census %s = %d calls, want %d", name, seen[name], want)
 		}
 	}
 }
