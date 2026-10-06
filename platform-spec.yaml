@@ -16068,7 +16068,11 @@ platform_tables:
         admission acquire that same fence before locked action resolution can acquire a
         predecessor activation or onboarding row. Resolving an action retains exact
         principal, current-render, receipt and draft checks after the fence; read-only
-        previews remain non-locking and do not acquire the mutation fence. Explicit
+        previews remain non-locking and do not acquire the mutation fence. Native inbox
+        attachment also acquires the same principal fence immediately after typed admission
+        validation and before its exact-current activation/onboarding/binding read, consumer
+        retirement and principal-referencing setting insertion. It retains exact scope checks,
+        stale-admission refusal and transaction rollback. Explicit
         and foreign-key principal locks therefore cannot invert the
         principal-before-activation order; the fence remains held through commit or rollback.
       ddl: |
