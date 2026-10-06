@@ -47,6 +47,9 @@ func RequireCardActionTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.A
 	var found bool
 	var err error
 	if lock {
+		if err := LockPrincipalTx(ctx, tx, demand.PrincipalID, postgres); err != nil {
+			return err
+		}
 		resolved, found, err = ResolveActionFactForMutationTx(ctx, tx, fact, postgres)
 	} else {
 		resolved, found, err = ResolveActionFactTx(ctx, tx, fact, postgres)
