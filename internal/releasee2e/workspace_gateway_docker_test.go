@@ -481,7 +481,8 @@ func TestWorkspaceMCPCompiledDockerDoctorAndLiveBootRefusal(t *testing.T) {
 		})
 	}
 	config := filepath.Join(root, "live-workspace.yaml")
-	writeReleaseFile(t, config, "llm:\n  backend: claude_cli\nworkspace:\n  backend: docker\n  image: swarm-workspace:latest\n")
+	image := buildWorkspaceBootRefusalImage(t, docker)
+	writeReleaseFile(t, config, "llm:\n  backend: claude_cli\nworkspace:\n  backend: docker\n  image: "+image+"\n")
 	source := filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/workspace_mcp")
 	credential := runReleaseCommand(t, 15*time.Second, root, env, "pre-model-refusal-test-not-a-provider-credential\n", binary, "secrets", "set", "CLAUDE_CODE_OAUTH_TOKEN", "--stdin")
 	if credential.err != nil {
@@ -496,6 +497,29 @@ func TestWorkspaceMCPCompiledDockerDoctorAndLiveBootRefusal(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "unexpected-provider-launch")); !os.IsNotExist(err) {
 		t.Fatalf("live negative reached provider launch: %v", err)
 	}
+}
+
+func buildWorkspaceBootRefusalImage(t *testing.T, docker string) string {
+	t.Helper()
+	root := t.TempDir()
+	image := fmt.Sprintf("swarm-workspace:boot-refusal-%d-%d", os.Getpid(), time.Now().UnixNano())
+	// The provider is never called. Its executable prerequisite must be real
+	// inside the image, so missing Claude cannot mask the gateway refusal.
+	writeReleaseFile(t, filepath.Join(root, "claude"), "#!/bin/sh\nif [ \"$1\" = --version ]; then printf '2.1.87 (boot-refusal fixture)\\n'; exit 0; fi\nprintf 'forbidden provider launch\\n' >&2\nexit 86\n")
+	writeReleaseFile(t, filepath.Join(root, "Dockerfile"), "FROM swarm-workspace:latest\nUSER root\nCOPY claude /usr/local/bin/claude\nRUN chmod 755 /usr/local/bin/claude\nUSER agent\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, docker, "build", "--network=none", "-t", image, root).CombinedOutput(); err != nil {
+		t.Fatalf("build exact preflight-only fixture image: %v\n%s", err, output)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if output, err := exec.CommandContext(ctx, docker, "image", "rm", image).CombinedOutput(); err != nil {
+			t.Errorf("remove exact fixture image: %v\n%s", err, output)
+		}
+	})
+	return image
 }
 
 func workspaceDockerProofConfig(t *testing.T, root string) []string {
