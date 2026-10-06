@@ -75,7 +75,7 @@ func (s *runLifecycleCandidateInterceptStore) ListCompletionCandidates(
 func (s *runLifecycleCandidateInterceptStore) ExecuteCompletionCandidate(
 	ctx context.Context,
 	candidate runtimerunlifecycle.Candidate,
-	_ runtimerunlifecycle.TerminalCatalog,
+	_ runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	select {
 	case <-ctx.Done():
@@ -97,7 +97,7 @@ func (s *runLifecycleSameRevisionInterceptStore) ListCompletionCandidates(
 func (s *runLifecycleSameRevisionInterceptStore) ExecuteCompletionCandidate(
 	ctx context.Context,
 	candidate runtimerunlifecycle.Candidate,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	s.mu.Lock()
 	s.calls++
@@ -161,7 +161,7 @@ func TestRunLifecycleSameRevisionCommittedHandoffParity(t *testing.T) {
 				t,
 				intercept,
 				occurrence,
-				stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
+				stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
 			)
 			registration, err := registrar.RegisterCompletionCandidateSink(
 				runtimeCtx,
@@ -230,7 +230,7 @@ func TestRunLifecyclePauseResumeSuccessorRaceParity(t *testing.T) {
 				t,
 				intercept,
 				occurrence,
-				stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
+				stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
 			)
 			registration, err := registrar.RegisterCompletionCandidateSink(
 				runtimeCtx,
@@ -366,7 +366,7 @@ func TestRunLifecycleCrossBundleSameRevisionHandoffParity(t *testing.T) {
 				releaseFirst:   make(chan struct{}),
 				secondExecuted: make(chan struct{}),
 			}
-			catalog := stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
+			catalog := stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
 			oldExecutor := newRunLifecycleParityExecutorForScope(t, intercept, oldOccurrence, runLifecycleCandidateParityBundleHash, catalog)
 			newExecutor := newRunLifecycleParityExecutorForScope(t, intercept, newOccurrence, runLifecycleCandidateParityReplacementHash, catalog)
 			oldRegistration, err := registrar.RegisterCompletionCandidateSink(
@@ -454,7 +454,7 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 			executor, err := runtimerunlifecycle.NewExecutor(
 				intercept,
 				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
-				runtimerunlifecycle.TerminalCatalog{},
+				runtimerunlifecycle.FinalCatalog{},
 				occurrence,
 				runtimerunlifecycle.ExecutorOptions{},
 			)
@@ -979,14 +979,14 @@ func newRunLifecycleParityExecutor(
 	store runtimerunlifecycle.CandidateStore,
 	occurrence *worklifetime.RuntimeOccurrence,
 ) *runtimerunlifecycle.Executor {
-	return newRunLifecycleParityExecutorWithCatalog(t, store, occurrence, runtimerunlifecycle.TerminalCatalog{})
+	return newRunLifecycleParityExecutorWithCatalog(t, store, occurrence, runtimerunlifecycle.FinalCatalog{})
 }
 
 func newRunLifecycleParityExecutorWithCatalog(
 	t *testing.T,
 	store runtimerunlifecycle.CandidateStore,
 	occurrence *worklifetime.RuntimeOccurrence,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) *runtimerunlifecycle.Executor {
 	return newRunLifecycleParityExecutorForScope(t, store, occurrence, runLifecycleCandidateParityBundleHash, catalog)
 }
@@ -996,7 +996,7 @@ func newRunLifecycleParityExecutorForScope(
 	store runtimerunlifecycle.CandidateStore,
 	occurrence *worklifetime.RuntimeOccurrence,
 	bundleHash string,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) *runtimerunlifecycle.Executor {
 	t.Helper()
 	executor, err := runtimerunlifecycle.NewExecutor(

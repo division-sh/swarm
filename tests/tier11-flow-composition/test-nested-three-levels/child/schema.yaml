@@ -1,8 +1,8 @@
 name: child
 stages:
-  waiting: {initial: true}
+  waiting: {}
   delegated: {}
-  completed: {terminal: true}
+  completed: {final: true}
 pins:
   inputs:
     - step.begin

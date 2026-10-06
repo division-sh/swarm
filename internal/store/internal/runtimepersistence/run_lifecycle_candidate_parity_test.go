@@ -159,7 +159,7 @@ func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
 			immediateResult, err := fixture.store.ExecuteCompletionCandidate(
 				ctx,
 				duplicateImmediate.Candidate,
-				stagecatalogfixture.NewTerminalCatalog(
+				stagecatalogfixture.NewFinalCatalog(
 					nil,
 					map[string][]string{semanticRunFixtureFlow: {"completed"}},
 				),
@@ -205,7 +205,7 @@ func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
 			mismatchedDue := unchanged
 			mismatchedDue.DueAt = mismatchedDue.DueAt.Add(time.Microsecond)
 			mismatchedResult, err := fixture.store.ExecuteCompletionCandidate(
-				ctx, mismatchedDue, runtimerunlifecycle.TerminalCatalog{},
+				ctx, mismatchedDue, runtimerunlifecycle.FinalCatalog{},
 			)
 			if err != nil {
 				t.Fatalf("execute same-revision candidate with mismatched due coordinate: %v", err)
@@ -229,7 +229,7 @@ func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
 			}
 
 			rearm, err := fixture.store.ExecuteCompletionCandidate(
-				ctx, unchanged, runtimerunlifecycle.TerminalCatalog{},
+				ctx, unchanged, runtimerunlifecycle.FinalCatalog{},
 			)
 			if err != nil {
 				t.Fatalf("execute future candidate: %v", err)
@@ -262,7 +262,7 @@ func TestRunLifecycleCompletionRetriesBeforeRunStartParity(t *testing.T) {
 			result, err := fixture.store.ExecuteCompletionCandidate(
 				ctx,
 				candidate,
-				runtimerunlifecycle.TerminalCatalog{},
+				runtimerunlifecycle.FinalCatalog{},
 			)
 			if err != nil {
 				t.Fatalf("execute future-start completion candidate: %v", err)
@@ -363,7 +363,7 @@ func TestRunLifecycleCandidateTerminalRaceParity(t *testing.T) {
 					t.Fatalf("terminalize current candidate: %v", err)
 				}
 				result, err := fixture.store.ExecuteCompletionCandidate(
-					ctx, current, runtimerunlifecycle.TerminalCatalog{},
+					ctx, current, runtimerunlifecycle.FinalCatalog{},
 				)
 				if err != nil || result.Outcome != runtimerunlifecycle.OutcomeExactNoop {
 					t.Fatalf("current callback after terminalization = %#v/%v", result, err)
@@ -384,7 +384,7 @@ func TestRunLifecycleCandidateTerminalRaceParity(t *testing.T) {
 					t.Fatalf("forced candidate revision = %d, stale = %d", current.Revision, stale.Revision)
 				}
 				result, err := fixture.store.ExecuteCompletionCandidate(
-					ctx, stale, runtimerunlifecycle.TerminalCatalog{},
+					ctx, stale, runtimerunlifecycle.FinalCatalog{},
 				)
 				if err != nil || result.Outcome != runtimerunlifecycle.OutcomeExactNoop {
 					t.Fatalf("stale callback = %#v/%v", result, err)
@@ -400,7 +400,7 @@ func TestRunLifecycleCandidateTerminalRaceParity(t *testing.T) {
 					t.Fatalf("terminalize newer candidate: %v", err)
 				}
 				result, err = fixture.store.ExecuteCompletionCandidate(
-					ctx, current, runtimerunlifecycle.TerminalCatalog{},
+					ctx, current, runtimerunlifecycle.FinalCatalog{},
 				)
 				if err != nil || result.Outcome != runtimerunlifecycle.OutcomeExactNoop {
 					t.Fatalf("newer callback after terminalization = %#v/%v", result, err)
@@ -636,7 +636,7 @@ func TestRunLifecycleEligibilityOriginParity(t *testing.T) {
 					t.Fatalf("source revision current candidate = %#v found=%v", current, found)
 				}
 				result, err := fixture.store.ExecuteCompletionCandidate(
-					ctx, stale, runtimerunlifecycle.TerminalCatalog{},
+					ctx, stale, runtimerunlifecycle.FinalCatalog{},
 				)
 				if err != nil || result.Outcome != runtimerunlifecycle.OutcomeExactNoop {
 					t.Fatalf("previous-source callback = %#v/%v", result, err)

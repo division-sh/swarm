@@ -71,7 +71,7 @@ func newReceiverConfigActivationFixtureWithTimerAndCommitter(t *testing.T, backe
 		"review/schema.yaml": `name: review
 instance: request_id
 stages:
-  pending: {initial: true}
+  pending: {}
 pins:
   inputs:
     - task.create

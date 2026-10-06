@@ -44,7 +44,7 @@ func (s *standingExecutionCountingStore) ListCompletionCandidates(
 func (s *standingExecutionCountingStore) ExecuteCompletionCandidate(
 	ctx context.Context,
 	candidate runtimerunlifecycle.Candidate,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	s.executions.Add(1)
 	return s.delegate.ExecuteCompletionCandidate(ctx, candidate, catalog)
@@ -288,7 +288,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 				countingStore,
 				occurrence,
 				secondHash,
-				stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{"standing/root": {"completed"}}),
+				stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{"standing/root": {"completed"}}),
 			)
 			registration, err := registrar.RegisterCompletionCandidateSink(
 				runtimeCtx,

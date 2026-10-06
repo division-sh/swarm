@@ -1,7 +1,7 @@
 name: claude-resource-read
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 pins:
   inputs:
     - task.assigned

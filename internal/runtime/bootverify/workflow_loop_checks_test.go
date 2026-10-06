@@ -241,7 +241,7 @@ func refreshLoopValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 	}
 	bundle.Semantics.HandlerTransitions = transitions
 	topology := runtimecontracts.BuildWorkflowStageTopology(".", bundle.Semantics.InitialStage,
-		[]string{"research", "drafting", "review", "exhausted", "approved"}, bundle.RootSchema.LoweredTerminalStates(),
+		[]string{"research", "drafting", "review", "exhausted", "approved"}, bundle.RootSchema.LoweredFinalStates(),
 		transitions, bundle.Semantics.Timers, bundle.Semantics.Loops)
 	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{".": topology}
 	bundle.Semantics.Loops = runtimecontracts.BindWorkflowLoopRegions(bundle.Semantics.Loops, bundle.Semantics.StageTopologies)

@@ -38,7 +38,7 @@ func TestBudgetRecoveryStageClassifierKeepsFlowScopedTerminality(t *testing.T) {
 		{"child", "ready", true, true}, {"", "ready", false, true},
 		{"child", "Done", false, false}, {"foreign", "done", false, false},
 	} {
-		got, known := owner.Terminal(tc.flow, tc.flow, tc.stage)
+		got, known := owner.Final(tc.flow, tc.flow, tc.stage)
 		if got != tc.terminal || known != tc.known {
 			t.Errorf("flow %q stage %q: terminal=%v known=%v, want %v/%v", tc.flow, tc.stage, got, known, tc.terminal, tc.known)
 		}

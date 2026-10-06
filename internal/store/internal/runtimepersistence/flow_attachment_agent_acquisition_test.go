@@ -106,7 +106,7 @@ func runFlowAttachmentAcquisitionCuts(t *testing.T, resource string) {
 					routes.enabled.Store(true)
 					f := newReceiverConfigActivationFixtureWithOwnership(t, backend, true, map[string]string{
 						"schema.yaml":          "name: agent-acquisition\n",
-						"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    - task.started\n",
+						"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
 						"review/entities.yaml": "review_item:\n  request_id: text\n",
 						"review/events.yaml":   "task.started:\n",
 					}, nil, func(t *testing.T, am *manager.AgentManager) *manager.AgentManager {

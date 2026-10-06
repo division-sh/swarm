@@ -1,9 +1,9 @@
 instance: worker_id
 stages:
-  idle: {initial: true}
+  idle: {}
   working: {}
   executing: {}
-  complete: {terminal: true}
+  complete: {final: true}
 loops:
   inspection:
     revision_field: revision_id

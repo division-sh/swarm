@@ -1,7 +1,7 @@
 name: support
 instance: ticket_id
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
   review: {}
-  done: {terminal: true}
+  done: {final: true}

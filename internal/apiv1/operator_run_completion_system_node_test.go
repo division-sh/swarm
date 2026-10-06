@@ -144,20 +144,20 @@ func startAPIRunLifecycleExecutor(
 	return executor
 }
 
-func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycle.TerminalCatalog {
+func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycle.FinalCatalog {
 	flows := make(map[string][]string)
 	for flowID := range source.FlowSchemaEntries() {
-		states := source.FlowTerminalStages(flowID)
+		states := source.FlowFinalStages(flowID)
 		flows[flowID] = states
 		flows[source.FlowPath(flowID)] = states
 	}
 	for _, scope := range source.FlowScopes() {
-		states := source.FlowTerminalStages(scope.ID)
+		states := source.FlowFinalStages(scope.ID)
 		flows[scope.ID] = states
 		flows[scope.Path] = states
 		flows[scope.OwningFlowID] = states
 	}
-	return stagecatalogfixture.NewTerminalCatalog(source.FlowTerminalStages(""), flows)
+	return stagecatalogfixture.NewFinalCatalog(source.FlowFinalStages(""), flows)
 }
 
 type runCompletionSystemNodeModule struct {

@@ -113,7 +113,7 @@ func materializeRunFixtureForTest(
 		owner,
 		source.BundleHash(),
 		fixture.RunID,
-		stagecatalogfixture.NewTerminalCatalog(
+		stagecatalogfixture.NewFinalCatalog(
 			nil,
 			map[string][]string{semanticRunFixtureFlow: {"completed"}},
 		),
@@ -465,7 +465,7 @@ func executeRunCompletionCandidateForEvent(
 	if eventID == "" {
 		return errors.New("completion candidate test helper requires event_id")
 	}
-	catalog := stagecatalogfixture.NewTerminalCatalog(workflowTerminalStates, flowTerminalStates)
+	catalog := stagecatalogfixture.NewFinalCatalog(workflowTerminalStates, flowTerminalStates)
 	var (
 		request runtimerunlifecycle.CandidateRequestResult
 		store   runtimerunlifecycle.CandidateStore
@@ -516,7 +516,7 @@ func executeRunCompletionCandidateForRun(
 	store runtimerunlifecycle.CandidateStore,
 	bundleHash string,
 	runID string,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	scope := runtimerunlifecycle.CandidateScope{BundleHash: strings.TrimSpace(bundleHash)}
 	cursor := runtimerunlifecycle.CandidateCursor{}
@@ -544,7 +544,7 @@ func executeCompletionCandidateUntilSettledForTest(
 	ctx context.Context,
 	store runtimerunlifecycle.CandidateStore,
 	candidate runtimerunlifecycle.Candidate,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {

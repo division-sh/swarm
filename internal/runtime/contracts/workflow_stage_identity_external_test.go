@@ -21,8 +21,8 @@ func TestStageReferenceHasNoExternalAuthorityFields(t *testing.T) {
 	}
 	graph.InitialStage = "Ready"
 	graph.Stages[0] = "unknown"
-	graph.TerminalStages[0] = "ready"
-	if err := graph.RequireStage(ready); err != nil || ready.IsTerminal() {
+	graph.FinalStages[0] = "ready"
+	if err := graph.RequireStage(ready); err != nil || ready.IsFinal() {
 		t.Fatalf("public projection changed sealed stage reference: ref=%#v err=%v", ready, err)
 	}
 	initial, err := graph.InitialStageRef()

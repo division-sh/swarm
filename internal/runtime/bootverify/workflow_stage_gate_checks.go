@@ -43,8 +43,8 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		if !graphOK || graph.FlowID != flowID || stageErr != nil {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("gate source stage %s is not declared", stage)))
 		}
-		if stageErr == nil && stageRef.IsTerminal() {
-			findings = append(findings, stageGateFinding(location, fmt.Sprintf("terminal stage %s cannot own an actionable gate", stage)))
+		if stageErr == nil && stageRef.IsFinal() {
+			findings = append(findings, stageGateFinding(location, fmt.Sprintf("final stage %s cannot own an actionable gate", stage)))
 		}
 		entityType, _ := semanticview.ResolveEntityStructuralType(c.source, flowID)
 		var known []string

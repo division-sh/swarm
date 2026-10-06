@@ -1359,9 +1359,9 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 		tc.lifecycle,
 		bundleHash,
 		runID,
-		stagecatalogfixture.NewTerminalCatalog(
-			bundle.FlowTerminalStages("."),
-			map[string][]string{".": bundle.FlowTerminalStages(".")},
+		stagecatalogfixture.NewFinalCatalog(
+			bundle.FlowFinalStages("."),
+			map[string][]string{".": bundle.FlowFinalStages(".")},
 		),
 	)
 	if err != nil {
@@ -1555,7 +1555,7 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposal bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml":   "name: support\nstages:\n  drafting: {initial: true}\n",
+		"schema.yaml":   "name: support\nstages:\n  drafting: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "support.reply_drafted:\n  chat_id: text\n  text: text\n",
 		"nodes.yaml": `support:

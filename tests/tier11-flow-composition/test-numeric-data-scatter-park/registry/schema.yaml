@@ -1,7 +1,6 @@
 name: registry
 stages:
   registered:
-    initial: true
     timers:
       - after: 2160h
         advances_to: archived
@@ -14,7 +13,7 @@ stages:
       - after: 720h
         advances_to: archived
   archived:
-    terminal: true
+    final: true
 instance: item_id
 pins:
   inputs:

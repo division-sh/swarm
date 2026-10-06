@@ -23,13 +23,13 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+shape, func(t *testing.T) {
 				documents := map[string]string{
-					"schema.yaml":                "name: root-construction\nstages:\n  pending: {initial: true}\n",
-					"scout/schema.yaml":          "name: scout\nstages:\n  pending: {initial: true}\n",
+					"schema.yaml":                "name: root-construction\nstages:\n  pending: {}\n",
+					"scout/schema.yaml":          "name: scout\nstages:\n  pending: {}\n",
 					"scout/detail/schema.yaml":   "name: detail\n",
 					"scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n",
 				}
 				if keyed {
-					documents["schema.yaml"] = "name: root-construction\ninstance: request_id\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    - task.started\n"
+					documents["schema.yaml"] = "name: root-construction\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n"
 					documents["events.yaml"] = "task.started:\n  request_id: text\n"
 					documents["entities.yaml"] = "request:\n  request_id: text\n"
 				}
@@ -72,10 +72,10 @@ func newEagerFlowConstructorFixture(t *testing.T, backend string) receiverConfig
 	t.Helper()
 	return newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":                       "name: eager-construction\n",
-		"review/schema.yaml":                "name: review\ninstance: request_id\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    - task.started\n",
+		"review/schema.yaml":                "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
 		"review/entities.yaml":              "review_item:\n  request_id: text\n",
 		"review/events.yaml":                "task.started:\n",
-		"review/scout/schema.yaml":          "name: scout\nstages:\n  pending: {initial: true}\n",
+		"review/scout/schema.yaml":          "name: scout\nstages:\n  pending: {}\n",
 		"review/scout/detail/schema.yaml":   "name: detail\n",
 		"review/scout/detail/entities.yaml": "detail:\n  marker: {type: text, initial: original}\n",
 		"review/deferred/schema.yaml":       "name: deferred\ninstance: job_id\npins:\n  inputs:\n    - job.started\n",

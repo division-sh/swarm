@@ -1742,7 +1742,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 
 	fixtureRoot := t.TempDir()
 	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: mutation-proof\nstages: []\n")
-	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/schema.yaml", "stages:\n  done: {initial: true, terminal: true}\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/schema.yaml", "stages:\n  done: {final: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/entities.yaml", "test_entity:\n  status: text\n")
 	module := loadConformanceWorkflowFixtureModule(t, fixtureRoot)
 	eventBus, err := newScopedTestEventBus(t, selected, durableConformanceEventBusOptions(selected, runtimebus.EventBusOptions{ContractBundle: module.source}))
@@ -2102,7 +2102,7 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
 	fixtureRoot := t.TempDir()
-	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nstages:\n  queued: {}\n  done: {final: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "events.yaml", "accounts.updated:\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")

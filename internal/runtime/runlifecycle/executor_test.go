@@ -16,7 +16,7 @@ const executorTestBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 type executorTestStore struct {
 	list    func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error)
-	execute func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error)
+	execute func(context.Context, Candidate, FinalCatalog) (CompletionResult, error)
 }
 
 func (s *executorTestStore) ListCompletionCandidates(
@@ -31,7 +31,7 @@ func (s *executorTestStore) ListCompletionCandidates(
 func (s *executorTestStore) ExecuteCompletionCandidate(
 	ctx context.Context,
 	candidate Candidate,
-	catalog TerminalCatalog,
+	catalog FinalCatalog,
 ) (CompletionResult, error) {
 	return s.execute(ctx, candidate, catalog)
 }
@@ -67,7 +67,7 @@ func TestExecutorHandsCommittedGenericScheduleToRecoveryBackedOwnerBeforeDroppin
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			executions <- struct{}{}
 			return CompletionResult{Outcome: OutcomeAwaitMutation, GenericScheduleActivations: []CommittedGenericScheduleActivation{activation}}, nil
 		},
@@ -98,7 +98,7 @@ func TestExecutorAcceptsRecoveryOwnershipAfterImmediateGenericScheduleProjection
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			executions.Add(1)
 			return CompletionResult{Outcome: OutcomeAwaitMutation, GenericScheduleActivations: []CommittedGenericScheduleActivation{activation}}, nil
 		},
@@ -146,7 +146,7 @@ func TestExecutorRepresentsCandidateAcrossStartupEnumerationOverlap(t *testing.T
 			}
 			return CandidatePage{Candidates: []Candidate{candidate}, Next: CandidateCursor{RunID: candidate.RunID}, Exhausted: true}, nil
 		},
-		execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+		execute: func(_ context.Context, got Candidate, _ FinalCatalog) (CompletionResult, error) {
 			executed <- got
 			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
 		},
@@ -192,7 +192,7 @@ func TestExecutorSameRevisionHandoffDuringAttemptForcesSerializedRecheck(t *test
 				list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 					return CandidatePage{Exhausted: true}, nil
 				},
-				execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+				execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 					switch calls.Add(1) {
 					case 1:
 						close(firstStarted)
@@ -235,7 +235,7 @@ func TestExecutorSameRevisionHandoffAfterResultBeforeRemovalForcesRecheck(t *tes
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			if calls.Add(1) == 1 {
 				// Return values are evaluated before deferred functions run. This
 				// commits the handoff after the result exists but before the
@@ -276,7 +276,7 @@ func TestExecutorSameRevisionHandoffAfterRemovalStartsNewChain(t *testing.T) {
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			calls.Add(1)
 			executed <- struct{}{}
 			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
@@ -314,7 +314,7 @@ func TestExecutorCoalescesSameRevisionNotificationsPerAttempt(t *testing.T) {
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			switch calls.Add(1) {
 			case 1:
 				close(firstStarted)
@@ -369,7 +369,7 @@ func TestExecutorSerializesAndCollapsesNewerSuccessors(t *testing.T) {
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(_ context.Context, candidate Candidate, _ TerminalCatalog) (CompletionResult, error) {
+		execute: func(_ context.Context, candidate Candidate, _ FinalCatalog) (CompletionResult, error) {
 			current := active.Add(1)
 			updateAtomicMax(&maxActive, current)
 			defer active.Add(-1)
@@ -426,7 +426,7 @@ func TestExecutorRejectsConflictingSameRevisionIdentity(t *testing.T) {
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			close(started)
 			<-release
 			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
@@ -464,7 +464,7 @@ func TestExecutorHandoffBeforeAttemptAdmissionIsRepresentedByThatAttempt(t *test
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			calls.Add(1)
 			close(executed)
 			return CompletionResult{Outcome: OutcomeExactNoop}, nil
@@ -502,7 +502,7 @@ func TestExecutorAllowsDifferentRunsToExecuteConcurrently(t *testing.T) {
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			current := active.Add(1)
 			updateAtomicMax(&maxActive, current)
 			started <- struct{}{}
@@ -544,7 +544,7 @@ func TestExecutorCrossBundleSameRevisionRetainsNewScopeRepresentation(t *testing
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(_ context.Context, candidate Candidate, _ TerminalCatalog) (CompletionResult, error) {
+		execute: func(_ context.Context, candidate Candidate, _ FinalCatalog) (CompletionResult, error) {
 			rowLock.Lock()
 			defer rowLock.Unlock()
 			if candidate.BundleHash == executorTestBundleHash {
@@ -597,7 +597,7 @@ func TestExecutorRetriesCurrentRevisionAndRearmsBeforeSettling(t *testing.T) {
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+		execute: func(_ context.Context, got Candidate, _ FinalCatalog) (CompletionResult, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			calls++
@@ -680,7 +680,7 @@ func TestExecutorDirtyNotificationSurvivesRetryAndRearmResults(t *testing.T) {
 				list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 					return CandidatePage{Exhausted: true}, nil
 				},
-				execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+				execute: func(_ context.Context, got Candidate, _ FinalCatalog) (CompletionResult, error) {
 					if calls.Add(1) == 1 {
 						close(firstStarted)
 						<-releaseFirst
@@ -725,7 +725,7 @@ func TestExecutorRetirementJoinsAcceptedPersistenceAndRejectsNewAdmission(t *tes
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(ctx context.Context, _ Candidate, _ TerminalCatalog) (CompletionResult, error) {
+		execute: func(ctx context.Context, _ Candidate, _ FinalCatalog) (CompletionResult, error) {
 			close(executing)
 			select {
 			case <-ctx.Done():
@@ -785,7 +785,7 @@ func TestExecutorRetirementRejectsZeroDelayRetryAfterActiveAttemptSettles(t *tes
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			call := int(calls.Add(1))
 			executions <- call
 			if call == 1 {
@@ -830,7 +830,7 @@ func TestExecutorRetirementRejectsElapsedRearmAfterActiveAttemptSettles(t *testi
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+		execute: func(_ context.Context, got Candidate, _ FinalCatalog) (CompletionResult, error) {
 			call := int(calls.Add(1))
 			executions <- call
 			if call == 1 {
@@ -877,7 +877,7 @@ func TestExecutorRetirementDropsDirtyGenerationAndPendingSuccessor(t *testing.T)
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+		execute: func(_ context.Context, got Candidate, _ FinalCatalog) (CompletionResult, error) {
 			executions <- got
 			if got.SameIdentity(candidate) {
 				close(executing)
@@ -928,7 +928,7 @@ func TestExecutorRetirementDuringRetryDelayRejectsSuccessorAttempt(t *testing.T)
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			call := int(calls.Add(1))
 			executions <- call
 			if call == 1 {
@@ -974,7 +974,7 @@ func TestExecutorRetirementDuringRearmDueEvaluationRejectsSuccessorAttempt(t *te
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+		execute: func(_ context.Context, got Candidate, _ FinalCatalog) (CompletionResult, error) {
 			call := int(calls.Add(1))
 			executions <- call
 			if call == 1 {
@@ -1012,7 +1012,7 @@ func TestExecutorRetirementIsContextBoundAndRejectsDelayedReservedSubmission(t *
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			t.Fatal("retired executor executed a delayed reserved candidate")
 			return CompletionResult{}, nil
 		},
@@ -1136,7 +1136,7 @@ func newExecutorTestSubjectForBundle(
 	executor, err := NewExecutor(
 		store,
 		CandidateScope{BundleHash: bundleHash},
-		TerminalCatalog{},
+		FinalCatalog{},
 		occurrence,
 		options,
 	)

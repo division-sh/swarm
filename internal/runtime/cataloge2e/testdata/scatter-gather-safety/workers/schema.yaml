@@ -2,11 +2,10 @@ name: workers
 instance: item_id
 stages:
   registered:
-    initial: true
     timers:
       - {after: 72h, advances_to: expired}
-  complete: {terminal: true}
-  expired: {terminal: true}
+  complete: {final: true}
+  expired: {final: true}
 pins:
   inputs:
     - item.registered

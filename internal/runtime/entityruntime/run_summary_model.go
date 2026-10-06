@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-type TerminalCatalog interface {
-	Terminal(flowTemplate, flowInstance, state string) (terminal bool, known bool)
+type FinalCatalog interface {
+	Final(flowTemplate, flowInstance, state string) (final bool, known bool)
 }
 
 // RunSummary is the entity owner's exact terminal-descriptor projection for

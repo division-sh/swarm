@@ -1,8 +1,8 @@
 stages:
-  pending: {initial: true}
+  pending: {}
   stage_a: {}
   stage_b: {}
-  released: {terminal: true}
+  released: {final: true}
 pins:
   inputs:
     - step.a_done

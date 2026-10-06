@@ -18,7 +18,7 @@ func TestExecutorCommittedErrorPreservesContinuationWithoutReplay(t *testing.T) 
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
-		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+		execute: func(context.Context, Candidate, FinalCatalog) (CompletionResult, error) {
 			if executions.Add(1) == 1 {
 				return CompletionResult{Committed: true, Outcome: OutcomeAwaitMutation, GenericScheduleActivations: []CommittedGenericScheduleActivation{activation}}, primary
 			}

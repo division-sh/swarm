@@ -2406,11 +2406,11 @@ func newNotifyAllChildrenRuntime(
 	}
 }
 
-func notifyAllChildrenTerminalCatalog(source semanticview.Source) runtimerunlifecycle.TerminalCatalog {
-	workflow := source.FlowTerminalStages("")
+func notifyAllChildrenTerminalCatalog(source semanticview.Source) runtimerunlifecycle.FinalCatalog {
+	workflow := source.FlowFinalStages("")
 	flows := make(map[string][]string)
 	for flowID := range source.FlowSchemaEntries() {
-		states := source.FlowTerminalStages(flowID)
+		states := source.FlowFinalStages(flowID)
 		if len(states) == 0 {
 			continue
 		}
@@ -2419,7 +2419,7 @@ func notifyAllChildrenTerminalCatalog(source semanticview.Source) runtimerunlife
 			flows[path] = states
 		}
 	}
-	return stagecatalogfixture.NewTerminalCatalog(workflow, flows)
+	return stagecatalogfixture.NewFinalCatalog(workflow, flows)
 }
 
 func loadNotifyAllChildrenAgentsByID(

@@ -3202,7 +3202,7 @@ func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, db 
 	`, eventID).Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &candidate.DueAt); err != nil {
 		t.Fatalf("load standalone completion candidate: %v", err)
 	}
-	result, err := pg.ExecuteCompletionCandidate(ctx, candidate, runtimerunlifecycle.TerminalCatalog{})
+	result, err := pg.ExecuteCompletionCandidate(ctx, candidate, runtimerunlifecycle.FinalCatalog{})
 	if err != nil {
 		t.Fatalf("execute standalone completion candidate: %v", err)
 	}
@@ -3920,9 +3920,9 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	}
 	admitted := loadEventBusTempBundle(t, map[string]string{
 
-		"schema.yaml":         "name: mixed-route\nstages:\n  active: {initial: true}\n",
+		"schema.yaml":         "name: mixed-route\nstages:\n  active: {}\n",
 		"entities.yaml":       "test_entity: {}\n",
-		"child/schema.yaml":   "name: child\nstages:\n  active: {initial: true}\n",
+		"child/schema.yaml":   "name: child\nstages:\n  active: {}\n",
 		"child/entities.yaml": "test_entity: {}\n",
 	})
 	admitted.Nodes = bundle.Nodes

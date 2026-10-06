@@ -583,7 +583,7 @@ func sameFlowScopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: same-flow-scoped-native-tool-census\n")
 	flowDir := filepath.Join(root, "operating")
 
-	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: operating\nstages:\n  active: {initial: true}\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: operating\nstages:\n  active: {}\n")
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(flowDir, "departments", project)
 
@@ -608,7 +608,7 @@ workspace_classes:
     workspace_scope: per-flow-instance
 `)
 	flowDir := filepath.Join(root, "review")
-	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: review\nstages:\n  active: {initial: true}\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: review\nstages:\n  active: {}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "agents.yaml"), `
 scoped-worker:
   model: regular

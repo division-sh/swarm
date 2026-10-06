@@ -1,6 +1,6 @@
 stages:
-  ready: {initial: true}
-  done: {terminal: true}
+  ready: {}
+  done: {final: true}
 pins:
   inputs:
     - job.submit

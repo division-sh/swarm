@@ -1,6 +1,6 @@
 stages:
-  queued: {initial: true}
-  active: {terminal: true}
+  queued: {}
+  active: {final: true}
 pins:
   inputs:
     - slot.requested

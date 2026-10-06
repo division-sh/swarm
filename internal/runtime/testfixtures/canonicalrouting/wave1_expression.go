@@ -22,9 +22,9 @@ connect:
 
 	writeClosedVariantFile(t, root, filepath.Join("child", "schema.yaml"), `name: child
 stages:
-  idle: {initial: true}
+  idle: {}
   working: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs: [task.assigned, task.feedback]
   outputs: [task.result]

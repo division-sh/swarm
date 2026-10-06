@@ -1,6 +1,6 @@
 stages:
-  waiting: {initial: true}
-  done: {terminal: true}
+  waiting: {}
+  done: {final: true}
 pins:
   inputs:
     - work.start

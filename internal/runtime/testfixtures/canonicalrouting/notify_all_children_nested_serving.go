@@ -24,7 +24,7 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	writeClosedVariantFile(t, root, "account/entities.yaml", "account_state:\n  account_id: text\n")
 	writeClosedVariantFile(t, root, "account/schema.yaml", `name: account
 stages:
-  active: {initial: true}
+  active: {}
 instance: account_id
 pins:
   inputs:
@@ -95,8 +95,8 @@ account.tasks.completed:
 	writeClosedVariantFile(t, root, "account/task/schema.yaml", `name: account-task
 instance: task_key
 stages:
-  pending: {initial: true}
-  completed: {terminal: true}
+  pending: {}
+  completed: {final: true}
 pins:
   inputs:
     - account.task.requested
