@@ -42,6 +42,15 @@ func buildOwnedMockLifecycleBinary(t *testing.T, outputRoot string, buildArgs ..
 	return path
 }
 
+func buildOwnedWorkspaceInspectionBinary(t *testing.T, outputRoot string) string {
+	t.Helper()
+	path := filepath.Join(outputRoot, "workspace-inspection.test")
+	if err := testplanning.BuildGoProduct(context.Background(), releaseE2ERepoRoot(t), os.Getenv("SWARM_TEST_BUILD_CACHE"), path, os.Getenv("SWARM_TEST_PROOF_PROFILE"), "test", "-c", "./internal/store/construction"); err != nil {
+		t.Fatalf("build independent workspace inspection child: %v", err)
+	}
+	return path
+}
+
 func buildReleaseBinaryWithArgs(t *testing.T, outputRoot string, buildArgs ...string) string {
 	t.Helper()
 	binaryPath := filepath.Join(outputRoot, "swarm")

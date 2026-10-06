@@ -8,15 +8,19 @@ import (
 	"testing"
 	"time"
 
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 func TestSelectedForkControlStorageExactPredicateAndIsolationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
 			selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			f := newSelectedCompletionFixture(t, selected, db, sqlite)
-			ctx := testAuthorActivityContext()
+			parity := runLifecycleCandidateParityFixture{store: selected.(runLifecycleCandidateParityStore), db: db, postgres: !sqlite}
 			var hash, binding string
 			if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, f.forkRun).Scan(&hash); err != nil {
 				t.Fatal(err)
@@ -26,31 +30,61 @@ func TestSelectedForkControlStorageExactPredicateAndIsolationBothStores(t *testi
 			}
 			seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(f.sourceRun, "selected-agent", "selected-test"), "active")
 			for _, cut := range []struct {
-				name, status, loaded string
-				due                  any
-				want                 bool
+				name                    string
+				state                   runtimerunlifecycle.State
+				loaded, candidate, want bool
 			}{
-				{"paused-unloaded", "paused", "unloaded", nil, false},
-				{"paused-no-candidate", "paused", hash, nil, false},
-				{"running-unloaded", "running", "unloaded", time.Now().UTC(), true},
-				{"running-awaiting-mutation", "running", hash, nil, true},
-				{"running-candidate", "running", hash, time.Now().UTC(), false},
-				{"terminal-unloaded", "completed", "unloaded", nil, false},
+				{"paused-unloaded", runtimerunlifecycle.StatePaused, false, false, false},
+				{"paused-no-candidate", runtimerunlifecycle.StatePaused, true, false, false},
+				{"running-unloaded", runtimerunlifecycle.StateRunning, false, true, true},
+				{"running-awaiting-mutation", runtimerunlifecycle.StateRunning, true, false, true},
+				{"running-candidate", runtimerunlifecycle.StateRunning, true, true, false},
+				{"terminal-unloaded", runtimerunlifecycle.StateCompleted, false, false, false},
 			} {
 				t.Run(cut.name, func(t *testing.T) {
-					if _, err := db.ExecContext(ctx, `UPDATE runs SET status=$1,completion_due_at=$2,completion_revision=1 WHERE run_id=$3`, cut.status, cut.due, f.forkRun); err != nil {
+					if cut.state == runtimerunlifecycle.StateCompleted {
+						snapshot, disposition, err := completeRunLifecycleCandidateParity(parity, ctx, f.forkRun, time.Now().UTC())
+						if err != nil || snapshot.State != cut.state || disposition != runtimerunlifecycle.MutationApplied {
+							t.Fatalf("canonical completed fixture: %+v %s %v", snapshot, disposition, err)
+						}
+					} else {
+						disposition, err := transitionRunLifecycleParity(parity, ctx, f.forkRun, cut.state)
+						if err != nil || (disposition != runtimerunlifecycle.MutationApplied && disposition != runtimerunlifecycle.MutationExactNoop) {
+							t.Fatalf("canonical active fixture: %s %v", disposition, err)
+						}
+					}
+					if cut.candidate {
+						forceRunLifecycleCandidateParity(t, parity, ctx, f.forkRun, time.Now().UTC())
+					} else if err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+						if sqlite {
+							return runlifecyclefixture.ForceSQLiteCompletionCandidateRevision(ctx, tx, f.forkRun)
+						}
+						return runlifecyclefixture.ForcePostgresCompletionCandidateRevision(ctx, tx, f.forkRun)
+					}); err != nil {
 						t.Fatal(err)
+					}
+					loaded := "unloaded"
+					if cut.loaded {
+						loaded = hash
 					}
 					before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
 					if err != nil {
 						t.Fatal(err)
 					}
-					got, err := ReadSelectedForkControlStorageForTest(ctx, selected, f.forkRun, cut.loaded, "selected-agent")
+					probe, restore, err := InstallTransactionProbeForTest(selected, transactiontest.Options{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					got, err := ReadSelectedForkControlStorageForTest(ctx, selected, f.forkRun, loaded, "selected-agent")
+					if counts := probe.Snapshot(); counts.Total.Begun != 1 || counts.Total.ReadCommits != 1 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
+						t.Fatalf("selected control escaped its original read snapshot: %+v", counts)
+					}
+					restore()
 					want := SelectedForkControlStorage{AwaitingMutation: cut.want, BindingID: binding, AgentCount: 1}
 					if err != nil || got != want {
 						t.Fatalf("exact selected control predicate: got=%+v want=%+v err=%v", got, want, err)
 					}
-					foreign, err := ReadSelectedForkControlStorageForTest(ctx, selected, f.forkRun, cut.loaded, "foreign-agent")
+					foreign, err := ReadSelectedForkControlStorageForTest(ctx, selected, f.forkRun, loaded, "foreign-agent")
 					if err != nil || foreign.AgentCount != 0 || foreign.BindingID != binding || foreign.AwaitingMutation != cut.want {
 						t.Fatalf("foreign agent contaminated selected control evidence: %+v %v", foreign, err)
 					}
