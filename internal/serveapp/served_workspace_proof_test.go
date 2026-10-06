@@ -109,6 +109,15 @@ func workspaceProofAuthorActivityContext(t *testing.T, proof servedWorkspaceProo
 	return servedRuntimeProofAuthorActivityContext(t, proof.Runtime, proof.BundleHash)
 }
 
+func readWorkspaceProofApplication(t *testing.T, owner runtimebus.EventStore) map[string]storetest.SelectedForkStorageTableSnapshot {
+	t.Helper()
+	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
 func waitWorkspaceProofPipelineHandoff(t *testing.T, proof servedWorkspaceProofRuntime, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
