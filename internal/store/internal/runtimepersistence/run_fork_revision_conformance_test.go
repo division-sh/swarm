@@ -203,7 +203,6 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 		"internal/store/internal/backend/runforkpersistence/run_fork_revision_snapshot.go",
 		"internal/store/internal/backend/runforkrevision/postgres.go",
 		"internal/store/internal/backend/runforkrevision/sqlite.go",
-		"internal/store/internal/backend/runforkrevision/test_notify_revision_observation.go",
 		"internal/store/platformschema/platformschema.go",
 	}
 	var got []string
