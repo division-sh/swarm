@@ -1,7 +1,6 @@
 package serveapp
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
@@ -14,16 +13,12 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/gorilla/websocket"
 )
 
 func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRuntime, runID, instance, template, entityID, entityType, state, parent, wantPhase string, wantRevision int, fields map[string]any) {
 	t.Helper()
-	physical, err := storetest.ReadReceiverConstructionStorage(context.Background(), rt.ReceiverStateReader, runID, instance, entityID, entityType)
-	if err != nil {
-		t.Fatal(err)
-	}
+	physical := requireReceiverConstructionStorage(t, rt.ReceiverStateReader, runID, instance, entityID, entityType)
 	if physical.EntityID != entityID || physical.Template != template || physical.State != state || physical.EntityType != entityType || physical.EntityTypePresent != (entityType != "") || physical.Revision != wantRevision || physical.CreatedAt == "" || physical.UpdatedAt == "" || !physical.OrderedClocks {
 		t.Fatalf("constructed receiver mismatch: run=%s instance=%s physical=%+v", runID, instance, physical)
 	}
@@ -35,11 +30,11 @@ func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRunti
 	if wantPhase == "" {
 		// A historical, fieldless source-only root is inventoried, not attached.
 		if physical.ReadinessPresent || template != "." || entityType != "" || parent != "" {
-			t.Fatalf("historical source-only projection acquired attachment: phase=%s err=%v", phase, err)
+			t.Fatalf("historical source-only projection acquired attachment: phase=%s", phase)
 		}
 	} else {
 		if !physical.ReadinessPresent || phase != wantPhase || planHash == "" {
-			t.Fatalf("receiver lacks exact canonical attachment: %s/%s phase=%s hash=%s err=%v", runID, instance, phase, planHash, err)
+			t.Fatalf("receiver lacks exact canonical attachment: %s/%s phase=%s hash=%s", runID, instance, phase, planHash)
 		}
 		plan, err := pipeline.DecodeFlowReadinessPlan(physical.Plan, planHash)
 		if err != nil {

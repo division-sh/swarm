@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"reflect"
 	"sort"
@@ -15,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // H: real HTTP/native stores through the retained in-process mock lifecycle.
@@ -104,9 +102,9 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 				t.Fatalf("config consumer claims=%d err=%v", claims, err)
 			}
 			owner := flowidentity.RunScopedFlowInstance{RunID: seed.RunID, Route: flowidentity.StoredRoute("account", "ti-138096d2b56ac1568ac40ea7", path)}
-			initialFields, err := storetest.ReadReceiverConstructionPublicationFields(context.Background(), rt.ReceiverStateReader, owner, entityID, creating)
-			if err != nil || !reflect.DeepEqual(initialFields, want) {
-				t.Fatalf("all nine business fields must exist at construction, not be initialized by the automatic consumer: %#v err=%v", initialFields, err)
+			initialFields := requireReceiverConstructionPublicationFields(t, rt.ReceiverStateReader, owner, entityID, creating)
+			if !reflect.DeepEqual(initialFields, want) {
+				t.Fatalf("all nine business fields must exist at construction, not be initialized by the automatic consumer: %#v", initialFields)
 			}
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='mutate' AND domain='authored_field' AND path IN ('count','label','ratio','active','attributes','status','flow_path','instance_id','workflow_version')`, seed.RunID, entityID, consumed).Scan(&writes); err != nil || writes != 0 {
 				t.Fatalf("automatic consumer reconstructed supplied state: writes=%d err=%v", writes, err)

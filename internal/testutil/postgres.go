@@ -27,6 +27,14 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	return startPostgresDatabase(t, true)
 }
 
+// StartPostgresDSN provides a sandbox location for native store construction
+// without granting its pool to semantic fixture callers.
+func StartPostgresDSN(t *testing.T) string {
+	t.Helper()
+	dsn, _, _ := startPostgresDatabase(t, true)
+	return dsn
+}
+
 // StartEmptyPostgres returns a database-per-test sandbox without platform
 // schema bootstrap.
 func StartEmptyPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {

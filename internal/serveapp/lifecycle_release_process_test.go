@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -127,9 +128,10 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	var db *sql.DB
-	var config, backendName string
+	var config, backendName, location string
 	if backend == servedparity.BackendDefaultSQLite {
 		path := filepath.Join(t.TempDir(), "lifecycle.sqlite")
+		location = path
 		config = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", path, channelOnboardingHostWorkspaceFields())
 		var err error
 		db, err = sql.Open("sqlite", path)
@@ -140,6 +142,7 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 		backendName = "sqlite"
 	} else {
 		dsn, postgres, _ := testutil.StartEmptyPostgres(t)
+		location = dsn
 		db, backendName = postgres, "postgres"
 		config = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
@@ -176,5 +179,17 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 			t.Log(output.String())
 		}
 	})
-	return servedControlProofRuntime{Endpoint: process.endpoint(t) + "/v1/rpc", DB: db, Backend: backendName, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
+	endpoint := process.endpoint(t) + "/v1/rpc"
+	observer, err := storetest.OpenReleaseProcessReadOnlyInspection(backendName, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cleanup order is intentional: join the inspection close before stopping
+	// its independently owned server and releasing the original store location.
+	t.Cleanup(func() {
+		if err := observer.Close(); err != nil {
+			t.Errorf("close release inspection: %v", err)
+		}
+	})
+	return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backendName, BundleHash: servedEventPublishFixtureBundleHash(t, root), ReceiverStateReader: requireReceiverProofStateReader(t, observer)}
 }
