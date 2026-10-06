@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -568,7 +569,7 @@ func stageForkContentionFixture(t *testing.T, f forkContentionFixture, selected 
 	return stageForkContentionFixtureAt(t, f, selected, f.eventID, false)
 }
 
-func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selected bool, selector string, withOperation bool) (runfork.RunForkMaterialization, runfork.RunForkSelectedContractExecutionActivateRequest) {
+func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selected bool, selector string, withOperation bool, pins ...durabledata.ExplicitPin) (runfork.RunForkMaterialization, runfork.RunForkSelectedContractExecutionActivateRequest) {
 	t.Helper()
 	if !selected {
 		staged, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
@@ -597,11 +598,13 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 		})
 	}
 	request := prepareSelectedStoreMaterializationForTest(t, f.ctx, f.store, f.runID, selector, selection)
+	request.DataPinOverrides = pins
 	if withOperation {
 		request.ForkOperation = &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(),
 			TransportHash: "sha256:branch-point-proof", SourceRunID: f.runID, ForkEventID: selector,
 			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true,
+			DataPinOverrides: pins,
 		}
 	}
 	_, ids, _, err := runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
@@ -612,7 +615,7 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 	if err != nil {
 		t.Fatal(err)
 	}
-	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{ForkOperation: request.ForkOperation, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
+	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{ForkOperation: request.ForkOperation, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, DataPins: staged.DataPins, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
 		FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning}
 }
 

@@ -19993,7 +19993,11 @@ run_model:
         exact resolved typed point: positive source revision, kind, and event ID if and only if event-kind. Deployment
         revision evidence has no event ID; an invented event or empty UUID is forbidden. Child origin, selected binding,
         source revision and permanent operation result must agree. Existing deployment-feed recovery admission and
-        historical/deferred-work refusals are unchanged.'
+        historical/deferred-work refusals are unchanged. Source-advancement classification covers every canonical
+        revision family; fan_out_obligations maps to source_fan_out_obligations_advanced_after_fork_point.
+        Only facts strictly after the fixed frontier are advancement. These facts remain selected branch lineage,
+        never copied executable post-frontier work; generic activation still refuses source advancement and unknown
+        revision families remain a hard corruption/admission failure.'
     selected_contract_source_advanced_conversation_history_policy: 'Mutating selected-contract fixed-event execution
       may consume runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy to classify
       source agent_sessions, agent_turns, and agent_conversation_audits committed after the selected revision as source-advanced branch-divergence
