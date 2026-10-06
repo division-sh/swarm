@@ -6,6 +6,7 @@ account.registered:
   gem_score: number
   external_id: uuid
   eligible: boolean
+portfolio.closed:
 account.notify.requested:
   key: account_id
   account_id: text

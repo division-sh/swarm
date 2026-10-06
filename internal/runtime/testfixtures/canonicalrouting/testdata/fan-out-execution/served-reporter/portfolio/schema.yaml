@@ -1,5 +1,7 @@
 name: portfolio
-stages: []
+stages:
+  active: {}
+  done: {final: true}
 pins:
   inputs:
     - portfolio.opened
@@ -7,6 +9,8 @@ pins:
     - portfolio.accounts.register.requested
     - portfolio.membership.seeded
     - portfolio.notify.requested
+    - portfolio.close.requested
   outputs:
     - account.registered
     - account.notify.requested
+    - portfolio.closed
