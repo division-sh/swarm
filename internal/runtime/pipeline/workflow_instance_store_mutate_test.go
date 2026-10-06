@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -295,7 +296,7 @@ func TestWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshots(t *testing
 		t.Fatalf("second mutation commit: %v", err)
 	}
 	close(releaseFirst)
-	if err := <-errCh; err == nil || !strings.Contains(err.Error(), "changed before commit") {
+	if err := <-errCh; !runtimefailures.IsStateContention(err) {
 		t.Fatalf("stale first mutation error = %v, want optimistic conflict", err)
 	}
 
@@ -357,7 +358,7 @@ func TestUpdateEntityState_RejectsCompetingStaleCallbackSnapshot(t *testing.T) {
 		t.Fatalf("closed transition commit: %v", err)
 	}
 	close(releaseFirst)
-	if err := <-callbackErr; err == nil || !strings.Contains(err.Error(), "changed before commit") {
+	if err := <-callbackErr; !runtimefailures.IsStateContention(err) {
 		t.Fatalf("stale callback commit error = %v, want optimistic conflict", err)
 	}
 
