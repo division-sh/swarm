@@ -27,6 +27,9 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 					Attempt: 1, SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed",
 					InputHash: "exact-storage-input", StartedAt: time.Now().UTC(),
 				}
+				if runID == other {
+					record.ExecutionMode = executionmode.Mock
+				}
 				if _, inserted, err := fixture.store.(pipeline.ActivityAttemptJournal).StartActivityAttempt(ctx, record); err != nil || !inserted {
 					t.Fatalf("start native journal: inserted=%t err=%v", inserted, err)
 				}
@@ -41,8 +44,21 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 			if err := fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1`, run).Scan(&expected.RunForkRevisions); err != nil {
 				t.Fatal(err)
 			}
+			if err := fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1`, run).Scan(&expected.Attempts); err != nil {
+				t.Fatal(err)
+			}
+			mockQuery := `SELECT COUNT(*) FROM author_activity_occurrences WHERE json_extract(projection, '$.execution_mode')='mock' AND source_owner='activity_attempts'`
+			if backend.name == "postgres" {
+				mockQuery = `SELECT COUNT(*) FROM author_activity_occurrences WHERE projection->>'execution_mode'='mock' AND source_owner='activity_attempts'`
+			}
+			if err := fixture.db.QueryRowContext(ctx, mockQuery).Scan(&expected.MockAttemptStories); err != nil {
+				t.Fatal(err)
+			}
 			if expected.StoryCount < 2 || expected.StoryHead < 2 {
 				t.Fatalf("global story/head control did not materialize both runs: %+v", expected)
+			}
+			if expected.Attempts != 1 || expected.MockAttemptStories != 1 {
+				t.Fatalf("exact-run attempts and global mock stories were conflated: %+v", expected)
 			}
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
 			if err != nil {

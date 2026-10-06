@@ -1067,8 +1067,9 @@ func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCre
 	}
 }
 
-func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournal(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournalForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	var calls atomic.Int32
@@ -1091,13 +1092,13 @@ func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedRespo
 		t.Fatalf("CompileMockResponsePlan: %v", err)
 	}
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
+	store := fixture.Persistence.store
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
 	credentialStore := &countingActivityCredentialStore{}
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{
 		Module:                 staticSemanticWorkflowModule{source: source},
-		Persistence:            workflowPersistenceForTest(store),
-		PipelineObligations:    unavailablePipelineTestObligationOwner{},
 		MockConnectorResponses: plan,
 		Credentials:            credentialStore,
 	})
@@ -1132,36 +1133,24 @@ func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedRespo
 	if len(bus.publishes) != 2 || bus.publishes[0].ID() != bus.publishes[1].ID() {
 		t.Fatalf("mock duplicate publications = %#v", bus.publishes)
 	}
-	var storyModes int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM author_activity_occurrences WHERE json_extract(projection, '$.execution_mode') = 'mock' AND source_owner = 'activity_attempts'`).Scan(&storyModes); err != nil {
+	observed, err := fixture.ReadJournal(ctx, runID)
+	if err != nil {
 		t.Fatalf("query mock author activity: %v", err)
 	}
-	if storyModes != 2 {
-		t.Fatalf("mock author activity rows = %d, want started and succeeded", storyModes)
+	if observed.MockAttemptStories != 2 {
+		t.Fatalf("mock author activity rows = %d, want started and succeeded", observed.MockAttemptStories)
 	}
 }
 
-func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlan(t *testing.T) {
-	backends := []struct {
-		name  string
-		store func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
-	}{
-		{name: "sqlite", store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-			db, journal := newSQLiteActivityJournalStore(t, ctx)
-			return db, journal, true
-		}},
-		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return db, newPostgresWorkflowInstanceStoreForTest(db), false
-		}},
-	}
-	for _, backend := range backends {
-		t.Run(backend.name, func(t *testing.T) {
-			ctx := context.Background()
-			db, journal, sqlite := backend.store(t, ctx)
+func VerifyPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlanForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := open(t, backend)
+			ctx := fixture.Context
 			runID := uuid.NewString()
-			seedActivityRun(t, db, sqlite, runID)
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
 			var httpCalls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				httpCalls.Add(1)
@@ -1187,9 +1176,8 @@ func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponseP
 			intent.Input = mustActivityInput(map[string]any{"chat_id": "42", "text": "hello"})
 
 			firstBus := &recordingPipelineBus{}
-			first := newDurablePipelineCoordinatorForTest(firstBus, db, PipelineCoordinatorOptions{
-				Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(journal),
-				PipelineObligations:    unavailablePipelineTestObligationOwner{},
+			first := fixture.NewCoordinator(firstBus, PipelineCoordinatorOptions{
+				Module:                 staticSemanticWorkflowModule{source: source},
 				MockConnectorResponses: plan,
 			})
 			if err := (pipelineActivityDispatcher{coordinator: first}).executeActivityIntent(ctx, intent); err != nil {
@@ -1201,10 +1189,10 @@ func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponseP
 
 			restartBus := &recordingPipelineBus{}
 			credentials := &countingActivityCredentialStore{}
-			restarted := newDurablePipelineCoordinatorForTest(restartBus, db, PipelineCoordinatorOptions{
-				Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(journal),
-				PipelineObligations: unavailablePipelineTestObligationOwner{},
-				Credentials:         credentials,
+			reopened := fixture.Reopen()
+			restarted := reopened.NewCoordinator(restartBus, PipelineCoordinatorOptions{
+				Module:      staticSemanticWorkflowModule{source: source},
+				Credentials: credentials,
 			})
 			if err := (pipelineActivityDispatcher{coordinator: restarted}).executeActivityIntent(ctx, intent); err != nil {
 				t.Fatalf("replay terminal mock activity without current plan: %v", err)
@@ -1219,25 +1207,11 @@ func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponseP
 	}
 }
 
-func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTP(t *testing.T) {
-	backends := []struct {
-		name  string
-		store func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
-	}{
-		{name: "sqlite", store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-			db, journal := newSQLiteActivityJournalStore(t, ctx)
-			return db, journal, true
-		}},
-		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return db, newPostgresWorkflowInstanceStoreForTest(db), false
-		}},
-	}
-	for _, backend := range backends {
-		t.Run(backend.name, func(t *testing.T) {
-			ctx := context.Background()
-			db, store, sqlite := backend.store(t, ctx)
+func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTPForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := open(t, backend)
+			ctx := fixture.Context
 			for _, tc := range []struct {
 				name      string
 				tool      runtimecontracts.ToolSchemaEntry
@@ -1251,7 +1225,9 @@ func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTT
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					runID := uuid.NewString()
-					seedActivityRun(t, db, sqlite, runID)
+					if err := fixture.RequireRun(ctx, runID); err != nil {
+						t.Fatal(err)
+					}
 					tool, err := tc.tool.WithStaticCredentials("must_not_read")
 					if err != nil {
 						t.Fatalf("derive credential-bearing tool: %v", err)
@@ -1263,9 +1239,8 @@ func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTT
 					source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": tool}})
 					bus := &recordingPipelineBus{}
 					credentialStore := &countingActivityCredentialStore{}
-					pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-						Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
-						PipelineObligations:    unavailablePipelineTestObligationOwner{},
+					pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{
+						Module:                 staticSemanticWorkflowModule{source: source},
 						MockConnectorResponses: plan, Credentials: credentialStore,
 					})
 					intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
@@ -1275,12 +1250,12 @@ func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTT
 					if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
 						t.Fatalf("execute rejected mock activity: %v", err)
 					}
-					var attempts int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id = `+activityTestPlaceholder(sqlite, 1), runID).Scan(&attempts); err != nil {
+					observed, err := fixture.ReadJournal(ctx, runID)
+					if err != nil {
 						t.Fatalf("count activity attempts: %v", err)
 					}
-					if attempts != 0 {
-						t.Fatalf("activity attempts = %d, want zero", attempts)
+					if observed.Attempts != 0 {
+						t.Fatalf("activity attempts = %d, want zero", observed.Attempts)
 					}
 					if credentialStore.reads.Load() != 0 {
 						t.Fatalf("credential reads = %d, want zero", credentialStore.reads.Load())
@@ -1294,11 +1269,13 @@ func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTT
 	}
 }
 
-func TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP(t *testing.T) {
-	ctx := context.Background()
-	db, store := newSQLiteActivityJournalStore(t, ctx)
+func VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	runID := uuid.NewString()
-	seedActivityRun(t, db, true, runID)
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
 	var httpCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		httpCalls.Add(1)
@@ -1312,12 +1289,10 @@ func TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP(t *te
 		"telegram.send_message": tool,
 	}})
 	credentials := &countingActivityCredentialStore{}
-	pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-		ExecutionPosture:    executionposture.MockOnly,
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-		Credentials:         credentials,
+	pc := fixture.NewCoordinator(&recordingPipelineBus{}, PipelineCoordinatorOptions{
+		ExecutionPosture: executionposture.MockOnly,
+		Module:           staticSemanticWorkflowModule{source: source},
+		Credentials:      credentials,
 	})
 	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 	intent.Tool = "telegram.send_message"
@@ -1327,12 +1302,12 @@ func TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP(t *te
 	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err == nil {
 		t.Fatal("mock_only posture admitted a live activity intent")
 	}
-	var attempts int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id = ?`, runID).Scan(&attempts); err != nil {
+	observed, err := fixture.ReadJournal(ctx, runID)
+	if err != nil {
 		t.Fatalf("count activity attempts: %v", err)
 	}
-	if attempts != 0 || credentials.reads.Load() != 0 || httpCalls.Load() != 0 {
-		t.Fatalf("live activity reached attempts=%d credentials=%d HTTP=%d, want zero", attempts, credentials.reads.Load(), httpCalls.Load())
+	if observed.Attempts != 0 || credentials.reads.Load() != 0 || httpCalls.Load() != 0 {
+		t.Fatalf("live activity reached attempts=%d credentials=%d HTTP=%d, want zero", observed.Attempts, credentials.reads.Load(), httpCalls.Load())
 	}
 }
 

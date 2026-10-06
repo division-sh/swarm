@@ -46,7 +46,12 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 			})
 		},
 		NewCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
-			deliveryBus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: options.Module.SemanticSource()})
+			if options.ExecutionPosture == "" {
+				options.ExecutionPosture = executionposture.Live
+			}
+			deliveryBus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+				ContractBundle: options.Module.SemanticSource(), ExecutionPosture: options.ExecutionPosture,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -54,7 +59,6 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 			options.WorkOwner = pipelineExternalTestWorkOwner(t)
 			// The recording bus remains the result-publication oracle. Durable
 			// delivery and obligation ports still belong to the native bus/store.
-			options.ExecutionPosture = executionposture.Live
 			options.ReceiverExecution = eventreceiver.NormalExecution()
 			options.SourceArtifactFact = authorActivityTestSourceArtifactFact
 			options.Persistence = persistence
@@ -119,6 +123,22 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 
 func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) {
 	pipeline.VerifyActivityAttemptJournalPreservesReplyContextAcrossRestartForTest(t, workflowActivityNativeFixture)
+}
+
+func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournal(t *testing.T) {
+	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournalForTest)
+}
+
+func TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP(t *testing.T) {
+	verifyNativeActivityBothStores(t, pipeline.VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForTest)
+}
+
+func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlan(t *testing.T) {
+	pipeline.VerifyPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlanForTest(t, workflowActivityNativeFixture)
+}
+
+func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTP(t *testing.T) {
+	pipeline.VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTPForTest(t, workflowActivityNativeFixture)
 }
 
 func TestWorkflowActivityNativeReopenUsesFreshOwnerAndRetainsJournalBothStores(t *testing.T) {
