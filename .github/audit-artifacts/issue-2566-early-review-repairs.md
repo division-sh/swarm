@@ -48,6 +48,7 @@ Post-Implementation Proof Audit, a core qualification receipt, or merge readines
 | Exact retained catalog survives either writer/activation ordering | `TestSelectedRunForkActivationFrontierContentionBothStores/(sqlite\|postgres)/(writer\|activation)/commit`; all four cases, race/count-three pass (156.767s aggregate) |
 | Two test interfaces fail to compile | Exact managed `core-structural-owner-guards` unit: all four packages pass |
 | Public final projection still agrees with join settlement | `TestA2JoinPublicProjectionAgreementBothStores`; race/count-three pass (76.371s) |
+| Reporter run.start fixture had no completion lifecycle | `TestServedReporterFiniteContractHasRealClosureCarriers` checks admitted topology; `TestIssue2566ReporterFiniteFixtureCanCloseBothStores` executes the declared close/ack path to completed, both stores race/count-three pass |
 | Rewrite/runtime complexity introduces hotspots | Independent base/head measurement at `4c53d2712`: cognitive >=30 561/561, >=50 192/192; cyclomatic >=30 261/261, >=50 58/58; unchanged maxima/policy |
 
 Whole-corpus replay remains 417 exact files / 553 decisions / byte-idempotent.
@@ -76,7 +77,22 @@ IDs changed by rewritten bundle bytes. The existing updater regenerated only
 those IDs; `TestStaticDataInvocationGoldenConsumesAdmittedIdentity` and catalog
 oracle guards pass race/count-three with corruption assertions intact. Interrupted
 units earn no qualification. The declaration-boundary repair changes production
-code, so the replacement head requires a fresh core run. Lifecycle and
+code, so the replacement head requires a fresh core run. Core at `f60c098ae`
+then passed the oracle guards but stopped on the served reporter family:
+`run.start` correctly refused its stateless/no-final root. The reporter overlay
+now has explicit active/final root and portfolio lifecycles, a fieldless root
+entity, and a declared close-request/acknowledgement path with producer-owned
+event schemas. Original held-delivery, exact transaction and supported-surface
+assertions are preserved. `TestServedReporterFiniteContractHasRealClosureCarriers`
+checks actual admitted topology; `TestIssue2566ReporterFiniteFixtureCanCloseBothStores`
+executes the closure to completed on both stores rather than accepting decorative
+final declarations. Production finite admission and the service example are
+unchanged; the overlay inventory includes its one newly required entity file.
+The combined four-test reporter race/count-three run hit its unchanged 180-second
+package deadline without a reported assertion failure; it is not a green receipt.
+The new both-store closure test passes separately at race/count-three. Original
+reporter assertions are being qualified separately without changed limits.
+The failed f60 core receipt remains unqualified. Lifecycle and
 named supplements, hosted full, ten-family completion, and composed A/E supported
 proof remain outstanding. No CI/PR was opened for these repairs.
 

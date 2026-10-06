@@ -6,7 +6,11 @@ portfolio-coordinator:
     - portfolio.accounts.register.requested
     - portfolio.membership.seeded
     - portfolio.notify.requested
+    - portfolio.close.requested
   event_handlers:
+    portfolio.close.requested:
+      advances_to: done
+      emit: {event: portfolio.closed}
     portfolio.opened:
       data_accumulation:
         writes:

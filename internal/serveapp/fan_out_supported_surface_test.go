@@ -194,6 +194,38 @@ func issue2394ServedReporterSource(t *testing.T) string {
 	return canonicalrouting.CopyServedFanOutReporter(t)
 }
 
+func TestIssue2566ReporterFiniteFixtureCanCloseBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := issue2394ServedReporterSource(t)
+			opts, start := lifecycleRestartHarness(t, backend, root)
+			opts.TestLLMRuntime = servedNoopLLMRuntime{}
+			_, runtime := start()
+			var opened struct {
+				RunID string `json:"run_id"`
+			}
+			requireServedJSONRPCResult(t, runtime.Endpoint, "run.start", map[string]any{
+				"run_id": uuid.NewString(), "bundle_hash": runtime.BundleHash, "event_name": "portfolio.opened",
+				"payload": map[string]any{"portfolio_id": "finite-fixture", "threshold": 75}, "idempotency_key": uuid.NewString(),
+			}, &opened)
+			waitPublicationSiteCompletion(t, runtime, opened.RunID)
+			var publication map[string]any
+			requireServedJSONRPCResult(t, runtime.Endpoint, "event.publish", map[string]any{
+				"run_id": opened.RunID, "event_name": "portfolio.close.requested", "payload": map[string]any{}, "idempotency_key": uuid.NewString(),
+			}, &publication)
+			var diagnosis cliapp.DiagnosticRunDiagnosisResult
+			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+				requireServedJSONRPCResult(t, runtime.Endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &diagnosis)
+				if diagnosis.Run.Status == "completed" {
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			t.Fatalf("fixture finals were decorative rather than executable: %+v", diagnosis)
+		})
+	}
+}
+
 func issue2394SurfaceSnapshot(t *testing.T, db *sql.DB, runID string) [][]sql.NullString {
 	t.Helper()
 	var snapshot [][]sql.NullString

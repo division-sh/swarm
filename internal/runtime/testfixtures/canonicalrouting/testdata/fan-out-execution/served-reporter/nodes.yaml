@@ -13,3 +13,11 @@ numeric-registration-reporter:
   subscribes_to: [account.registered]
   event_handlers:
     account.registered: {}
+close-portfolio:
+  execution_type: system_node
+  subscribes_to: [portfolio.close.requested, portfolio.closed]
+  event_handlers:
+    portfolio.close.requested:
+      emit: {event: portfolio.close.forwarded}
+    portfolio.closed:
+      advances_to: done
