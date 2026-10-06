@@ -17,6 +17,35 @@ import (
 	"github.com/google/uuid"
 )
 
+type ReceiverDeliveryStorageRow struct {
+	DeliveryID, EventID, Status, Target string
+}
+
+// This physical witness is deliberately independent of eligibility and public
+// target/status projection. It retains every historical delivery in the run.
+func ReadReceiverDeliveryStorage(ctx context.Context, q queryer, runID string) ([]ReceiverDeliveryStorageRow, error) {
+	rows, err := q.QueryContext(ctx, `SELECT delivery_id,event_id,status,CAST(delivery_target_route AS TEXT) FROM event_deliveries WHERE run_id=$1`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ReceiverDeliveryStorageRow
+	for rows.Next() {
+		var row ReceiverDeliveryStorageRow
+		if err := rows.Scan(&row.DeliveryID, &row.EventID, &row.Status, &row.Target); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 const (
 	postgresAgentPendingEligibility = `(
 		d.status = 'pending'
