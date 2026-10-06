@@ -68,7 +68,7 @@ negative preparation attempt ran before its worktree checkout completed and
 failed compilation; it is retained but is not credited as the negative proof.
 
 Downward census: `14,953 ->14,915` findings, **38 removed / ZERO added**.
-Confirmed raw-operation debt: `11,089 ->11,065`; all67 excluded-source
+Confirmed raw-operation debt: `11,094 ->11,065`; all67 excluded-source
 uncertainties remain. Collector digest is unchanged:
 `494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5`.
 Seven exact facts in the two new legitimate private reader/accessor functions
