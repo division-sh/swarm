@@ -2479,10 +2479,6 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend
 }
 
 func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
-	return startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t, backend, sourceRoot, realWorkspace, "", nil, "127.0.0.1:0", hooks...)
-}
-
-func startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
 	forkOptions := captureServedForkRuntimeOptions(t)
 	configureWorkspace := func() {
@@ -2492,9 +2488,6 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t *testing.T, 
 		previous := cliapp.ConfiguredWorkspaceLifecycleForServe
 		root := t.TempDir()
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, _ cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
-			if factory != nil {
-				return factory(projection, source)
-			}
 			manager := workspace.NewHostManager()
 			cfg := workspace.DefaultHostConfig()
 			cfg.WorkspaceRoot, cfg.SourceProjection = root, projection
@@ -2528,14 +2521,12 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t *testing.T, 
 			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 		}
 		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
-			WorkspaceBackend:                 targetBackend,
-			WorkspaceBackendSet:              targetBackend != "",
 			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
 			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 			APIListenAddr:                    "127.0.0.1:0",
-			MCPListenAddr:                    mcpListen,
+			MCPListenAddr:                    "127.0.0.1:0",
 			SelfCheck:                        true,
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
@@ -2555,8 +2546,6 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t *testing.T, 
 			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		}
 		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
-			WorkspaceBackend:                 targetBackend,
-			WorkspaceBackendSet:              targetBackend != "",
 			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
@@ -2564,7 +2553,7 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t *testing.T, 
 			StoreMode:                        "postgres",
 			StoreModeSet:                     true,
 			APIListenAddr:                    "127.0.0.1:0",
-			MCPListenAddr:                    mcpListen,
+			MCPListenAddr:                    "127.0.0.1:0",
 			SelfCheck:                        true,
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
