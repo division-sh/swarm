@@ -30,7 +30,7 @@ faults call the exact selected semantic owner and retain its real durable cut.
 The B/G/C/A handoffs are unchanged. No G convenience/location/event/delivery
 operation, C allocated read port or A exact fault is duplicated. The already-
 landed WithReopen constructors, semantic event writer and activation command
-builder are reused. Entity-tool handoff for #2269 remains outside this batch.
+fixture recipe are reused. Entity-tool handoff for #2269 remains outside this batch.
 
 ## Current Rebased Debt Ledger
 
