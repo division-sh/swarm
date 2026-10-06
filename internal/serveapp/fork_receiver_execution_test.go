@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -25,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type forkReceiverExecutionObservation struct {
@@ -95,7 +97,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				}
 				checkBusiness := func(t *testing.T, rt servedControlProofRuntime, runID, eventID, entityID string) {
 					if declaredAgent {
-						requireSelectedForkMixedBusinessMutation(t, rt, runID, eventID, entityID)
+						requireSelectedForkMixedBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, runID, eventID, entityID)
 					} else {
 						requireForkReceiverBusinessMutation(t, rt, runID, eventID, entityID)
 					}
@@ -481,10 +483,10 @@ func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRu
 	}
 }
 
-func requireSelectedForkMixedBusinessMutation(t *testing.T, rt servedControlProofRuntime, runID, eventID, entityID string) {
+func requireSelectedForkMixedBusinessMutation(t *testing.T, endpoint string, owner runtimebus.EventStore, runID, eventID, entityID string) {
 	t.Helper()
 	var event operatorread.OperatorEventFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
 	if event.RunID != runID || len(event.Deliveries) != 2 {
 		t.Fatalf("mixed frontier did not retain both recipients: %+v", event)
 	}
@@ -497,16 +499,16 @@ func requireSelectedForkMixedBusinessMutation(t *testing.T, rt servedControlProo
 		if delivery.SubscriberType == "node" && delivery.Target != (operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}) {
 			t.Fatalf("mixed frontier borrowed another entity: %+v", delivery)
 		}
-		var outcomes int
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1 AND claim_version=1 AND outcome='delivered'`, delivery.DeliveryID).Scan(&outcomes); err != nil || outcomes != 1 {
+		outcomes, err := storetest.ReadVersionOneDeliveredSettlementCount(context.Background(), owner, delivery.DeliveryID)
+		if err != nil || outcomes != 1 {
 			t.Fatalf("mixed frontier missing exact settlement: count=%d err=%v", outcomes, err)
 		}
 	}
 	if kinds["node"] != 1 || kinds["agent"] != 1 {
 		t.Fatalf("mixed frontier recipient census: %v", kinds)
 	}
-	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(new_value AS TEXT) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND domain='authored_field' AND path='processed_token' AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='mutate'`, runID, entityID, eventID).Scan(&raw); err != nil {
+	raw, err := storetest.ReadSelectedForkAuthoredMutation(context.Background(), owner, runID, entityID, eventID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	var value string
