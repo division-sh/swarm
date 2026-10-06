@@ -5,8 +5,13 @@ package store_test
 // supplies the separately enforced no-new-debt guard and final broad census.
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"go/ast"
+	"go/build"
+	"go/build/constraint"
+	"go/format"
 	"go/importer"
 	"go/parser"
 	"go/token"
@@ -25,64 +30,148 @@ import (
 
 func debtLoadPersistenceAuthorityFindings(t *testing.T, root string) []authorityFinding {
 	t.Helper()
-	cfg := &packages.Config{
-		Dir: root,
-		Env: debtCensusEnvironment(),
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
-		Tests: true,
+	sources := debtOwnedAuthoritySources(t, root)
+	fset := token.NewFileSet()
+	seenFiles := map[string]bool{}
+	activeFiles := map[string]bool{}
+	fileOccurrences := map[string]map[string][]authorityFinding{}
+	methodSets := map[string]authorityFinding{}
+	packagesByDir := map[string]*packages.Package{}
+	imports := map[string]*types.Package{}
+	var findings []authorityFinding
+	scan := debtNewAuthorityTypeScan()
+	{
+		context := build.Default
+		context.GOOS, context.GOARCH, context.CgoEnabled = "linux", "amd64", true
+		context.BuildTags = nil
+		context.ToolTags = []string{"amd64.v1"}
+		dirs := map[string]bool{}
+		for path := range sources {
+			matches, err := context.MatchFile(filepath.Dir(path), filepath.Base(path))
+			if err != nil {
+				t.Fatalf("select owned authority source %s: %v", path, err)
+			}
+			if matches {
+				activeFiles[path] = true
+				dir, err := filepath.Rel(root, filepath.Dir(path))
+				if err != nil {
+					t.Fatal(err)
+				}
+				dirs["./"+filepath.ToSlash(dir)] = true
+			}
+		}
+		var patterns []string
+		for dir := range dirs {
+			patterns = append(patterns, dir)
+		}
+		sort.Strings(patterns)
+		if len(patterns) == 0 {
+			t.Fatal("authority census matched no packages")
+		}
+		patterns = append(patterns, "database/sql", "context")
+		cfg := &packages.Config{
+			Dir: root, Env: debtCensusEnvironment(), Fset: fset,
+			BuildFlags: []string{"-trimpath"},
+			Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+				packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
+			Tests: true,
+		}
+		pkgs, err := packages.Load(cfg, patterns...)
+		if err != nil {
+			t.Fatalf("load authority packages: %v", err)
+		}
+		if packages.PrintErrors(pkgs) > 0 {
+			t.Fatal("load authority packages reported type errors")
+		}
+		for _, pkg := range pkgs {
+			debtRememberAuthorityImports(pkg, imports)
+			if len(pkg.Syntax) != len(pkg.CompiledGoFiles) {
+				t.Fatalf("incomplete authority syntax for %s: syntax=%d compiled=%d", pkg.ID, len(pkg.Syntax), len(pkg.CompiledGoFiles))
+			}
+			for index, file := range pkg.Syntax {
+				if index >= len(pkg.CompiledGoFiles) {
+					continue
+				}
+				path := filepath.Clean(pkg.CompiledGoFiles[index])
+				rel, owned := sources[path]
+				if !owned {
+					continue
+				}
+				packagesByDir[filepath.Dir(path)+"\t"+file.Name.Name] = pkg
+				seenFiles[path] = true
+				fileFindings := scan.debtCollectAuthorityFindings(rel, file, pkg.TypesInfo)
+				if !debtAuthorityTypedContractScope(rel) {
+					fileFindings = slices.DeleteFunc(fileFindings, func(finding authorityFinding) bool {
+						return !finding.RawSQL && finding.Kind != "forbidden-test-consumption" && finding.Kind != "selected-store-construction"
+					})
+				}
+				// Preserve each variant's evidence and within-file multiplicity.
+				// Re-loading the same source cannot multiply its occurrences.
+				if fileOccurrences[path] == nil {
+					fileOccurrences[path] = map[string][]authorityFinding{}
+				}
+				variant := map[string][]authorityFinding{}
+				for _, finding := range fileFindings {
+					key := finding.key()
+					variant[key] = append(variant[key], finding)
+				}
+				for key, occurrences := range variant {
+					if len(occurrences) > len(fileOccurrences[path][key]) {
+						fileOccurrences[path][key] = occurrences
+					}
+				}
+			}
+			for _, finding := range debtCollectEffectiveMethodSetFindings(root, pkg) {
+				methodSets[finding.key()] = finding
+			}
+		}
 	}
-	pkgs, err := packages.Load(cfg, "./...")
-	if err != nil {
-		t.Fatalf("load authority packages: %v", err)
+	for _, identities := range fileOccurrences {
+		for _, occurrences := range identities {
+			findings = append(findings, occurrences...)
+		}
 	}
-	if packages.PrintErrors(pkgs) > 0 {
-		t.Fatal("load authority packages reported type errors")
+	for path := range activeFiles {
+		if !seenFiles[path] {
+			t.Fatalf("canonical active authority source was not loaded: %s", sources[path])
+		}
 	}
-	if len(pkgs) == 0 {
+	if len(seenFiles) == 0 {
 		t.Fatal("authority census matched no packages")
 	}
-	resolved := map[string]authorityFinding{}
-	compiled := map[string]bool{}
-	scan := debtNewAuthorityTypeScan()
-	for _, pkg := range pkgs {
-		if len(pkg.Syntax) != len(pkg.CompiledGoFiles) {
-			t.Fatalf("incomplete authority syntax for %s: syntax=%d compiled=%d", pkg.ID, len(pkg.Syntax), len(pkg.CompiledGoFiles))
-		}
-		for index, file := range pkg.Syntax {
-			if index >= len(pkg.CompiledGoFiles) {
-				continue
-			}
-			rel, err := filepath.Rel(root, pkg.CompiledGoFiles[index])
-			if err != nil {
-				t.Fatalf("relativize %s: %v", pkg.CompiledGoFiles[index], err)
-			}
-			rel = filepath.ToSlash(rel)
-			if !filepath.IsLocal(rel) {
-
-				continue
-			}
-			compiled[rel] = true
-			fileFindings := scan.debtCollectAuthorityFindings(rel, file, pkg.TypesInfo)
-			if !debtAuthorityTypedContractScope(rel) {
-				fileFindings = slices.DeleteFunc(fileFindings, func(finding authorityFinding) bool {
-					return !finding.RawSQL && finding.Kind != "forbidden-test-consumption" && finding.Kind != "selected-store-construction"
-				})
-			}
-			for _, finding := range fileFindings {
-				resolved[finding.key()] = finding
-			}
-		}
-		for _, finding := range debtCollectEffectiveMethodSetFindings(root, pkg) {
-			resolved[finding.key()] = finding
-		}
-	}
-	for _, finding := range debtInactiveAuthorityFindings(t, root, compiled) {
-		resolved[finding.key()] = finding
-	}
-	findings := make([]authorityFinding, 0, len(resolved))
-	for _, finding := range resolved {
+	for _, finding := range methodSets {
 		findings = append(findings, finding)
+	}
+	var inactive []string
+	for path := range sources {
+		if !seenFiles[path] {
+			inactive = append(inactive, path)
+		}
+	}
+	sort.Strings(inactive)
+	for _, path := range inactive {
+		file, err := parser.ParseFile(fset, path, nil, parser.AllErrors|parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parse inactive authority source: %v", err)
+		}
+		base := packagesByDir[filepath.Dir(path)+"\t"+file.Name.Name]
+		var owner *types.Package
+		if base != nil {
+			owner = base.Types
+		}
+		info := debtPartialExcludedAuthorityInfo(file, fset, owner, imports)
+		fileFindings := scan.debtCollectAuthorityFindings(sources[path], file, info)
+		if !debtAuthorityTypedContractScope(sources[path]) {
+			fileFindings = slices.DeleteFunc(fileFindings, func(finding authorityFinding) bool {
+				return !finding.RawSQL && finding.Kind != "forbidden-test-consumption" && finding.Kind != "selected-store-construction"
+			})
+		}
+		fileFindings = append(fileFindings, debtExcludedSourceFindings(t, sources[path], file, info)...)
+		findings = append(findings, fileFindings...)
+		seenFiles[path] = true
+	}
+	if len(seenFiles) != len(sources) {
+		t.Fatalf("incomplete owned authority enumeration: sources=%d collected=%d", len(sources), len(seenFiles))
 	}
 	sort.Slice(findings, func(i, j int) bool { return debtAuthorityFindingLess(findings[i], findings[j]) })
 	return findings
@@ -91,16 +180,19 @@ func debtLoadPersistenceAuthorityFindings(t *testing.T, root string) []authority
 func debtCensusEnvironment() []string {
 	var env []string
 	for _, value := range os.Environ() {
-		if !strings.HasPrefix(value, "GOFLAGS=") && !strings.HasPrefix(value, "GOWORK=") {
+		key, _, _ := strings.Cut(value, "=")
+		switch key {
+		case "GOFLAGS", "GOWORK", "GOOS", "GOARCH", "GOAMD64", "GOEXPERIMENT", "CGO_ENABLED":
+		default:
 			env = append(env, value)
 		}
 	}
-	return append(env, "GOFLAGS=", "GOWORK=off")
+	return append(env, "GOFLAGS=", "GOWORK=off", "GOOS=linux", "GOARCH=amd64", "GOAMD64=v1", "GOEXPERIMENT=", "CGO_ENABLED=1")
 }
 
-func debtInactiveAuthorityFindings(t *testing.T, root string, compiled map[string]bool) []authorityFinding {
+func debtOwnedAuthoritySources(t *testing.T, root string) map[string]string {
 	t.Helper()
-	var findings []authorityFinding
+	sources := map[string]string{}
 	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -120,33 +212,225 @@ func debtInactiveAuthorityFindings(t *testing.T, root string, compiled map[strin
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if compiled[rel] {
-			return nil
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
+		abs, err := filepath.Abs(path)
 		if err != nil {
 			return err
 		}
-		for _, imp := range file.Imports {
-			imported, err := strconv.Unquote(imp.Path.Value)
-			if err != nil {
-				return err
-			}
-			if imported != "database/sql" && !strings.HasPrefix(imported, "github.com/division-sh/swarm/internal/store/internal/") {
-				continue
-			}
-			findings = append(findings, authorityFinding{
-				Kind: "inactive-raw-source", File: rel, Enclosing: file.Name.Name,
-				Member: "import:" + imported, Resolved: "unresolved inactive authority", RawSQL: true,
-			})
-		}
-		findings = append(findings, debtCollectInactiveTestConsumptionFindings(rel, file)...)
+		sources[abs] = rel
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("scan inactive persistence authority sources: %v", err)
+		t.Fatalf("enumerate owned persistence authority sources: %v", err)
+	}
+	return sources
+}
+
+func debtRememberAuthorityImports(pkg *packages.Package, imports map[string]*types.Package) {
+	if pkg == nil || pkg.Types == nil || imports[pkg.PkgPath] != nil {
+		return
+	}
+	imports[pkg.PkgPath] = pkg.Types
+	for _, imported := range pkg.Imports {
+		debtRememberAuthorityImports(imported, imports)
+	}
+}
+
+type debtAuthorityImporter map[string]*types.Package
+
+func (imports debtAuthorityImporter) Import(path string) (*types.Package, error) {
+	if pkg := imports[path]; pkg != nil {
+		return pkg, nil
+	}
+	return nil, fmt.Errorf("%s is not available in the canonical active type view", path)
+}
+
+func debtPartialExcludedAuthorityInfo(file *ast.File, fset *token.FileSet, base *types.Package, imports map[string]*types.Package) *types.Info {
+	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
+	if base == nil {
+		return info
+	}
+	declared := map[string]bool{}
+	for _, decl := range file.Decls {
+		switch decl := decl.(type) {
+		case *ast.FuncDecl:
+			if decl.Recv == nil {
+				declared[decl.Name.Name] = true
+			}
+		case *ast.GenDecl:
+			for _, spec := range decl.Specs {
+				switch spec := spec.(type) {
+				case *ast.TypeSpec:
+					declared[spec.Name.Name] = true
+				case *ast.ValueSpec:
+					for _, name := range spec.Names {
+						declared[name.Name] = true
+					}
+				}
+			}
+		}
+	}
+	pkg := types.NewPackage(base.Path(), base.Name())
+	for _, name := range base.Scope().Names() {
+		if !declared[name] {
+			pkg.Scope().Insert(base.Scope().Lookup(name))
+		}
+	}
+	// This is partial evidence from the canonical scope, never foreign-platform
+	// validation. AST uncertainty accounting below does not depend on its success.
+	conf := &types.Config{Importer: debtAuthorityImporter(imports), Error: func(error) {}}
+	partial := *file
+	partial.Decls = nil
+	for _, declaration := range file.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && function.Recv != nil {
+			// A receiver copied from another checker has no local declaration
+			// table. Its complete source is covered by AST uncertainty instead.
+			continue
+		}
+		partial.Decls = append(partial.Decls, declaration)
+	}
+	_ = types.NewChecker(conf, fset, pkg, info).Files([]*ast.File{&partial})
+	return info
+}
+
+func debtExcludedSourceFindings(t *testing.T, path string, file *ast.File, info *types.Info) []authorityFinding {
+	t.Helper()
+	var context []string
+	for _, imported := range file.Imports {
+		name := ""
+		if imported.Name != nil {
+			name = imported.Name.Name
+		}
+		value, err := strconv.Unquote(imported.Path.Value)
+		if err != nil {
+			t.Fatalf("invalid excluded-source import %s: %v", path, err)
+		}
+		context = append(context, "import:"+name+":"+value)
+	}
+	for _, group := range file.Comments {
+		for _, comment := range group.List {
+			if !constraint.IsGoBuild(comment.Text) && !constraint.IsPlusBuild(comment.Text) {
+				continue
+			}
+			expr, err := constraint.Parse(comment.Text)
+			if err != nil {
+				t.Fatalf("invalid excluded-source build constraint %s: %v", path, err)
+			}
+			context = append(context, "build:"+expr.String())
+		}
+	}
+	sort.Strings(context)
+	contextDigest := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(context, "\n"))))
+	var findings []authorityFinding
+	record := func(node ast.Node, enclosing string) {
+		if debtExcludedDeclarationIsLiteralOnly(node, info) {
+			return
+		}
+		// Comments and source positions do not define a permission or occurrence.
+		ast.Inspect(node, func(node ast.Node) bool {
+			switch node := node.(type) {
+			case *ast.FuncDecl:
+				node.Doc = nil
+			case *ast.GenDecl:
+				node.Doc = nil
+			case *ast.TypeSpec:
+				node.Doc, node.Comment = nil, nil
+			case *ast.ValueSpec:
+				node.Doc, node.Comment = nil, nil
+			case *ast.Field:
+				node.Doc, node.Comment = nil, nil
+			}
+			return true
+		})
+		var normalized bytes.Buffer
+		if err := format.Node(&normalized, token.NewFileSet(), node); err != nil {
+			t.Fatalf("normalize excluded authority source %s: %v", path, err)
+		}
+		findings = append(findings, authorityFinding{
+			Kind: "unresolved-excluded-source", File: path, Enclosing: enclosing,
+			Member:   fmt.Sprintf("declaration:%x", sha256.Sum256(normalized.Bytes())),
+			Resolved: "unresolved|source-context:" + contextDigest,
+		})
+	}
+	for _, declaration := range file.Decls {
+		switch declaration := declaration.(type) {
+		case *ast.FuncDecl:
+			record(declaration, declaration.Name.Name)
+		case *ast.GenDecl:
+			if declaration.Tok == token.IMPORT {
+				continue
+			}
+			for _, spec := range declaration.Specs {
+				name := "package"
+				if spec, ok := spec.(*ast.TypeSpec); ok {
+					name = spec.Name.Name
+				}
+				record(&ast.GenDecl{Tok: declaration.Tok, Specs: []ast.Spec{spec}}, name)
+			}
+		}
 	}
 	return findings
+}
+
+func debtExcludedDeclarationIsLiteralOnly(node ast.Node, info *types.Info) bool {
+	// A deliberately narrow, source-evidenced benign classification. References,
+	// calls, selectors, aliases, callbacks and non-literal bodies stay uncertain.
+	literal := func(expr ast.Expr) bool {
+		_, ok := expr.(*ast.BasicLit)
+		return ok
+	}
+	builtin := func(expr ast.Expr) bool {
+		ident, ok := expr.(*ast.Ident)
+		if !ok {
+			return false
+		}
+		object, ok := info.Uses[ident].(*types.TypeName)
+		if !ok || object != types.Universe.Lookup(ident.Name) {
+			return false
+		}
+		_, ok = object.Type().(*types.Basic)
+		return ok
+	}
+	switch node := node.(type) {
+	case *ast.GenDecl:
+		for _, spec := range node.Specs {
+			values, ok := spec.(*ast.ValueSpec)
+			if !ok || (values.Type != nil && !builtin(values.Type)) || len(values.Values) == 0 {
+				return false
+			}
+			for _, value := range values.Values {
+				if !literal(value) {
+					return false
+				}
+			}
+		}
+		return true
+	case *ast.FuncDecl:
+		if node.Recv != nil || node.Type.TypeParams != nil || node.Body == nil {
+			return false
+		}
+		for _, list := range []*ast.FieldList{node.Type.Params, node.Type.Results} {
+			if list != nil {
+				for _, field := range list.List {
+					if !builtin(field.Type) {
+						return false
+					}
+				}
+			}
+		}
+		for _, statement := range node.Body.List {
+			ret, ok := statement.(*ast.ReturnStmt)
+			if !ok {
+				return false
+			}
+			for _, expr := range ret.Results {
+				if !literal(expr) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func debtAuthorityTypedContractScope(path string) bool {
@@ -346,6 +630,10 @@ func (scan *debtAuthorityTypeScan) debtCollectAuthorityFindings(path string, fil
 							}
 							findings = append(findings, finding)
 						}
+					}
+					for _, value := range typed.Values {
+						findings = append(findings, scan.debtCollectContextAuthorityFindings(path, "package", value, info)...)
+						findings = append(findings, scan.debtCollectOperationAuthorityFindings(path, "package", value, info)...)
 					}
 				}
 			}
@@ -615,90 +903,8 @@ func debtPrivateFixtureImportIsConfined(path string, file *ast.File, info *types
 	return used && confined
 }
 
-// Inactive source cannot rely on the current build's type graph. Resolve its
-// import aliases syntactically and reject production fixture consumption rather
-// than letting an OS/build-tag change bypass the active-source guard.
-func debtCollectInactiveTestConsumptionFindings(path string, file *ast.File) []authorityFinding {
-	if debtTestAuthorityConsumer(path, "package") {
-		return nil
-	}
-	imports := map[string]string{}
-	var findings []authorityFinding
-	for _, imp := range file.Imports {
-		imported, err := strconv.Unquote(imp.Path.Value)
-		if err != nil {
-			continue
-		}
-		name := filepath.Base(imported)
-		if imp.Name != nil {
-			name = imp.Name.Name
-		}
-		imports[name] = imported
-		if debtTestFixturePackage(imported) {
-			findings = append(findings, authorityFinding{
-				Kind: "forbidden-test-consumption", File: path, Enclosing: "package",
-				Member: "inactive-import:" + imported, Resolved: "fixture import in inactive production source",
-			})
-		}
-	}
-	for _, declaration := range file.Decls {
-		enclosing := "package"
-		if function, ok := declaration.(*ast.FuncDecl); ok {
-			enclosing = function.Name.Name
-		}
-		if debtTestAuthorityConsumer(path, enclosing) {
-			continue
-		}
-		counts := map[string]int{}
-		ast.Inspect(declaration, func(node ast.Node) bool {
-			name := ""
-			switch reference := node.(type) {
-			case *ast.SelectorExpr:
-				if !strings.HasSuffix(reference.Sel.Name, "ForTest") {
-					return true
-				}
-				qualifier, ok := reference.X.(*ast.Ident)
-				if ok {
-					imported := imports[qualifier.Name]
-					if imported != "" && !strings.HasPrefix(imported, "github.com/division-sh/swarm/") {
-						return false
-					}
-					if imported == "" {
-						imported = file.Name.Name + "." + qualifier.Name
-					}
-					name = imported + "." + reference.Sel.Name
-				} else {
-					name = file.Name.Name + "." + reference.Sel.Name
-				}
-			case *ast.Ident:
-				if !strings.HasSuffix(reference.Name, "ForTest") || imports[reference.Name] != "" {
-					return true
-				}
-				if function, ok := declaration.(*ast.FuncDecl); ok && reference == function.Name {
-					return true
-				}
-				if reference.Obj != nil && reference.Obj.Kind != ast.Fun {
-					return true
-				}
-				name = file.Name.Name + "." + reference.Name
-			}
-			if name == "" {
-				return true
-			}
-			counts[name]++
-			findings = append(findings, authorityFinding{
-				Kind: "forbidden-test-consumption", File: path, Enclosing: enclosing,
-				Member: fmt.Sprintf("inactive-reference:%s#%d", name, counts[name]), Resolved: "named test operation in inactive production source",
-			})
-			_, selector := node.(*ast.SelectorExpr)
-			return !selector
-		})
-	}
-	return findings
-}
-
-func (scan *debtAuthorityTypeScan) debtCollectOperationAuthorityFindings(path, enclosing string, body *ast.BlockStmt, info *types.Info) []authorityFinding {
-	if body == nil {
+func (scan *debtAuthorityTypeScan) debtCollectOperationAuthorityFindings(path, enclosing string, body ast.Node, info *types.Info) []authorityFinding {
+	if body == nil || body == (*ast.BlockStmt)(nil) {
 		return nil
 	}
 	counts := map[string]int{}
@@ -784,8 +990,10 @@ func (scan *debtAuthorityTypeScan) debtAuthorityCallFinding(path, enclosing stri
 		raw = raw || scan.debtContainsRawSQLType(argType)
 		resolved += "|arg=" + debtResolvedTypeString(argType)
 	}
-	if signature, ok := types.Unalias(callType).Underlying().(*types.Signature); ok {
-		resolved += "|results=" + debtResolvedTupleString(signature.Results())
+	if callType != nil {
+		if signature, ok := types.Unalias(callType).Underlying().(*types.Signature); ok {
+			resolved += "|results=" + debtResolvedTupleString(signature.Results())
+		}
 	}
 	if !raw && !debtIsSQLOperationName(name) {
 		return authorityFinding{}, false
@@ -930,8 +1138,8 @@ func (scan *debtAuthorityTypeScan) debtAuthorityTypeFinding(path, enclosing, mem
 	}, true
 }
 
-func (scan *debtAuthorityTypeScan) debtCollectContextAuthorityFindings(path, enclosing string, body *ast.BlockStmt, info *types.Info) []authorityFinding {
-	if body == nil {
+func (scan *debtAuthorityTypeScan) debtCollectContextAuthorityFindings(path, enclosing string, body ast.Node, info *types.Info) []authorityFinding {
+	if body == nil || body == (*ast.BlockStmt)(nil) {
 		return nil
 	}
 	counts := map[string]int{}

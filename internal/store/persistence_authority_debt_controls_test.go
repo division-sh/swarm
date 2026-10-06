@@ -204,8 +204,251 @@ func TestPersistenceAuthorityDebtSelectedScopeIncludesAliasesAndInactiveSource(t
 	if err := os.WriteFile(filepath.Join(path, "disabled.go"), []byte("//go:build never_swarm_authority\n\npackage runtime\nimport \"database/sql\"\nvar _ *sql.DB\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if got := debtInactiveAuthorityFindings(t, root, map[string]bool{}); len(authorityDebtSites(got)) == 0 {
+	source, err := os.ReadFile(filepath.Join(path, "disabled.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := debtAuthorityFindingsFromSource(t, "internal/runtime/disabled.go", string(source)); len(authorityDebtSites(got)) == 0 {
 		t.Fatalf("inactive raw authority disappeared: %+v", got)
+	}
+}
+
+func debtWriteModuleSource(t *testing.T, root, path, source string) {
+	t.Helper()
+	full := filepath.Join(root, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPersistenceAuthorityDebtCensusPackageInitializers(t *testing.T) {
+	for name, source := range map[string]string{
+		"blank-scalar":   `package probe;import "database/sql";var _=func(db *sql.DB)bool{db.Exec("one");return true}(nil)`,
+		"named-scalar":   `package probe;import "database/sql";var value=func(db *sql.DB)bool{db.Exec("one");return true}(nil)`,
+		"stored-closure": `package probe;import "database/sql";var value=func(db *sql.DB){db.Exec("one")}`,
+		"context":        `package probe;import("context";"database/sql");var _=func(ctx context.Context,tx *sql.Tx)bool{_ = context.WithValue(ctx,"tx",tx);return true}(nil,nil)`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			findings := debtAuthorityFindingsFromSource(t, "internal/runtime/init.go", source)
+			if authorityDebtCount(authorityDebtSites(findings)) == 0 {
+				t.Fatalf("initializer authority escaped: %+v", findings)
+			}
+		})
+	}
+}
+
+func TestPersistenceAuthorityDebtCensusRepeatedOccurrences(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	source := "package probe;import \"database/sql\";var db *sql.DB;func init(){db.Exec(\"one\")}\n"
+	debtWriteModuleSource(t, root, "internal/runtime/probe.go", source)
+	before := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	debtWriteModuleSource(t, root, "internal/runtime/probe_test.go", "package probe;import \"testing\";func TestUnrelated(t *testing.T){}\n")
+	if got := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)); !debtSitesEqual(before, got) {
+		t.Fatal("test package variants multiplied the same source occurrences")
+	}
+	debtWriteModuleSource(t, root, "internal/runtime/probe.go", source+"func init(){db.Exec(\"two\")}\n")
+	after := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	if authorityDebtCount(after) != authorityDebtCount(before)+1 || len(authorityDebtSubset(after, before, "second init")) == 0 {
+		t.Fatalf("second initializer collapsed: before=%d after=%d", authorityDebtCount(before), authorityDebtCount(after))
+	}
+	blank := "package probe;import \"database/sql\";var _=func(db *sql.DB)bool{db.Exec(\"one\");return true}(nil)\n"
+	debtWriteModuleSource(t, root, "internal/runtime/probe.go", blank)
+	before = authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	debtWriteModuleSource(t, root, "internal/runtime/probe.go", blank+"var _=func(db *sql.DB)bool{db.Exec(\"two\");return true}(nil)\n")
+	after = authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	if authorityDebtCount(after) <= authorityDebtCount(before) || len(authorityDebtSubset(after, before, "second blank initializer")) == 0 {
+		t.Fatal("distinct blank declarations collapsed")
+	}
+}
+
+func TestPersistenceAuthorityDebtCensusPreservesAugmentedVariantEvidence(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	prefix := "internal/store/internal/runtimepersistence/"
+	debtWriteModuleSource(t, root, prefix+"holder.go", "package probe;type Holder struct{};func NewHolder()*Holder{return nil}\n")
+	debtWriteModuleSource(t, root, prefix+"holder_test.go", "package probe;import \"database/sql\";func(h *Holder)Database()*sql.DB{return nil}\n")
+	foundType, foundResult := false, false
+	for _, site := range authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)) {
+		if site.File != prefix+"holder.go" || site.Kind != "raw-authority-export" {
+			continue
+		}
+		foundType = foundType || site.Declaration == "Holder"
+		foundResult = foundResult || site.Declaration == "NewHolder"
+	}
+	if !foundType || !foundResult {
+		t.Fatalf("first normal package load erased augmented raw evidence: type=%v result=%v", foundType, foundResult)
+	}
+}
+
+func TestPersistenceAuthorityDebtCensusInactiveLocalOperations(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "internal/runtime/active.go", "package probe;import \"database/sql\";func Database()*sql.DB{return nil}\n")
+	debtWriteModuleSource(t, root, "internal/runtime/hidden.go", "//go:build never_swarm_authority\n\npackage probe;func hidden(){Database().Exec(\"one\")}\n")
+	before := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	found := false
+	for _, site := range before {
+		found = found || site.File == "internal/runtime/hidden.go" && site.Kind == "raw-operation"
+	}
+	if !found {
+		t.Fatal("inactive package-local SQL escaped")
+	}
+	debtWriteModuleSource(t, root, "internal/runtime/hidden.go", "//go:build never_swarm_authority\n\npackage probe;func hidden(){db:=Database();db.Exec(\"one\");db.Exec(\"two\")}\n")
+	after := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	if len(authorityDebtSubset(after, before, "new inactive operation")) == 0 {
+		t.Fatal("extra inactive SQL operation paid by its old source marker")
+	}
+	debtWriteModuleSource(t, root, "internal/runtime/hidden.go", "//go:build never_swarm_authority\n\npackage probe;func harmless()string{return \"no authority\"}\n")
+	for _, site := range authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)) {
+		if site.File == "internal/runtime/hidden.go" {
+			t.Fatalf("legitimate inactive source became authority: %+v", site)
+		}
+	}
+}
+
+func TestPersistenceAuthorityDebtCensusPlatformIndependentSource(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "internal/runtime/active.go", "package probe;import \"database/sql\";func Database()*sql.DB{return nil}\n")
+	for _, goos := range []string{"linux", "darwin"} {
+		debtWriteModuleSource(t, root, "internal/runtime/platform_"+goos+".go", "package probe;func platform(){Database().Exec(\"one\")}\n")
+	}
+	var before map[string]authorityDebtSite
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		t.Setenv("GOOS", goos)
+		t.Setenv("GOARCH", "arm64")
+		t.Setenv("CGO_ENABLED", "1")
+		t.Setenv("GOFLAGS", "-tags=ignored_host_selection")
+		got := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+		if before != nil && !debtSitesEqual(before, got) {
+			t.Fatalf("identical source changed debt with host %s", goos)
+		}
+		before = got
+	}
+	debtWriteModuleSource(t, root, "internal/runtime/platform_darwin.go", "package probe;func platform(){Database().Exec(\"one\");Database().Exec(\"two\")}\n")
+	if len(authorityDebtSubset(authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)), before, "new platform operation")) == 0 {
+		t.Fatal("new platform-specific operation escaped")
+	}
+}
+
+func TestPersistenceAuthorityDebtCensusOwnedSourceBeforeLoading(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "internal/runtime/active.go", "package probe;import \"database/sql\";func Database()*sql.DB{return nil}\n")
+	before := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	debtWriteModuleSource(t, root, "foreign/.git", "gitdir: /unrelated/checkout\n")
+	debtWriteModuleSource(t, root, "foreign/foreign.go", "package foreign;import \"database/sql\";func hidden(db *sql.DB){db.Exec(\"foreign\")}\n")
+	if got := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)); !debtSitesEqual(before, got) {
+		t.Fatal("active foreign checkout entered the owned census")
+	}
+	debtWriteModuleSource(t, root, "foreign/foreign.go", "this is invalid foreign source")
+	if got := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)); !debtSitesEqual(before, got) {
+		t.Fatal("broken foreign checkout influenced owned loading")
+	}
+	debtWriteModuleSource(t, root, "internal/runtime/untracked_test.go", "package probe;func untracked(){Database().Exec(\"owned\")}\n")
+	if len(authorityDebtSubset(authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)), before, "owned untracked source")) == 0 {
+		t.Fatal("owned untracked source escaped")
+	}
+}
+
+func TestPersistenceAuthorityDebtExcludedWindowsAndUnknownDeclarations(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "active.go", "package probe;func harmless()string{return \"safe\"}\n")
+	path := "internal/runtime/process_tree_windows.go"
+	debtWriteModuleSource(t, root, path, `//go:build windows
+
+package probe
+import("os/exec";"syscall";"golang.org/x/sys/windows")
+func prepare(cmd *exec.Cmd){cmd.SysProcAttr=&syscall.SysProcAttr{};cmd.SysProcAttr.CreationFlags|=windows.CREATE_NEW_PROCESS_GROUP}
+func helper(){unknownDatabase().Exec("one")}
+var callback=unknownDatabase().Exec
+var _=func()bool{callback("two");return true}()
+`)
+	sites := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	unknown := 0
+	for _, site := range sites {
+		if site.File == path && site.Kind == "unresolved-excluded-source" {
+			unknown += site.Multiplicity
+			if site.Family != "excluded-source-uncertainty" || !strings.Contains(site.Replacement, "classification") {
+				t.Fatalf("uncertainty mislabeled as SQL/permission: %+v", site)
+			}
+		}
+	}
+	if unknown != 4 {
+		t.Fatalf("Windows field/helper/method-value/initializer uncertainty missing: got %d sites=%+v", unknown, sites)
+	}
+}
+
+func TestPersistenceAuthorityDebtExcludedUncertaintyRatchet(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "active.go", "package probe;func anchor(){}\n")
+	path := "hidden.go"
+	prefix := "//go:build never_swarm_authority\n\npackage probe\n"
+	first := "func init(){unknownCallback(\"one\")}\n"
+	second := "var _=func()bool{unknownMethodValue();return true}()\n"
+	debtWriteModuleSource(t, root, path, prefix+first+second)
+	before := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	debtWriteModuleSource(t, root, path, prefix+"\n// harmless position change\n"+first+second)
+	if got := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)); !debtSitesEqual(before, got) {
+		t.Fatal("comments/line movement changed uncertainty identity")
+	}
+	debtWriteModuleSource(t, root, path, prefix+first+second+second)
+	more := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	if authorityDebtCount(more) != authorityDebtCount(before)+1 || len(authorityDebtSubset(more, before, "duplicate uncertainty")) == 0 {
+		t.Fatal("distinct identical excluded initializers collapsed")
+	}
+	debtWriteModuleSource(t, root, path, prefix+"var _=func()bool{unknownMethodValue();unknownCallback(\"two\");return true}()\n")
+	changed := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	if authorityDebtCount(changed) >= authorityDebtCount(before) || len(authorityDebtSubset(changed, before, "changed despite deletion")) == 0 {
+		t.Fatal("deletion paid for changed unresolved authority")
+	}
+	debtWriteModuleSource(t, root, path, strings.Replace(prefix, "never_swarm_authority", "another_excluded_tag", 1)+first+second)
+	if got := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)); len(authorityDebtSubset(got, before, "build context changed")) == 0 {
+		t.Fatal("excluded build context change disappeared")
+	}
+}
+
+func TestPersistenceAuthorityDebtExcludedPlatformIdentity(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "active.go", "package probe;func anchor(){}\n")
+	debtWriteModuleSource(t, root, "hidden_windows.go", "package probe;import \"syscall\";func windowsField(p *syscall.SysProcAttr){p.CreationFlags=1}\n")
+	var before map[string]authorityDebtSite
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		t.Setenv("GOOS", goos)
+		t.Setenv("GOARCH", "arm64")
+		t.Setenv("GOAMD64", "v4")
+		t.Setenv("GOEXPERIMENT", "not_a_real_experiment")
+		t.Setenv("CGO_ENABLED", "0")
+		t.Setenv("GOFLAGS", "-tags=hidden_selection")
+		got := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+		if authorityDebtCount(got) != 1 || (before != nil && !debtSitesEqual(before, got)) {
+			t.Fatalf("excluded field uncertainty changed with host %s: %+v", goos, got)
+		}
+		before = got
+	}
+}
+
+func TestPersistenceAuthorityDebtExcludedInheritedReceiver(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "active.go", "package probe;type handle struct{}\n")
+	path := "hidden_windows.go"
+	debtWriteModuleSource(t, root, path, "package probe;func(h *handle)Close(){unknownCallback(h)}\n")
+	before := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	if authorityDebtCount(before) != 1 {
+		t.Fatalf("inherited receiver was skipped instead of accounted: %+v", before)
+	}
+	debtWriteModuleSource(t, root, path, "package probe;func(h *handle)Close(){unknownCallback(h);unknownCallback(h)}\n")
+	after := authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root))
+	if len(authorityDebtSubset(after, before, "changed receiver body")) == 0 {
+		t.Fatal("extra receiver-body work escaped uncertainty accounting")
 	}
 }
 
@@ -220,7 +463,7 @@ func TestPersistenceAuthorityDebtCensusFailsClosedOnMissingAndTypeFailedSource(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"empty", "type-error"} {
+	for _, name := range []string{"empty", "type-error", "excluded-parse-error"} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/authorityprobe\n\ngo 1.25.0\n"), 0644); err != nil {
@@ -231,13 +474,17 @@ func TestPersistenceAuthorityDebtCensusFailsClosedOnMissingAndTypeFailedSource(t
 					t.Fatal(err)
 				}
 			}
+			if name == "excluded-parse-error" {
+				debtWriteModuleSource(t, root, "active.go", "package probe;func anchor(){}\n")
+				debtWriteModuleSource(t, root, "broken_windows.go", "package probe;func broken(\n")
+			}
 			command := exec.Command(executable, "-test.run=^TestPersistenceAuthorityDebtCensusFailsClosedOnMissingAndTypeFailedSource$", "-test.v")
 			command.Env = append(os.Environ(), probe+"="+root)
 			output, err := command.CombinedOutput()
 			if err == nil || strings.Contains(string(output), "HOSTILE_CENSUS_RETURNED_SUCCESS") {
 				t.Fatalf("partial census accepted: %v\n%s", err, output)
 			}
-			if !strings.Contains(string(output), "authority census matched no packages") && !strings.Contains(string(output), "load authority packages reported type errors") {
+			if !strings.Contains(string(output), "authority census matched no packages") && !strings.Contains(string(output), "load authority packages reported type errors") && !strings.Contains(string(output), "parse inactive authority source") {
 				t.Fatalf("wrong failure: %v\n%s", err, output)
 			}
 		})
@@ -348,6 +595,42 @@ func TestPersistenceAuthorityDebtTrustedBaseDistinguishesBootstrapFromLandedMerg
 				t.Fatalf("trusted base=%s error=%v, want %s", got, err, want)
 			}
 		})
+	}
+}
+
+func TestPersistenceAuthorityDebtBootstrapOriginSurvivesRebase(t *testing.T) {
+	root := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := debtGit(root, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q", "-b", "master")
+	git("config", "user.name", "Debt Ratchet Control")
+	git("config", "user.email", "ratchet@example.invalid")
+	debtWriteModuleSource(t, root, "seed.txt", "original extraction\n")
+	git("add", ".")
+	git("commit", "-qm", "test: origin")
+	origin := git("rev-parse", "HEAD")
+	debtWriteModuleSource(t, root, "seed.txt", "new master\n")
+	git("add", ".")
+	git("commit", "-qm", "test: master advanced")
+	base := git("rev-parse", "HEAD")
+	if err := debtCheckBootstrapAncestry(root, origin, base); err != nil {
+		t.Fatalf("rebase rejected unchanged origin: %v", err)
+	}
+	git("switch", "-qc", "unrelated", origin)
+	debtWriteModuleSource(t, root, "other.txt", "unrelated source\n")
+	git("add", ".")
+	git("commit", "-qm", "test: unrelated origin")
+	if err := debtCheckBootstrapAncestry(root, git("rev-parse", "HEAD"), base); err == nil {
+		t.Fatal("unrelated bootstrap source accepted")
+	}
+	if err := debtCheckBootstrapAncestry(root, "bad", base); err == nil {
+		t.Fatal("invalid bootstrap source accepted")
 	}
 }
 
