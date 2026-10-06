@@ -40,17 +40,17 @@ func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol
 		if err != nil {
 			return err
 		}
-		query := `SELECT CAST(admitted_attempt_id AS TEXT),CAST(origin_evidence AS TEXT),CAST(run_id AS TEXT),agent_id,flow_instance,cancel_reason,CAST(cancel_cause_event_id AS TEXT),cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1`
+		query := `SELECT CAST(current_attempt_id AS TEXT),CAST(origin_evidence AS TEXT),CAST(run_id AS TEXT),agent_id,flow_instance,cancel_reason,CAST(cancel_cause_event_id AS TEXT),cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1`
 		if postgres {
 			query += ` FOR UPDATE`
 		}
-		var admitted, evidence, reason, cause sql.NullString
+		var current, evidence, reason, cause sql.NullString
 		var runID, agentID, path string
 		var requested any
-		if err := tx.QueryRowContext(ctx, query, turnID).Scan(&admitted, &evidence, &runID, &agentID, &path, &reason, &cause, &requested); err != nil {
+		if err := tx.QueryRowContext(ctx, query, turnID).Scan(&current, &evidence, &runID, &agentID, &path, &reason, &cause, &requested); err != nil {
 			return err
 		}
-		if admitted.Valid || !evidence.Valid || !reason.Valid || reason.String != string(deliverylifecycle.CancellationTerminate) || !cause.Valid {
+		if current.Valid || !evidence.Valid || !reason.Valid || reason.String != string(deliverylifecycle.CancellationTerminate) || !cause.Valid {
 			return fmt.Errorf("unstarted settlement lacks exact origin-only termination evidence")
 		}
 		stored, owner, err := decodeUnstartedOrigin([]byte(evidence.String))
@@ -78,6 +78,9 @@ func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol
 		}
 		if physical != 0 {
 			return fmt.Errorf("origin-only cancellation cannot bypass provider-attempt ownership")
+		}
+		if err := requireCanceledPhysicalSetClosed(ctx, tx, origin); err != nil {
+			return err
 		}
 		if origin.Kind == effects.CompletionOriginDelivery {
 			if selectedRecoveryExecutionID == "" {

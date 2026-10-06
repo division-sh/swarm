@@ -82,6 +82,9 @@ func requestTurnTimeoutTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 	if runID != owner.RunID || agentID != attempt.Authority.Target.AgentID || flow != owner.Route.InstancePath {
 		return runtimeeffects.TurnCancellation{}, fmt.Errorf("turn timeout contradicts its exact origin owner")
 	}
+	if err := requireBusinessTurnBindingTx(ctx, tx, postgres, turnID, attempt, now); err != nil {
+		return runtimeeffects.TurnCancellation{}, err
+	}
 	result := runtimeeffects.TurnCancellation{Origin: attempt.Origin, OriginSettled: !pending}
 	if !pending && settledRaw == nil {
 		query = `UPDATE runtime_agent_turn_lifetimes SET settled_at=$1 WHERE turn_id=$2::uuid AND settled_at IS NULL`

@@ -495,6 +495,11 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 			}
 			return insertCompletionBudgetReservationsPostgres(ctx, tx, attempt.AttemptID, reservations, req.Now.UTC())
 		})
+		if err == nil {
+			err = mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				return bindBusinessTurnAttemptTx(ctx, tx, true, attempt, req.Now)
+			})
+		}
 		return attempt, err
 	})
 	attempt, acknowledged := result.Value()
@@ -647,6 +652,11 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 			}
 			return insertCompletionBudgetReservationsSQLite(txctx, tx, attempt.AttemptID, reservations, req.Now.UTC())
 		})
+		if err == nil {
+			err = mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				return bindBusinessTurnAttemptTx(txctx, tx, false, attempt, req.Now)
+			})
+		}
 		return attempt, err
 	})
 	attempt, acknowledged := result.Value()

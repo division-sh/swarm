@@ -16967,12 +16967,25 @@ platform_tables:
         for stage movement nor independently settles the canceled business origin.
         An authored terminate command belongs to the exact compiled advances_to
         carrier and commits its intent in the guarded stage-write transaction.
-        The immutable admitted_attempt_id anchors the real provider authorization
-        before launch; it is not a launch timestamp or timeout deadline. A
+        The immutable admitted_attempt_id anchors the first real provider authorization;
+        first_attempt_id and first_launched_at separately anchor the first actual
+        launch. A retryable prelaunch rejection can put these immutable anchors
+        on different exact delivery claims. Neither anchor grants settlement
+        authority. Successful provider authorization atomically binds
+        current_attempt_id to the actual authorized attempt, after the existing
+        origin owner admits its exact claim. Cancellation freezes that binding;
+        startup, timeout admission, launch and physical canceled settlement
+        consume it, never a latest-attempt query. Additional physical rounds of
+        the same exact claim can settle under that binding, but an obsolete
+        claim cannot act on its successor. Historical anchors must agree on the
+        logical delivery, constructed run/instance, agent and authority kind;
+        directive execution ownership remains exact and does not inherit delivery
+        claim-renewal semantics. The first launch/deadline, bound, physical facts
+        and replay policy remain unchanged. A
         prelaunch terminate intent prevents launch and further rounds, while the
         owning carrier still closes its authorized physical work and joins cleanup
         before CommitCanceledTurn settles the business origin. Startup consumes
-        that same authorization anchor without manufacturing a launch clock.
+        that exact current authorization binding without manufacturing a launch clock.
         An unclaimed pending or retry delivery or prepared directive can instead be canceled in the
         guarded terminate transaction through the existing delivery owner. It
         preserves claim/retry versions and prior attempt evidence, never creates
@@ -16998,7 +17011,7 @@ platform_tables:
         passing an origin-only CommitCanceledTurn command. The same operation
         validates either explicit physical-attempt evidence or exact origin-only
         evidence, never an implicit fallback between them. Origin-only settlement
-        refuses any physical attempt for the origin and cannot declare a timeout
+        refuses any physical attempt for the exact current claim and cannot declare a timeout
         reaction. Normal startup reconstructs unresolved origin-only cancellation
         without minting provider authority or execution mode, and keeps selected
         execution authority out of its normal snapshot. Directive recovery
@@ -17006,6 +17019,12 @@ platform_tables:
         snapshots do not acquire mutation locks. Exact constructor identity
         is read from persisted evidence, not reconstructed from an instance path.
         An open physical provider set refuses premature queued settlement.
+        A reclaimed delivery terminated before current provider authorization
+        stores its exact claim in origin_evidence with current_attempt_id absent.
+        Closed predecessor attempts and immutable clock anchors remain history,
+        not current execution authority. Origin-only settlement still requires
+        the entire logical origin's physical history to be closed; it never
+        bypasses a predecessor's outstanding cleanup or invents a provider attempt.
         A canceled retry origin also retires its saved completion continuations in
         the same transaction, preserving prior physical attempts, responses, spend
         and claim outcomes. Shared physical-turn decoding consumes each exact
@@ -17028,6 +17047,7 @@ platform_tables:
             bound_ns BIGINT CHECK (bound_ns > 0),
             bound_emit TEXT CHECK (bound_emit IS NULL OR NULLIF(TRIM(bound_emit), '') IS NOT NULL),
             admitted_attempt_id UUID,
+            current_attempt_id UUID,
             origin_evidence JSONB,
             first_attempt_id UUID,
             first_launched_at TIMESTAMPTZ,
@@ -17039,7 +17059,8 @@ platform_tables:
             created_at TIMESTAMPTZ NOT NULL,
             UNIQUE (origin_kind, origin_id),
             CHECK (admitted_attempt_id IS NOT NULL OR (cancel_reason IS NOT NULL AND cancel_reason = 'terminate' AND first_attempt_id IS NULL AND first_launched_at IS NULL AND bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL AND (origin_evidence IS NOT NULL OR settled_at IS NOT NULL))),
-            CHECK (origin_evidence IS NULL OR admitted_attempt_id IS NULL),
+            CHECK (current_attempt_id IS NULL OR admitted_attempt_id IS NOT NULL),
+            CHECK (origin_evidence IS NULL OR (current_attempt_id IS NULL AND cancel_reason = 'terminate')),
             CHECK ((bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL) OR (bound_ns IS NOT NULL AND bound_emit IS NOT NULL AND timeout_event_id IS NOT NULL)),
             CHECK ((first_attempt_id IS NULL AND first_launched_at IS NULL) OR (first_attempt_id IS NOT NULL AND first_launched_at IS NOT NULL)),
             CHECK ((cancel_reason IS NULL AND cancel_cause_event_id IS NULL AND cancel_requested_at IS NULL) OR (cancel_reason IS NOT NULL AND cancel_cause_event_id IS NOT NULL AND cancel_requested_at IS NOT NULL)),

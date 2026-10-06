@@ -14,6 +14,7 @@ import (
 type canceledTurnRecoveryRow struct {
 	turnID, runID, agentID, flow    string
 	admittedAttempt, originEvidence sql.NullString
+	currentAttempt                  sql.NullString
 	firstAttempt                    sql.NullString
 	bound                           sql.NullInt64
 	emit, timeoutEvent              sql.NullString
@@ -32,7 +33,7 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 		scope = `t.run_id=(SELECT fork_run_id FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1)`
 		args = []any{selectedExecutionID}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT CAST(t.turn_id AS TEXT),CAST(t.admitted_attempt_id AS TEXT),CAST(t.first_attempt_id AS TEXT),CAST(t.run_id AS TEXT),t.agent_id,t.flow_instance,
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(t.turn_id AS TEXT),CAST(t.admitted_attempt_id AS TEXT),CAST(t.current_attempt_id AS TEXT),CAST(t.first_attempt_id AS TEXT),CAST(t.run_id AS TEXT),t.agent_id,t.flow_instance,
 		t.bound_ns,t.bound_emit,CAST(t.timeout_event_id AS TEXT),t.first_launched_at,t.cancel_reason,CAST(t.cancel_cause_event_id AS TEXT),t.cancel_requested_at,CAST(t.origin_evidence AS TEXT)
 		FROM runtime_agent_turn_lifetimes t
 		LEFT JOIN runtime_external_effect_attempts admitted ON admitted.attempt_id=t.admitted_attempt_id
@@ -50,7 +51,7 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 	var pending []canceledTurnRecoveryRow
 	for rows.Next() {
 		var row canceledTurnRecoveryRow
-		if err := rows.Scan(&row.turnID, &row.admittedAttempt, &row.firstAttempt, &row.runID, &row.agentID, &row.flow, &row.bound, &row.emit, &row.timeoutEvent, &row.launched, &row.reason, &row.cause, &row.requested, &row.originEvidence); err != nil {
+		if err := rows.Scan(&row.turnID, &row.admittedAttempt, &row.currentAttempt, &row.firstAttempt, &row.runID, &row.agentID, &row.flow, &row.bound, &row.emit, &row.timeoutEvent, &row.launched, &row.reason, &row.cause, &row.requested, &row.originEvidence); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -65,8 +66,8 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 	}
 	turns := make([]runtimeeffects.TurnExecutionResult, 0, len(pending))
 	for _, row := range pending {
-		if !row.admittedAttempt.Valid {
-			turn, err := recoverUnstartedCanceledTurn(ctx, tx, delivery, directives, row)
+		if !row.currentAttempt.Valid {
+			turn, err := recoverUnstartedCanceledTurn(ctx, tx, postgres, delivery, directives, row)
 			if err != nil {
 				return nil, err
 			}
@@ -85,23 +86,28 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 		if err != nil {
 			return nil, err
 		}
-		if selectedExecutionID == "" && admitted.Authority.Kind != runtimeeffects.AuthorityNormalAgent || selectedExecutionID != "" && (admitted.Authority.Kind != runtimeeffects.AuthoritySelectedContractFork || admitted.Authority.ID != selectedExecutionID) {
+		attempt, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.currentAttempt.String, request.Now())
+		if err != nil {
+			return nil, err
+		}
+		if err := validateBusinessTurnAnchor(admitted, attempt); err != nil {
+			return nil, err
+		}
+		if selectedExecutionID == "" && attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || selectedExecutionID != "" && (attempt.Authority.Kind != runtimeeffects.AuthoritySelectedContractFork || attempt.Authority.ID != selectedExecutionID) {
 			return nil, fmt.Errorf("canceled turn authority differs from its recovery scope")
 		}
-		if selectedExecutionID != "" && admitted.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
-			if err := delivery.ValidateSelectedOriginExecutionTx(ctx, tx, admitted.Origin.Delivery, selectedExecutionID); err != nil {
+		if selectedExecutionID != "" && attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
+			if err := delivery.ValidateSelectedOriginExecutionTx(ctx, tx, attempt.Origin.Delivery, selectedExecutionID); err != nil {
 				return nil, err
 			}
 		}
-		attempt := admitted
-		if row.firstAttempt.Valid && row.firstAttempt.String != row.admittedAttempt.String {
-			attempt, err = loadCanceledFirstAttempt(ctx, tx, postgres, row.firstAttempt.String, request.Now())
+		if row.firstAttempt.Valid {
+			first, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.firstAttempt.String, request.Now())
 			if err != nil {
 				return nil, err
 			}
-			if !attempt.Origin.Same(admitted.Origin) || attempt.Authority.Target.RunID != admitted.Authority.Target.RunID ||
-				attempt.Authority.Target.AgentID != admitted.Authority.Target.AgentID || attempt.Authority.Target.FlowInstance != admitted.Authority.Target.FlowInstance {
-				return nil, fmt.Errorf("canceled turn launch and authorization anchors disagree")
+			if err := validateBusinessTurnAnchor(first, attempt); err != nil {
+				return nil, err
 			}
 		}
 		if err := request.Admit(attempt.Authority.ExecutionMode); err != nil {

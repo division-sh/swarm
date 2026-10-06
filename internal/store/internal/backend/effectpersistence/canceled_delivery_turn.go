@@ -79,7 +79,7 @@ func prepareCanceledTurnSettlementTx(ctx context.Context, tx *sql.Tx, postgres b
 	if err := requireExactLaunchAttempt(ctx, tx, postgres, attempt); err != nil {
 		return canceledTurnSettlementFacts{}, err
 	}
-	turnID, originID, err := businessTurnIdentity(attempt.Origin)
+	turnID, _, err := businessTurnIdentity(attempt.Origin)
 	if err != nil {
 		return canceledTurnSettlementFacts{}, err
 	}
@@ -108,24 +108,15 @@ func prepareCanceledTurnSettlementTx(ctx context.Context, tx *sql.Tx, postgres b
 	if err != nil || !valid {
 		return canceledTurnSettlementFacts{}, fmt.Errorf("canceled turn has an invalid intent timestamp")
 	}
+	if err := requireBusinessTurnBindingTx(ctx, tx, postgres, turnID, attempt, requestedAt); err != nil {
+		return canceledTurnSettlementFacts{}, err
+	}
 	intent := runtimeeffects.TurnCancellation{Committed: true, Requested: true, Origin: attempt.Origin, Reason: cancellation, CauseEvent: cause.String, RequestedAt: requestedAt}
 	if err := intent.ValidateIntent(); err != nil {
 		return canceledTurnSettlementFacts{}, err
 	}
-	column := "origin_delivery_id"
-	if attempt.Origin.Kind == runtimeeffects.CompletionOriginDirective {
-		column = "origin_directive_operation_id"
-	}
-	query = fmt.Sprintf(`SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE %s=$1::uuid AND state IN ('authorized','launched','response_observed')`, column)
-	if !postgres {
-		query = fmt.Sprintf(`SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE %s=? AND state IN ('authorized','launched','response_observed')`, column)
-	}
-	var pending int
-	if err := tx.QueryRowContext(ctx, query, originID).Scan(&pending); err != nil {
+	if err := requireCanceledPhysicalSetClosed(ctx, tx, attempt.Origin); err != nil {
 		return canceledTurnSettlementFacts{}, err
-	}
-	if pending != 0 {
-		return canceledTurnSettlementFacts{}, &pendingCanceledTurnEffects{count: pending}
 	}
 	query = `SELECT clock_timestamp()`
 	if !postgres {
@@ -146,6 +137,26 @@ func prepareCanceledTurnSettlementTx(ctx context.Context, tx *sql.Tx, postgres b
 		facts.duration = now.Sub(first)
 	}
 	return facts, nil
+}
+
+func requireCanceledPhysicalSetClosed(ctx context.Context, tx *sql.Tx, origin runtimeeffects.CompletionOrigin) error {
+	_, originID, err := businessTurnIdentity(origin)
+	if err != nil {
+		return err
+	}
+	column := "origin_delivery_id"
+	if origin.Kind == runtimeeffects.CompletionOriginDirective {
+		column = "origin_directive_operation_id"
+	}
+	var pending int
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE %s=$1 AND state IN ('authorized','launched','response_observed')`, column)
+	if err := tx.QueryRowContext(ctx, query, originID).Scan(&pending); err != nil {
+		return err
+	}
+	if pending != 0 {
+		return &pendingCanceledTurnEffects{count: pending}
+	}
+	return nil
 }
 
 func completeCanceledTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, turnID string, settledAt time.Time) error {

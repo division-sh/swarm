@@ -42,6 +42,84 @@ func businessTurnID(kind runtimeeffects.CompletionOriginKind, id string) (string
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("agent-business-turn:"+string(kind)+":"+id)).String(), nil
 }
 
+// Historical clock anchors identify work, not its current claim. This check
+// never grants execution; the delivery/directive owner fences the exact origin.
+func validateBusinessTurnAnchor(anchor, current runtimeeffects.Attempt) error {
+	anchorID, _, err := businessTurnIdentity(anchor.Origin)
+	if err != nil {
+		return err
+	}
+	currentID, _, err := businessTurnIdentity(current.Origin)
+	if err != nil {
+		return err
+	}
+	anchorOwner, err := businessTurnOwner(anchor.Authority)
+	if err != nil {
+		return err
+	}
+	currentOwner, err := businessTurnOwner(current.Authority)
+	if err != nil {
+		return err
+	}
+	if anchorID != currentID || anchorOwner != currentOwner || anchor.Authority.Target.AgentID != current.Authority.Target.AgentID || anchor.Authority.Kind != current.Authority.Kind || anchor.Authority.ExecutionMode != current.Authority.ExecutionMode {
+		return fmt.Errorf("business turn history contradicts its current owner")
+	}
+	if anchor.Origin.Kind == runtimeeffects.CompletionOriginDirective {
+		if !anchor.Origin.Same(current.Origin) {
+			return fmt.Errorf("business turn cannot transfer directive execution ownership")
+		}
+	} else {
+		a, c := anchor.Origin.Delivery, current.Origin.Delivery
+		if a.RunID() != c.RunID() || a.RouteIdentity() != c.RouteIdentity() || a.SubscriberClass() != c.SubscriberClass() || a.SubscriberID() != c.SubscriberID() {
+			return fmt.Errorf("business turn history contradicts its delivery identity")
+		}
+	}
+	return nil
+}
+
+func bindBusinessTurnAttemptTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, now time.Time) error {
+	if attempt.Kind != runtimeeffects.KindProviderTurn || !attempt.Authority.HasBusinessTurnOrigin() {
+		return nil
+	}
+	turnID, _, err := businessTurnIdentity(attempt.Origin)
+	if err != nil {
+		return err
+	}
+	var admitted string
+	if err := tx.QueryRowContext(ctx, `SELECT CAST(admitted_attempt_id AS TEXT) FROM runtime_agent_turn_lifetimes WHERE turn_id=$1`, turnID).Scan(&admitted); err != nil {
+		return err
+	}
+	anchor, _, err := loadBusinessTurnFirstAttempt(ctx, tx, postgres, admitted, now)
+	if err != nil {
+		return err
+	}
+	if err := validateBusinessTurnAnchor(anchor, attempt); err != nil {
+		return err
+	}
+	// The caller still holds the real origin admission lock. Bind only the
+	// attempt actually authorized, never a request's speculative attempt ID.
+	write, err := tx.ExecContext(ctx, `UPDATE runtime_agent_turn_lifetimes SET current_attempt_id=$1 WHERE turn_id=$2 AND cancel_reason IS NULL AND settled_at IS NULL AND origin_evidence IS NULL`, attempt.AttemptID, turnID)
+	return requireExternalAttemptTransition(write, err)
+}
+
+func requireBusinessTurnBindingTx(ctx context.Context, tx *sql.Tx, postgres bool, turnID string, attempt runtimeeffects.Attempt, now time.Time) error {
+	var current sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT CAST(current_attempt_id AS TEXT) FROM runtime_agent_turn_lifetimes WHERE turn_id=$1`, turnID).Scan(&current); err != nil {
+		return err
+	}
+	if !current.Valid {
+		return fmt.Errorf("physical business turn lacks its current attempt binding")
+	}
+	binding, _, err := loadBusinessTurnFirstAttempt(ctx, tx, postgres, current.String, now)
+	if err != nil {
+		return err
+	}
+	if !binding.Origin.Same(attempt.Origin) {
+		return fmt.Errorf("physical business turn differs from its exact current origin")
+	}
+	return validateBusinessTurnAnchor(binding, attempt)
+}
+
 func prepareBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) error {
 	if !authority.HasBusinessTurnOrigin() || req.Kind != runtimeeffects.KindProviderTurn {
 		if req.TurnTimeout != nil {
@@ -132,6 +210,9 @@ func launchBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 	}
 	if canceled.Valid || settled != nil {
 		return nil, fmt.Errorf("logical provider turn is canceled or settled")
+	}
+	if err := requireBusinessTurnBindingTx(ctx, tx, postgres, turnID, attempt, launchedAt); err != nil {
+		return nil, err
 	}
 	clock := &runtimeeffects.LogicalTurnClock{Origin: attempt.Origin, FirstAttempt: first.String, TimeoutEvent: event.String}
 	if bound.Valid != emit.Valid || bound.Valid != event.Valid {

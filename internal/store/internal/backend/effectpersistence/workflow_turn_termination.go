@@ -51,17 +51,17 @@ func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationproto
 		if err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT CAST(turn_id AS TEXT),CAST(admitted_attempt_id AS TEXT) FROM runtime_agent_turn_lifetimes WHERE run_id=$1 AND flow_instance=$2 AND settled_at IS NULL AND admitted_attempt_id IS NOT NULL ORDER BY origin_kind,origin_id`, owner.RunID, owner.Route.InstancePath)
+		rows, err := tx.QueryContext(ctx, `SELECT CAST(turn_id AS TEXT),CAST(current_attempt_id AS TEXT) FROM runtime_agent_turn_lifetimes WHERE run_id=$1 AND flow_instance=$2 AND settled_at IS NULL AND current_attempt_id IS NOT NULL ORDER BY origin_kind,origin_id`, owner.RunID, owner.Route.InstancePath)
 		if err != nil {
 			return err
 		}
 		type turnRow struct {
-			id, admitted string
+			id, current string
 		}
 		var turns []turnRow
 		for rows.Next() {
 			var row turnRow
-			if err := rows.Scan(&row.id, &row.admitted); err != nil {
+			if err := rows.Scan(&row.id, &row.current); err != nil {
 				_ = rows.Close()
 				return err
 			}
@@ -79,7 +79,7 @@ func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationproto
 			if err != nil {
 				return err
 			}
-			attempt, _, err := loadBusinessTurnFirstAttempt(ctx, tx, postgres, row.admitted, now)
+			attempt, _, err := loadBusinessTurnFirstAttempt(ctx, tx, postgres, row.current, now)
 			if err != nil {
 				return err
 			}

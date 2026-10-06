@@ -58,9 +58,11 @@ func requestUnstartedClaimedTurnTermination(ctx context.Context, tx *sql.Tx, pos
 }
 
 func unstartedPhysicalAttemptCount(ctx context.Context, tx *sql.Tx, origin effects.CompletionOrigin) (int, error) {
-	query, id := `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE origin_kind='delivery' AND origin_delivery_id=$1`, origin.Delivery.DeliveryID()
-	if origin.Kind == effects.CompletionOriginDirective {
-		query, id = `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE origin_kind='directive' AND origin_directive_operation_id=$1`, origin.Directive.OperationID
+	query, id := `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE origin_kind='directive' AND origin_directive_operation_id=$1`, origin.Directive.OperationID
+	if origin.Kind == effects.CompletionOriginDelivery {
+		var count int
+		err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE origin_kind='delivery' AND origin_delivery_id=$1 AND origin_claim_token=$2 AND origin_claim_version=$3`, origin.Delivery.DeliveryID(), origin.Delivery.PersistenceToken(), origin.Delivery.Version()).Scan(&count)
+		return count, err
 	}
 	var count int
 	err := tx.QueryRowContext(ctx, query, id).Scan(&count)
@@ -91,7 +93,10 @@ func recordUnstartedTurnTermination(ctx context.Context, tx *sql.Tx, postgres bo
 	if err != nil {
 		return effects.TurnCancellation{}, err
 	}
-	query := `SELECT CAST(origin_evidence AS TEXT),cancel_reason,CAST(cancel_cause_event_id AS TEXT),cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1 AND admitted_attempt_id IS NULL AND settled_at IS NULL`
+	if _, err := tx.ExecContext(ctx, `UPDATE runtime_agent_turn_lifetimes SET current_attempt_id=NULL,origin_evidence=$1,cancel_reason='terminate',cancel_cause_event_id=$2,cancel_requested_at=$3 WHERE turn_id=$4 AND cancel_reason IS NULL AND settled_at IS NULL`, string(evidence), command.Cause().EventID(), now, turnID); err != nil {
+		return effects.TurnCancellation{}, err
+	}
+	query := `SELECT CAST(origin_evidence AS TEXT),cancel_reason,CAST(cancel_cause_event_id AS TEXT),cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1 AND current_attempt_id IS NULL AND settled_at IS NULL`
 	if postgres {
 		query += ` FOR UPDATE`
 	}
