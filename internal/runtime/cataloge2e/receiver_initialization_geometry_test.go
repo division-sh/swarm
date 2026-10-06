@@ -50,10 +50,29 @@ func TestReceiverSuppliedStateMutationReuseRestartAndSelectedHistoryBothStores(t
 			initial := catalogTriggerStep{Event: "work.requested", inputKind: catalogReplayInputRootIngress, eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", Payload: map[string]any{"worker_id": "alpha", "label": "constructed", "count": int64(1)}}
 			h.publishAndWait(initial, catalogRuntimePublishTimeout)
 			h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
-			var point string
-			if err := h.db.QueryRowContext(h.ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name LIKE '%/worker.ready'`, catalogRuntimeRunID).Scan(&point); err != nil {
-				t.Fatal(err)
+			creatingOccurrence := func() string {
+				lister, err := h.catalogOperatorEventLister()
+				if err != nil {
+					t.Fatal(err)
+				}
+				events, err := loadCatalogOperatorEvents(h.ctx, lister)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var point string
+				occurrences := 0
+				for _, event := range events {
+					if strings.HasSuffix(event.EventName, "/worker.ready") {
+						point = event.EventID
+						occurrences++
+					}
+				}
+				if occurrences != 1 || point == "" {
+					t.Fatalf("creating occurrences=%d point=%q, want exactly one", occurrences, point)
+				}
+				return point
 			}
+			point := creatingOccurrence()
 			assert := func(current string) {
 				instances, err := h.workflow.ListWorkflowInstances(h.ctx, catalogRuntimeRunID)
 				if err != nil {
@@ -87,9 +106,8 @@ func TestReceiverSuppliedStateMutationReuseRestartAndSelectedHistoryBothStores(t
 				if !found {
 					t.Fatal("selected history omitted the constructed worker")
 				}
-				var occurrences int
-				if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name LIKE '%/worker.ready'`, catalogRuntimeRunID).Scan(&occurrences); err != nil || occurrences != 1 {
-					t.Fatalf("creating occurrences=%d err=%v", occurrences, err)
+				if got := creatingOccurrence(); got != point {
+					t.Fatalf("creating occurrence changed: got=%s want=%s", got, point)
 				}
 			}
 			assert("constructed")
