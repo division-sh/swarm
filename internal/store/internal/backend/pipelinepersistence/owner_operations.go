@@ -17,6 +17,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -29,12 +30,40 @@ import (
 const pipelineReplayClaimNamespace = "swarm:pipeline-replay:"
 
 // This is a fixed handoff witness, not continuation eligibility or transfer.
-func ReadIncompletePipelineHandoffCount(ctx context.Context, q rowQueryer, runID string) (int, error) {
+func ReadIncompletePipelineHandoffCount(ctx context.Context, q eventReadQueryer, runID string) (int, error) {
+	facts, err := delivery.ReadPipelineHandoffDeliveryFacts(ctx, q, runID)
+	if err != nil {
+		return 0, err
+	}
+	if len(facts) == 0 {
+		// The former joined query also refused a missing receipt relation when
+		// the run had no deliveries. Do not fabricate an empty-store witness.
+		_, err := ReadPipelineReceiptExists(ctx, q, uuid.Nil.String())
+		return 0, err
+	}
+	receipts := make(map[string]bool)
 	var count int
-	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
-		(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
-		(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&count)
-	return count, err
+	for _, fact := range facts {
+		exists, read := receipts[fact.EventID]
+		if !read {
+			exists, err = ReadPipelineReceiptExists(ctx, q, fact.EventID)
+			if err != nil {
+				return 0, err
+			}
+			receipts[fact.EventID] = exists
+		}
+		if fact.Active || fact.MissingHandoff || !exists {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func ReadPipelineReceiptExists(ctx context.Context, q rowQueryer, eventID string) (bool, error) {
+	var exists bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM event_receipts
+		WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline')`, eventID).Scan(&exists)
+	return exists, err
 }
 
 type PipelineReceiptStorage struct {

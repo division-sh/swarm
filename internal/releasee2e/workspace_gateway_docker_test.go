@@ -23,17 +23,21 @@ import (
 const realDockerProxyArgument = "--test-real-workspace-docker-proxy"
 
 type workspaceDockerObservation struct {
-	Mode       string `json:"mode"`
-	Tool       string `json:"tool,omitempty"`
-	Failure    string `json:"failure,omitempty"`
-	Disconnect bool   `json:"disconnect,omitempty"`
-	Model      bool   `json:"model,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at"`
+	Container  string    `json:"container,omitempty"`
+	Mode       string    `json:"mode"`
+	Tool       string    `json:"tool,omitempty"`
+	Failure    string    `json:"failure,omitempty"`
+	Disconnect bool      `json:"disconnect,omitempty"`
+	Model      bool      `json:"model,omitempty"`
 }
 
 // This observer always executes the real Docker command. Its only fault is an
 // exact network disconnect after a successful, real read_flow_data call. It
 // never evaluates a model, handles a tool, or fabricates a Docker response.
 func runWorkspaceDockerProxy(args []string) int {
+	started := time.Now().UTC()
 	docker, root := os.Getenv("RELEASE_E2E_REAL_DOCKER"), os.Getenv("RELEASE_E2E_WORKSPACE_DOCKER_ROOT")
 	if !filepath.IsAbs(docker) || root == "" {
 		return 2
@@ -65,7 +69,7 @@ func runWorkspaceDockerProxy(args []string) int {
 			break
 		}
 	}
-	row := workspaceDockerObservation{Mode: request.Mode, Tool: request.Tool}
+	row := workspaceDockerObservation{StartedAt: started, Container: container, Mode: request.Mode, Tool: request.Tool}
 	if os.Getenv("RELEASE_E2E_FORBID_PROVIDER_LAUNCH") == "1" && slices.Contains(args, "--output-format") {
 		// A negative live-serve test may prove pre-model refusal, never buy a
 		// model turn if the implementation regresses. This is a failing sentinel,
@@ -128,6 +132,7 @@ func runWorkspaceDockerProxy(args []string) int {
 		}
 	}
 	if request.Mode != "" {
+		row.FinishedAt = time.Now().UTC()
 		var result struct {
 			ModelStarted bool            `json:"model_started"`
 			ToolResult   json.RawMessage `json:"tool_result"`
@@ -374,11 +379,20 @@ func TestWorkspaceMCPCompiledDockerConformance(t *testing.T) {
 				env = append(env, "RELEASE_E2E_WORKSPACE_DISCONNECT=1")
 			}
 			stopInspection := startWorkspacePrivateStoreObserver(t, observerBinary, tmp)
+			t.Cleanup(func() {
+				if !t.Failed() {
+					return
+				}
+				for _, name := range []string{"observations.jsonl", "workspace-observer-last-snapshot.json"} {
+					data, err := os.ReadFile(filepath.Join(owned, name))
+					t.Logf("failure evidence %s (read error=%v):\n%s", name, err, data)
+				}
+			})
 			args := []string{"test", source, "tests/transport.yaml", "--workspace-backend", "docker", "--timeout", "10s", "--poll-interval", "25ms"}
 			result := runReleaseCommand(t, time.Minute, root, env, "", binary, args...)
 			observed := stopInspection()
 			if !disconnect && (result.err != nil || !strings.Contains(result.output, "swarm test ok: scenarios=1")) {
-				t.Fatalf("real Docker public read/emit/store assertion: %v\n%s", result.err, result.output)
+				t.Fatalf("real Docker public read/emit/store assertion: %v\nselected-store observation=%+v\n%s", result.err, observed, result.output)
 			}
 			if disconnect && result.err == nil {
 				t.Fatalf("disconnected successor reported success: %s", result.output)
@@ -552,7 +566,8 @@ type workspacePrivateStoreObservation struct {
 func startWorkspacePrivateStoreObserver(t *testing.T, binary, root string) func() workspacePrivateStoreObservation {
 	t.Helper()
 	cmd := exec.Command(binary, "-test.run=^TestWorkspaceInvocationReadOnlyObserverChild$")
-	cmd.Env = append(os.Environ(), "SWARM_TEST_WORKSPACE_OBSERVER_CHILD=1", "SWARM_TEST_WORKSPACE_OBSERVER_ROOT="+root)
+	cmd.Env = append(os.Environ(), "SWARM_TEST_WORKSPACE_OBSERVER_CHILD=1", "SWARM_TEST_WORKSPACE_OBSERVER_ROOT="+root,
+		"SWARM_TEST_WORKSPACE_OBSERVER_DIAGNOSTICS="+filepath.Join(filepath.Dir(root), "workspace-observer-last-snapshot.json"))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()

@@ -21,6 +21,38 @@ type ReceiverDeliveryStorageRow struct {
 	DeliveryID, EventID, Status, Target string
 }
 
+type PipelineHandoffDeliveryFacts struct {
+	EventID        string
+	Active         bool
+	MissingHandoff bool
+}
+
+// Retain one detached fact per delivery, including rows sharing an event. The
+// pipeline owner supplies its receipt facts in the same selected read snapshot.
+func ReadPipelineHandoffDeliveryFacts(ctx context.Context, q queryer, runID string) ([]PipelineHandoffDeliveryFacts, error) {
+	rows, err := q.QueryContext(ctx, `SELECT event_id, status IN ('pending','in_progress'), continuation_handoff_at IS NULL
+		FROM event_deliveries WHERE run_id=$1`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PipelineHandoffDeliveryFacts
+	for rows.Next() {
+		var row PipelineHandoffDeliveryFacts
+		if err := rows.Scan(&row.EventID, &row.Active, &row.MissingHandoff); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // This physical witness is deliberately independent of eligibility and public
 // target/status projection. It retains every historical delivery in the run.
 func ReadReceiverDeliveryStorage(ctx context.Context, q queryer, runID string) ([]ReceiverDeliveryStorageRow, error) {

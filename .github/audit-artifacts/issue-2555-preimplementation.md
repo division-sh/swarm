@@ -1232,7 +1232,7 @@ the existing class; no separate owner, compatibility path or follow-up slice.
 | --- | --- | --- |
 | PC52 | Valid text/nil results are rejected and JSON-looking strings change type after execution. | The existing MCP result projector publishes an explicit typed projected value, separate from display text. The native mock consumer never infers type from text. Actual gateway/worker/conversation string, nil, JSON-looking string and structured-value controls; malformed/missing envelopes and projection failures stay uncertain. |
 | PC53 | Fork registration drops settled terminal-output identity. | Server-side turn registration carries the exact settled output call. Gateway authorizes name/arguments/occurrence and selects only the frozen fork dispatch/output executor. Public both-store terminal emit/replay/recovery/noninterference plus nonterminal snapshot and wrong-call controls. No live executor fallback. |
-| PC54 | Incomplete handoff and fixture pipeline reads bypass canonical SQL ownership. | Move the whole three-arm handoff read into the existing pipeline-persistence owner, avoiding its delivery dependency cycle. Fixture scope/receipt reads consume canonical typed reads in the same selected snapshot. Pipeline-obligation and existing five guards, both-store exact/count/missing/late-error/no-write proofs. |
+| PC54 | Incomplete handoff and fixture pipeline reads bypass canonical SQL ownership. | Cycle-2 ruling6025692164 supersedes the whole-query migration: delivery owns detached status/handoff facts for every delivery; pipeline owns exact platform/pipeline receipt existence and the final three-arm count. Both owners consume the original single selected read transaction. Cache only receipt existence by event within that transaction, never delivery multiplicity. Both unchanged delivery/pipeline guards and source-bound debt ratchet; frozen-query equivalence for each arm, overlaps, shared events, foreign scope, malformed-but-present receipt, dependency/read failure, cancellation/no partial count and concurrent one-snapshot proof on both stores. |
 | PC55 | Hosted worker fixtures omit declared network prerequisites before Q01. | Each fixture consumes existing workspace EnsurePrereqs. Public default-topology Q01 runs first on clean Ubuntu before any fixture-created network. Minimal CI setup/order correction, negative ownership checks and actual hosted receipt; no network override or deadline/assertion change. |
 | PC56 | Hosted mock-frame call cancels at5s without attribution. | Retain red evidence; exact focused base/head controls and failure evidence classify or reproduce it. No budget waiver or passing-focused-as-fix claim. |
 
@@ -1244,6 +1244,26 @@ other sandbox side effects and reads remain nonterminal. A dedicated retained
 restart supplement preserves all original public sandbox/source-continuation
 assertions and adds exact output replay; fresh boot owns separate run/event
 facts, so replay noninterference is fenced after that boot completes.
+
+PC54 cycle-2 boundary correction is recorded on #2555 and cross-lane #2542.
+The former whole join satisfied the pipeline guard but failed the unchanged
+delivery guard, stopping3b server2 core before the golden root. Typed
+composition supersedes that instruction, not either guard. The exact Boolean
+receipt reader must not decode outcome/failure/side_effects: malformed but
+present data still satisfies the original EXISTS witness. An empty delivery
+set must also fail on an unavailable receipt relation, as the joined query did.
+
+Q01 at3b is RED and unclassified: one active delivery remained at the public
+test's unchanged10s quiescence deadline. The old190 positive pass has identical
+production bytes but is not attribution or current-head qualification. The
+existing compiled construction observer retains exact native row/column
+snapshots before private session deletion through its already allocated
+read-only snapshot owner. The parent prints that bounded latest evidence and
+timestamped native-worker phase records only on failure. No in-process store
+import, new SQL observation port, assertion/deadline change or gateway override
+is authorized. Local hardened-host pre-model refusal earns no default-network
+positive proof. Exact-head hosted Q01, fresh core/quiet both-store numeric and
+the final proof audit remain required.
 
 PC56 classification: unchanged focused master and candidate controls each
 pass10/10, but do not explain the red by themselves. A held-target fixture
