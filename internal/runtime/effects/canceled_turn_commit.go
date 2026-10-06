@@ -55,6 +55,10 @@ type TurnTimeoutReactionOwner interface {
 	DispatchTurnTimeoutReaction(context.Context, CommittedTurnReaction) error
 }
 
+type TurnCancellationDispatcher interface {
+	ApplyCommittedTurnCancellations(context.Context, []TurnCancellation) error
+}
+
 func (c CanceledTurnCommit) Validate() error {
 	if !c.Acknowledged || c.Origin.Validate() != nil || c.Cancellation.ValidateIntent() != nil ||
 		!c.Cancellation.OriginSettled || !c.Origin.Same(c.Cancellation.Origin) {

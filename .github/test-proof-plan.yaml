@@ -829,6 +829,7 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: '^(Test($|2376.*|[AB].*|Ru($|[^n].*|n($|[^F].*)))|Example.*|Fuzz.*)$'
     required_children:
+      TestAuthoredTurnTerminationCommitsWithExactStageBothStores: [committed/sqlite, committed/postgres, late_rollback/sqlite, late_rollback/postgres, stale_cas/sqlite, stale_cas/postgres, other_instance/sqlite, other_instance/postgres, prelaunch/sqlite, prelaunch/postgres, prelaunch_restart/sqlite, prelaunch_restart/postgres]
       TestAgentFixtureSealedAuthorityRejectionParity: [sqlite, postgres]
       TestAgentLifecycleProcessBindingReadbackParity: [sqlite, postgres]
       TestAgentLifecycleReadinessSourceSetRebindBothStores: [sqlite, postgres]

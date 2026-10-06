@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,8 @@ type PipelineCoordinator struct {
 	deadLetters            runtimedeadletters.AcknowledgedRecorder
 	deliveryRuntime        WorkflowDeliveryRuntime
 	flowRoutes             FlowInstanceRouteOwner
+	turnCancellationMu     sync.Mutex
+	turnCancellations      effects.TurnCancellationDispatcher
 	credentials            runtimecredentials.Store
 	providerCredentials    runtimecredentials.Store
 	managedCredentials     runtimemanagedcredentials.Store

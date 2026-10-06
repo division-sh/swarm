@@ -235,7 +235,7 @@ func commitWorkflowTimerReconciliation(
 		}); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 		}
-		result, err := commitWorkflowEngineLifecycle(txctx, attempt, decisions, genericSchedules, postgres, command.Plan)
+		result, err := commitWorkflowEngineLifecycle(txctx, attempt, decisions, genericSchedules, nil, postgres, command.Plan)
 		if err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 		}
@@ -249,7 +249,7 @@ func commitWorkflowTimerReconciliation(
 	if !acknowledged {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, outcome.Err()
 	}
-	result.Committed = true
+	result = result.WithCommitAcknowledgment()
 	return result, errors.Join(outcome.Err(), result.Validate())
 }
 

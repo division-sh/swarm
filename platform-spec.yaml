@@ -16872,6 +16872,14 @@ platform_tables:
         remain immutable physical facts; canceled response projection is not an
         executable completion continuation. This observation neither invents intent
         for stage movement nor independently settles the canceled business origin.
+        An authored terminate command belongs to the exact compiled advances_to
+        carrier and commits its intent in the guarded stage-write transaction.
+        The immutable admitted_attempt_id anchors the real provider authorization
+        before launch; it is not a launch timestamp or timeout deadline. A
+        prelaunch terminate intent prevents launch and further rounds, while the
+        owning carrier still closes its authorized physical work and joins cleanup
+        before CommitCanceledTurn settles the business origin. Startup consumes
+        that same authorization anchor without manufacturing a launch clock.
       ddl: |
         CREATE TABLE runtime_agent_turn_lifetimes (
             turn_id UUID PRIMARY KEY,
@@ -16882,6 +16890,7 @@ platform_tables:
             flow_instance TEXT NOT NULL,
             bound_ns BIGINT CHECK (bound_ns > 0),
             bound_emit TEXT CHECK (bound_emit IS NULL OR NULLIF(TRIM(bound_emit), '') IS NOT NULL),
+            admitted_attempt_id UUID NOT NULL,
             first_attempt_id UUID,
             first_launched_at TIMESTAMPTZ,
             timeout_event_id UUID,

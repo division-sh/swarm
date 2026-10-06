@@ -474,7 +474,7 @@ func commitWorkflowEngineMutation(
 			if err != nil {
 				return err
 			}
-			result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, attempt, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, command.Lifecycle)
+			result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, attempt, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), store.workflowTurnTerminationOwner(), postgres, command.Lifecycle)
 			if err != nil {
 				return err
 			}
@@ -559,7 +559,7 @@ func commitWorkflowEngineMutation(
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, outcome.Err()
 	}
 	result.Committed = true
-	result.Lifecycle.Committed = true
+	result.Lifecycle = result.Lifecycle.WithCommitAcknowledgment()
 	for index, publication := range result.Publications {
 		result.Publications[index] = publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
 	}

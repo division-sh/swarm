@@ -692,6 +692,11 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	}()
 	turnCtx, turnOwner := runtimeeffects.WithTurnExecution(directiveCtx)
 	defer func() { _, _ = turnOwner.Finish() }()
+	if err := am.attachLogicalTurn(directiveCtx, turnOwner); err != nil {
+		stopHeartbeat()
+		<-heartbeatDone
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
 	response, executionErr := chatAgent.BoardStep(turnCtx, runtimeagentcontrol.BoardDirective{
 		Directive:       admitted.Directive,
 		Event:           directiveEvent,

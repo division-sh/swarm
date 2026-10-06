@@ -181,6 +181,9 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	attemptCtx, completionSettlement := runtimeeffects.WithCompletionSettlementObserver(attemptCtx)
 	turnCtx, turnOwner := runtimeeffects.WithTurnExecution(attemptCtx)
 	defer func() { _, _ = turnOwner.Finish() }()
+	if err := am.attachLogicalTurn(attemptCtx, turnOwner); err != nil {
+		return eventProcessResult{record: record, err: err}
+	}
 	out, err := agent.OnEvent(turnCtx, evt)
 	turn, finishErr := turnOwner.Finish()
 	err = errors.Join(err, finishErr)

@@ -47,15 +47,15 @@ func prepareBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, autho
 		event = uuid.NewSHA1(turn, []byte("turn-timeout")).String()
 	}
 	query := `INSERT INTO runtime_agent_turn_lifetimes
-		(turn_id,origin_kind,origin_id,run_id,agent_id,flow_instance,bound_ns,bound_emit,timeout_event_id,created_at)
-		VALUES ($1::uuid,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9::uuid,$10) ON CONFLICT (origin_kind,origin_id) DO NOTHING`
+		(turn_id,origin_kind,origin_id,run_id,agent_id,flow_instance,bound_ns,bound_emit,timeout_event_id,created_at,admitted_attempt_id)
+		VALUES ($1::uuid,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9::uuid,$10,$11::uuid) ON CONFLICT (origin_kind,origin_id) DO NOTHING`
 	if !postgres {
 		query = `INSERT INTO runtime_agent_turn_lifetimes
-			(turn_id,origin_kind,origin_id,run_id,agent_id,flow_instance,bound_ns,bound_emit,timeout_event_id,created_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT (origin_kind,origin_id) DO NOTHING`
+			(turn_id,origin_kind,origin_id,run_id,agent_id,flow_instance,bound_ns,bound_emit,timeout_event_id,created_at,admitted_attempt_id)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (origin_kind,origin_id) DO NOTHING`
 	}
 	if _, err := tx.ExecContext(ctx, query, turnID, string(req.Origin.Kind), originID, authority.Target.RunID,
-		authority.Target.AgentID, authority.Target.FlowInstance, bound, emit, event, req.Now.UTC()); err != nil {
+		authority.Target.AgentID, authority.Target.FlowInstance, bound, emit, event, req.Now.UTC(), req.AttemptID); err != nil {
 		return fmt.Errorf("admit logical provider turn: %w", err)
 	}
 	query = `SELECT run_id::text,agent_id,flow_instance,bound_ns,bound_emit,cancel_reason,settled_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid FOR UPDATE`

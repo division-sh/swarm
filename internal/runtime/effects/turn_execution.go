@@ -22,8 +22,15 @@ func (e *AuthoredTurnCancellationError) Error() string {
 }
 
 func (c TurnCancellation) ValidateIntent() error {
-	if !c.Committed || !c.Requested || c.Origin.Validate() != nil || c.RequestedAt.IsZero() {
+	if !c.Committed {
 		return fmt.Errorf("authored turn cancellation requires acknowledged exact intent")
+	}
+	return c.ValidateFacts()
+}
+
+func (c TurnCancellation) ValidateFacts() error {
+	if !c.Requested || c.Origin.Validate() != nil || c.RequestedAt.IsZero() {
+		return fmt.Errorf("authored turn cancellation requires exact intent facts")
 	}
 	if _, err := deliverylifecycle.ParseCancellationReason(string(c.Reason)); err != nil {
 		return err
@@ -71,6 +78,15 @@ func newTurnExecution(ctx context.Context, timer func(time.Time) (<-chan time.Ti
 	}
 	turnCtx, cancel := context.WithCancelCause(ctx)
 	owner := &TurnExecution{parent: ctx, cancel: cancel, timer: timer, stop: make(chan struct{}), done: make(chan struct{})}
+	claim, hasDelivery := deliverylifecycle.ClaimFromContext(ctx)
+	directive, hasDirective := directiveCompletionOriginFromContext(ctx)
+	if hasDelivery != hasDirective {
+		if hasDelivery {
+			owner.result.Attempt.Origin, _ = DeliveryCompletionOrigin(claim)
+		} else {
+			owner.result.Attempt.Origin, _ = DirectiveCompletionOrigin(directive)
+		}
+	}
 	return context.WithValue(turnCtx, turnExecutionContextKey{}, owner), owner
 }
 
@@ -108,32 +124,71 @@ func observeTurnLaunch(ctx context.Context, handle *Handle, clock LogicalTurnClo
 	return nil
 }
 
+func observeTurnAuthorization(ctx context.Context, attempt Attempt) error {
+	owner, _ := ctx.Value(turnExecutionContextKey{}).(*TurnExecution)
+	if owner == nil {
+		return nil
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if owner.closed || !attempt.AuthorizationAcknowledged || attempt.Origin.Validate() != nil {
+		return fmt.Errorf("logical turn authorization lacks its admitted origin")
+	}
+	if owner.result.Attempt.AttemptID != "" {
+		if !owner.result.Attempt.Origin.Same(attempt.Origin) {
+			return fmt.Errorf("provider round changed its logical turn origin")
+		}
+		return nil
+	}
+	if origin := owner.result.Attempt.Origin; origin.Validate() == nil && !origin.Same(attempt.Origin) {
+		return fmt.Errorf("provider authorization changed its admitted work origin")
+	}
+	owner.result.Attempt = attempt
+	return nil
+}
+
 func observeTurnCancellation(ctx context.Context, intent TurnCancellation) error {
 	owner, _ := ctx.Value(turnExecutionContextKey{}).(*TurnExecution)
 	if owner == nil {
 		return nil
 	}
+	matched, err := owner.RequestCancellation(intent)
+	if !matched && err == nil {
+		return fmt.Errorf("completion cancellation lacks its owned logical execution")
+	}
+	return err
+}
+
+// RequestCancellation consumes acknowledged exact origin evidence. It does not
+// retire the agent generation, join providers, or cancel unrelated work.
+func (owner *TurnExecution) RequestCancellation(intent TurnCancellation) (bool, error) {
 	if err := intent.ValidateIntent(); err != nil {
-		return err
+		return false, err
 	}
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
-	if owner.closed || owner.clock == nil || !owner.clock.Origin.Same(intent.Origin) {
-		return fmt.Errorf("completion cancellation lacks its owned logical execution")
+	if owner.closed {
+		return false, nil
+	}
+	if !owner.result.Attempt.Origin.Same(intent.Origin) {
+		return false, nil
+	}
+	if owner.clock == nil && intent.Reason != deliverylifecycle.CancellationTerminate {
+		return false, fmt.Errorf("completion cancellation lacks its owned logical execution")
 	}
 	// Admission already compared the exact deadline. The persisted intent time
 	// can have lower precision; it is not a second deadline decision.
 	if intent.Reason == deliverylifecycle.CancellationTurnTimeout && (owner.clock.Timeout == nil ||
 		intent.CauseEvent != owner.clock.TimeoutEvent || intent.RequestedAt.Before(owner.clock.LaunchedAt)) {
-		return fmt.Errorf("completion cancellation contradicts its first-launch bound")
+		return false, fmt.Errorf("completion cancellation contradicts its first-launch bound")
 	}
 	previous := owner.result.Cancellation
 	if previous.Requested && (previous.Reason != intent.Reason || previous.CauseEvent != intent.CauseEvent || !previous.RequestedAt.Equal(intent.RequestedAt)) {
-		return fmt.Errorf("completion changed its acknowledged cancellation intent")
+		return false, fmt.Errorf("completion changed its acknowledged cancellation intent")
 	}
 	owner.result.Cancellation = intent
 	owner.cancel(&AuthoredTurnCancellationError{Cancellation: intent})
-	return nil
+	return true, nil
 }
 
 func (o *TurnExecution) awaitTimeout(store TurnLifetimeStore, attempt Attempt, wake <-chan time.Time, stopTimer func()) {
@@ -155,13 +210,22 @@ func (o *TurnExecution) awaitTimeout(store TurnLifetimeStore, attempt Attempt, w
 		if intent.Requested && intent.Committed && !intent.OriginSettled {
 			if validationErr := intent.ValidateIntent(); validationErr != nil {
 				err = errors.Join(err, validationErr)
-			} else if !intent.Origin.Same(attempt.Origin) || intent.Reason != deliverylifecycle.CancellationTurnTimeout || intent.CauseEvent != o.clock.TimeoutEvent {
+			} else if !intent.Origin.Same(attempt.Origin) || intent.Reason == deliverylifecycle.CancellationTurnTimeout && intent.CauseEvent != o.clock.TimeoutEvent {
 				err = errors.Join(err, fmt.Errorf("turn timeout returned foreign authored intent"))
 			} else {
 				o.mu.Lock()
-				o.result.Cancellation = intent
+				previous := o.result.Cancellation
+				accepted := true
+				if previous.Requested && (previous.Reason != intent.Reason || previous.CauseEvent != intent.CauseEvent || !previous.RequestedAt.Equal(intent.RequestedAt)) {
+					accepted = false
+					err = errors.Join(err, fmt.Errorf("timeout changed its acknowledged cancellation winner"))
+				} else {
+					o.result.Cancellation = intent
+				}
 				o.mu.Unlock()
-				o.cancel(&AuthoredTurnCancellationError{Cancellation: intent})
+				if accepted {
+					o.cancel(&AuthoredTurnCancellationError{Cancellation: intent})
+				}
 			}
 		}
 		o.mu.Lock()

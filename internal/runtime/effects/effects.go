@@ -1568,7 +1568,11 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
 	}
-	return c.store.AuthorizeExternalAttempt(ctx, authority, req)
+	attempt, err := c.store.AuthorizeExternalAttempt(ctx, authority, req)
+	if attempt.AuthorizationAcknowledged && attempt.Kind == KindProviderTurn && attempt.Origin.Validate() == nil {
+		err = errors.Join(err, observeTurnAuthorization(ctx, attempt))
+	}
+	return attempt, err
 }
 
 // StartupProbeSurfaceMatchesAuthority is shared by effect admission and the

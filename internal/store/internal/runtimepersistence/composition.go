@@ -232,6 +232,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	}
 	store.deliveryPostgresOwner = deliveryOwner
 	store.pipelinePostgresOwner = pipelineOwner
+	if err := pipelineOwner.BindWorkflowTurnTermination(effectOwner); err != nil {
+		return nil, err
+	}
 	store.eventPostgresOwner = eventOwner
 	store.decisionPostgresOwner = decisionOwner
 	store.runLifecyclePostgresOwner = runLifecycle
@@ -490,6 +493,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	}
 	store.deliverySQLiteOwner = deliveryOwner
 	store.pipelineSQLiteOwner = pipelineOwner
+	if err := pipelineOwner.BindWorkflowTurnTermination(effectOwner); err != nil {
+		return nil, err
+	}
 	store.eventSQLiteOwner = eventOwner
 	store.decisionSQLiteOwner = decisionOwner
 	store.runLifecycleSQLiteOwner = runLifecycle

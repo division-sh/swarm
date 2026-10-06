@@ -94,6 +94,51 @@ func TestTurnExecutionObservesOnlyExactCommittedCompletionCancellation(t *testin
 	}
 }
 
+func TestTurnExecutionOwnsPrelaunchTerminationBeforeAuthorizationReturns(t *testing.T) {
+	for _, mode := range []string{"before_ack", "after_ack", "missing_ack", "foreign_origin", "unlaunched_timeout", "closed"} {
+		t.Run(mode, func(t *testing.T) {
+			_, attempt := turnExecutionClock(t)
+			attempt.AuthorizationAcknowledged = true
+			ctx, owner := WithTurnExecution(WithDirectiveCompletionOrigin(context.Background(), attempt.Origin.Directive))
+			defer func() { _, _ = owner.Finish() }()
+			intent := TurnCancellation{Committed: true, Requested: true, Origin: attempt.Origin, Reason: deliverylifecycle.CancellationTerminate, CauseEvent: uuid.NewString(), RequestedAt: time.Now().UTC()}
+			if mode == "after_ack" {
+				if err := observeTurnAuthorization(ctx, attempt); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch mode {
+			case "missing_ack":
+				intent.Committed = false
+			case "foreign_origin":
+				intent.Origin.Directive.OperationID = uuid.NewString()
+			case "unlaunched_timeout":
+				intent.Reason = deliverylifecycle.CancellationTurnTimeout
+			case "closed":
+				_, _ = owner.Finish()
+			}
+			matched, err := owner.RequestCancellation(intent)
+			valid := mode == "before_ack" || mode == "after_ack"
+			if valid {
+				if !matched || err != nil || ctx.Err() == nil {
+					t.Fatalf("prelaunch intent lost: matched=%t err=%v", matched, err)
+				}
+				if mode == "before_ack" {
+					if err := observeTurnAuthorization(ctx, attempt); err != nil {
+						t.Fatal(err)
+					}
+				}
+				result, err := owner.Finish()
+				if err != nil || result.Clock != nil || result.Attempt.AttemptID != attempt.AttemptID || !result.Cancellation.Origin.Same(attempt.Origin) {
+					t.Fatalf("prelaunch cleanup lost exact evidence or fabricated clock: %+v err=%v", result, err)
+				}
+			} else if matched || ctx.Err() != nil && mode != "closed" {
+				t.Fatalf("invalid/closed intent gained authority: matched=%t err=%v cause=%v", matched, err, context.Cause(ctx))
+			}
+		})
+	}
+}
+
 func TestTurnExecutionStartsOnlyOnAcknowledgedLaunchAndNeverResets(t *testing.T) {
 	clock, attempt := turnExecutionClock(t)
 	wake := make(chan time.Time, 1)
@@ -141,7 +186,7 @@ func TestTurnExecutionStartsOnlyOnAcknowledgedLaunchAndNeverResets(t *testing.T)
 }
 
 func TestTurnExecutionCancelsOnlyForExactAcknowledgedIntent(t *testing.T) {
-	for _, name := range []string{"exact", "cleanup_error", "foreign_origin", "missing_ack", "malformed_reason", "already_settled", "no_intent"} {
+	for _, name := range []string{"exact", "terminate_won", "cleanup_error", "foreign_origin", "missing_ack", "malformed_reason", "already_settled", "no_intent"} {
 		t.Run(name, func(t *testing.T) {
 			clock, attempt := turnExecutionClock(t)
 			wake := make(chan time.Time, 1)
@@ -155,6 +200,8 @@ func TestTurnExecutionCancelsOnlyForExactAcknowledgedIntent(t *testing.T) {
 				intent := TurnCancellation{Committed: true, Requested: true, Origin: attempt.Origin, Reason: deliverylifecycle.CancellationTurnTimeout, CauseEvent: clock.TimeoutEvent, RequestedAt: at}
 				var err error
 				switch name {
+				case "terminate_won":
+					intent.Reason, intent.CauseEvent = deliverylifecycle.CancellationTerminate, uuid.NewString()
 				case "cleanup_error":
 					err = cleanup
 				case "foreign_origin":
@@ -181,7 +228,7 @@ func TestTurnExecutionCancelsOnlyForExactAcknowledgedIntent(t *testing.T) {
 				t.Fatal("owned timeout did not finish")
 			}
 			var authored *AuthoredTurnCancellationError
-			exact := name == "exact" || name == "cleanup_error"
+			exact := name == "exact" || name == "cleanup_error" || name == "terminate_won"
 			if errors.As(context.Cause(ctx), &authored) != exact {
 				t.Fatalf("intent classification: cause=%v want authored=%t", context.Cause(ctx), exact)
 			}

@@ -38,7 +38,7 @@ func (t CompiledTransition) Validate() error {
 			return fmt.Errorf("compiled handler event/timer identity contradicts carrier")
 		}
 		if e.Source == "loop.escape" {
-			if e.LoopID == "" || e.LoopOperation != LoopOperationRepeat || e.AdvanceCarrier != "" || e.RuleRef.Valid() {
+			if e.LoopID == "" || e.LoopOperation != LoopOperationRepeat || e.AdvanceCarrier != "" || e.RuleRef.Valid() || e.Terminate {
 				return fmt.Errorf("compiled escape has contradictory carrier")
 			}
 		} else {
@@ -66,7 +66,7 @@ func (t CompiledTransition) Validate() error {
 			return fmt.Errorf("handler transition cannot carry gate identity")
 		}
 	} else {
-		if e.InternalOwner != "runtime" || e.HandlerEvent != "" || e.RuleRef.Valid() || e.AdvanceCarrier != "" || e.LoopID != "" || e.LoopOperation != "" {
+		if e.InternalOwner != "runtime" || e.HandlerEvent != "" || e.RuleRef.Valid() || e.AdvanceCarrier != "" || e.LoopID != "" || e.LoopOperation != "" || e.Terminate {
 			return fmt.Errorf("runtime transition has contradictory handler identity")
 		}
 		switch e.Source {
@@ -86,6 +86,7 @@ func (t CompiledTransition) Validate() error {
 }
 
 type compiledTransitionWire struct {
+	Terminate                                                            bool `json:"Terminate,omitempty"`
 	Flow, From, To, Source, Node, InternalOwner, HandlerEvent, EventType string
 	AdvanceCarrier                                                       HandlerAdvanceCarrierKind
 	RuleRef                                                              string
@@ -101,7 +102,7 @@ func (t CompiledTransition) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	e := t.edge
-	return json.Marshal(compiledTransitionWire{Flow: t.flow, From: e.From, To: e.To, Source: e.Source, Node: e.Node.Key(), InternalOwner: e.InternalOwner, HandlerEvent: e.HandlerEvent, EventType: e.EventType, AdvanceCarrier: e.AdvanceCarrier, RuleRef: e.RuleRef.Key(), LoopID: e.LoopID, LoopOperation: e.LoopOperation, TimerID: e.TimerID, After: e.After, Timed: e.Timed, DecisionID: e.DecisionID, Verdict: e.Verdict})
+	return json.Marshal(compiledTransitionWire{Terminate: e.Terminate, Flow: t.flow, From: e.From, To: e.To, Source: e.Source, Node: e.Node.Key(), InternalOwner: e.InternalOwner, HandlerEvent: e.HandlerEvent, EventType: e.EventType, AdvanceCarrier: e.AdvanceCarrier, RuleRef: e.RuleRef.Key(), LoopID: e.LoopID, LoopOperation: e.LoopOperation, TimerID: e.TimerID, After: e.After, Timed: e.Timed, DecisionID: e.DecisionID, Verdict: e.Verdict})
 }
 
 func (t *CompiledTransition) UnmarshalJSON(raw []byte) error {
@@ -114,7 +115,7 @@ func (t *CompiledTransition) UnmarshalJSON(raw []byte) error {
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return fmt.Errorf("compiled transition has trailing JSON")
 	}
-	e := WorkflowStageTopologyEdge{From: w.From, To: w.To, Source: w.Source, InternalOwner: w.InternalOwner, HandlerEvent: w.HandlerEvent, EventType: w.EventType, AdvanceCarrier: w.AdvanceCarrier, LoopID: w.LoopID, LoopOperation: w.LoopOperation, TimerID: w.TimerID, After: w.After, Timed: w.Timed, DecisionID: w.DecisionID, Verdict: w.Verdict}
+	e := WorkflowStageTopologyEdge{Terminate: w.Terminate, From: w.From, To: w.To, Source: w.Source, InternalOwner: w.InternalOwner, HandlerEvent: w.HandlerEvent, EventType: w.EventType, AdvanceCarrier: w.AdvanceCarrier, LoopID: w.LoopID, LoopOperation: w.LoopOperation, TimerID: w.TimerID, After: w.After, Timed: w.Timed, DecisionID: w.DecisionID, Verdict: w.Verdict}
 	var err error
 	if w.Node != "" {
 		e.Node, err = runtimeidentity.ParseExecutableNodeKey(w.Node)

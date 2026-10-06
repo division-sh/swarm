@@ -334,7 +334,10 @@ type agentExecutionLease struct {
 	agentExecutionSnapshot
 	Context context.Context
 	release func()
+	turn    *runtimeeffects.TurnExecution
 }
+
+type agentExecutionLeaseContextKey struct{}
 
 func (l *agentExecutionLease) Release() {
 	if l == nil {
@@ -1701,7 +1704,7 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(
 	if c.effectsStore != nil {
 		leaseCtx = runtimeeffects.WithController(leaseCtx, runtimeeffects.NewController(c.effectsStore).WithExecutionPosture(c.executionPosture))
 	}
-	lease.Context = leaseCtx
+	lease.Context = context.WithValue(leaseCtx, agentExecutionLeaseContextKey{}, lease)
 	lease.release = sync.OnceFunc(func() {
 		stopGenerationCancel()
 		cancel()

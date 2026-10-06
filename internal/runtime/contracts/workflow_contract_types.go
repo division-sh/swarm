@@ -360,6 +360,7 @@ type WorkflowHandlerStageScope struct {
 }
 
 type WorkflowStageTopologyEdge struct {
+	Terminate      bool
 	From           string
 	To             string
 	Source         string

@@ -1481,6 +1481,11 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		managerOptions.WorkflowInstances = rt.Pipeline
 	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, managerOptions, runtimeDeps.ManagerStore)
+	if rt.Pipeline != nil {
+		if err := rt.Pipeline.BindTurnCancellationDispatcher(rt.Manager); err != nil {
+			return nil, err
+		}
+	}
 	managerRef = rt.Manager
 	rt.Bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
 		return managerRef.FinalizeCommittedAgentReadiness(ctx, event, routes)
