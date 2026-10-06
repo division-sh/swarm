@@ -95,6 +95,27 @@ func TestConnectionParametersAreTypedAcrossKeywordAndURLInputs(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("Parameters() = %#v, want %#v", got, want)
 		}
+		projected, err := ParseConnectionParameters(raw)
+		if err != nil || !reflect.DeepEqual(projected, got) {
+			t.Fatalf("closed DSN projection differs: got=%#v err=%v", projected, err)
+		}
+	}
+}
+
+func TestConnectionParametersProjectionFailsClosed(t *testing.T) {
+	for _, raw := range []string{
+		"postgres://%invalid",
+		"host=127.0.0.1 user=tester password=secret sslmode=pqgo-verify-ca",
+	} {
+		parameters, err := ParseConnectionParameters(raw)
+		if err == nil || !reflect.DeepEqual(parameters, Parameters{}) {
+			t.Fatal("refused DSN leaked partial configuration values")
+		}
+	}
+	for _, field := range reflect.VisibleFields(reflect.TypeFor[Parameters]()) {
+		if field.Type.Kind() != reflect.String && field.Type.Kind() != reflect.Uint16 {
+			t.Fatalf("DSN value projection carries native authority through %s: %s", field.Name, field.Type)
+		}
 	}
 }
 
