@@ -908,7 +908,7 @@ func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan runfork.RunF
 		if item.RetainsTerminalBarrierHistory() {
 			continue
 		}
-		if classification == runfork.RunForkPendingClassificationDeliveredCompleted {
+		if classification == runfork.RunForkPendingClassificationDeliveredCompleted || classification == runfork.RunForkPendingClassificationCanceled {
 			continue
 		}
 		if runfork.RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item) {

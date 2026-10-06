@@ -15172,7 +15172,8 @@ platform_tables:
         subject vocabulary, exact scope policy, human visibility, and rendered action. Producers and renderers MUST consume
         that same row; parallel source, field, scope, visibility, action, or subject registries are forbidden.
       delivery_lifecycle_contract: >-
-        delivery.lifecycle/v2 admits in_progress, delivered, failed, dead_letter, and terminalized. failed and dead_letter
+        delivery.lifecycle/v2 admits in_progress, delivered, failed, dead_letter, terminalized, and canceled. Canceled
+        carries the exact authored terminate or turn_timeout reason, without a failure envelope. failed and dead_letter
         are failure-bearing author-visible transitions. terminalized records a parent-owned lifecycle fence without a
         failure envelope and is not author-visible; it MUST NOT be rendered or reclassified as handler failure.
       event_descriptor_projection: >-
@@ -16809,6 +16810,14 @@ platform_tables:
         The durable deadline is the canonical first_launched_at plus the exact
         bound_ns duration, not a second rounded timestamp. The effects owner
         computes that same deadline for launch readback and timeout decisions.
+        Canceled delivery-turn settlement consumes the exact durable intent after
+        all origin-bound provider attempts have recorded terminal physical facts.
+        It commits the delivery's canceled outcome and logical-turn settlement
+        together. Ordinary success/failure cannot bypass an acknowledged intent.
+        Immutable response, spend and uncertainty evidence survive; cancellation
+        does not become retry or dead-letter failure. Lost acknowledgment retries
+        return the exact existing outcome. Canceled source history is lineage only,
+        never executable fork replay and never a successful delivery.
       ddl: |
         CREATE TABLE runtime_agent_turn_lifetimes (
             turn_id UUID PRIMARY KEY,
@@ -17236,7 +17245,7 @@ platform_tables:
             selected_fork_run_id UUID,
             selected_execution_generation BIGINT,
             continuation_handoff_at TIMESTAMPTZ,
-            status            TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'delivered', 'failed', 'dead_letter')),
+            status            TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'delivered', 'failed', 'dead_letter', 'canceled')),
             retry_count       INTEGER NOT NULL CHECK (retry_count >= 0),
             max_retries       INTEGER NOT NULL CHECK ((subscriber_type = 'agent' AND max_retries = 1) OR (subscriber_type = 'node' AND max_retries = 3)),
             next_eligible_at  TIMESTAMPTZ,
@@ -17257,7 +17266,7 @@ platform_tables:
             FOREIGN KEY (selected_execution_id, selected_fork_run_id, selected_execution_generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation),
             CHECK ((execution_authority_kind = 'normal_runtime' AND selected_execution_id IS NULL AND selected_fork_run_id IS NULL AND selected_execution_generation IS NULL) OR (execution_authority_kind = 'selected_contract_fork' AND selected_execution_id IS NOT NULL AND selected_fork_run_id = run_id AND selected_execution_generation = execution_authority_generation AND execution_authority_id = CAST(selected_execution_id AS TEXT))),
             CHECK (retry_count <= max_retries),
-            CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_version > 0 AND current_attempt_version = claim_version AND current_attempt_open = TRUE AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL)),
+            CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_version > 0 AND current_attempt_version = claim_version AND current_attempt_open = TRUE AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL) OR (status = 'canceled' AND subscriber_type = 'agent' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IN ('terminate', 'turn_timeout'))),
             CHECK (updated_at >= created_at),
             INDEX idx_deliveries_run (run_id, status) WHERE run_id IS NOT NULL,
             INDEX idx_deliveries_eligibility (subscriber_type, subscriber_id, status, next_eligible_at),
@@ -17328,7 +17337,7 @@ platform_tables:
             session_agent_flow_instance_path TEXT,
             open_marker       BOOLEAN NOT NULL,
             closure_kind      TEXT NOT NULL CHECK (closure_kind IN ('open', 'lease_expired', 'parent_interrupted', 'settled')),
-            outcome          TEXT CHECK (outcome IS NULL OR outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'lease_expired', 'terminalized')),
+            outcome          TEXT CHECK (outcome IS NULL OR outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'lease_expired', 'terminalized', 'canceled')),
             reason_code      TEXT,
             failure          JSONB,
             side_effects     JSONB NOT NULL DEFAULT '[]',
@@ -17345,7 +17354,8 @@ platform_tables:
             CHECK ((open_marker = TRUE AND current_delivery_id = delivery_id) OR (open_marker = FALSE AND current_delivery_id IS NULL)),
             CHECK ((active_session_id IS NULL AND session_delivery_id IS NULL AND session_run_id IS NULL AND session_subscriber_type IS NULL AND session_agent_id IS NULL AND session_agent_name_owner IS NULL AND session_agent_name_source IS NULL AND session_agent_route_presence IS NULL AND session_agent_flow_scope_key IS NULL AND session_agent_flow_instance_id IS NULL AND session_agent_flow_instance_path IS NULL) OR (active_session_id IS NOT NULL AND session_delivery_id = delivery_id AND session_run_id IS NOT NULL AND session_subscriber_type = 'agent' AND NULLIF(TRIM(COALESCE(session_agent_id, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(session_agent_name_owner, '')), '') IS NOT NULL AND session_agent_name_source IN ('declared', 'runtime_created') AND session_agent_route_presence IN ('present', 'root') AND session_agent_flow_scope_key IS NOT NULL AND session_agent_flow_instance_id IS NOT NULL AND session_agent_flow_instance_path IS NOT NULL)),
             CHECK ((open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL) OR (open_marker = FALSE AND outcome IS NOT NULL AND completed_at IS NOT NULL)),
-            CHECK ((closure_kind = 'open' AND open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL AND duration_ms IS NULL) OR (closure_kind = 'lease_expired' AND open_marker = FALSE AND outcome = 'lease_expired' AND completed_at IS NOT NULL AND duration_ms IS NULL) OR (closure_kind = 'parent_interrupted' AND open_marker = FALSE AND outcome = 'terminalized' AND completed_at IS NOT NULL AND duration_ms IS NOT NULL) OR (closure_kind = 'settled' AND open_marker = FALSE AND outcome IS NOT NULL AND outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'terminalized') AND completed_at IS NOT NULL AND duration_ms IS NOT NULL)),
+            CHECK ((closure_kind = 'open' AND open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL AND duration_ms IS NULL) OR (closure_kind = 'lease_expired' AND open_marker = FALSE AND outcome = 'lease_expired' AND completed_at IS NOT NULL AND duration_ms IS NULL) OR (closure_kind = 'parent_interrupted' AND open_marker = FALSE AND outcome = 'terminalized' AND completed_at IS NOT NULL AND duration_ms IS NOT NULL) OR (closure_kind = 'settled' AND open_marker = FALSE AND outcome IS NOT NULL AND outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'terminalized', 'canceled') AND completed_at IS NOT NULL AND duration_ms IS NOT NULL)),
+            CHECK (outcome <> 'canceled' OR (failure IS NULL AND reason_code IN ('terminate', 'turn_timeout'))),
             CHECK (completed_at IS NULL OR completed_at >= started_at),
             INDEX idx_delivery_attempts_open (lease_expires_at) WHERE outcome IS NULL
         );

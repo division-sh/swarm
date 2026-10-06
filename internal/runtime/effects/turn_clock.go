@@ -69,6 +69,10 @@ type TurnLifetimeStore interface {
 	RequestTurnTimeout(context.Context, Attempt, time.Time) (TurnCancellation, error)
 }
 
+type CanceledDeliveryTurnStore interface {
+	SettleCanceledDeliveryTurn(context.Context, Attempt) (deliverylifecycle.ClaimCommit, error)
+}
+
 type turnTimeoutContextKey struct{}
 
 // WithTurnTimeout carries admitted configuration, not launch or cancel rights.

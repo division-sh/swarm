@@ -31,6 +31,7 @@ type providerDrainDeliveryOwner interface {
 	ValidateProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim) error
 	RenewProviderOriginTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, time.Duration) error
 	SettleProviderOriginSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration) error
+	SettleProviderCanceledOriginTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.CancellationReason, time.Duration) (runtimedelivery.Snapshot, error)
 	SettleProviderOriginFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
 	SettleProviderOriginRecoveryFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
 }

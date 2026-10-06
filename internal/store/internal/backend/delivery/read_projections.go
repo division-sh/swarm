@@ -618,7 +618,7 @@ func (a *Adapter) runSnapshotsByProjection(ctx context.Context, q queryer, runID
 		predicate = `(
 			d.status = 'in_progress'
 			OR COALESCE(a.active_session_id::text, '') <> ''
-			OR (d.started_at IS NOT NULL AND d.status NOT IN ('delivered', 'dead_letter'))
+			OR (d.started_at IS NOT NULL AND d.status NOT IN ('delivered', 'dead_letter', 'canceled'))
 		)`
 		join = `LEFT JOIN event_delivery_attempts a
 			ON a.delivery_id = d.delivery_id
@@ -628,7 +628,7 @@ func (a *Adapter) runSnapshotsByProjection(ctx context.Context, q queryer, runID
 			predicate = `(
 				d.status = 'in_progress'
 				OR COALESCE(a.active_session_id, '') <> ''
-				OR (d.started_at IS NOT NULL AND d.status NOT IN ('delivered', 'dead_letter'))
+				OR (d.started_at IS NOT NULL AND d.status NOT IN ('delivered', 'dead_letter', 'canceled'))
 			)`
 			join = `LEFT JOIN event_delivery_attempts a
 				ON a.delivery_id = d.delivery_id
