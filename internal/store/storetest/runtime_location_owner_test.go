@@ -37,3 +37,32 @@ func TestPostgresRuntimeLocationFixtureRetainsOriginalWriterAndAdmitsIndependent
 		t.Fatal("closed original fixture retained read authority")
 	}
 }
+
+func TestSQLiteRuntimeLocationFixtureRetainsOriginalWriterAndAdmitsIndependentPeer(t *testing.T) {
+	ctx := context.Background()
+	selected, _ := StartSQLiteRuntimeStoreWithReopen(t, ctx)
+	location := selected.Path()
+	if location == "" {
+		t.Fatal("empty constructor location")
+	}
+	sourceartifactfixture.Require(t, ctx, selected)
+	probe := CollectTransactions(t, selected, TransactionProbeOptions{})
+	run := uuid.NewString()
+	RequireRun(t, ctx, selected, RunFixture{Origin: ScenarioSetupOrigin(), RunID: run})
+	if counts := probe.Snapshot(); counts.Total.WriteCommits == 0 || counts.Active != 0 {
+		t.Fatalf("fixture bypassed original writer: %+v", counts)
+	}
+	peer, _ := StartSQLiteRuntimeStoreWithReopen(t, ctx, location)
+	if _, err := peer.LoadRunLifecycleSnapshot(ctx, run); err != nil {
+		t.Fatalf("location peer lost original committed run: %v", err)
+	}
+	if err := selected.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := peer.LoadRunLifecycleSnapshot(ctx, run); err != nil {
+		t.Fatalf("original close revoked independent peer: %v", err)
+	}
+	if _, err := selected.LoadRunLifecycleSnapshot(ctx, run); err == nil {
+		t.Fatal("closed original fixture retained read authority")
+	}
+}
