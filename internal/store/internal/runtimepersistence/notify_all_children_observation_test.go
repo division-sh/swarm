@@ -215,6 +215,27 @@ func TestNotifyAllChildrenObservationRefusesRawCancelledClosedAndFailedSectionsB
 			}); err != nil {
 				t.Fatal(err)
 			}
+			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, `ALTER TABLE event_deliveries RENAME TO unavailable_notify_observer_deliveries`)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			sections, err = ReadNotifyAllChildrenDiagnosticStorageForTest(ctx, fixture.store)
+			if err != nil || len(sections) != 6 || sections[2].Failure == "" || sections[2].Rows != nil || sections[2].Columns != nil {
+				t.Fatalf("failed delivery section=%v/%v", sections, err)
+			}
+			for i, section := range sections {
+				if i != 2 && (section.Failure != "" || len(section.Columns) == 0) {
+					t.Fatalf("delivery failure poisoned section %d: %+v", i, section)
+				}
+			}
+			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_notify_observer_deliveries RENAME TO event_deliveries`)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
 			if err := fixture.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
 type NotifyAllChildrenItemStorage struct {
@@ -42,20 +44,30 @@ func ReadNotifyAllChildrenDiagnosticStorageForTest(ctx context.Context, selected
 	default:
 		return nil, fmt.Errorf("observation requires the original native owner, got %T", selected)
 	}
-	queries := []string{
-		`SELECT event_name, event_id, payload FROM events ORDER BY created_at, event_id`,
-		`SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '') FROM event_receipts ORDER BY event_id, subscriber_type, subscriber_id`,
-		`SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), ''), COALESCE(CAST(delivery_target_route AS TEXT), '') FROM event_deliveries ORDER BY event_id, subscriber_type, subscriber_id`,
-		`SELECT flow_instance, current_state, fields FROM entity_state ORDER BY flow_instance`,
-		`SELECT run_id, instance_path, flow_template, status, config FROM flow_instances ORDER BY run_id, instance_path`,
-		`SELECT original_event_id, failure FROM dead_letters ORDER BY created_at`,
+	observations := []func(context.Context, *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error){
+		func(ctx context.Context, tx *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error) {
+			return readNotifyAllChildrenDiagnosticSection(ctx, tx, `SELECT event_name, event_id, payload FROM events ORDER BY created_at, event_id`)
+		},
+		func(ctx context.Context, tx *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error) {
+			return readNotifyAllChildrenDiagnosticSection(ctx, tx, `SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '') FROM event_receipts ORDER BY event_id, subscriber_type, subscriber_id`)
+		},
+		readNotifyAllChildrenDeliveryDiagnosticSection,
+		func(ctx context.Context, tx *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error) {
+			return readNotifyAllChildrenDiagnosticSection(ctx, tx, `SELECT flow_instance, current_state, fields FROM entity_state ORDER BY flow_instance`)
+		},
+		func(ctx context.Context, tx *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error) {
+			return readNotifyAllChildrenDiagnosticSection(ctx, tx, `SELECT run_id, instance_path, flow_template, status, config FROM flow_instances ORDER BY run_id, instance_path`)
+		},
+		func(ctx context.Context, tx *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error) {
+			return readNotifyAllChildrenDiagnosticSection(ctx, tx, `SELECT original_event_id, failure FROM dead_letters ORDER BY created_at`)
+		},
 	}
 	var evidence []NotifyAllChildrenDiagnosticStorage
-	for _, query := range queries {
+	for _, observe := range observations {
 		var section NotifyAllChildrenDiagnosticStorage
 		err := read(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			var err error
-			section, err = readNotifyAllChildrenDiagnosticSection(ctx, tx, query)
+			section, err = observe(ctx, tx)
 			return err
 		})
 		if err != nil {
@@ -64,6 +76,14 @@ func ReadNotifyAllChildrenDiagnosticStorageForTest(ctx context.Context, selected
 		evidence = append(evidence, section)
 	}
 	return evidence, nil
+}
+
+func readNotifyAllChildrenDeliveryDiagnosticSection(ctx context.Context, tx *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error) {
+	section, err := storedelivery.FixtureNotifyAllChildrenDiagnosticTx(ctx, tx)
+	if err != nil {
+		return NotifyAllChildrenDiagnosticStorage{}, err
+	}
+	return NotifyAllChildrenDiagnosticStorage{Columns: section.Columns, Rows: section.Rows}, nil
 }
 
 func readNotifyAllChildrenDiagnosticSection(ctx context.Context, tx *sql.Tx, query string) (section NotifyAllChildrenDiagnosticStorage, err error) {
