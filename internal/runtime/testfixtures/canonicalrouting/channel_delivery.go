@@ -41,6 +41,41 @@ func CopyChannelLearnedObjectControlPagesJourney(t testing.TB) string {
 	return root
 }
 
+func CopyChannelNoticeJourney(t testing.TB) string {
+	t.Helper()
+	root := CopyChannelLearnedObjectJourney(t)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - work.requested\n", "    - work.requested\n    - notice.requested\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: work.requested, from: ., to: reviews}\n",
+		"  - {event: work.requested, from: ., to: reviews}\n  - {event: notice.requested, from: ., to: notices}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  detail: text\nnotice.requested:\n  seed: boolean\n")
+	writeClosedVariantFile(t, root, "notices/schema.yaml", "name: notices\nstages: []\npins:\n  inputs: [notice.requested]\n")
+	writeClosedVariantFile(t, root, "notices/nodes.yaml", "start:\n  execution_type: system_node\n  subscribes_to: [notice.requested]\n  event_handlers:\n    notice.requested: {}\n")
+	writeClosedVariantFile(t, root, "notices/agents.yaml", `observer:
+  role: observer
+  intent: {inline: 'Notify the operator about the observed work.'}
+  model: regular
+  subscriptions: [notice.requested]
+  mock:
+    kind: python
+    module: mocks/observer.py
+`)
+	writeClosedVariantFile(t, root, "notices/mocks/observer.py", `def handle(input):
+    if input["round"] == 1:
+        return {"calls": [{"name": "notify_human", "arguments": {"summary": "Observed notice", "context": {"proof": "channel-notice-ack"}}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+    return {"text": "Observed.", "usage": {"input_tokens": 1, "output_tokens": 1}}
+`)
+	return root
+}
+
+func CopyChannelCaptionJourney(t testing.TB) string {
+	t.Helper()
+	root := CopyChannelLearnedObjectJourney(t)
+	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"),
+		"approve: {advances_to: done}", "approve: {label: Accept, advances_to: done}")
+	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "        reject:\n", "        reject:\n          label: accept\n")
+	return root
+}
+
 // CopyChannelLearnedObjectAnchorJourney retains the real gate, ask_human and
 // approved connector producers, using the independently declared mock protocol.
 func CopyChannelLearnedObjectAnchorJourney(t testing.TB) string {

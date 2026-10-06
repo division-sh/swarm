@@ -10956,7 +10956,14 @@ tool_model:
         bound; only the immutable source-content excerpt may be shortened. Tokens stay private and reply authority
         resolves through the exact accepted provider receipt. With buttons, existing accepted connector-derived bounds
         continue to govern the native controls without widening Telegram's limits. The same immutable render owner
-        computes controls, pages and the text budget including the reference and visible words. Control pages respect
+        computes controls, pages and the text budget including the reference and visible words. It owns
+        one deterministic visible-word projection for persistence, text, buttons and exact reply matching:
+        captions are made single-line by whitespace folding and removal of display format controls, then bounded.
+        If any bounded words on a page collide under Unicode case folding or become empty, every word on that page
+        receives its one-based decimal position followed by the bounded caption when space permits; otherwise only
+        that position is shown. Pagination reserves representable positions and includes generated navigation in
+        the same collision check. Authored captions and immutable source content remain unchanged; bare or ambiguous
+        inbound words never gain authority. Control pages respect
         both the admitted count and text limits; a content excerpt adds the exact View full control, whose requested
         continuation pages reserve their own reference and Next page space without losing source bytes.
         More choices uses edit only when declared. Without edit, the verified explicit request atomically creates
@@ -10977,7 +10984,10 @@ tool_model:
         Unsupported optional capability requests are refused with a typed error naming the capability before any
         mutation or effect launch. Unsupported edit never silently becomes a fresh send. Native interaction
         acknowledgment is distinct from principal-authorized mailbox notice acknowledgment; a text reply requires no
-        fabricated callback identifier or successful native acknowledgment. The text/reply baseline does not claim
+        native callback acknowledgment. Automatic callback acknowledgment runs only when the exact compiled activation
+        declares acknowledgment; buttons alone never request it. Supported failures and uncertainty remain failures,
+        and explicitly requested unsupported acknowledgment still receives the typed prelaunch refusal. Replies never
+        fabricate callback identifiers or native acknowledgment. The text/reply baseline does not claim
         provider-native menus or installed launcher settings. Telegram native qualification remains a separate strict
         compiled extension, not a prerequisite for neutral Inbox listing or text/reply authority.
     contract: >

@@ -16,10 +16,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/mailbox"
+	"github.com/division-sh/swarm/internal/operatorchannel"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
 
@@ -773,7 +777,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if len(admitted.EventNames) == 0 {
 			t.Fatal("view-full source did not enter the business flow")
 		}
-		proveChannelViewFullCallbackPages(t, provider, callbackURL, signing)
+		proveChannelViewFullCallbackPages(t, provider, callbackURL, signing, endpoint+"/v1/rpc")
 		return
 	}
 	if scenario == "notice_ack" {
@@ -1753,7 +1757,7 @@ noticeVisible:
 	}
 }
 
-func proveChannelViewFullCallbackPages(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+func proveChannelViewFullCallbackPages(t *testing.T, provider *telegramapi.Double, callbackURL, signing, rpcEndpoint string) {
 	t.Helper()
 	deadline := time.Now().Add(25 * time.Second)
 	messageIndex := -1
@@ -1775,6 +1779,7 @@ func proveChannelViewFullCallbackPages(t *testing.T, provider *telegramapi.Doubl
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
+	originalText := channelLongNoticeSourceText(t, rpcEndpoint)
 	var reconstructed strings.Builder
 	pageCount := 0
 	for {
@@ -1830,7 +1835,15 @@ func proveChannelViewFullCallbackPages(t *testing.T, provider *telegramapi.Doubl
 			}
 		}
 		page := provider.Delivery(nextIndex)
-		parts := strings.SplitN(fmt.Sprint(page["text"]), "\n", 2)
+		words := []string{}
+		if _, more := telegramCallbackToken(page, "Next page"); more {
+			words = append(words, "Next page")
+		}
+		source, err := channelPageSourceText(fmt.Sprint(page["text"]), words)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parts := strings.SplitN(source, "\n", 2)
 		var ordinal, advertised int
 		if len(parts) != 2 {
 			t.Fatalf("view-full page lacks content: %v", page)
@@ -1842,13 +1855,55 @@ func proveChannelViewFullCallbackPages(t *testing.T, provider *telegramapi.Doubl
 		pageCount++
 		messageIndex = nextIndex
 		if _, more := telegramCallbackToken(page, "Next page"); !more {
-			if pageCount != advertised || pageCount < 2 || !strings.Contains(reconstructed.String(), strings.Repeat("A", 7500)) ||
+			if pageCount != advertised || pageCount < 2 || reconstructed.String() != originalText ||
 				len(provider.Acknowledgments()) != pageCount {
 				t.Fatalf("view-full pages incomplete: pages=%d advertised=%d acknowledgments=%d", pageCount, advertised, len(provider.Acknowledgments()))
 			}
 			return
 		}
 	}
+}
+
+func channelLongNoticeSourceText(t *testing.T, rpcEndpoint string) string {
+	t.Helper()
+	var listed struct {
+		Items []struct {
+			Kind   string         `json:"kind"`
+			Notice mailbox.V1Item `json:"notice"`
+		} `json:"items"`
+	}
+	requireServedJSONRPCResult(t, rpcEndpoint, "mailbox.list", map[string]any{"type": "operator_notice", "limit": 200}, &listed)
+	var notices []mailbox.V1Item
+	for _, item := range listed.Items {
+		if item.Kind == "notice" {
+			notices = append(notices, item.Notice)
+		}
+	}
+	if len(notices) != 1 || notices[0].Payload["trace"] != strings.Repeat("A", 7500) {
+		t.Fatalf("public long-notice source changed: %+v", listed)
+	}
+	var got struct {
+		Kind   string               `json:"kind"`
+		Notice mailbox.V1ItemDetail `json:"notice"`
+	}
+	requireServedJSONRPCResult(t, rpcEndpoint, "mailbox.get", map[string]any{"mailbox_id": notices[0].MailboxID}, &got)
+	if got.Kind != "notice" || len(got.Notice.History) != 1 || got.Notice.History[0].Action != "created" {
+		t.Fatalf("long-notice source provenance is incomplete: %+v", got)
+	}
+	contextBytes, err := json.Marshal(got.Notice.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Audience cannot change source text; this pure projection grants no execution authority.
+	frozen, err := render.FreezeNotice(render.Notice{ID: notices[0].MailboxID, Type: notices[0].Type, Summary: "Long detail",
+		Priority: notices[0].Priority, Context: contextBytes, FromAgent: got.Notice.History[0].ActorTokenID,
+		EntityID: notices[0].SourceEntityID, FlowInstance: notices[0].SourceFlow}, render.Audience{
+		PrincipalID: uuid.NewString(), InterfaceKey: "oracle", DeliveryEpoch: 1, ExternalAccountRef: "oracle",
+		ConversationRef: "oracle", ConversationScope: operatorchannel.ConversationScopeDirect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return frozen.FullText
 }
 
 func telegramCallbackToken(delivery map[string]any, label string) (string, bool) {

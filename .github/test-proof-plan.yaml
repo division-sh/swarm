@@ -623,7 +623,7 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     # The channel unit took 350s before the new serial learned journeys.
     # Preserve their complete family under the same environment and budget.
-    run: '^TestChannelLearned.*$'
+    run: '^TestChannel(Learned.*|TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
