@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,12 +23,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/lib/pq"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Reconstructed equivalent H2, NOT the unchanged lead-local archive. Sources
@@ -180,25 +179,18 @@ pins: {inputs: [hub.start, hub.bump, hub.close]}
 	return root
 }
 
-func issue2564H2Harness(t *testing.T, backend, root string) (func(bool) (*channelOnboardingCrashServeProcess, servedControlProofRuntime), *os.File, *os.File) {
+func issue2564H2Harness(t *testing.T, backend, root string) (func(bool) (*channelOnboardingCrashServeProcess, issue2564H2Fixture), *os.File, *os.File) {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
-	var db *sql.DB
-	var config string
+	var config, location string
 	if backend == "postgres" {
-		dsn, connection, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		db, config = connection, writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
+		location = storetest.PostgresFixtureLocation(t)
+		config = writeChannelOnboardingPostgresRuntimeConfig(t, location)
 	} else {
-		path := filepath.Join(t.TempDir(), "h2.sqlite")
-		config = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, path, channelOnboardingHostWorkspaceFields())
-		var err error
-		db, err = sql.Open("sqlite", path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = db.Close() })
+		location = filepath.Join(t.TempDir(), "h2.sqlite")
+		config = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, location, channelOnboardingHostWorkspaceFields())
 	}
+	var observations *storetest.Issue2564WorkloadObservation
 	setServeRuntimeRecovery(t, config, false, true)
 	armR, armW, err := os.Pipe()
 	if err != nil {
@@ -227,14 +219,54 @@ func issue2564H2Harness(t *testing.T, backend, root string) (func(bool) (*channe
 			t.Error(err)
 		}
 	})
-	return func(cut bool) (*channelOnboardingCrashServeProcess, servedControlProofRuntime) {
+	return func(cut bool) (*channelOnboardingCrashServeProcess, issue2564H2Fixture) {
 		raw, err := json.Marshal(issue2564H2Child{Source: root, Config: config, Backend: backend, Cut: cut})
 		if err != nil {
 			t.Fatal(err)
 		}
 		process := startServedCrashProcess(t, "TestIssue2564H2ServeProcessHelper", []string{issue2564H2ChildEnv + "=" + string(raw), "TMPDIR=" + temporary}, armR, cutW)
-		return process, servedControlProofRuntime{Endpoint: process.endpoint(t) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
+		endpoint := process.endpoint(t) + "/v1/rpc"
+		if observations == nil {
+			observations = storetest.OpenIssue2564WorkloadObservation(t, backend, location)
+		}
+		return process, issue2564H2Fixture{Endpoint: endpoint, selected: observations.Reader, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
 	}, armW, cutR
+}
+
+type issue2564H2Fixture struct {
+	Endpoint, Backend, BundleHash string
+	selected                      storetest.Issue2564WorkloadReader
+}
+
+func (f issue2564H2Fixture) debug(t *testing.T, runID string) string {
+	t.Helper()
+	report, err := f.selected.LoadRunDebugReport(context.Background(), runID, operatorread.RunDebugQueryOptions{})
+	if err != nil {
+		return fmt.Sprintf("H2 run debug report: %v", err)
+	}
+	return fmt.Sprintf("%+v", report)
+}
+
+func (f issue2564H2Fixture) waitDeliveries(t *testing.T, runID string) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	stable := 0
+	for time.Now().Before(deadline) {
+		summary, err := f.selected.SummarizeRun(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("count active served run deliveries: %v", err)
+		}
+		if summary.Pending+summary.InProgress == 0 {
+			stable++
+			if stable == 4 {
+				return
+			}
+		} else {
+			stable = 0
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("served run %s deliveries did not remain quiescent\n%s", runID, f.debug(t, runID))
 }
 
 type issue2564H2Hub struct {
@@ -260,24 +292,6 @@ type issue2564H2Snapshot struct {
 	Events map[string]issue2564H2Event
 }
 
-func issue2564H2Time(value any) (time.Time, error) {
-	if value == nil {
-		return time.Time{}, nil
-	}
-	if stamp, ok := value.(time.Time); ok {
-		return stamp.UTC(), nil
-	}
-	if raw, ok := value.([]byte); ok {
-		value = string(raw)
-	}
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05.999999999+00", "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05.999999999 -0700 MST"} {
-		if stamp, err := time.Parse(layout, fmt.Sprint(value)); err == nil {
-			return stamp.UTC(), nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("H2 timestamp %T %q", value, value)
-}
-
 func issue2564H2Counters(raw []byte) (string, int64, int64, int64, error) {
 	var fields struct {
 		HubID string       `json:"hub_id"`
@@ -300,115 +314,49 @@ func issue2564H2Counters(raw []byte) (string, int64, int64, int64, error) {
 	return fields.HubID, count, c1, c2, nil
 }
 
-func issue2564H2Read(ctx context.Context, rt servedControlProofRuntime, run string) (issue2564H2Snapshot, error) {
+func issue2564H2Read(ctx context.Context, rt issue2564H2Fixture, run string) (issue2564H2Snapshot, error) {
 	snapshot := issue2564H2Snapshot{Hubs: map[string]issue2564H2Hub{}, Timers: map[string]issue2564H2Timer{}, Events: map[string]issue2564H2Event{}}
-	options := &sql.TxOptions{ReadOnly: true}
-	if rt.Backend == "postgres" {
-		options.Isolation = sql.LevelRepeatableRead
-	}
-	tx, err := rt.DB.BeginTx(ctx, options)
+	evidence, err := storetest.ObserveH2WorkloadSnapshot(ctx, rt.selected, run)
 	if err != nil {
-		return snapshot, err
+		return issue2564H2Snapshot{}, err
 	}
-	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT s.entity_id,s.flow_instance,s.current_state,s.fields,s.revision,f.current_state,f.revision,f.config FROM entity_state s JOIN flow_instances f ON f.run_id=s.run_id AND f.entity_id=s.entity_id WHERE s.run_id=$1`, run)
-	if err != nil {
-		return snapshot, err
-	}
-	for rows.Next() {
-		var hub issue2564H2Hub
-		var fields, config []byte
-		var headerState string
-		var headerRevision int64
-		if err := rows.Scan(&hub.Entity, &hub.Instance, &hub.Stage, &fields, &hub.Revision, &headerState, &headerRevision, &config); err != nil {
-			rows.Close()
-			return snapshot, err
-		}
-		hub.ID, hub.Count, hub.C1, hub.C2, err = issue2564H2Counters(fields)
+	for _, row := range evidence.Hubs {
+		hub := issue2564H2Hub{Entity: row.Entity, Instance: row.Instance, Stage: row.Stage, Revision: row.Revision}
+		hub.ID, hub.Count, hub.C1, hub.C2, err = issue2564H2Counters(row.Fields)
 		if err != nil {
-			rows.Close()
-			return snapshot, err
+			return issue2564H2Snapshot{}, err
 		}
-		if hub.Stage != headerState || hub.Revision != headerRevision || snapshot.Hubs[hub.ID].ID != "" {
-			rows.Close()
-			return snapshot, fmt.Errorf("H2 header/field identity disagreement for %+v", hub)
+		if hub.Stage != row.HeaderState || hub.Revision != row.HeaderRevision || snapshot.Hubs[hub.ID].ID != "" {
+			return issue2564H2Snapshot{}, fmt.Errorf("H2 header/field identity disagreement for %+v", hub)
 		}
 		var persisted struct {
 			History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
 		}
-		if err := json.Unmarshal(config, &persisted); err != nil {
-			rows.Close()
-			return snapshot, err
+		if err := json.Unmarshal(row.Config, &persisted); err != nil {
+			return issue2564H2Snapshot{}, err
 		}
 		hub.History = persisted.History
 		snapshot.Hubs[hub.ID] = hub
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return snapshot, err
-	}
-	rows.Close()
-	rows, err = tx.QueryContext(ctx, `SELECT timer_id,timer_name,entity_id,flow_instance,status,created_at,fire_at,fired_at FROM timers WHERE run_id=$1 AND task_type='workflow_timer'`, run)
-	if err != nil {
-		return snapshot, err
-	}
-	for rows.Next() {
-		var timer issue2564H2Timer
-		var name string
-		var created, due, fired any
-		if err := rows.Scan(&timer.ID, &name, &timer.Entity, &timer.Instance, &timer.Status, &created, &due, &fired); err != nil {
-			rows.Close()
-			return snapshot, err
-		}
+	for _, row := range evidence.Timers {
+		timer := issue2564H2Timer{ID: row.ID, Entity: row.Entity, Instance: row.Instance, Status: row.Status, Created: row.Created, Due: row.Due, Fired: row.Fired}
 		var valid bool
-		timer.Ref, valid = timeridentity.ParseWorkflowTimerActivationTaskID(name)
+		timer.Ref, valid = timeridentity.ParseWorkflowTimerActivationTaskID(row.Name)
 		if !valid || timer.Ref.ActivationID != timer.ID {
-			rows.Close()
-			return snapshot, fmt.Errorf("H2 invalid exact timer identity: %+v", timer)
-		}
-		if timer.Created, err = issue2564H2Time(created); err != nil {
-			rows.Close()
-			return snapshot, err
-		}
-		if timer.Due, err = issue2564H2Time(due); err != nil {
-			rows.Close()
-			return snapshot, err
-		}
-		if timer.Fired, err = issue2564H2Time(fired); err != nil {
-			rows.Close()
-			return snapshot, err
+			return issue2564H2Snapshot{}, fmt.Errorf("H2 invalid exact timer identity: %+v", timer)
 		}
 		snapshot.Timers[timer.ID] = timer
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return snapshot, err
-	}
-	rows.Close()
-	rows, err = tx.QueryContext(ctx, `SELECT e.event_id,e.task_id,e.flow_instance,COALESCE(r.outcome,''),COALESCE(r.reason_code,'') FROM events e LEFT JOIN event_receipts r ON r.event_id=e.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' WHERE e.run_id=$1 AND e.event_name='platform.stage_timer'`, run)
-	if err != nil {
-		return snapshot, err
-	}
-	for rows.Next() {
-		var event issue2564H2Event
-		if err := rows.Scan(&event.ID, &event.Task, &event.Instance, &event.Outcome, &event.Reason); err != nil {
-			rows.Close()
-			return snapshot, err
-		}
+	for _, row := range evidence.Events {
+		event := issue2564H2Event{ID: row.ID, Task: row.Task, Instance: row.Instance, Outcome: row.Outcome, Reason: row.Reason}
 		var valid bool
 		event.Occurrence, valid = timeridentity.ParseWorkflowTimerOccurrenceTaskID(event.Task)
 		if !valid || timeridentity.WorkflowTimerOccurrenceEventID(event.Occurrence) != event.ID {
-			rows.Close()
-			return snapshot, fmt.Errorf("H2 publication lacks exact occurrence identity: %+v", event)
+			return issue2564H2Snapshot{}, fmt.Errorf("H2 publication lacks exact occurrence identity: %+v", event)
 		}
 		snapshot.Events[event.ID] = event
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return snapshot, err
-	}
-	rows.Close()
-	return snapshot, tx.Commit()
+	return snapshot, nil
 }
 
 func issue2564H2DeclarationKeys(t *testing.T, root string) map[string]string {
@@ -521,7 +469,7 @@ func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool
 	return nil
 }
 
-func issue2564H2WaitAccounting(t *testing.T, rt servedControlProofRuntime, run string, closed bool, keys map[string]string) issue2564H2Snapshot {
+func issue2564H2WaitAccounting(t *testing.T, rt issue2564H2Fixture, run string, closed bool, keys map[string]string) issue2564H2Snapshot {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -537,7 +485,7 @@ func issue2564H2WaitAccounting(t *testing.T, rt servedControlProofRuntime, run s
 		last = err
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("exact H2 accounting never settled: %v\n%s", last, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, run))
+	t.Fatalf("exact H2 accounting never settled: %v\n%s", last, rt.debug(t, run))
 	return issue2564H2Snapshot{}
 }
 
@@ -578,12 +526,12 @@ func issue2564H2QualificationContext(t *testing.T) (context.Context, context.Can
 	return context.WithDeadline(t.Context(), deadline)
 }
 
-func issue2564H2HTTPClient(t *testing.T, rt servedControlProofRuntime) *http.Client {
+func issue2564H2HTTPClient(t *testing.T, rt issue2564H2Fixture) *http.Client {
 	t.Helper()
 	limit := 64
 	if rt.Backend == "postgres" {
-		var capacity int
-		if err := rt.DB.QueryRow(`SHOW max_connections`).Scan(&capacity); err != nil {
+		capacity, err := storetest.ObserveH2ServerCapacity(context.Background(), rt.selected)
+		if err != nil {
 			t.Fatal(err)
 		}
 		// Leave capacity for independent claim/advisory sessions and runtime work.
@@ -599,103 +547,49 @@ func issue2564H2HTTPClient(t *testing.T, rt servedControlProofRuntime) *http.Cli
 	return &http.Client{Transport: transport}
 }
 
-func issue2564H2PGSessionSampler(t *testing.T, ctx context.Context, rt servedControlProofRuntime, run string, count int, acknowledged *sync.Map) (func(string), func()) {
+func issue2564H2PGSessionSampler(t *testing.T, ctx context.Context, rt issue2564H2Fixture, run string, count int, acknowledged *sync.Map) (func(string), func()) {
 	t.Helper()
 	if rt.Backend != "postgres" {
 		return func(string) {}, func() {}
 	}
-	// Retain only the test's read connection, before pressure, so native session
-	// attribution remains observable even when runtime connections are exhausted.
-	conn, err := rt.DB.Conn(ctx)
+	// Retain the native fixture's private read connection before pressure.
+	observation, err := storetest.BeginH2SessionObservation(ctx, rt.selected, run, count)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var actorKind, actorID string
-	if err := conn.QueryRowContext(ctx, `SELECT actor_kind,actor_id FROM api_idempotency WHERE method='event.publish' AND idempotency_key='h2-start-1'`).Scan(&actorKind, &actorID); err != nil {
-		_ = conn.Close()
-		t.Fatal(err)
-	}
-	apiKeys := make([]string, count)
-	for ordinal := range apiKeys {
-		encoded, err := json.Marshal([]string{"event.publish", actorKind, actorID, fmt.Sprintf("h2-bump-%04d", ordinal)})
-		if err != nil {
-			_ = conn.Close()
-			t.Fatal(err)
-		}
-		apiKeys[ordinal] = "swarm:api-idempotency:" + string(encoded)
-	}
-	// These read-only lock identities match the existing store owners' namespaces
-	// and retainedAdvisoryLockProofSQL. They confer no execution/claim authority.
-	const query = `
-		WITH pipeline_keys AS MATERIALIZED (
-			SELECT event_id,hashtext('swarm:pipeline-replay:' || event_id::text)::bigint AS key,
-			       event_id::text = ANY($3::text[]) AS acknowledged
-			FROM events WHERE run_id=$1::uuid
-		), api_keys AS MATERIALIZED (
-			SELECT hashtext(unnest($2::text[]))::bigint AS key
-		), held AS MATERIALIZED (
-			SELECT pid,classid::bigint AS classid,objid::bigint AS objid
-			FROM pg_locks WHERE locktype='advisory' AND granted AND objsubid=1
-			  AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
-		), pipeline AS MATERIALIZED (
-			SELECT DISTINCT h.pid,k.event_id,k.acknowledged FROM held h JOIN pipeline_keys k
-			  ON h.classid=CASE WHEN k.key<0 THEN 4294967295::bigint ELSE 0::bigint END
-			 AND h.objid=(k.key & 4294967295::bigint)
-		), api AS MATERIALIZED (
-			SELECT DISTINCT h.pid FROM held h JOIN api_keys k
-			  ON h.classid=CASE WHEN k.key<0 THEN 4294967295::bigint ELSE 0::bigint END
-			 AND h.objid=(k.key & 4294967295::bigint)
-		), sessions AS (
-			SELECT a.pid,COALESCE(a.datname,'') AS database,COALESCE(a.application_name,'') AS application,
-			       COALESCE(a.state,'') AS state,
-			       CASE WHEN EXISTS(SELECT 1 FROM pipeline p WHERE p.pid=a.pid) THEN
-			         CASE WHEN EXISTS(SELECT 1 FROM api k WHERE k.pid=a.pid) THEN 'pipeline+api' ELSE 'pipeline_only' END
-			         ELSE CASE WHEN EXISTS(SELECT 1 FROM api k WHERE k.pid=a.pid) THEN 'api_only' ELSE 'unmapped' END END AS owner,
-			       (SELECT COUNT(*) FROM pipeline p WHERE p.pid=a.pid) AS pipeline_keys,
-			       (SELECT COUNT(*) FROM pipeline p WHERE p.pid=a.pid AND p.acknowledged) AS acknowledged_keys,
-			       EXTRACT(EPOCH FROM (clock_timestamp()-a.state_change)) AS state_age
-			FROM pg_stat_activity a WHERE a.backend_type='client backend' AND a.pid<>pg_backend_pid()
-		)
-		SELECT database,application,state,owner,COUNT(*),SUM(pipeline_keys),SUM(acknowledged_keys),COALESCE(MAX(state_age),0)
-		FROM sessions GROUP BY database,application,state,owner ORDER BY database,application,state,owner`
 	return func(label string) {
-		var acked []string
-		acknowledged.Range(func(event, _ any) bool { acked = append(acked, event.(string)); return true })
-		sampleCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		rows, err := conn.QueryContext(sampleCtx, query, run, pq.Array(apiKeys), pq.Array(acked))
-		if err != nil {
-			t.Logf("H2 native_pg_sessions phase=%s acknowledged_HTTP=%d error=%v", label, len(acked), err)
-			return
-		}
-		defer rows.Close()
-		total, pipeline, api, ackedClaims := 0, 0, 0, 0
-		for rows.Next() {
-			var database, application, state, owner string
-			var sessions, keys, acknowledgedKeys int
-			var age float64
-			if err := rows.Scan(&database, &application, &state, &owner, &sessions, &keys, &acknowledgedKeys, &age); err != nil {
-				t.Logf("H2 native_pg_sessions phase=%s scan_error=%v", label, err)
+			var acked []string
+			acknowledged.Range(func(event, _ any) bool { acked = append(acked, event.(string)); return true })
+			sampleCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			samples, err := observation.SampleForTest(sampleCtx, acked)
+			if err != nil {
+				t.Logf("H2 native_pg_sessions phase=%s acknowledged_HTTP=%d error=%v", label, len(acked), err)
 				return
 			}
-			total += sessions
-			if owner == "pipeline_only" || owner == "pipeline+api" {
-				pipeline += sessions
+			total, pipeline, api, ackedClaims := 0, 0, 0, 0
+			for _, sample := range samples {
+				database, application, state, owner := sample.Database, sample.Application, sample.State, sample.Owner
+				sessions, keys, acknowledgedKeys, age := sample.Sessions, sample.Keys, sample.AcknowledgedKeys, sample.Age
+				total += sessions
+				if owner == "pipeline_only" || owner == "pipeline+api" {
+					pipeline += sessions
+				}
+				if owner == "api_only" || owner == "pipeline+api" {
+					api += sessions
+				}
+				ackedClaims += acknowledgedKeys
+				t.Logf("H2 native_pg_sessions phase=%s database=%s application=%q state=%s owner=%s sessions=%d pipeline_event_keys=%d HTTP_acknowledged_pipeline_keys=%d max_state_age_seconds=%.3f", label, database, application, state, owner, sessions, keys, acknowledgedKeys, age)
 			}
-			if owner == "api_only" || owner == "pipeline+api" {
-				api += sessions
+			t.Logf("H2 native_pg_session_totals phase=%s client_sessions=%d pipeline_owner_sessions=%d api_owner_sessions=%d acknowledged_HTTP=%d still_held_ACKed_event_keys=%d sampler_backend_excluded=true", label, total, pipeline, api, len(acked), ackedClaims)
+		}, func() {
+			if err := observation.CloseForTest(); err != nil {
+				t.Errorf("H2 native_pg_sessions close: %v", err)
 			}
-			ackedClaims += acknowledgedKeys
-			t.Logf("H2 native_pg_sessions phase=%s database=%s application=%q state=%s owner=%s sessions=%d pipeline_event_keys=%d HTTP_acknowledged_pipeline_keys=%d max_state_age_seconds=%.3f", label, database, application, state, owner, sessions, keys, acknowledgedKeys, age)
 		}
-		if err := rows.Err(); err != nil {
-			t.Logf("H2 native_pg_sessions phase=%s rows_error=%v", label, err)
-		}
-		t.Logf("H2 native_pg_session_totals phase=%s client_sessions=%d pipeline_owner_sessions=%d api_owner_sessions=%d acknowledged_HTTP=%d still_held_ACKed_event_keys=%d sampler_backend_excluded=true", label, total, pipeline, api, len(acked), ackedClaims)
-	}, func() { _ = conn.Close() }
 }
 
-func issue2564H2Bumps(t *testing.T, rt servedControlProofRuntime, seed servedEventPublishRPCResult, count, rate int) map[string]string {
+func issue2564H2Bumps(t *testing.T, rt issue2564H2Fixture, seed servedEventPublishRPCResult, count, rate int) map[string]string {
 	t.Helper()
 	ctx, cancel := issue2564H2QualificationContext(t)
 	defer cancel()
@@ -722,26 +616,14 @@ func issue2564H2Bumps(t *testing.T, rt servedControlProofRuntime, seed servedEve
 			case <-nativeTick:
 				samplePG("during_bumps")
 			case <-tick.C:
-				rows, err := rt.DB.QueryContext(ctx, `SELECT e.event_name,d.status,COUNT(*) FROM events e LEFT JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1 GROUP BY e.event_name,d.status`, seed.RunID)
-				if err != nil {
-					t.Logf("H2 live response-queue diagnostic query: %v", err)
-					continue
-				}
+				rows, err := storetest.ObserveH2ResponseQueue(ctx, rt.selected, seed.RunID)
 				var progress []string
-				for rows.Next() {
-					var name string
-					var status sql.NullString
-					var n int
-					if err := rows.Scan(&name, &status, &n); err != nil {
-						progress = append(progress, err.Error())
-						break
-					}
-					progress = append(progress, fmt.Sprintf("%s/%s=%d", name, status.String, n))
+				for _, row := range rows {
+					progress = append(progress, fmt.Sprintf("%s/%s=%d", row.Name, row.Status.String, row.Count))
 				}
-				if err := rows.Err(); err != nil {
+				if err != nil {
 					progress = append(progress, err.Error())
 				}
-				rows.Close()
 				t.Logf("H2 live response-queue diagnostic: %s", strings.Join(progress, " "))
 			}
 		}
@@ -773,10 +655,16 @@ func issue2564H2Bumps(t *testing.T, rt servedControlProofRuntime, seed servedEve
 						firstFailure = reply.err
 					}
 				}
-				var persisted, pending int
-				_ = rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1`, seed.RunID).Scan(&persisted)
-				_ = rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress')`, seed.RunID).Scan(&pending)
-				t.Fatalf("H2 workload pacing deadline expired: issued=%d/%d completed=%d persisted_events=%d pending_deliveries=%d first_error=%v\n%s", ordinal, count, completed, persisted, pending, firstFailure, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+				persistedEvidence, persistedErr := storetest.ObserveH2EventAccounting(context.Background(), rt.selected, seed.RunID)
+				if persistedErr != nil {
+					t.Logf("H2 persisted-event diagnostic read: %v", persistedErr)
+				}
+				summary, pendingErr := rt.selected.SummarizeRun(context.Background(), seed.RunID)
+				if pendingErr != nil {
+					t.Logf("H2 pending-delivery diagnostic read: %v", pendingErr)
+				}
+				persisted, pending := persistedEvidence.Events, summary.Pending+summary.InProgress
+				t.Fatalf("H2 workload pacing deadline expired: issued=%d/%d completed=%d persisted_events=%d pending_deliveries=%d first_error=%v\n%s", ordinal, count, completed, persisted, pending, firstFailure, rt.debug(t, seed.RunID))
 			}
 		}
 		workers.Add(1)
@@ -838,7 +726,7 @@ func issue2564H2Bumps(t *testing.T, rt servedControlProofRuntime, seed servedEve
 	}
 	observed := float64(count-1) / last.Sub(first).Seconds()
 	if len(failures) != 0 {
-		t.Fatalf("H2 issued=%d accepted=%d input_rate=%.3f/s span=%s RPC_errors=%v\n%s", count, len(accepted), observed, last.Sub(first), failures, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+		t.Fatalf("H2 issued=%d accepted=%d input_rate=%.3f/s span=%s RPC_errors=%v\n%s", count, len(accepted), observed, last.Sub(first), failures, rt.debug(t, seed.RunID))
 	}
 	if len(accepted) != count || observed < float64(rate)*0.85 || observed > float64(rate)*1.15 {
 		t.Fatalf("H2 workload changed: accepted=%d/%d observed_rate=%.2f target=%d", len(accepted), count, observed, rate)
@@ -884,20 +772,15 @@ func issue2564H2AdmissionEvidence(t *testing.T, output string, accepted map[stri
 	t.Logf("H2 durable_publication_observation exact_events=%d observed_postcommit_rate=%.3f/s span=%s (not a claim of submission-rate durable admissions)", len(seen), float64(len(seen)-1)/last.Sub(first).Seconds(), last.Sub(first))
 }
 
-func issue2564H2CounterEvidence(t *testing.T, rt servedControlProofRuntime, run string, accepted map[string]string, snapshot issue2564H2Snapshot) {
+func issue2564H2CounterEvidence(t *testing.T, rt issue2564H2Fixture, run string, accepted map[string]string, snapshot issue2564H2Snapshot) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT entity_id,path,CAST(old_value AS TEXT),CAST(new_value AS TEXT),COALESCE(CAST(caused_by_event AS TEXT),'') FROM entity_mutations WHERE run_id=$1 AND domain='authored_field' AND path IN ('count','c1','c2')`, run)
+	rows, err := storetest.ObserveH2CounterMutations(context.Background(), rt.selected, run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	chains, effects := map[string]map[int64]int64{}, map[string]map[string]int{}
-	for rows.Next() {
-		var entity, path, cause string
-		var old, next sql.NullString
-		if err := rows.Scan(&entity, &path, &old, &next, &cause); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		entity, path, cause, old, next := row.Entity, row.Path, row.Cause, row.Before, row.After
 		var before, after int64
 		if !next.Valid || json.Unmarshal([]byte(next.String), &after) != nil {
 			t.Fatalf("H2 counter became absent/noninteger: %s %s -> %s", path, old.String, next.String)
@@ -933,9 +816,6 @@ func issue2564H2CounterEvidence(t *testing.T, rt servedControlProofRuntime, run 
 		}
 		effects[cause][path]++
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
 	for event, hubID := range accepted {
 		if effects[event]["count"] != 1 || effects[event]["c1"]+effects[event]["c2"] != 1 {
 			t.Fatalf("H2 bump %s hub=%s does not have exact coupled count/stage evidence: %v", event, hubID, effects[event])
@@ -959,21 +839,15 @@ func issue2564H2CounterEvidence(t *testing.T, rt servedControlProofRuntime, run 
 	}
 }
 
-func issue2564H2Deliveries(t *testing.T, rt servedControlProofRuntime, run string, accepted map[string]string, userEvents int) {
+func issue2564H2Deliveries(t *testing.T, rt issue2564H2Fixture, run string, accepted map[string]string, userEvents int) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT d.event_id,d.status,d.retry_count,e.event_name,e.payload FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND d.subscriber_type='node'`, run)
+	rows, err := storetest.ObserveH2NodeDeliveries(context.Background(), rt.selected, run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	total, bumped := 0, map[string]bool{}
-	for rows.Next() {
-		var event, status, name string
-		var retries int
-		var payload []byte
-		if err := rows.Scan(&event, &status, &retries, &name, &payload); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		event, status, name, retries, payload := row.Event, row.Status, row.Name, row.Retries, row.Payload
 		total++
 		if status != "delivered" || retries != 0 {
 			t.Fatalf("H2 stale-entry/contention delivery: event=%s type=%s status=%s retry_count=%d", event, name, status, retries)
@@ -988,19 +862,14 @@ func issue2564H2Deliveries(t *testing.T, rt servedControlProofRuntime, run strin
 			bumped[event] = true
 		}
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
 	if total != userEvents || len(bumped) != len(accepted) {
 		t.Fatalf("H2 real node delivery counts=%d/%d bumps=%d/%d", total, userEvents, len(bumped), len(accepted))
 	}
-	var dead, retried int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, run).Scan(&dead); err != nil {
+	failures, err := storetest.ObserveH2DeliveryAccounting(context.Background(), rt.selected, run)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND (a.outcome='retry_scheduled' OR a.outcome='dead_letter')`, run).Scan(&retried); err != nil {
-		t.Fatal(err)
-	}
+	dead, retried := failures.DeadLetters, failures.Retried
 	if dead != 0 || retried != 0 {
 		t.Fatalf("H2 handler failure evidence: dead_letters=%d retry/dead_letter_attempts=%d", dead, retried)
 	}
@@ -1024,8 +893,11 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 						for time.Now().Before(until) && !strings.Contains(first.output.String(), "H2_STACK_DUMP_END") {
 							time.Sleep(10 * time.Millisecond)
 						}
-						var pending int
-						_ = rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id IS NOT NULL AND status IN ('pending','in_progress')`).Scan(&pending)
+						pendingEvidence, pendingErr := storetest.ObserveH2PendingAccounting(context.Background(), rt.selected, "")
+						if pendingErr != nil {
+							t.Logf("H2 failure pending-delivery read: %v", pendingErr)
+						}
+						pending := pendingEvidence.Pending
 						t.Logf("H2 failure pending_deliveries=%d", pending)
 						t.Logf("H2 first process raw output:\n%s", first.output.String())
 					}
@@ -1034,7 +906,7 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 				for hub := 2; hub <= 6; hub++ {
 					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"hub_id": fmt.Sprintf("h%02d", hub)}, "idempotency_key": fmt.Sprintf("h2-start-%d", hub)})
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				rt.waitDeliveries(t, seed.RunID)
 				initialized, err := issue2564H2Read(context.Background(), rt, seed.RunID)
 				if err != nil || len(initialized.Hubs) != 6 {
 					t.Fatalf("H2 real six-hub construction: hubs=%d error=%v", len(initialized.Hubs), err)
@@ -1056,13 +928,14 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 						t.Fatalf("H2 hub %s has %d initial-entry timers, want exactly one", hub.ID, initial)
 					}
 				}
-				var constructions int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1`, seed.RunID).Scan(&constructions); err != nil || constructions != 7 {
+				constructionEvidence, err := storetest.ObserveH2ConstructionAccounting(context.Background(), rt.selected, seed.RunID)
+				constructions := constructionEvidence.Constructions
+				if err != nil || constructions != 7 {
 					t.Fatalf("H2 requires one root plus six real keyed-child constructions: %d %v", constructions, err)
 				}
 				accepted := issue2564H2Bumps(t, rt, seed, workload.bumps, workload.rate)
 				issue2564H2AdmissionEvidence(t, first.output.String(), accepted)
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				rt.waitDeliveries(t, seed.RunID)
 				before := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
 				issue2564H2Deliveries(t, rt, seed.RunID, accepted, workload.bumps+6)
 				issue2564H2CounterEvidence(t, rt, seed.RunID, accepted, before)
@@ -1148,7 +1021,7 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				rt.waitDeliveries(t, seed.RunID)
 				closed, err := issue2564H2Read(context.Background(), rt, seed.RunID)
 				if err != nil {
 					t.Fatal(err)
@@ -1182,3 +1055,113 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 }
 
 var _ lifecycleprobe.Observer = (*issue2564H2Cut)(nil)
+
+func TestIssue2564WorkloadObservationPortsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			start, _, _ := issue2564H2Harness(t, backend, issue2564H2Source(t))
+			first, rt := start(false)
+			// This exercises observation ports only, not an H2 pressure qualification.
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				"event_name": "hub.start", "bundle_hash": rt.BundleHash,
+				"payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "h2-start-1",
+			})
+			rt.waitDeliveries(t, seed.RunID)
+			issue2564WorkloadObservationChecks(t, rt, seed.RunID)
+			snapshot, err := issue2564H2Read(t.Context(), rt, seed.RunID)
+			if err != nil || len(snapshot.Hubs) != 1 || len(snapshot.Timers) == 0 {
+				t.Fatalf("native snapshot observation: %+v error=%v", snapshot, err)
+			}
+			if backend == "postgres" {
+				capacity, err := storetest.ObserveH2ServerCapacity(t.Context(), rt.selected)
+				if err != nil || capacity < 6 {
+					t.Fatalf("native capacity observation: %d %v", capacity, err)
+				}
+				var acknowledged sync.Map
+				acknowledged.Store(seed.EventID, struct{}{})
+				sample, release := issue2564H2PGSessionSampler(t, t.Context(), rt, seed.RunID, 1, &acknowledged)
+				sample("observation_port_smoke")
+				release()
+			}
+			cancelled, cancel := context.WithCancel(t.Context())
+			cancel()
+			evidence, err := storetest.ObserveH2WorkloadSnapshot(cancelled, rt.selected, seed.RunID)
+			if err == nil || !reflect.DeepEqual(evidence, storetest.H2WorkloadSnapshotEvidence{}) {
+				t.Fatalf("cancelled snapshot exposed partial evidence: %+v %v", evidence, err)
+			}
+			if err := first.stop(); err != nil {
+				t.Fatal(err)
+			}
+			second, reopened := start(false)
+			after, err := issue2564H2Read(t.Context(), reopened, seed.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			old, next := snapshot.Hubs["h01"], after.Hubs["h01"]
+			if old.Entity != next.Entity || old.Instance != next.Instance || old.Count != next.Count || old.C1 != next.C1 || old.C2 != next.C2 {
+				t.Fatalf("native location readback changed hub: before=%+v after=%+v", old, next)
+			}
+			issue2564WorkloadObservationChecks(t, reopened, seed.RunID)
+			if err := second.stop(); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("ISSUE2564_OBSERVATION_PORT_SMOKE backend=%s native_location_reopen=true pressure_qualification=false", backend)
+		})
+	}
+}
+
+func issue2564WorkloadObservationChecks(t *testing.T, rt issue2564H2Fixture, runID string) {
+	t.Helper()
+	ctx := t.Context()
+	checks := []struct {
+		name string
+		read func() error
+	}{
+		{"H1FlowAccounting", func() error { _, err := storetest.ObserveH1FlowAccounting(ctx, rt.selected, runID); return err }},
+		{"H1TurnAccounting", func() error { _, err := storetest.ObserveH1TurnAccounting(ctx, rt.selected, runID); return err }},
+		{"H1BumpAccounting", func() error { _, err := storetest.ObserveH1BumpAccounting(ctx, rt.selected, runID); return err }},
+		{"H1DeliveryAccounting", func() error { _, err := storetest.ObserveH1DeliveryAccounting(ctx, rt.selected, runID); return err }},
+		{"H2DeliveryAccounting", func() error { _, err := storetest.ObserveH2DeliveryAccounting(ctx, rt.selected, runID); return err }},
+		{"H2ConstructionAccounting", func() error { _, err := storetest.ObserveH2ConstructionAccounting(ctx, rt.selected, runID); return err }},
+		{"H2EventAccounting", func() error { _, err := storetest.ObserveH2EventAccounting(ctx, rt.selected, runID); return err }},
+		{"H2PendingAccounting", func() error { _, err := storetest.ObserveH2PendingAccounting(ctx, rt.selected, runID); return err }},
+		{"H1RunOverlap", func() error { _, err := storetest.ObserveH1RunOverlap(ctx, rt.selected, runID); return err }},
+		{"H1HubFields", func() error { _, err := storetest.ObserveH1HubFields(ctx, rt.selected, runID); return err }},
+		{"H1AttributedMutations", func() error {
+			_, err := storetest.ObserveH1AttributedMutations(ctx, rt.selected, runID, rt.BundleHash)
+			return err
+		}},
+		{"H1SameEntityOverlap", func() error { _, err := storetest.ObserveH1SameEntityOverlap(ctx, rt.selected, runID); return err }},
+		{"H1FailureMutations", func() error { _, err := storetest.ObserveH1FailureMutations(ctx, rt.selected, runID); return err }},
+		{"H1NodeFailures", func() error { _, err := storetest.ObserveH1NodeFailures(ctx, rt.selected, runID); return err }},
+		{"H1AttemptFailures", func() error { _, err := storetest.ObserveH1AttemptFailures(ctx, rt.selected, runID); return err }},
+		{"H1DeadLetters", func() error { _, err := storetest.ObserveH1DeadLetters(ctx, rt.selected, runID); return err }},
+		{"H1BumpHistory", func() error { _, err := storetest.ObserveH1BumpHistory(ctx, rt.selected, runID); return err }},
+		{"H2Hubs", func() error { _, err := storetest.ObserveH2Hubs(ctx, rt.selected, runID); return err }},
+		{"H2Occurrences", func() error { _, err := storetest.ObserveH2Occurrences(ctx, rt.selected, runID); return err }},
+		{"H2ResponseQueue", func() error { _, err := storetest.ObserveH2ResponseQueue(ctx, rt.selected, runID); return err }},
+		{"H2CounterMutations", func() error { _, err := storetest.ObserveH2CounterMutations(ctx, rt.selected, runID); return err }},
+		{"H2NodeDeliveries", func() error { _, err := storetest.ObserveH2NodeDeliveries(ctx, rt.selected, runID); return err }},
+	}
+	for _, check := range checks {
+		if err := check.read(); err != nil {
+			t.Fatalf("closed %s observation: %v", check.name, err)
+		}
+	}
+}
+
+func TestIssue2564WorkloadObservationsRejectOtherOwner(t *testing.T) {
+	selected := struct{}{}
+	if facts, err := storetest.ObserveH1DeliveryAccounting(t.Context(), selected, "run"); err == nil || facts != (storetest.H1DeliveryAccountingEvidence{}) {
+		t.Fatalf("foreign delivery owner exposed evidence: %+v %v", facts, err)
+	}
+	if rows, err := storetest.ObserveH1FailureMutations(t.Context(), selected, "run"); err == nil || rows != nil {
+		t.Fatalf("foreign mutation owner exposed evidence: %+v %v", rows, err)
+	}
+	if facts, err := storetest.ObserveH2WorkloadSnapshot(t.Context(), selected, "run"); err == nil || !reflect.DeepEqual(facts, storetest.H2WorkloadSnapshotEvidence{}) {
+		t.Fatalf("foreign snapshot owner exposed evidence: %+v %v", facts, err)
+	}
+	if facts, err := storetest.BeginH2SessionObservation(t.Context(), selected, "run", 1); err == nil || facts != nil {
+		t.Fatalf("foreign physical observation owner exposed evidence: %+v %v", facts, err)
+	}
+}
