@@ -770,6 +770,9 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 		states := declaredStatesForFlow(c.source, flowID)
 		initial := strings.TrimSpace(c.source.FlowInitialStage(flowID))
 		if graph, ok := semanticview.WorkflowStageTopology(c.source, flowID); ok && graph.FlowID == flowID && graph.ValidStageCatalog() {
+			for _, message := range graph.HandlerSourceErrors() {
+				c.stateFindings = append(c.stateFindings, Finding{CheckID: "state_machine_coherence", Severity: "error", Message: message, Location: flowID})
+			}
 			compiledInitial := ""
 			if graph.HasInitialStage() {
 				ref, err := graph.InitialStageRef()

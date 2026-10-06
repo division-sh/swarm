@@ -1997,26 +1997,26 @@ func AdmitSourceEvent(eventType events.EventType, source events.RoutingSource) (
 // AdmitDeploymentFeedDeclaration binds a source-neutral feed to the exact
 // compiled importable event declaration. A flow coordinate alone is not
 // permission to publish an arbitrary output-pin event.
-func AdmitDeploymentFeedDeclaration(source semanticview.Source, eventType events.EventType, routingSource events.RoutingSource) error {
+func AdmitDeploymentFeedDeclaration(source semanticview.Source, eventType events.EventType, routingSource events.RoutingSource) (SourceEvent, error) {
 	if source == nil || routingSource.Kind() != events.RoutingSourceDeploymentFeed {
-		return fmt.Errorf("deployment feed requires semantic source and typed provenance")
+		return SourceEvent{}, fmt.Errorf("deployment feed requires semantic source and typed provenance")
 	}
 	ref, err := durabledata.ParseDeclarationRef(routingSource.Route().FlowID, string(eventType))
 	if err != nil {
-		return err
+		return SourceEvent{}, err
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
-		return fmt.Errorf("deployment feed requires admitted bundle")
+		return SourceEvent{}, fmt.Errorf("deployment feed requires admitted bundle")
 	}
 	declaration, ok := bundle.DurableDataDeclarationByRef(ref)
 	if !ok || declaration.OwnerFlowID != routingSource.Route().FlowID || declaration.Ref != ref {
-		return fmt.Errorf("deployment feed event %q has no exact importable declaration in flow %q", eventType, ref.FlowPath)
+		return SourceEvent{}, fmt.Errorf("deployment feed event %q has no exact importable declaration in flow %q", eventType, ref.FlowPath)
 	}
 	if !PinDeclaredOutput(source, declaration.OwnerFlowID, declaration.Ref.EventName) {
-		return fmt.Errorf("deployment feed event %q has no exact declared output pin in flow %q", eventType, ref.FlowPath)
+		return SourceEvent{}, fmt.Errorf("deployment feed event %q has no exact declared output pin in flow %q", eventType, ref.FlowPath)
 	}
-	return nil
+	return AdmitSourceEvent(eventType, routingSource)
 }
 
 // AdmitRuntimeControlSourceEvent resolves one authored producer event against

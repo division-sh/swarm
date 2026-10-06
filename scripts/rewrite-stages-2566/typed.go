@@ -61,58 +61,16 @@ func prepareTyped(root string) error {
 func rewriteTypedStages(body []byte, positions *token.FileSet, file *ast.File) ([]byte, int, error) {
 	var edits []edit
 	seen := map[*ast.CompositeLit]bool{}
-	var typeName func(ast.Expr) string
-	typeName = func(expression ast.Expr) string {
-		switch typed := expression.(type) {
-		case *ast.Ident:
-			return typed.Name
-		case *ast.SelectorExpr:
-			return typed.Sel.Name
-		case *ast.ArrayType:
-			return typeName(typed.Elt)
-		}
-		return ""
-	}
 	add := func(literal *ast.CompositeLit) {
 		if seen[literal] {
 			return
 		}
 		seen[literal] = true
-		for _, element := range literal.Elts {
-			field, ok := element.(*ast.KeyValueExpr)
-			if !ok {
-				continue
-			}
-			key, ok := field.Key.(*ast.Ident)
-			if !ok {
-				continue
-			}
-			start := positions.Position(field.Pos()).Offset
-			end := positions.Position(field.End()).Offset
-			switch key.Name {
-			case "Terminal":
-				edits = append(edits, edit{Offset: start, Before: "Terminal", After: "Final"})
-			case "Initial":
-				for end < len(body) && (body[end] == ' ' || body[end] == '\t') {
-					end++
-				}
-				if end < len(body) && body[end] == ',' {
-					end++
-				} else {
-					for start > 0 && (body[start-1] == ' ' || body[start-1] == '\t') {
-						start--
-					}
-					if start > 0 && body[start-1] == ',' {
-						start--
-					}
-				}
-				edits = append(edits, edit{Offset: start, Before: string(body[start:end])})
-			}
-		}
+		edits = append(edits, typedStageFieldEdits(body, positions, literal)...)
 	}
 	ast.Inspect(file, func(node ast.Node) bool {
 		literal, ok := node.(*ast.CompositeLit)
-		if !ok || typeName(literal.Type) != "FlowStageDeclaration" {
+		if !ok || typedFixtureTypeName(literal.Type) != "FlowStageDeclaration" {
 			return true
 		}
 		if _, array := literal.Type.(*ast.ArrayType); array {
@@ -142,4 +100,52 @@ func rewriteTypedStages(body []byte, positions *token.FileSet, file *ast.File) (
 	c.AfterHash = digest(output)
 	output, err := rewrite(c, body)
 	return output, len(edits), err
+}
+
+func typedFixtureTypeName(expression ast.Expr) string {
+	switch typed := expression.(type) {
+	case *ast.Ident:
+		return typed.Name
+	case *ast.SelectorExpr:
+		return typed.Sel.Name
+	case *ast.ArrayType:
+		return typedFixtureTypeName(typed.Elt)
+	}
+	return ""
+}
+
+func typedStageFieldEdits(body []byte, positions *token.FileSet, literal *ast.CompositeLit) []edit {
+	var edits []edit
+	for _, element := range literal.Elts {
+		field, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := field.Key.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		start := positions.Position(field.Pos()).Offset
+		end := positions.Position(field.End()).Offset
+		switch key.Name {
+		case "Terminal":
+			edits = append(edits, edit{Offset: start, Before: "Terminal", After: "Final"})
+		case "Initial":
+			for end < len(body) && (body[end] == ' ' || body[end] == '\t') {
+				end++
+			}
+			if end < len(body) && body[end] == ',' {
+				end++
+			} else {
+				for start > 0 && (body[start-1] == ' ' || body[start-1] == '\t') {
+					start--
+				}
+				if start > 0 && body[start-1] == ',' {
+					start--
+				}
+			}
+			edits = append(edits, edit{Offset: start, Before: string(body[start:end])})
+		}
+	}
+	return edits
 }

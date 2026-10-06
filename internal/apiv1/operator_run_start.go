@@ -124,7 +124,8 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	if err != nil {
 		return runStartResult{}, err
 	}
-	if err := admitRunStartDeploymentFeeds(selectedOpts.Source, data); err != nil {
+	selectedFeeds, err := admitRunStartDeploymentFeeds(selectedOpts.Source, data)
+	if err != nil {
 		return runStartResult{}, err
 	}
 	key, _, err := optionalStringParam(req.Params, "idempotency_key")
@@ -164,7 +165,7 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	if _, _, command, err = command.RequestHash(); err != nil {
 		return runStartResult{}, NewInvalidParamsError(map[string]any{"field": "data", "reason": err.Error()})
 	}
-	if err := runtimerunstart.ValidateFinite(selectedOpts.Source); err != nil {
+	if err := runtimerunstart.ValidateFinite(selectedOpts.Source, selectedFeeds); err != nil {
 		return runStartResult{}, finiteRunStartApplicationError(err)
 	}
 	record, err := owner.StartDeploymentRunAcknowledged(ctx, command, idempotency)
@@ -196,28 +197,31 @@ func finiteRunStartApplicationError(err error) error {
 	})
 }
 
-func admitRunStartDeploymentFeeds(source semanticview.Source, data durabledata.RunCreationDataEnvelope) error {
+func admitRunStartDeploymentFeeds(source semanticview.Source, data durabledata.RunCreationDataEnvelope) ([]runtimepinrouting.SourceEvent, error) {
+	var selected []runtimepinrouting.SourceEvent
 	admit := func(ref durabledata.DeclarationRef) error {
 		routingSource, err := events.NewDeploymentFeedRoutingSource(ref.FlowPath)
+		var feed runtimepinrouting.SourceEvent
 		if err == nil {
-			err = runtimepinrouting.AdmitDeploymentFeedDeclaration(source, events.EventType(ref.EventName), routingSource)
+			feed, err = runtimepinrouting.AdmitDeploymentFeedDeclaration(source, events.EventType(ref.EventName), routingSource)
 		}
 		if err != nil {
 			return NewInvalidParamsError(map[string]any{"field": "data", "declaration": ref.EventName, "reason": err.Error()})
 		}
+		selected = append(selected, feed)
 		return nil
 	}
 	for _, item := range data.Imports {
 		if err := admit(item.Declaration); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, item := range data.Pins {
 		if err := admit(item.Declaration); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return selected, nil
 }
 
 func bundleIdentityInputParam(params map[string]any) (bundleIdentityParam, error) {
