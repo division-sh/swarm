@@ -23,14 +23,15 @@ import (
 const realDockerProxyArgument = "--test-real-workspace-docker-proxy"
 
 type workspaceDockerObservation struct {
-	StartedAt  time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at"`
-	Container  string    `json:"container,omitempty"`
-	Mode       string    `json:"mode"`
-	Tool       string    `json:"tool,omitempty"`
-	Failure    string    `json:"failure,omitempty"`
-	Disconnect bool      `json:"disconnect,omitempty"`
-	Model      bool      `json:"model,omitempty"`
+	StartedAt    time.Time `json:"started_at"`
+	FinishedAt   time.Time `json:"finished_at"`
+	Container    string    `json:"container,omitempty"`
+	Mode         string    `json:"mode"`
+	Tool         string    `json:"tool,omitempty"`
+	Failure      string    `json:"failure,omitempty"`
+	Cancellation string    `json:"cancellation,omitempty"`
+	Disconnect   bool      `json:"disconnect,omitempty"`
+	Model        bool      `json:"model,omitempty"`
 }
 
 // This observer always executes the real Docker command. Its only fault is an
@@ -135,6 +136,7 @@ func runWorkspaceDockerProxy(args []string) int {
 		row.FinishedAt = time.Now().UTC()
 		var result struct {
 			ModelStarted bool            `json:"model_started"`
+			Cancellation string          `json:"cancellation"`
 			ToolResult   json.RawMessage `json:"tool_result"`
 			Failure      *struct {
 				Detail struct {
@@ -146,6 +148,7 @@ func runWorkspaceDockerProxy(args []string) int {
 			return 2
 		}
 		row.Model = result.ModelStarted
+		row.Cancellation = result.Cancellation
 		if result.Failure != nil {
 			row.Failure = result.Failure.Detail.Code
 		}
@@ -383,7 +386,7 @@ func TestWorkspaceMCPCompiledDockerConformance(t *testing.T) {
 				if !t.Failed() {
 					return
 				}
-				for _, name := range []string{"observations.jsonl", "workspace-observer-last-snapshot.json"} {
+				for _, name := range []string{"observations.jsonl", "workspace-observer-last-snapshot.json", "workspace-observer-last-snapshot.json.timing.json"} {
 					data, err := os.ReadFile(filepath.Join(owned, name))
 					t.Logf("failure evidence %s (read error=%v):\n%s", name, err, data)
 				}

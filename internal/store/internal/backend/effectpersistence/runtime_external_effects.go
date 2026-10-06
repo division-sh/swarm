@@ -31,6 +31,39 @@ var _ runtimeeffects.ChannelOnboardingOutcomeStore = (*EffectPostgresOwner)(nil)
 var _ runtimeeffects.ChannelOnboardingOutcomeStore = (*EffectSQLiteOwner)(nil)
 var _ runtimeeffects.CompletionHeartbeatStore = (*EffectPostgresOwner)(nil)
 var _ runtimeeffects.CompletionHeartbeatStore = (*EffectSQLiteOwner)(nil)
+
+type WorkspaceEffectPhase struct {
+	AttemptID, OperationID, State                             string
+	AuthorizedAt, LaunchedAt, ResponseObservedAt, CompletedAt *string
+}
+
+// Fixed physical phase facts for an optional private-invocation diagnostic.
+// This cannot expose authority evidence, provider inputs/results or credentials.
+func ReadWorkspaceInvocationEffectPhases(ctx context.Context, q schemaQueryer) ([]WorkspaceEffectPhase, error) {
+	rows, err := q.QueryContext(ctx, `SELECT CAST(attempt_id AS TEXT),CAST(operation_id AS TEXT),state,
+		CAST(authorized_at AS TEXT),CAST(launched_at AS TEXT),CAST(response_observed_at AS TEXT),CAST(completed_at AS TEXT)
+		FROM runtime_external_effect_attempts ORDER BY authorized_at,attempt_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkspaceEffectPhase{}
+	for rows.Next() {
+		var row WorkspaceEffectPhase
+		if err := rows.Scan(&row.AttemptID, &row.OperationID, &row.State, &row.AuthorizedAt, &row.LaunchedAt, &row.ResponseObservedAt, &row.CompletedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 var _ runtimeeffects.RecoveryStore = (*EffectPostgresOwner)(nil)
 var _ runtimeeffects.RecoveryStore = (*EffectSQLiteOwner)(nil)
 

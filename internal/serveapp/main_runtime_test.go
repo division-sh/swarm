@@ -2475,10 +2475,6 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, hooks...)
 }
 
-func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
-	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, realWorkspace, hooks...)
-}
-
 func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
 	forkOptions := captureServedForkRuntimeOptions(t)

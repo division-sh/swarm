@@ -18,6 +18,7 @@ type ConversationForkTurnDiagnostic = private.ConversationForkTurnDiagnostic
 type AuthoredHTTPToolEffectStorage = private.AuthoredHTTPToolEffectStorage
 type SelectedSourceOutcomeFixture = private.SelectedSourceOutcomeFixture
 type WorkspaceMockInvocationStorage = private.WorkspaceMockInvocationStorage
+type WorkspaceInvocationPhases = private.WorkspaceInvocationPhases
 type WorkspaceEffectFailureStorage = private.WorkspaceEffectFailureStorage
 
 func ReadWorkspaceEffectFailures(ctx context.Context, selected any) ([]WorkspaceEffectFailureStorage, error) {
@@ -26,6 +27,10 @@ func ReadWorkspaceEffectFailures(ctx context.Context, selected any) ([]Workspace
 
 func ReadWorkspaceMockInvocationStorage(ctx context.Context, selected any) (WorkspaceMockInvocationStorage, error) {
 	return private.ReadWorkspaceMockInvocationStorageForTest(ctx, selected)
+}
+
+func ReadWorkspaceInvocationPhases(ctx context.Context, selected any) (WorkspaceInvocationPhases, error) {
+	return private.ReadWorkspaceInvocationPhasesForTest(ctx, selected)
 }
 
 func ReadManagedAgentTurnStorage(ctx context.Context, selected any, runID, agentID string) ([]ManagedAgentTurnStorageRow, error) {

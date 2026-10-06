@@ -173,6 +173,47 @@ func ReadWorkspaceInvocationStorageCounts(ctx context.Context, q queryer) (agent
 	return
 }
 
+type WorkspaceDeliveryPhase struct {
+	DeliveryID, EventID, RunID, SubscriberType, SubscriberID, Status                           string
+	ClaimVersion                                                                               int64
+	CreatedAt, UpdatedAt                                                                       string
+	SettledAt, HandoffAt                                                                       *string
+	AttemptStartedAt, AttemptExpiresAt, AttemptClosureKind, AttemptOutcome, AttemptCompletedAt *string
+	AttemptOpenMarker                                                                          *bool
+}
+
+// Closed diagnostic of the private invocation, never an eligibility selector.
+// Payload, route/capability bodies and claim tokens cannot enter the result.
+func ReadWorkspaceInvocationDeliveryPhases(ctx context.Context, q queryer) ([]WorkspaceDeliveryPhase, error) {
+	rows, err := q.QueryContext(ctx, `SELECT CAST(d.delivery_id AS TEXT),CAST(d.event_id AS TEXT),CAST(d.run_id AS TEXT),
+		d.subscriber_type,d.subscriber_id,d.status,d.claim_version,CAST(d.created_at AS TEXT),CAST(d.updated_at AS TEXT),
+		CAST(d.settled_at AS TEXT),CAST(d.continuation_handoff_at AS TEXT),CAST(a.started_at AS TEXT),
+		CAST(a.lease_expires_at AS TEXT),a.closure_kind,a.outcome,CAST(a.completed_at AS TEXT),a.open_marker
+		FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.claim_version=d.claim_version
+		ORDER BY d.created_at,d.delivery_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkspaceDeliveryPhase{}
+	for rows.Next() {
+		var row WorkspaceDeliveryPhase
+		if err := rows.Scan(&row.DeliveryID, &row.EventID, &row.RunID, &row.SubscriberType, &row.SubscriberID, &row.Status, &row.ClaimVersion,
+			&row.CreatedAt, &row.UpdatedAt, &row.SettledAt, &row.HandoffAt, &row.AttemptStartedAt, &row.AttemptExpiresAt,
+			&row.AttemptClosureKind, &row.AttemptOutcome, &row.AttemptCompletedAt, &row.AttemptOpenMarker); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ReadSemanticEventSettledAttemptCount(ctx context.Context, q queryer, eventID string) (int, error) {
 	var count int
 	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a

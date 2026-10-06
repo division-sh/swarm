@@ -73,6 +73,17 @@ func observeWorkspaceInvocation(ctx context.Context, root string, output *json.E
 	var session string
 	var lastError error
 	var lastDiagnostic time.Time
+	var diagnosticInspection storetest.ReleaseProcessReadOnlyInspection
+	var diagnosticDisabled bool
+	var diagnosticSamples int
+	var diagnosticTotal, diagnosticMax time.Duration
+	defer func() {
+		if diagnosticInspection != nil {
+			if err := diagnosticInspection.Close(); err != nil {
+				fmt.Fprintln(os.Stderr, "optional workspace diagnostic close:", err)
+			}
+		}
+	}()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -122,12 +133,33 @@ func observeWorkspaceInvocation(ctx context.Context, root string, output *json.E
 					return workspaceObserverResult{}, err
 				}
 			}
-			if path := os.Getenv("SWARM_TEST_WORKSPACE_OBSERVER_DIAGNOSTICS"); path != "" && time.Since(lastDiagnostic) >= time.Second {
+			if path := os.Getenv("SWARM_TEST_WORKSPACE_OBSERVER_DIAGNOSTICS"); path != "" && !diagnosticDisabled && time.Since(lastDiagnostic) >= time.Second {
+				started := time.Now()
 				diagnosticCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				err := writeWorkspaceObserverSnapshot(diagnosticCtx, inspection, path)
+				if diagnosticInspection == nil {
+					diagnosticInspection, err = storetest.OpenReleaseProcessReadOnlyInspection("sqlite", session)
+				}
+				if err == nil {
+					err = writeWorkspaceObserverSnapshot(diagnosticCtx, diagnosticInspection, path)
+				}
 				cancel()
+				elapsed := time.Since(started)
+				diagnosticSamples++
+				diagnosticTotal += elapsed
+				diagnosticMax = max(diagnosticMax, elapsed)
 				if err != nil {
-					return workspaceObserverResult{}, err
+					fmt.Fprintln(os.Stderr, "optional workspace diagnostics unavailable:", err)
+					diagnosticDisabled = true
+				}
+				metrics, marshalErr := json.Marshal(struct {
+					Samples      int   `json:"samples"`
+					TotalNanos   int64 `json:"total_nanos"`
+					MaximumNanos int64 `json:"maximum_nanos"`
+					Unavailable  bool  `json:"unavailable"`
+				}{diagnosticSamples, int64(diagnosticTotal), int64(diagnosticMax), diagnosticDisabled})
+				if err := errors.Join(marshalErr, os.WriteFile(path+".timing.json", metrics, 0o600)); err != nil {
+					fmt.Fprintln(os.Stderr, "optional workspace diagnostic timing unavailable:", err)
+					diagnosticDisabled = true
 				}
 				lastDiagnostic = time.Now()
 			}
@@ -141,13 +173,18 @@ func writeWorkspaceObserverSnapshot(ctx context.Context, inspection storetest.Re
 	if !filepath.IsAbs(path) {
 		return errors.New("workspace observer diagnostics require an absolute path")
 	}
-	snapshot, err := readReleaseInspectionStorageSnapshot(ctx, inspection)
+	var snapshot storetest.WorkspaceInvocationPhases
+	err := inspection.InspectSnapshot(ctx, func(scoped context.Context) error {
+		var err error
+		snapshot, err = storetest.ReadWorkspaceInvocationPhases(scoped, inspection)
+		return err
+	})
 	if err != nil {
 		return err
 	}
 	data, err := json.Marshal(struct {
-		At     time.Time                                             `json:"at"`
-		Tables map[string]storetest.SelectedForkStorageTableSnapshot `json:"tables"`
+		At     time.Time                           `json:"at"`
+		Phases storetest.WorkspaceInvocationPhases `json:"phases"`
 	}{time.Now().UTC(), snapshot})
 	if err != nil {
 		return err

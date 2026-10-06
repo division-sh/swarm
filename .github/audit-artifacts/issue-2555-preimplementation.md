@@ -1283,3 +1283,46 @@ cutover, paid debt and specification notes. Duplicate revision counter is
 identical upstream; only attribution comment conflicted. New production
 repairs above require fresh core at the final head; the user's test-only
 rebase fast path no longer applies. No server2 run before allocation.
+
+## Cycle-3 Diagnostic And CI Attribution Amendment
+
+Reviewer-g6026024336 requires correctness-independent diagnostics and bounded
+phase-only failure output. B confirms sole G landing authority6026257152 after
+the repo-wide observation-owner check6026140996. This supersedes the preceding
+Q01 whole-store-polling design, not the original correctness witness or any
+of the 48 manifestation assertions.
+
+The delivery read owner returns exact private-invocation delivery/current
+attempt identity, status, NULL and phase-time facts. The effect read owner
+returns only attempt/operation identity, state and phase times. The existing
+runtimepersistence workspace observation composes both within one selected
+native snapshot; the storetest bridge has no SQL or selector. The compiled
+construction child alone consumes the optional companion. Original aggregate
+counts use a separate read-only handle and remain proof-bearing. No production
+eligibility, routing, replay or admission consumer uses diagnostic phases.
+
+| Supplemental row | Required proof |
+| --- | --- |
+| PC57 optional phase evidence | Both-store native identity/status/NULL facts; no write; invalid/raw/cancelled/closed/missing-owner refusals; late effect-read failure returns no partial delivery list. Actual compiled observer ready/observed/join controls preserve original counters and whole-store before/after comparison. Optional evidence-write failure cannot abort correctness. DTO fields cannot carry source/payload/capability/input/output/credentials. Record diagnostic overhead without a new budget assertion. |
+| PC58 stale local authority artifacts | Delete all eight unused helper roots, without new callers. Classify all five exact fixture writer sites in the unchanged revision writer census; retain original expiry/header fault and rollback/refusal tests on both stores. Registry refresh classifies 17 new native diagnostic findings as existing private backend/runtime-adapter roles; no raw consumer permission, collector exception or debt-baseline growth. |
+
+Exact hosted d2d43 attempt37534967271 is RED. Broad06 is a Docker Hub pull
+reset before test execution. Native-unused and revision-census are G-owned.
+Burst1/2 and mailbox/other-late are G-owned qualification/performance work,
+not established inherited flakes: burst reaches the two-minute join deadline;
+mailbox and other-late exhaust the ten-minute package limit, with three new
+fork-chat roots adding216.27s to other-late. Timing/summary are downstream
+INCOMPLETE aggregates, not additional independent timing breaches. All complete
+units remain within their existing CI ceilings. The separate fan-out source
+advancement mapper defect tracked by A/#2564 is not this failed fork-census
+root. Full job-by-job evidence: PR2580 comment6026497992.
+
+Q01 is provisionally classified: real read succeeds, second model remains
+launched at the10s cut and finishes afterward. No handoff/receipt deadlock is
+claimed. A scratch cold interpreter measurement is exploratory, not proof of
+hosted causality or permission for a persistent worker/cache/compiler redesign.
+The master tree has no Q01 root; no fictitious master same-root timing credit.
+Correct optional evidence first, then assess exact hosted acceptance. Any
+budget relaxation still requires lead ruling. Local core/quiet both-store
+numeric and final hosted full/audit remain open; do not advance closure from
+focused repair receipts or relabel historical failed aggregates.
