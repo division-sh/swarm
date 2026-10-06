@@ -308,6 +308,7 @@ type committedPublicationConsequences struct {
 
 func (eb *EventBus) finalizeCommittedPublicationConsequences(ctx context.Context, prepared PreparedPublish, committed CommittedPublication, stageEngineInternalDelivery bool) (result committedPublicationConsequences, err error) {
 	result.prepared = prepared
+	result.prepared.durableHandoffReady = false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = errors.Join(err, fmt.Errorf("finalize committed publication %s panic: %v", prepared.Event.ID(), recovered))
