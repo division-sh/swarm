@@ -293,7 +293,7 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 					if err := f.db.QueryRow(`PRAGMA database_list`).Scan(&sequence, &name, &path); err != nil {
 						t.Fatal(err)
 					}
-					secondStore = barrier.observeSQLiteStore(t, f.store.(*SQLiteRuntimeStore), path)
+					secondStore = barrier.observeSQLiteStore(t, path)
 					var err error
 					observer, err = sql.Open("sqlite", path)
 					if err != nil {

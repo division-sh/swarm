@@ -68,9 +68,9 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 						other := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 						writer = other
 						if first == "writer" {
-							f.store = barrier.observeSQLiteStore(t, f.store.(*SQLiteRuntimeStore), path)
+							f.store = barrier.observeSQLiteStore(t, path)
 						} else {
-							writer = barrier.observeSQLiteStore(t, other, path)
+							writer = barrier.observeSQLiteStore(t, path)
 						}
 						observer, err = sql.Open("sqlite", path)
 						if err != nil {
@@ -866,8 +866,9 @@ type forkContentionTx struct {
 	conn *forkContentionConn
 }
 
-func (b *forkContentionBarrier) observeSQLiteStore(t *testing.T, original *SQLiteRuntimeStore, path string) *SQLiteRuntimeStore {
+func (b *forkContentionBarrier) observeSQLiteStore(t *testing.T, path string) *SQLiteRuntimeStore {
 	t.Helper()
+	original := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	name := b.name + "_driver"
 	sql.Register(name, &forkContentionDriver{Driver: original.backend.ConstructionHandle().Driver(), barrier: b})
 	db, err := sql.Open(name, "file:"+path+"?_pragma=busy_timeout(1)&_pragma=foreign_keys(1)")

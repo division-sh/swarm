@@ -257,9 +257,9 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 			bundle := loadWave1EntityToolBundle(t, actor, "review", "case", "", "case:\n  items: list<text>\n")
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
-				selected = newSQLiteRuntimeToolStoreForTest(t)
+				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, unmanagedToolTestContext())
 			} else {
-				selected = newPostgresHumanTaskToolStoreForTest(t)
+				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
 			ctx := seedEntityToolSourceRun(t, selected, bundle)
 			fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
@@ -289,8 +289,13 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 				t.Fatalf("fresh index refusal changed fields/revision: %#v err=%v", after, err)
 			}
 			var count int
-			if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1 AND entity_id = $2 AND path = 'items' AND writer_type = 'agent'`, entityToolTestRunID, entityID).Scan(&count); err != nil || count != 1 {
-				t.Fatalf("fresh index mutation evidence count=%d err=%v", count, err)
+			for _, row := range storetest.ObserveEntityMutationHistory(t, ctx, selected, entityToolTestRunID) {
+				if row.EntityID == entityID && row.Path == "items" && row.WriterType == "agent" {
+					count++
+				}
+			}
+			if count != 1 {
+				t.Fatalf("fresh index mutation evidence count=%d", count)
 			}
 		})
 	}

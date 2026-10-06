@@ -124,7 +124,7 @@ func TestIssue2564M24RunStopWriterBothOrdersAndRollbackBothStores(t *testing.T) 
 						// A distinct native backend avoids merely queuing on the same
 						// process-local SQLite mutation token or a one-connection pool.
 						f.store = newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-						secondStore = barrier.observeSQLiteStore(t, f.store.(*SQLiteRuntimeStore), path)
+						secondStore = barrier.observeSQLiteStore(t, path)
 						var err error
 						observer, err = sql.Open("sqlite", path)
 						if err != nil {
