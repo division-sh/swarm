@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
@@ -11,8 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/gorilla/websocket"
 )
 
@@ -100,6 +103,26 @@ func requireReceiverPublicReadback(t *testing.T, rt servedControlProofRuntime, r
 	}
 	rows.Close()
 	requireReceiverPublicReadbackEvidence(t, rt.Endpoint, runID, want)
+}
+
+func requireWorkspaceProofReceiverPublicReadback(t *testing.T, endpoint string, owner runtimebus.EventStore, runID string) {
+	t.Helper()
+	rows, err := storetest.ReadReceiverDeliveryStorage(context.Background(), owner, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]receiverPublicDeliveryEvidence{}
+	for _, row := range rows {
+		if _, duplicate := want[row.DeliveryID]; duplicate {
+			t.Fatal("receiver storage repeated an exact delivery")
+		}
+		record := receiverPublicDeliveryEvidence{eventID: row.EventID, status: row.Status}
+		if err := json.Unmarshal([]byte(row.Target), &record.owner); err != nil {
+			t.Fatal(err)
+		}
+		want[row.DeliveryID] = record
+	}
+	requireReceiverPublicReadbackEvidence(t, endpoint, runID, want)
 }
 
 func requireReceiverPublicReadbackEvidence(t *testing.T, endpoint, runID string, want map[string]receiverPublicDeliveryEvidence) {
