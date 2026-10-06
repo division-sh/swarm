@@ -39,7 +39,7 @@ func CheckDeliveryLifecycleStorageColumnsForTest(ctx context.Context, selected a
 }
 
 func checkConformanceStorageColumns(ctx context.Context, selected any, inventory []conformanceStorageColumns) error {
-	sqlite := false
+	schema := "public"
 	var read func(context.Context, func(context.Context, *sql.Tx) error) error
 	switch owner := selected.(type) {
 	case *PostgresStore:
@@ -58,23 +58,26 @@ func checkConformanceStorageColumns(ctx context.Context, selected any, inventory
 			return err
 		}
 		read = owner.backend.RunReadTransaction
-		sqlite = true
+		schema = "main"
 	default:
 		return fmt.Errorf("column evidence requires the original selected owner, got %T", selected)
 	}
 	return read(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		for _, item := range inventory {
 			for _, column := range strings.Fields(item.columns) {
-				query := `SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name=$2)`
-				if sqlite {
-					query = `SELECT EXISTS(SELECT 1 FROM pragma_table_info($1, 'main') WHERE name=$2)`
+				// Qualifying the column also prevents SQLite's double-quoted
+				// string fallback from accepting a missing identifier.
+				query := fmt.Sprintf(`SELECT canonical.%s FROM %s.%s AS canonical WHERE 1=0`, column, schema, item.table)
+				rows, err := tx.QueryContext(ctx, query)
+				if err != nil {
+					return fmt.Errorf("check required canonical column %s.%s: %w", item.table, column, err)
 				}
-				var exists bool
-				if err := tx.QueryRowContext(ctx, query, item.table, column).Scan(&exists); err != nil {
-					return fmt.Errorf("inspect column %s.%s: %w", item.table, column, err)
+				closeErr := rows.Close()
+				if err := rows.Err(); err != nil {
+					return fmt.Errorf("check required canonical column %s.%s: %w", item.table, column, err)
 				}
-				if !exists {
-					return fmt.Errorf("missing required canonical column %s.%s", item.table, column)
+				if closeErr != nil {
+					return fmt.Errorf("close canonical column witness %s.%s: %w", item.table, column, closeErr)
 				}
 			}
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
@@ -16,6 +17,9 @@ func TestNotifyExecutionStorageKeepsExactScopeAndOriginalReadOwnerBothStores(t *
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			run, _ := seedWorkflowProjectionFaultCut(t, fixture, ctx)
+			if err := commitSemanticParentFixture(ctx, fixture.store, run, uuid.NewString(), time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
 			var turns NotifyCompletedTurnsStorage
 			if err := fixture.db.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(DISTINCT flow_instance) FROM agent_turns WHERE run_id=$1 AND agent_id='observer' AND failure IS NULL`, run).Scan(&turns.Turns, &turns.Instances); err != nil {
 				t.Fatal(err)
@@ -33,6 +37,12 @@ func TestNotifyExecutionStorageKeepsExactScopeAndOriginalReadOwnerBothStores(t *
 			}
 			if err := fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1`, run).Scan(&work.Facts); err != nil {
 				t.Fatal(err)
+			}
+			if work.Revisions == 0 || work.Facts == 0 {
+				t.Fatalf("ledger witness requires real committed revisions and facts: %+v", work)
+			}
+			if got, err := ReadNotifyFanOutWorkForTest(ctx, fixture.store, uuid.NewString()); err != nil || got != (NotifyFanOutWorkStorage{}) {
+				t.Fatalf("foreign run gained diagnostic evidence: %+v %v", got, err)
 			}
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
 			if err != nil {
@@ -102,6 +112,8 @@ func TestNotifyExecutionStorageRefusesRawCancelledClosedAndUnavailableOwnersBoth
 			return ReadNotifyFirstRunFailureForTest(ctx, owner, run)
 		}, ""},
 		{"work", "fan_out_intents", func(ctx context.Context, owner any) (any, error) { return ReadNotifyFanOutWorkForTest(ctx, owner, run) }, NotifyFanOutWorkStorage{}},
+		{"work-revisions", "run_fork_revisions", func(ctx context.Context, owner any) (any, error) { return ReadNotifyFanOutWorkForTest(ctx, owner, run) }, NotifyFanOutWorkStorage{}},
+		{"work-facts", "run_fork_fact_revisions", func(ctx context.Context, owner any) (any, error) { return ReadNotifyFanOutWorkForTest(ctx, owner, run) }, NotifyFanOutWorkStorage{}},
 	}
 	refuse := func(t *testing.T, ctx context.Context, owner any) {
 		t.Helper()

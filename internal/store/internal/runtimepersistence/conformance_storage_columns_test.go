@@ -76,7 +76,7 @@ func TestConformanceStorageColumnsDetectMissingCanonicalColumnsBothStores(t *tes
 						t.Error(err)
 					}
 				}()
-				if err := item.check(ctx, fixture.store); err == nil || !strings.Contains(err.Error(), "missing required canonical column "+item.table+"."+item.column) {
+				if err := item.check(ctx, fixture.store); err == nil || !strings.Contains(err.Error(), "check required canonical column "+item.table+"."+item.column) {
 					t.Fatalf("missing canonical column accepted: %v", err)
 				}
 			})
@@ -129,7 +129,7 @@ func TestConformanceStorageColumnsIgnoreSiblingSchemaBothStores(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			if err := CheckConversationStorageColumnsForTest(ctx, fixture.store); err == nil || !strings.Contains(err.Error(), "missing required canonical column agent_turns.turn_blocks") {
+			if err := CheckConversationStorageColumnsForTest(ctx, fixture.store); err == nil || !strings.Contains(err.Error(), "check required canonical column agent_turns.turn_blocks") {
 				t.Fatalf("sibling schema promoted into canonical storage presence: %v", err)
 			}
 		})
