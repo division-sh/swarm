@@ -51,6 +51,7 @@ Post-Implementation Proof Audit, a core qualification receipt, or merge readines
 | Reporter run.start fixture had no completion lifecycle | `TestServedReporterFiniteContractHasRealClosureCarriers` checks admitted topology; `TestIssue2566ReporterFiniteFixtureCanCloseBothStores` executes the declared close/ack path to completed, both stores race/count-three pass |
 | CLI graph oracle still requires the retired terminal label | `TestDescribeCommandGraphRendersStageGraph`; exact final JSON/text projection and absence of the retired text marker, race/count-three pass |
 | Old boot oracle still requires authored entry/end markers | `TestRun_StagesUseOrderedEntryAndOptionalFinal`; ordered waiting entry and zero final stages, valid service verifies; race/count-three pass |
+| Persistence authority registry still names retired stage-catalog APIs | `TestPersistenceAuthorityFindingRegistry`, `TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority`, `TestPersistenceAuthorityDebtRatchetRejectsPaymentDuplicationReseedAndResurrection`; race/count-three pass; exact 18-for-18 signature update with all classifications preserved |
 | Rewrite/runtime complexity introduces hotspots | Independent base/head measurement at `4c53d2712`: cognitive >=30 561/561, >=50 192/192; cyclomatic >=30 261/261, >=50 58/58; unchanged maxima/policy |
 
 Whole-corpus replay remains 417 exact files / 553 decisions / byte-idempotent.
@@ -111,6 +112,20 @@ admission; its valid service fixture declares all existing handler destinations.
 Both focused tests pass race/count-three. The script ledger retains the original
 entry/end decisions while replaying this bounded test update. Interrupted core
 units are unqualified. Server2 was released; another run requires a new handoff.
+After that explicit handoff, core at accepted `41f3a4739` progressed beyond the
+earlier CLI/reporter failures, then stopped in `store-admission-full` on
+`TestPersistenceAuthorityFindingRegistry`. Its 18 stale signatures are now
+updated to the reviewed FinalCatalog/Final/FlowFinalStages APIs. The exact
+one-to-one replacement preserves 4 typed-process-local, 12 private-backend and
+2 typed-public-facade rows. No production code, guard logic, debt baseline or
+ceiling changed. The existing updater passes, with no unclassified entries;
+registry/raw-exposure/debt-control tests pass race/count-three (162.743s).
+The first broader local race command also selected the heavyweight actual debt
+census and timed out during historical-source type checking, before completing
+that first test. It earns no passing credit; the census remains due through the
+canonical managed unit. No test deadline was changed. The complete 41f core
+receipt and interrupted units remain unqualified. Server2 was released for C,
+and lifecycle/supplements did not start. The next core needs a fresh handoff.
 The failed f60 core receipt remains unqualified. Lifecycle and
 named supplements, hosted full, ten-family completion, and composed A/E supported
 proof remain outstanding. No CI/PR was opened for these repairs.
