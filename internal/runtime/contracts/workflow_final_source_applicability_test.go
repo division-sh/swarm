@@ -94,3 +94,42 @@ func boolString(value bool) string {
 	}
 	return "false"
 }
+
+func TestFinalJoinDeclarationApplicabilityPreservesLoopAndFanOutKinds(t *testing.T) {
+	node, err := identity.AdmitExecutableNodeDeclaration(".", "controller")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"arrival", "loop_arrival", "fan_out_delivery"} {
+		for _, final := range []bool{false, true} {
+			t.Run(kind+"/final="+boolString(final), func(t *testing.T) {
+				join := &JoinSpec{ID: "results", Stage: "waiting", OnCompleteFound: true, OnComplete: HandlerRuleEntry{Emit: EmitSpec{Event: "work.completed"}}}
+				transition := HandlerTransitionSemantic{Node: node, EventType: "work.received", Join: join}
+				if kind == "loop_arrival" {
+					transition.Loop = &LoopOperationSpec{Admit: "revision", From: "waiting"}
+				}
+				if kind == "fan_out_delivery" {
+					join.Stage = ""
+					join.Members.FromFanOut = true
+				}
+				var finals []string
+				if final {
+					finals = []string{"waiting"}
+				}
+				graph := BuildWorkflowStageTopology(".", "waiting", []string{"waiting", "other"}, finals, []HandlerTransitionSemantic{transition}, nil, nil)
+				if len(graph.Edges) != 0 {
+					t.Fatal("emit-only outcome fabricated an advance edge")
+				}
+				if final && kind != "fan_out_delivery" {
+					if len(graph.HandlerSourceErrors()) == 0 {
+						t.Fatal("non-advancing join source bypassed final admission")
+					}
+					return
+				}
+				if len(graph.HandlerSourceErrors()) != 0 {
+					t.Fatalf("lawful source/kind changed: %v", graph.HandlerSourceErrors())
+				}
+			})
+		}
+	}
+}

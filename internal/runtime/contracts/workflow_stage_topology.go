@@ -208,6 +208,15 @@ func BuildWorkflowStageTopology(
 				handlerStages = topology.explicitHandlerSources([]string{transition.Loop.From}, "loop."+string(kind)+" "+transition.Node.Key()+" "+transition.EventType)
 			}
 		}
+		var joinSources []string
+		if transition.Join != nil && transition.Join.Mode() == WorkflowJoinModeArrival {
+			// Stage applicability belongs to the join declaration, not the
+			// subset of outcomes that happen to produce an advance edge.
+			joinSources = topology.explicitHandlerSources([]string{transition.Join.Stage}, "join "+transition.Node.Key()+" "+transition.EventType)
+			if len(joinSources) == 0 {
+				handlerStages = nil
+			}
+		}
 		topology.Handlers = append(topology.Handlers, WorkflowHandlerStageScope{
 			Node:      transition.Node,
 			EventType: strings.TrimSpace(transition.EventType),
@@ -245,11 +254,11 @@ func BuildWorkflowStageTopology(
 				switch carrier.Kind {
 				case HandlerAdvanceCarrierJoinOnComplete:
 					if transition.Loop == nil {
-						from = topology.explicitHandlerSources([]string{transition.Join.Stage}, carrier.Source()+" "+transition.Node.Key()+" "+transition.EventType)
+						from = joinSources
 					}
 				case HandlerAdvanceCarrierJoinOnDeadline:
 					if transition.Loop == nil {
-						from = topology.explicitHandlerSources([]string{transition.Join.Stage}, carrier.Source()+" "+transition.Node.Key()+" "+transition.EventType)
+						from = joinSources
 					}
 					eventType = "platform.join_timeout"
 					timed = true
