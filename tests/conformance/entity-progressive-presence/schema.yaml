@@ -1,11 +1,10 @@
 name: entity-progressive-presence
 stages:
-  draft:
-    initial: true
+  draft: {}
   assess: {}
   consume: {}
   done:
-    terminal: true
+    final: true
 pins:
   inputs:
     - work.opened

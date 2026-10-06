@@ -1,6 +1,6 @@
 stages:
-  monitoring: {initial: true}
-  done: {terminal: true}
+  monitoring: {}
+  done: {final: true}
 pins:
   inputs:
     - monitor.started

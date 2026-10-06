@@ -1,9 +1,9 @@
 name: delivery
 instance: item_id
 stages:
-  approved: {initial: true}
-  completed: {terminal: true}
-  rejected: {terminal: true}
+  approved: {}
+  completed: {final: true}
+  rejected: {final: true}
 auto_emit_on_create:
   event: item.completed
   description: Seed delivery completion checks when a template instance is created.

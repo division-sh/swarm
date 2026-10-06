@@ -1,7 +1,7 @@
 name: test-guards-pre-handler-state
 stages:
-  active: {initial: true}
-  processing: {terminal: true}
+  active: {}
+  processing: {final: true}
 pins:
   inputs:
     - process.requested

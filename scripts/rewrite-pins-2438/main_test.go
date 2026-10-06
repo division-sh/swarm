@@ -218,7 +218,7 @@ func TestRewriteDeletesOnlyExplicitRetiredFixtures(t *testing.T) {
 func TestRewriteRetainsCommentsOnUntouchedSections(t *testing.T) {
 	before := []byte("name: worker\n# boundary heading\npins:\n  inputs:\n    events: [work.start]\n\n# lifecycle heading\n# another lifecycle line\nstages: {idle: {initial: true}}\n")
 	after, _ := rewritten(t, map[string][]byte{"schema.yaml": before})
-	for _, expected := range []string{"name: worker\n# boundary heading\n", "\n# lifecycle heading\n# another lifecycle line\nstages: {idle: {initial: true}}\n"} {
+	for _, expected := range []string{"name: worker\n# boundary heading\n", "\n# lifecycle heading\n# another lifecycle line\nstages: {idle: {}}\n"} {
 		if !bytes.Contains(after["schema.yaml"], []byte(expected)) {
 			t.Fatalf("unrelated comment changed:\n%s", after["schema.yaml"])
 		}

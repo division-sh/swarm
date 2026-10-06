@@ -11,7 +11,7 @@ func TestAgentDeclarationRecordsCanonicalizeDeepFilesystemFlowProjection(t *test
 	root := t.TempDir()
 	writeAgentDeclarationBaseFiles(t, root, "canonical-agent-records")
 	flowRoot := filepath.Join(root, "parent", "child", "support")
-	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {initial: true}\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {}\n")
 	writeFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 worker:
   id: public-worker

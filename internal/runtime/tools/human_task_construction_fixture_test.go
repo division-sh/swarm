@@ -57,7 +57,7 @@ func humanTaskImportedSource(t *testing.T, actor actors.AgentConfig) semanticvie
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"gateway": {SchemaYAML: "name: gateway\n"},
 		"gateway/provider": {
-			SchemaYAML:   "name: provider\nstages:\n  queued: {initial: true}\n",
+			SchemaYAML:   "name: provider\nstages:\n  queued: {}\n",
 			EntitiesYAML: "provider_record:\n  status: text\n", AgentsYAML: entityToolAgentYAML(actor),
 		},
 	})

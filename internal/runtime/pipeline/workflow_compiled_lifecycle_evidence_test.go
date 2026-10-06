@@ -234,7 +234,7 @@ func TestAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStores(t *testin
 			}
 			gateBundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":          "name: frozen-gate\n",
-				"orders/schema.yaml":   "name: orders\nstages:\n  queued:\n    initial: true\n    gate:\n      decision: review\n      outcomes:\n        approve: {advances_to: active}\n  active: {}\n",
+				"orders/schema.yaml":   "name: orders\nstages:\n  queued:\n    gate:\n      decision: review\n      outcomes:\n        approve: {advances_to: active}\n  active: {}\n",
 				"orders/entities.yaml": "test_entity: {}\n",
 			})
 			gateGraph, found := gateBundle.WorkflowStageTopology("orders")

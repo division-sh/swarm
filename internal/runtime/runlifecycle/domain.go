@@ -819,7 +819,7 @@ func (r CompletionResult) Validate() error {
 	}
 }
 
-type TerminalCatalog struct {
+type FinalCatalog struct {
 	compiled CompiledStageCatalog
 }
 
@@ -827,31 +827,31 @@ type TerminalCatalog struct {
 // Its implementation must resolve exact flow and stage references, not names
 // from a terminal-only projection.
 type CompiledStageCatalog interface {
-	Terminal(flowTemplate, flowInstance, state string) (terminal, known bool)
+	Final(flowTemplate, flowInstance, state string) (final, known bool)
 	Valid() bool
 }
 
-func NewCompiledTerminalCatalog(owner CompiledStageCatalog) (TerminalCatalog, error) {
+func NewCompiledFinalCatalog(owner CompiledStageCatalog) (FinalCatalog, error) {
 	if owner == nil || !owner.Valid() {
-		return TerminalCatalog{}, fmt.Errorf("completion requires selected compiled stage catalog")
+		return FinalCatalog{}, fmt.Errorf("completion requires selected compiled stage catalog")
 	}
-	return TerminalCatalog{compiled: owner}, nil
+	return FinalCatalog{compiled: owner}, nil
 }
 
-func (c TerminalCatalog) Empty() bool {
+func (c FinalCatalog) Empty() bool {
 	return c.compiled == nil
 }
 
-func (c TerminalCatalog) Terminal(flowTemplate, flowInstance, state string) (bool, bool) {
+func (c FinalCatalog) Final(flowTemplate, flowInstance, state string) (bool, bool) {
 	if c.compiled == nil {
 		return false, false
 	}
-	return c.compiled.Terminal(flowTemplate, flowInstance, state)
+	return c.compiled.Final(flowTemplate, flowInstance, state)
 }
 
 type CandidateStore interface {
 	ListCompletionCandidates(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error)
-	ExecuteCompletionCandidate(context.Context, Candidate, TerminalCatalog) (CompletionResult, error)
+	ExecuteCompletionCandidate(context.Context, Candidate, FinalCatalog) (CompletionResult, error)
 }
 
 type CandidateSink interface {

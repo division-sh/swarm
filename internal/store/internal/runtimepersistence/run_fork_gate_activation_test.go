@@ -68,14 +68,13 @@ func runForkRootGateBundleForTest(t *testing.T) *runtimecontracts.WorkflowContra
 		"schema.yaml": `name: root
 stages:
   awaiting_review:
-    initial: true
     gate:
       decision: root_review
       outcomes:
         approve:
           advances_to: done
           emit: run_fork.compiled_root_gate_approved
-  done: {terminal: true}
+  done: {final: true}
 `,
 		"entities.yaml": "default: {}\n",
 		"events.yaml":   "run_fork.compiled_root_gate_approved:\n",
@@ -668,7 +667,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 		for _, fields := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/fields_%t", backend.name, fields), func(t *testing.T) {
 				opened := backend.open(t)
-				files := map[string]string{"schema.yaml": "name: proposed-effect-remint\nstages:\n  operating: {initial: true}\n"}
+				files := map[string]string{"schema.yaml": "name: proposed-effect-remint\nstages:\n  operating: {}\n"}
 				if fields {
 					files["entities.yaml"] = "item:\n  label: text?\n"
 				}

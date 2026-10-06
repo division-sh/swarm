@@ -36,7 +36,7 @@ type Source interface {
 	FlowSchemaEntries() map[string]runtimecontracts.FlowSchemaDocument
 	FlowInitialStage(flowID string) string
 	FlowStates(flowID string) []string
-	FlowTerminalStages(flowID string) []string
+	FlowFinalStages(flowID string) []string
 	FlowScopes() []FlowScope
 	FlowScopeByID(id string) (FlowScope, bool)
 	FlowSchemaByID(id string) (runtimecontracts.FlowSchemaDocument, bool)

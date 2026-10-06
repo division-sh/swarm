@@ -1,8 +1,8 @@
 name: child
 stages:
-  idle: {initial: true}
+  idle: {}
   working: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - task.assigned

@@ -1,6 +1,6 @@
 stages:
-  waiting: {initial: true}
-  checked: {terminal: true}
+  waiting: {}
+  checked: {final: true}
 pins:
   inputs:
     - timer.scheduled

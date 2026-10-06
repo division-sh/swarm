@@ -9,13 +9,13 @@ func CopyMailboxEntityFilter(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: mailbox-entity-filter
 stages:
-  new: {initial: true}
+  new: {}
   waiting:
     gate:
       decision: review
       outcomes:
         approve: {advances_to: done}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - review.requested

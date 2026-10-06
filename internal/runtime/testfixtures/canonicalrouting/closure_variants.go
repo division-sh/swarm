@@ -107,7 +107,7 @@ func CopyDeadEventSchemaExternalSource(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: dead-event-schema-external-source\n")
-	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\n")
+	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  idle: {}\n  done: {final: true}\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "ticket.ready:\n  swarm:\n    source: external (manual handoff)\n")
 	return root
 }
@@ -211,7 +211,7 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	if settings.flowOutput {
 		flowPins += "  outputs:\n    - timer.reminder\n"
 	}
-	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {initial: true}\n  active: {}\n  done: {terminal: true}\n"+flowPins)
+	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\n"+flowPins)
 	agents := ""
 	if settings.flowAgent {
 		agents = "reminder-agent:\n  intent: {inline: 'Handle timer reminders.'}\n  model: regular\n  subscriptions: [timer.reminder]\n  emit_events: []\n"
@@ -355,7 +355,7 @@ func CopyVerifyStateSchemaFloat(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-state-schema-float\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
 	removeClosedVariantFiles(t, root, "entities.yaml", "nodes.yaml", "events.yaml")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - task.assigned\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n")
 	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", "accumulator:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n  state_schema:\n    fields:\n      composite: float\n")
@@ -367,7 +367,7 @@ func CopyVerifyAccumulatorEntityProjection(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\nstages:\n  collecting: {initial: true}\n  complete: {terminal: true}\npins:\n  inputs:\n    - score.dimension_complete\n  outputs:\n    - score.completed\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\nstages:\n  collecting: {}\n  complete: {final: true}\npins:\n  inputs:\n    - score.dimension_complete\n  outputs:\n    - score.completed\n")
 	writeClosedVariantFile(t, root, "types.yaml", "types:\n  DimensionScore:\n    dimension: text\n    tier: integer\n    score: integer\n    evidence: text\n    confidence: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "vertical:\n  scores:\n    type: list<DimensionScore>\n    materialize_from: scorer.dimensions_received\n")
 	writeClosedVariantFile(t, root, "events.yaml", "score.dimension_complete:\n  expected_dimensions: integer\n  vertical_id: string\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\nscore.completed:\n")
@@ -398,7 +398,7 @@ func CopyVerifyModelAlias(t testing.TB, variant VerifyModelAliasVariant) string 
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-model-alias\npins:\n  inputs:\n    - task.assigned\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
 	removeClosedVariantFiles(t, root, "entities.yaml", "nodes.yaml", "events.yaml")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - task.assigned\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\nstages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n")
 	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
 	writeClosedVariantFile(t, root, "child/agents.yaml", fmt.Sprintf("worker:\n  type: factory\n  role: worker\n  intent: prompts/worker.md\n  model: %s\n  subscriptions: [task.assigned]\n", model))
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")

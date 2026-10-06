@@ -22,7 +22,7 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				db, store := openHandlerEntityRequirementStore(t, backend)
 				source := loadWorkflowTempSource(t, map[string]string{
-					"schema.yaml":   "name: findings\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n",
+					"schema.yaml":   "name: findings\nstages:\n  active: {}\n  done: {final: true}\n",
 					"types.yaml":    "types:\n  Finding:\n    summary: text\n",
 					"entities.yaml": "work:\n  findings: {type: '[Finding]', initial: []}\n  status: {type: text, initial: pending}\n",
 					"events.yaml":   "finding.received:\n  summary: text\n  status: text\nfinding.recorded:\n  status: text\n",

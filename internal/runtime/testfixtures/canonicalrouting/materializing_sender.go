@@ -40,7 +40,7 @@ receiver:
 func CopyProspectiveTerminalSender(t testing.TB) string {
 	t.Helper()
 	root := CopyMaterializingSenderExistingReceiver(t, true)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: materializing-sender\nstages:\n  waiting: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - start\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: materializing-sender\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - start\n")
 	path := filepath.Join(root, "nodes.yaml")
 	raw, err := os.ReadFile(path)
 	if err != nil {

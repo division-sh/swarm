@@ -45,7 +45,7 @@ func TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores(t *tes
 			}
 			t.Run(backend.name+"/"+phase, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend.name, false, map[string]string{
-					"schema.yaml": "name: gate-consumer\nstages:\n  awaiting_review:\n    initial: true\n    gate:\n      decision: root_review\n      outcomes:\n        approve:\n          advances_to: done\n          emit: test.node_emitted\n  done: {terminal: true}\n",
+					"schema.yaml": "name: gate-consumer\nstages:\n  awaiting_review:\n    gate:\n      decision: root_review\n      outcomes:\n        approve:\n          advances_to: done\n          emit: test.node_emitted\n  done: {final: true}\n",
 					"events.yaml": "test.node_emitted:\n",
 				}, nil)
 				selected, db := f.store, f.db

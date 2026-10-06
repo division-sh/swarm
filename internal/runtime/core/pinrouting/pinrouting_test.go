@@ -328,7 +328,7 @@ func loadFilesystemAgentOwnedByFlowSource(t *testing.T, mode string) semanticvie
 		instance = "instance: instance_id\n"
 		write(filepath.Join(root, "support", "entities.yaml"), "support:\n  instance_id: text\n")
 	}
-	write(filepath.Join(root, "support", "schema.yaml"), "name: support\n"+instance+"stages:\n  waiting: {initial: true}\n  done: {terminal: true}\n")
+	write(filepath.Join(root, "support", "schema.yaml"), "name: support\n"+instance+"stages:\n  waiting: {}\n  done: {final: true}\n")
 	write(filepath.Join(root, "support", "agents.yaml"), "backend:\n  role: backend\n  intent: {inline: \"Handle backend work.\"}\n  model: regular\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

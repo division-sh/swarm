@@ -129,7 +129,7 @@ func validateRunDeliveryWork(runID string, delivery runtimedelivery.RunSummary, 
 // A validated nonterminal obligation can refute completion without repeatedly
 // decoding every already-published fan-out ledger. This never establishes
 // successful completion or constructs a partial public summary.
-func (s *RunLifecyclePostgresOwner) pendingPostgresRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.TerminalCatalog, allowEmptyEntities bool) (bool, *time.Time, error) {
+func (s *RunLifecyclePostgresOwner) pendingPostgresRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.FinalCatalog, allowEmptyEntities bool) (bool, *time.Time, error) {
 	delivery, err := postgresDeliveryAdapter.SummarizeRun(ctx, tx, runID)
 	if err != nil {
 		return false, nil, err
@@ -158,7 +158,7 @@ func (s *RunLifecyclePostgresOwner) pendingPostgresRunCompletionWork(ctx context
 	return pendingRunDeliveryWorkWake(runID, sessions)
 }
 
-func (s *RunLifecycleSQLiteOwner) pendingSQLiteRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.TerminalCatalog, allowEmptyEntities bool) (bool, *time.Time, error) {
+func (s *RunLifecycleSQLiteOwner) pendingSQLiteRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.FinalCatalog, allowEmptyEntities bool) (bool, *time.Time, error) {
 	delivery, err := sqliteDeliveryAdapter.SummarizeRun(ctx, tx, runID)
 	if err != nil {
 		return false, nil, err
@@ -216,7 +216,7 @@ func (s *RunLifecyclePostgresOwner) loadPostgresRunCompletionOwnerSummaries(
 	tx *sql.Tx,
 	runID string,
 	selectedNow time.Time,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runCompletionOwnerSummaries, error) {
 	delivery, err := postgresDeliveryAdapter.SummarizeRun(ctx, tx, runID)
 	if err != nil {
@@ -266,7 +266,7 @@ func (s *RunLifecycleSQLiteOwner) loadSQLiteRunCompletionOwnerSummaries(
 	tx *sql.Tx,
 	runID string,
 	selectedNow time.Time,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runCompletionOwnerSummaries, error) {
 	delivery, err := sqliteDeliveryAdapter.SummarizeRun(ctx, tx, runID)
 	if err != nil {
@@ -345,10 +345,10 @@ func PostgresRunSessionNextWakeTx(ctx context.Context, tx *sql.Tx, runID string,
 	return postgresRunSessionNextWakeTx(ctx, tx, runID, selectedNow)
 }
 
-func (s *RunLifecyclePostgresOwner) LoadRunCompletionOwnerSummariesTx(ctx context.Context, tx *sql.Tx, runID string, selectedNow time.Time, catalog runtimerunlifecycle.TerminalCatalog) (RunCompletionOwnerSummaries, error) {
+func (s *RunLifecyclePostgresOwner) LoadRunCompletionOwnerSummariesTx(ctx context.Context, tx *sql.Tx, runID string, selectedNow time.Time, catalog runtimerunlifecycle.FinalCatalog) (RunCompletionOwnerSummaries, error) {
 	return s.loadPostgresRunCompletionOwnerSummaries(ctx, tx, runID, selectedNow, catalog)
 }
 
-func (s *RunLifecycleSQLiteOwner) LoadRunCompletionOwnerSummariesTx(ctx context.Context, tx *sql.Tx, runID string, selectedNow time.Time, catalog runtimerunlifecycle.TerminalCatalog) (RunCompletionOwnerSummaries, error) {
+func (s *RunLifecycleSQLiteOwner) LoadRunCompletionOwnerSummariesTx(ctx context.Context, tx *sql.Tx, runID string, selectedNow time.Time, catalog runtimerunlifecycle.FinalCatalog) (RunCompletionOwnerSummaries, error) {
 	return s.loadSQLiteRunCompletionOwnerSummaries(ctx, tx, runID, selectedNow, catalog)
 }

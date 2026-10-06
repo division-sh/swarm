@@ -1,10 +1,10 @@
 name: period
 instance: period_id
 stages:
-  collecting: {initial: true}
+  collecting: {}
   awaiting: {}
-  complete: {terminal: true}
-  failed: {terminal: true}
+  complete: {final: true}
+  failed: {final: true}
 pins:
   inputs:
     - period.setup

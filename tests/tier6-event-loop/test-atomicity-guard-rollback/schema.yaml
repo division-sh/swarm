@@ -1,7 +1,7 @@
 name: test-atomicity-guard-rollback
 stages:
-  pending: {initial: true}
-  processed: {terminal: true}
+  pending: {}
+  processed: {final: true}
 pins:
   inputs:
     - process.requested

@@ -945,8 +945,8 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOw
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wildcard-owner-test\n")
 	writeFixtureFile(t, filepath.Join(root, "flow-a", "schema.yaml"), `name: flow-a
 stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 pins:
   outputs:
     - task.done
@@ -965,8 +965,8 @@ flow-a-wildcard:
 `)
 	writeFixtureFile(t, filepath.Join(root, "flow-b", "schema.yaml"), `name: flow-b
 stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 pins:
   outputs:
     - task.done

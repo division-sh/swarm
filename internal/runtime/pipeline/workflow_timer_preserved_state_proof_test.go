@@ -101,7 +101,7 @@ func VerifyMutationFreeAcceptedEventTimersBothStoresForTest(t *testing.T, factor
 			for _, fault := range []string{"none", "committed_cleanup", "stale_revision", "changed_fields", "changed_config", "foreign_event", "wrong_occurrence", "foreign_source", "settlement_failure"} {
 				t.Run(fmt.Sprintf("%s/fields=%t/%s", backend, fields, fault), func(t *testing.T) {
 					files := map[string]string{
-						"schema.yaml": "name: preserved-timer-proof\nstages:\n  waiting: {initial: true}\n",
+						"schema.yaml": "name: preserved-timer-proof\nstages:\n  waiting: {}\n",
 						"events.yaml": "timer.arm:\ntimer.cancel:\ntimer.elapsed:\nwork.noted:\n",
 						"nodes.yaml":  "observer:\n  execution_type: system_node\n  event_handlers:\n    timer.arm: {}\n    timer.cancel: {}\n    work.noted: {}\n  timers:\n    - {id: event.timeout, event: timer.elapsed, start_on: 'event:timer.arm', cancel_on: 'event:timer.cancel', delay: 1h}\n",
 					}

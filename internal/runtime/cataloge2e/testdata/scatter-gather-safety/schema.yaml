@@ -1,10 +1,9 @@
 stages:
   collecting:
-    initial: true
     timers:
       - {after: 72h, advances_to: closed}
   closed:
-    terminal: true
+    final: true
 pins:
   inputs:
     - batch.submitted

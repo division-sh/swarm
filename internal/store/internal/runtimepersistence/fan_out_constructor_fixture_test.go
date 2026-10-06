@@ -17,7 +17,7 @@ func newFanOutConstructorFixture(t *testing.T, backend string) receiverConfigAct
 	t.Helper()
 	files := map[string]string{"schema.yaml": "name: fan-out-store-fixture\n"}
 	for _, flow := range []string{"completion_one", "completion_two"} {
-		files[flow+"/schema.yaml"] = "name: " + flow + "\nstages:\n  pending: {initial: true}\n"
+		files[flow+"/schema.yaml"] = "name: " + flow + "\nstages:\n  pending: {}\n"
 		files[flow+"/events.yaml"] = "items.child:\n  ordinal: integer\n"
 		files[flow+"/nodes.yaml"] = "completion:\n  execution_type: system_node\n  event_handlers:\n    items.child: {}\n"
 	}

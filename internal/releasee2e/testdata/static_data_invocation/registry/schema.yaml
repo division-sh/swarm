@@ -1,9 +1,9 @@
 name: registry
 instance: request_key
 stages:
-  pending: {initial: true}
+  pending: {}
   reading: {}
-  complete: {terminal: true}
+  complete: {final: true}
 pins:
   inputs:
     - child.requested

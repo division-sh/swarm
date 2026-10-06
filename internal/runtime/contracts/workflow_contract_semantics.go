@@ -35,7 +35,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	semantics := WorkflowSemanticView{
 		Name:                   name,
 		Version:                version,
-		InitialStage:           rootSchemaInitialStage(bundle.RootSchema),
 		EntitySchema:           entitySchema,
 		Stages:                 deriveWorkflowStages(bundle.RootSchema, bundle.FlowSchemas),
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
@@ -44,9 +43,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		Gates:                  deriveWorkflowGatePlans(bundle),
 		Guards:                 deriveWorkflowGuardEntries(bundle),
 		GuardByID:              map[string]GuardActionEntry{},
-		FlowInitial:            map[string]string{},
-		FlowStates:             map[string][]string{},
-		FlowTerminal:           map[string][]string{},
 		FlowNamespace:          map[string]string{},
 		FlowPrefix:             map[string]string{},
 		FlowRules:              map[string]string{},
@@ -103,9 +99,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		if flowID == "" {
 			continue
 		}
-		semantics.FlowInitial[flowID] = schema.LoweredInitialState()
-		semantics.FlowStates[flowID] = schema.LoweredStates()
-		semantics.FlowTerminal[flowID] = schema.LoweredTerminalStates()
 		assignedNamespace := strings.TrimSpace(bundle.FlowPath(flowID))
 		semantics.FlowNamespace[flowID] = assignedNamespace
 		semantics.FlowPrefix[flowID] = assignedNamespace
@@ -215,7 +208,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		semantics.NodeHandlers[nodeRef.Key()] = handlers
 	}
 	semantics.Loops = deriveWorkflowLoopPlans(bundle, semantics.HandlerTransitions)
-	semantics.StageTopologies = deriveWorkflowStageTopologies(bundle.RootSchema, semantics)
+	semantics.StageTopologies = deriveWorkflowStageTopologies(bundle.RootSchema, bundle.FlowSchemas, semantics)
 	semantics.Loops = BindWorkflowLoopRegions(semantics.Loops, semantics.StageTopologies)
 	bundle.Semantics = semantics
 	populateEventSchemaOwnershipIndex(bundle)
@@ -302,7 +295,7 @@ func deriveWorkflowLoopPlans(bundle *WorkflowContractBundle, transitions []Handl
 	return plans
 }
 
-func deriveWorkflowStageTopologies(root *FlowSchemaDocument, semantics WorkflowSemanticView) map[string]WorkflowStageTopology {
+func deriveWorkflowStageTopologies(root *FlowSchemaDocument, schemas map[string]FlowSchemaDocument, semantics WorkflowSemanticView) map[string]WorkflowStageTopology {
 	out := map[string]WorkflowStageTopology{}
 	build := func(flowID, initial string, stages, terminal []string) {
 		timers := make([]WorkflowTimerContract, 0)
@@ -320,12 +313,12 @@ func deriveWorkflowStageTopologies(root *FlowSchemaDocument, semantics WorkflowS
 		out[flowID] = BuildWorkflowStageTopology(flowID, initial, stages, terminal, semantics.HandlerTransitions, timers, semantics.Loops, semantics.Gates)
 	}
 	// Aggregate stage metadata includes other flows and cannot authorize root edges.
-	build(".", semantics.InitialStage, rootSchemaStates(root), rootSchemaTerminalStates(root))
-	for flowID, stages := range semantics.FlowStates {
+	build(".", rootSchemaInitialStage(root), rootSchemaStates(root), rootSchemaFinalStates(root))
+	for flowID, schema := range schemas {
 		if flowID == "." {
 			continue
 		}
-		build(flowID, semantics.FlowInitial[flowID], stages, semantics.FlowTerminal[flowID])
+		build(flowID, schema.LoweredInitialState(), schema.LoweredStates(), schema.LoweredFinalStates())
 	}
 	return out
 }

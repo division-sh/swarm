@@ -1,8 +1,8 @@
 name: worker
 instance: worker_id
 stages:
-  ready: {initial: true}
-  done: {terminal: true}
+  ready: {}
+  done: {final: true}
 pins:
   inputs:
     - spawn.done

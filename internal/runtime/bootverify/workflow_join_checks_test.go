@@ -196,7 +196,7 @@ func TestRun_JoinValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
 	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "schema.yaml"), `name: a
 stages:
-  active: {initial: true}
+  active: {}
   done: {}
   failed: {}
 pins:

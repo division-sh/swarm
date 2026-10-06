@@ -22,7 +22,7 @@ import (
 func transitionMutationSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: transition-proof\nstages:\n  ready: {initial: true}\n  other: {}\n  done: {terminal: true}\n",
+		"schema.yaml":   "name: transition-proof\nstages:\n  ready: {}\n  other: {}\n  done: {final: true}\n",
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "advance:\nforeign:\n",
 		"nodes.yaml": `router:
@@ -86,7 +86,7 @@ func TestPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStores(t *t
 	}
 	// A structurally valid carrier from another admitted declaration set is not
 	// permission in this selected source, even when every stage name is local.
-	alternateGraph := contracts.BuildWorkflowStageTopology(".", "ready", graph.Stages, graph.TerminalStages,
+	alternateGraph := contracts.BuildWorkflowStageTopology(".", "ready", graph.Stages, graph.FinalStages,
 		[]contracts.HandlerTransitionSemantic{{Node: node, EventType: "advance", AdvancesTo: "other"}}, nil, nil)
 	alternate, err := alternateGraph.AdmitTransition(site, "ready", "other")
 	if err != nil {
@@ -96,7 +96,7 @@ func TestPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStores(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	gateGraph := contracts.BuildWorkflowStageTopology(".", "ready", graph.Stages, graph.TerminalStages, nil, nil, nil,
+	gateGraph := contracts.BuildWorkflowStageTopology(".", "ready", graph.Stages, graph.FinalStages, nil, nil, nil,
 		[]contracts.WorkflowGatePlan{{FlowID: ".", Stage: "ready", Decision: "forged", Outcomes: map[string]contracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done"}}}})
 	gate, err := gateGraph.AdmitTransition(contracts.WorkflowTransitionSite{DecisionID: "forged", Verdict: "approve"}, "ready", "done")
 	if err != nil {
@@ -108,7 +108,7 @@ func TestPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStores(t *t
 	}
 	projectedCause := func(flow string, edge contracts.WorkflowStageTopologyEdge) *workflowlifecycle.Transition {
 		t.Helper()
-		projection := contracts.BuildWorkflowStageTopology(flow, "ready", graph.Stages, graph.TerminalStages, nil, nil, nil)
+		projection := contracts.BuildWorkflowStageTopology(flow, "ready", graph.Stages, graph.FinalStages, nil, nil, nil)
 		projection.Edges = []contracts.WorkflowStageTopologyEdge{edge}
 		admitted, err := projection.AdmitTransition(edge.Site(), edge.From, edge.To)
 		if err != nil {

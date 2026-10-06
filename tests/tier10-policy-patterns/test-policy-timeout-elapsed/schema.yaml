@@ -1,7 +1,7 @@
 stages:
-  waiting: {initial: true}
-  done: {terminal: true}
-  timed_out: {terminal: true}
+  waiting: {}
+  done: {final: true}
+  timed_out: {final: true}
 pins:
   inputs:
     - task.done

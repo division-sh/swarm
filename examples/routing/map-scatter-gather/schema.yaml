@@ -1,9 +1,9 @@
 name: map-scatter-gather
 stages:
-  waiting: {initial: true}
+  waiting: {}
   collecting: {}
-  complete: {terminal: true}
-  failed: {terminal: true}
+  complete: {final: true}
+  failed: {final: true}
 pins:
   inputs:
     - batch.ready

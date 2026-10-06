@@ -11,11 +11,11 @@ func TestFlowStatesRootScopeExcludesChildFlowStates(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		RootSchema: &FlowSchemaDocument{
 			Name:              "root-workflow",
-			StageDeclarations: FlowStageDeclarations{Declared: true, Entries: []FlowStageDeclaration{{ID: "root-new", Initial: true}, {ID: "root-done", Terminal: true}}},
+			StageDeclarations: FlowStageDeclarations{Declared: true, Entries: []FlowStageDeclaration{{ID: "root-new"}, {ID: "root-done", Final: true}}},
 		},
 		FlowSchemas: map[string]FlowSchemaDocument{
 			"child": {
-				StageDeclarations: FlowStageDeclarations{Declared: true, Entries: []FlowStageDeclaration{{ID: "child-new", Initial: true}, {ID: "child-done", Terminal: true}}},
+				StageDeclarations: FlowStageDeclarations{Declared: true, Entries: []FlowStageDeclaration{{ID: "child-new"}, {ID: "child-done", Final: true}}},
 			},
 		},
 	}
@@ -42,8 +42,8 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 			StageDeclarations: FlowStageDeclarations{
 				Declared: true,
 				Entries: []FlowStageDeclaration{
-					{ID: "ready", Initial: true},
-					{ID: "done", Terminal: true},
+					{ID: "ready"},
+					{ID: "done", Final: true},
 				},
 			},
 		},
@@ -52,8 +52,8 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 				StageDeclarations: FlowStageDeclarations{
 					Declared: true,
 					Entries: []FlowStageDeclaration{
-						{ID: "ready", Initial: true},
-						{ID: "done", Terminal: true},
+						{ID: "ready"},
+						{ID: "done", Final: true},
 					},
 				},
 			},
@@ -67,8 +67,8 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 	if got, want := bundle.FlowStates("."), []string{"ready", "done"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("FlowStates(root) = %#v, want %#v", got, want)
 	}
-	if got, want := bundle.FlowTerminalStages("child"), []string{"done"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("FlowTerminalStages(child) = %#v, want %#v", got, want)
+	if got, want := bundle.FlowFinalStages("child"), []string{"done"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("FlowFinalStages(child) = %#v, want %#v", got, want)
 	}
 	if got, want := bundle.FlowInitialStage("child"), "ready"; got != want {
 		t.Fatalf("FlowInitialStage(child) = %q, want %q", got, want)

@@ -152,8 +152,8 @@ pins:
 	writeClosedVariantFile(t, root, "ingress/schema.yaml", `name: ingress
 activation: standing
 stages:
-  active: {initial: true, gate: {decision: retire_service, outcomes: {retire: {advances_to: done}}}}
-  done: {terminal: true}
+  active: {gate: {decision: retire_service, outcomes: {retire: {advances_to: done}}}}
+  done: {final: true}
 pins:
   inputs:
     - inbound.mock

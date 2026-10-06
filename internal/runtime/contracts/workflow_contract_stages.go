@@ -12,8 +12,7 @@ type FlowStageDeclarations struct {
 
 type FlowStageDeclaration struct {
 	ID          string                      `yaml:"-"`
-	Initial     bool                        `yaml:"initial"`
-	Terminal    bool                        `yaml:"terminal"`
+	Final       bool                        `yaml:"final"`
 	Description string                      `yaml:"description"`
 	Timers      []FlowStageTimerDeclaration `yaml:"timers"`
 	Gate        *FlowStageGateDeclaration   `yaml:"gate"`
@@ -42,8 +41,7 @@ type FlowStageTimerDeclaration struct {
 }
 
 var stageDeclarationFieldOptions = map[string]struct{}{
-	"initial":     {},
-	"terminal":    {},
+	"final":       {},
 	"description": {},
 	"timers":      {},
 	"gate":        {},
@@ -180,18 +178,16 @@ func (d FlowStageDeclarations) StageIDs() []string {
 }
 
 func (d FlowStageDeclarations) InitialStage() string {
-	for _, stage := range d.Entries {
-		if stage.Initial {
-			return strings.TrimSpace(stage.ID)
-		}
+	if len(d.Entries) != 0 {
+		return d.Entries[0].ID
 	}
 	return ""
 }
 
-func (d FlowStageDeclarations) TerminalStages() []string {
+func (d FlowStageDeclarations) FinalStages() []string {
 	out := make([]string, 0, len(d.Entries))
 	for _, stage := range d.Entries {
-		if stage.Terminal {
+		if stage.Final {
 			id := strings.TrimSpace(stage.ID)
 			if id != "" {
 				out = append(out, id)
@@ -217,26 +213,6 @@ func (d FlowStageDeclarations) WorkflowStages(phase string) []WorkflowStageContr
 	return out
 }
 
-func (d FlowStageDeclarations) InitialCount() int {
-	count := 0
-	for _, stage := range d.Entries {
-		if stage.Initial {
-			count++
-		}
-	}
-	return count
-}
-
-func (d FlowStageDeclarations) TerminalCount() int {
-	count := 0
-	for _, stage := range d.Entries {
-		if stage.Terminal {
-			count++
-		}
-	}
-	return count
-}
-
 func (d FlowStageDeclarations) IsExplicitStateless() bool {
 	return d.Declared && len(d.Entries) == 0
 }
@@ -253,8 +229,8 @@ func (s FlowSchemaDocument) LoweredStates() []string {
 	return s.StageDeclarations.StageIDs()
 }
 
-func (s FlowSchemaDocument) LoweredTerminalStates() []string {
-	return s.StageDeclarations.TerminalStages()
+func (s FlowSchemaDocument) LoweredFinalStates() []string {
+	return s.StageDeclarations.FinalStages()
 }
 
 func (s FlowSchemaDocument) LoweredWorkflowStages(phase string) []WorkflowStageContract {

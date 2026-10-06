@@ -39,11 +39,11 @@ func CopyForkLoopRetainedJoin(t testing.TB) string {
 	for name, body := range map[string]string{
 		"schema.yaml": `name: fork-loop-retained-join
 stages:
-  queued: {initial: true}
+  queued: {}
   working: {}
   reviewing: {}
-  approved: {terminal: true}
-  exhausted: {terminal: true}
+  approved: {final: true}
+  exhausted: {final: true}
 loops:
   revision:
     revision_field: revision_id

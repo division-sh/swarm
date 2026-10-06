@@ -80,7 +80,7 @@ func Write(t testing.TB, opts Options) string {
 func addTemplateLifecycleOverlay(t testing.TB, root string) {
 	t.Helper()
 	canonicalrouting.ApplyOverlay(t, root, TemplateFlowID+"/schema.yaml",
-		"stages:\n  pending: {initial: true}\n  reviewed: {terminal: true}\n")
+		"stages:\n  pending: {}\n  reviewed: {final: true}\n")
 }
 
 func applyRoutingMutation(t testing.TB, root string, opts Options) {

@@ -319,8 +319,8 @@ func writeDescribeStageNodes(out io.Writer, nodes []authoringview.StageGraphNode
 			if node.Initial {
 				markers = append(markers, "initial")
 			}
-			if node.Terminal {
-				markers = append(markers, "terminal")
+			if node.Final {
+				markers = append(markers, "final")
 			}
 			suffix := ""
 			if len(markers) > 0 {
