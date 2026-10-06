@@ -9,19 +9,21 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitError(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases() {
+func VerifyActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitErrorForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, uncertain := range []bool{false, true} {
 			name := "complete"
 			if uncertain {
 				name = "uncertain"
 			}
-			t.Run(tc.name+"/"+name, func(t *testing.T) {
-				store, ctx := tc.open(t)
-				runner, ok := store.testRuntimeMutation().(*recordingRuntimeMutationRunner)
-				if !ok {
-					t.Fatalf("activity journal fixture runner = %T", store.testRuntimeMutation())
+			t.Run(backend+"/"+name, func(t *testing.T) {
+				fixture := open(t, backend)
+				store, ctx := fixture.Persistence.store, fixture.Context
+				runID := uuid.NewString()
+				if err := fixture.RequireRun(ctx, runID); err != nil {
+					t.Fatal(err)
 				}
+				ctx = runtimecorrelation.WithRunID(ctx, runID)
 				intent := testNonIdempotentActivityIntent(runtimecorrelation.RunIDFromContext(ctx), uuid.NewString(), uuid.NewString())
 				started, inserted, err := store.StartActivityAttempt(ctx, activityAttemptStartRecord(intent, activityInputHash(intent.Input)))
 				if err != nil || !inserted {
@@ -37,15 +39,19 @@ func TestActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitError(t 
 					terminal.ResultEventType = intent.FailureEvent
 				}
 				fault := errors.New("selected mutation cleanup failed after acknowledgement")
-				runner.postCommitErr = fault
+				faulted, acknowledgments := fixture.CleanupFault(fault)
+				terminalOwner := faulted.store
 				var committed bool
 				if uncertain {
-					terminal, committed, err = store.MarkActivityAttemptUncertain(ctx, terminal)
+					terminal, committed, err = terminalOwner.MarkActivityAttemptUncertain(ctx, terminal)
 				} else {
-					terminal, committed, err = store.CompleteActivityAttempt(ctx, terminal)
+					terminal, committed, err = terminalOwner.CompleteActivityAttempt(ctx, terminal)
 				}
 				if !committed || !errors.Is(err, fault) {
 					t.Fatalf("terminal acknowledgement=%t err=%v, want acknowledged cleanup fault", committed, err)
+				}
+				if acknowledgments() != 1 {
+					t.Fatalf("cleanup fault acknowledgment count=%d, want one actual durable verdict", acknowledgments())
 				}
 				stored, found, err := store.LoadActivityAttempt(ctx, started.RequestEventID)
 				if err != nil || !found || stored.Status != terminal.Status || stored.ResultEventID != terminal.ResultEventID {

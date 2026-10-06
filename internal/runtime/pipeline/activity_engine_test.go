@@ -577,10 +577,11 @@ func TestCompiledResultProjectionHasNoConversionSeam(t *testing.T) {
 	}
 }
 
-func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t *testing.T) {
+func VerifyChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStoresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(t, context.Background())
+			fixture := open(t, tc.name)
+			ctx := fixture.Context
 			runID := uuid.NewString()
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -590,13 +591,14 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 			}))
 			defer server.Close()
 
-			db, store, sqlite := newActivityJournalStoreForCase(t, ctx, tc.kind)
-			seedActivityRun(t, db, sqlite, runID)
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
 				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
 			}})
 			bus := &recordingPipelineBus{}
-			pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
+			pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}})
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 			intent.Tool = "channel.ops.deliver"
 			intent.ActivityID = "channel_deliver"
@@ -611,7 +613,7 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 			}
 			// Reconstruct the consumer before replay: no in-memory result may satisfy
 			// this attempt; the selected-store journal must supply it.
-			pc = newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
+			pc = fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}})
 			if handled, _, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
 				t.Fatalf("replay handle = %v, err=%v", handled, err)
 			}
@@ -670,10 +672,11 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 	}
 }
 
-func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStores(t *testing.T) {
+func VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStoresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := testAuthorActivityContext(t, context.Background())
+			fixture := open(t, tc.name)
+			ctx := fixture.Context
 			runID := uuid.NewString()
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -681,13 +684,15 @@ func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossS
 				_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":42}}`)
 			}))
 			defer server.Close()
-			db, store, sqlite := newActivityJournalStoreForCase(t, ctx, tc.kind)
-			seedActivityRun(t, db, sqlite, runID)
+			store := fixture.Persistence.store
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
 				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
 			}})
 			bus := &recordingPipelineBus{}
-			pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
+			pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}})
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 			intent.Tool = "channel.ops.deliver"
 			intent.ActivityID = "channel_deliver"
@@ -708,17 +713,6 @@ func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossS
 			}
 		})
 	}
-}
-
-func newActivityJournalStoreForCase(t *testing.T, ctx context.Context, kind activityBoringStoreKind) (*sql.DB, *workflowInstanceStore, bool) {
-	t.Helper()
-	if kind == activityBoringStoreSQLite {
-		db, store := newSQLiteActivityJournalStore(t, ctx)
-		return db, store, true
-	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	return db, newPostgresWorkflowInstanceStoreForTest(db), false
 }
 
 func testCompiledChannelActivityTool(url string) runtimecontracts.ToolSchemaEntry {

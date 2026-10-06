@@ -14,32 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type faultingTerminalActivityJournal struct {
-	ActivityAttemptJournal
-	fault      error
-	uncertain  bool
-	faultCount int
-}
-
-func (j *faultingTerminalActivityJournal) CompleteActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
-	stored, committed, err := j.ActivityAttemptJournal.CompleteActivityAttempt(ctx, record)
-	if committed && err == nil && !j.uncertain {
-		j.faultCount++
-		return stored, true, j.fault
-	}
-	return stored, committed, err
-}
-
-func (j *faultingTerminalActivityJournal) MarkActivityAttemptUncertain(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
-	stored, committed, err := j.ActivityAttemptJournal.MarkActivityAttemptUncertain(ctx, record)
-	if committed && err == nil && j.uncertain {
-		j.faultCount++
-		return stored, true, j.fault
-	}
-	return stored, committed, err
-}
-
-func TestActivityTerminalPostCommitErrorPublishesJournaledResultBothStores(t *testing.T) {
+func VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		for _, uncertain := range []bool{false, true} {
 			name := "complete"
@@ -47,13 +22,14 @@ func TestActivityTerminalPostCommitErrorPublishesJournaledResultBothStores(t *te
 				name = "uncertain"
 			}
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
-				ctx := testAuthorActivityContext(t, context.Background())
+				fixture := open(t, tc.name)
+				ctx := fixture.Context
 				runID := uuid.NewString()
-				db, store, sqlite := newActivityJournalStoreForCase(t, ctx, tc.kind)
-				seedActivityRun(t, db, sqlite, runID)
+				store := fixture.Persistence.store
+				if err := fixture.RequireRun(ctx, runID); err != nil {
+					t.Fatal(err)
+				}
 				fault := errors.New("injected activity post-commit cleanup fault")
-				journal := &faultingTerminalActivityJournal{ActivityAttemptJournal: store.activityJournal, fault: fault, uncertain: uncertain}
-				store.activityJournal = journal
 
 				calls := 0
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -64,9 +40,7 @@ func TestActivityTerminalPostCommitErrorPublishesJournaledResultBothStores(t *te
 				tool := testCompiledChannelActivityTool(server.URL)
 				source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"channel.ops.deliver": tool}})
 				bus := &recordingPipelineBus{}
-				pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-					Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{},
-				})
+				pc, faultCount := fixture.CleanupFaultCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}}, fault)
 				dispatcher := pipelineActivityDispatcher{coordinator: pc}
 				if uncertain {
 					dispatcher.client = &http.Client{Transport: activityRoundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -84,8 +58,8 @@ func TestActivityTerminalPostCommitErrorPublishesJournaledResultBothStores(t *te
 				if err := dispatcher.executeNonIdempotentActivityIntent(ctx, intent, tool, nil); !errors.Is(err, fault) {
 					t.Fatalf("terminal execution error = %v, want post-commit fault", err)
 				}
-				if journal.faultCount != 1 || calls != 1 || len(bus.publishes) != 1 {
-					t.Fatalf("committed activity follow-up: faults=%d provider_calls=%d publications=%d", journal.faultCount, calls, len(bus.publishes))
+				if faultCount() != 1 || calls != 1 || len(bus.publishes) != 1 {
+					t.Fatalf("committed activity follow-up: faults=%d provider_calls=%d publications=%d", faultCount(), calls, len(bus.publishes))
 				}
 				stored, found, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
 				if err != nil || !found {
