@@ -53,9 +53,11 @@ func (s *shutdownContinuationPage) ScanDeliveryContinuations(context.Context, ru
 
 type shutdownBlockedDispatcher struct {
 	entered, canceled, release chan struct{}
+	ctx                        context.Context
 }
 
 func (d *shutdownBlockedDispatcher) DispatchDeliveryContinuation(ctx context.Context, _ events.Event, _ events.DeliveryRoute) runtimedeliverycontinuation.DispatchResult {
+	d.ctx = ctx
 	close(d.entered)
 	<-ctx.Done()
 	close(d.canceled)

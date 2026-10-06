@@ -40,11 +40,25 @@ func (p *recoveryReadProbe) LoadRunOrigin(ctx context.Context, _ string) (runlif
 	return p.origin, p.read(ctx, "origin")
 }
 
-func (p *recoveryReadProbe) StandingRunRestartDisposition(ctx context.Context, _ string) (runlifecycle.StandingRestartDisposition, error) {
+func (p *recoveryReadProbe) StandingRunRestartDisposition(ctx context.Context, runID string) (runlifecycle.StandingRestartDisposition, error) {
 	if err := p.read(ctx, "standing"); err != nil {
 		return runlifecycle.StandingRestartDisposition{}, err
 	}
+	if p.phase == "authorization" {
+		return runlifecycle.ClassifyStandingRestart(runlifecycle.StandingRestartFact{
+			BindingEnabled: true, ExactCurrent: true, DeclarationPresent: true,
+			ServiceID: p.origin.ServiceID(), RunID: runID, Generation: p.origin.Generation(),
+			EffectiveState: "active", OperatorOverride: "none", RunState: "running",
+		})
+	}
 	return runlifecycle.ClassifyStandingRestart(runlifecycle.StandingRestartFact{})
+}
+
+func (p *recoveryReadProbe) BeginStandingRunRecovery(ctx context.Context, _ string, _ runlifecycle.RunOrigin) (*worklifetime.Lease, error) {
+	if err := p.read(ctx, "authorization"); err != nil {
+		return nil, err
+	}
+	return nil, ctx.Err()
 }
 
 type recoveryReadScan struct {
@@ -57,7 +71,7 @@ func (s recoveryReadScan) ScanDeliveryContinuations(context.Context, runtimedeli
 }
 
 func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
-	for _, phase := range []string{"origin", "standing"} {
+	for _, phase := range []string{"origin", "standing", "authorization"} {
 		for _, stop := range []string{"retire", "parent_cancel"} {
 			for _, failure := range []string{"none", "independent", "joined"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", phase, stop, failure), func(t *testing.T) {
@@ -68,7 +82,7 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 						t.Fatal(err)
 					}
 					probe := &recoveryReadProbe{phase: phase, entered: make(chan context.Context, 1), release: make(chan struct{}), origin: runlifecycle.ScenarioSetupRunOrigin()}
-					if phase == "standing" {
+					if phase != "origin" {
 						probe.origin, err = runlifecycle.StandingGenerationRunOrigin(uuid.NewString(), 1)
 						if err != nil {
 							t.Fatal(err)
@@ -82,6 +96,9 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 						probe.failure = errors.Join(context.Canceled, independent)
 					}
 					eb.durable.RunOrigins, eb.durable.StandingRestarts = probe, probe
+					if phase == "authorization" {
+						eb.SetStandingRunWorkOwner(probe)
+					}
 					event := eventtest.ExistingRunRootIngress(uuid.NewString(), "recovery.read", "test", "", []byte(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
 					route := nodeOnlyDeliveryPlan(t, event, "reader-node").DeliveryRoutes()[0]
 					id, err := runtimedelivery.DeliveryID(event.ID(), route)
@@ -136,7 +153,9 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					if owner.ActiveCount() == 0 {
 						t.Error("read lost joined worker")
 					}
-					if readCtx.Done() != nil {
+					if phase == "authorization" && !errors.Is(readCtx.Err(), context.Canceled) {
+						t.Error("standing authorization lost its original retirement cancellation")
+					} else if phase != "authorization" && readCtx.Done() != nil {
 						t.Error("admitted origin read still receives retirement cancellation")
 					}
 					close(probe.release)
@@ -151,6 +170,9 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					err = c.Retire(context.Background())
 					if (failure == "none" && err != nil) || (failure != "none" && !errors.Is(err, independent)) {
 						t.Errorf("retirement lost error accounting: %v", err)
+					}
+					if phase == "authorization" && failure != "none" && !errors.Is(err, ErrRunDispatchBlocked) {
+						t.Errorf("standing admission lost its blocked classification: %v", err)
 					}
 					if dispatched.Load() != 0 || owner.ActiveCount() != 0 {
 						t.Errorf("post-stop dispatch=%d active=%d", dispatched.Load(), owner.ActiveCount())

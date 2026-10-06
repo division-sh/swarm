@@ -444,6 +444,16 @@ func (eb *EventBus) processClaimedPipelineWork(
 	return false, false, nil, fmt.Errorf("unknown pipeline dispatch decision")
 }
 
+type standingRecoveryAdmissionError struct{ cause error }
+
+func (e standingRecoveryAdmissionError) Error() string {
+	return fmt.Sprintf("%v: admit standing-generation pipeline recovery: %v", ErrRunDispatchBlocked, e.cause)
+}
+
+func (e standingRecoveryAdmissionError) Unwrap() error { return e.cause }
+
+func (e standingRecoveryAdmissionError) Is(target error) bool { return target == ErrRunDispatchBlocked }
+
 func (eb *EventBus) bindClaimedRunWork(
 	ctx context.Context,
 	event events.Event,
@@ -506,7 +516,7 @@ func (eb *EventBus) bindClaimedRunWork(
 	}
 	lease, err := owner.BeginStandingRunRecovery(ctx, runID, origin)
 	if err != nil {
-		return ctx, nil, fmt.Errorf("%w: admit standing-generation pipeline recovery: %v", ErrRunDispatchBlocked, err)
+		return ctx, nil, standingRecoveryAdmissionError{cause: err}
 	}
 	contextOwner, ok := worklifetime.OccurrenceFromContext(lease.Context())
 	if !ok {
