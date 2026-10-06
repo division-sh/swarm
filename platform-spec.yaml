@@ -10885,6 +10885,7 @@ tool_model:
       normalized_event_exact_schema_carrier: internal/runtime/contracts.EventFieldSpec.ExactSchema
       runtime_schema_acceptance: internal/runtime/eventschema
       structural_compiler: internal/packs.CompileChannelInventory
+      capability_vector: internal/packs.CompileChannelCapabilities and AdmitChannelCapabilities
       immutable_structural_plan: internal/packs.SatisfactionPlan
       admitted_pack_source_and_identity: internal/packs.PackSource and PackIdentity
       directional_assignability_and_cardinality: internal/packs channel relation owner
@@ -10898,6 +10899,30 @@ tool_model:
       runtime_adapter: internal/runtime/tools channel handler consuming internal/packs.OutboundBindingPlan
       private_activity_targets: internal/runtime/pipeline.ChannelActivityTarget
       durable_execution: internal/runtime/pipeline activity attempt owner
+    capability_model:
+      exact_fields: [card_render, reply_to_reference, actions_as_buttons, actions_as_text, edit, acknowledgment, inbox_listing]
+      admission: >
+        The provider-neutral capability vector has exactly these seven explicit boolean fields. Unknown fields,
+        missing fields, structural null, quoted booleans and other scalar kinds are invalid, even for an unsupported
+        optional capability. Source admission retains exact field evidence and admits the same immutable value as the
+        typed constructor. Readback includes every field, including false; readback is not executable authority.
+      text_reply_baseline:
+        language: en
+        required_capabilities: [card_render, reply_to_reference, actions_as_text, inbox_listing]
+        rule: >
+          Every channel supports English text commands to list the authoritative Inbox, renders a card as text with
+          its stable reference, and accepts actions and input by replying to that provider message. A reply reference
+          is necessary evidence, not sufficient authorization: existing principal, provider account, conversation,
+          binding revision, source, card and input guards remain mandatory. A bare action word never substitutes for
+          the required provider reply evidence. Customer messages do not identify or authorize the operator.
+      optional_capabilities: [actions_as_buttons, edit, acknowledgment]
+      unsupported_rule: >
+        Unsupported optional capability requests are refused with a typed error naming the capability before any
+        mutation or effect launch. Unsupported edit never silently becomes a fresh send. Native interaction
+        acknowledgment is distinct from principal-authorized mailbox notice acknowledgment; a text reply requires no
+        fabricated callback identifier or successful native acknowledgment. The text/reply baseline does not claim
+        provider-native menus or installed launcher settings. Telegram native qualification remains a separate strict
+        compiled extension, not a prerequisite for neutral Inbox listing or text/reply authority.
     contract: >
       A channel pack is a universal-envelope satisfier of one immutable provider-neutral interface. The interface owns
       presentation, ordered actions, operation/event names, effects, and required semantic fields. It does not own provider
