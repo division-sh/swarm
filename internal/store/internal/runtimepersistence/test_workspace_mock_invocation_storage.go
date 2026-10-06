@@ -3,6 +3,8 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
 type WorkspaceMockInvocationStorage struct {
@@ -17,10 +19,9 @@ func ReadWorkspaceMockInvocationStorageForTest(ctx context.Context, selected any
 	}
 	var out WorkspaceMockInvocationStorage
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT
-			(SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type='agent'),
-			(SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type='agent' AND status='delivered'),
-			(SELECT COUNT(*) FROM events WHERE event_name='work.completed')`).Scan(&out.AgentDeliveries, &out.Delivered, &out.Emitted)
+		var err error
+		out.AgentDeliveries, out.Delivered, out.Emitted, err = delivery.ReadWorkspaceInvocationStorageCounts(ctx, tx)
+		return err
 	})
 	if err != nil {
 		return WorkspaceMockInvocationStorage{}, err
