@@ -398,6 +398,7 @@ type Status string
 
 const (
 	StatusActive    Status = "active"
+	StatusParked    Status = "parked"
 	StatusFired     Status = "fired"
 	StatusCancelled Status = "cancelled"
 	StatusFailed    Status = "failed"
@@ -424,6 +425,7 @@ type Activation struct {
 	AcceptedAt             time.Time
 	FailedAt               time.Time
 	Failure                Failure
+	ClockSuspension        *ClockSuspension
 }
 
 func (a Activation) Canonical() Activation {
@@ -443,6 +445,7 @@ func (a Activation) Canonical() Activation {
 	a.FailedAt = canonicalTime(a.FailedAt)
 	a.Failure.Code = strings.TrimSpace(a.Failure.Code)
 	a.Failure.Message = strings.TrimSpace(a.Failure.Message)
+	a.ClockSuspension = a.ClockSuspension.Canonical()
 	return a
 }
 
@@ -474,7 +477,17 @@ func (a Activation) Validate() error {
 	if !a.Command.Due.Recurring() && !a.CurrentDueAt.Equal(a.InitialDueAt) {
 		return errors.New("one-shot generic schedule current due coordinate changed")
 	}
-	if a.Command.Due.Kind == DueEvery && a.CurrentDueAt.Sub(a.InitialDueAt)%a.Command.Due.Every != 0 {
+	if err := validateClockSuspension(a); err != nil {
+		return err
+	}
+	cadenceBase, err := a.cadenceBase()
+	if err != nil {
+		return err
+	}
+	if a.CurrentDueAt.Before(cadenceBase) {
+		return errors.New("generic schedule current due precedes its cadence base")
+	}
+	if a.Command.Due.Kind == DueEvery && (a.CurrentDueAt.UnixMicro()-cadenceBase.UnixMicro())%a.Command.Due.Every.Microseconds() != 0 {
 		return errors.New("every generic schedule current due coordinate is off cadence")
 	}
 	hasOccurrenceID := a.CurrentEventID != ""
@@ -507,7 +520,7 @@ func (a Activation) Validate() error {
 		return errors.New("generic schedule cancellation and failure facts are mutually exclusive")
 	}
 	switch a.Status {
-	case StatusActive:
+	case StatusActive, StatusParked:
 		if hasCancelCause || hasFailureCode {
 			return errors.New("active generic schedule carries terminal facts")
 		}
