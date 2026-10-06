@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const originalServeappLateSelection = `^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(One.*|F.*|S.*)|Stop.*|Selected.*)|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$`
+const originalServeappLateSelection = `^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(One.*|F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$`
 
 func TestServeappLateSplitRetainsProofEnvelopes(t *testing.T) {
 	policy := loadPersistenceDebtPolicy(t)
@@ -42,7 +42,7 @@ func serveappLateSplitEnvelopes() map[string]UnitPolicy {
 	return map[string]UnitPolicy{
 		"serveapp-other-late": {
 			Packages:         []string{"github.com/division-sh/swarm/internal/serveapp"},
-			Run:              `^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$`,
+			Run:              `^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$`,
 			RequiredChildren: map[string][]string{"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"}},
 			CountMode:        "count-1", EnvironmentID: "ci-postgres-gateway-empty-v1", BudgetClass: "full",
 		},
