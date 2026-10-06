@@ -21,6 +21,26 @@ type StandingServiceCoordinate struct {
 	EntityID            string
 }
 
+func standingActivationsForPublication(existing, incoming []StandingActivation, serviceID, bundleHash string) ([]StandingActivation, int, error) {
+	var activations []StandingActivation
+	for _, activation := range existing {
+		if activation.ServiceID != serviceID {
+			activations = append(activations, activation)
+		}
+	}
+	added := 0
+	for _, activation := range incoming {
+		if activation.ServiceID != serviceID {
+			return nil, 0, fmt.Errorf("standing activation service_id does not match publication")
+		}
+		if activation.BundleHash == bundleHash {
+			activations = append(activations, activation)
+			added++
+		}
+	}
+	return activations, added, nil
+}
+
 func (c BundleContext) standingServiceCoordinates() ([]StandingServiceCoordinate, error) {
 	byService := make(map[string]StandingServiceCoordinate)
 	add := func(coordinate StandingServiceCoordinate) error {
