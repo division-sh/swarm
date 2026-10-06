@@ -424,29 +424,12 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 }
 
 func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResult, outcomeErr error) {
-	activation, found, err := l.store.LoadGenericScheduleActivation(ctx, wakeup.ActivationID())
+	prepare, err := l.admitOccurrencePreparation(ctx, wakeup)
 	if err != nil {
-		if !activation.Command.ExecutionMode.Valid() {
-			return CommitResult{Outcome: CommitRetry}, err
-		}
-		if postureErr := l.posture.Admit(activation.Command.ExecutionMode, "generic schedule occurrence preparation"); postureErr != nil {
-			return CommitResult{Outcome: CommitRetry}, postureErr
-		}
+		return CommitResult{Outcome: CommitRetry}, err
 	}
-	if !found {
-		if err == nil {
-			return CommitResult{Outcome: CommitTerminal}, nil
-		}
-	}
-	if err == nil {
-		if postureErr := l.posture.Admit(activation.Command.ExecutionMode, "generic schedule occurrence preparation"); postureErr != nil {
-			return CommitResult{Outcome: CommitRetry}, postureErr
-		}
-		if found {
-			if err := validateInstanceExecutionOwner(ctx, activation.Command); err != nil {
-				return CommitResult{Outcome: CommitRetry}, err
-			}
-		}
+	if !prepare {
+		return CommitResult{Outcome: CommitTerminal}, nil
 	}
 	commit, prepareErr := l.store.PrepareGenericScheduleOccurrence(ctx, wakeup)
 	if !commit.Acknowledged {
@@ -468,7 +451,7 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 	case PrepareTerminal:
 		return CommitResult{Outcome: CommitTerminal, Next: prepared.Activation}, nil
 	}
-	activation = prepared.Activation
+	activation := prepared.Activation
 	occurrence := prepared.Occurrence
 	if err := validateInstanceExecutionOwner(ctx, activation.Command); err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
@@ -523,6 +506,25 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 		err = errors.Join(err, dispatchErr)
 	}
 	return result, err
+}
+
+func (l *Lifecycle) admitOccurrencePreparation(ctx context.Context, wakeup Wakeup) (bool, error) {
+	activation, found, loadErr := l.store.LoadGenericScheduleActivation(ctx, wakeup.ActivationID())
+	if loadErr != nil && !activation.Command.ExecutionMode.Valid() {
+		return false, loadErr
+	}
+	if !found && loadErr == nil {
+		return false, nil
+	}
+	if err := l.posture.Admit(activation.Command.ExecutionMode, "generic schedule occurrence preparation"); err != nil {
+		return false, err
+	}
+	if loadErr == nil {
+		if err := validateInstanceExecutionOwner(ctx, activation.Command); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func occurrenceEvent(activation Activation, occurrence Occurrence, payload []byte) (events.Event, error) {
