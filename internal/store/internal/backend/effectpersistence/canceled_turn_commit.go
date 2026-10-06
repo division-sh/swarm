@@ -97,9 +97,12 @@ func validateTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, atte
 	if err != nil || !valid || !event.CreatedAt().Equal(requestedAt.UTC().Truncate(time.Microsecond)) {
 		return fmt.Errorf("canceled turn reaction changed its persisted occurrence time")
 	}
-	flowID, _, path, present := attempt.Authority.Normal.Identity.Route.Fields()
+	flowID, _, path, err := attempt.Authority.BusinessTurnCoordinates()
+	if err != nil {
+		return err
+	}
 	source := event.RoutingSource()
-	if !present || source.Kind() != events.RoutingSourceFlowOwnedControl ||
+	if source.Kind() != events.RoutingSourceFlowOwnedControl ||
 		source.Route().FlowID != flowID || source.Route().FlowInstance != path || !event.TargetRoute().Empty() ||
 		source.Route().EntityID != attempt.Authority.Target.EntityID ||
 		event.ProducerType() != events.EventProducerPlatform || event.Producer().ID() != runtimeeffects.TurnTimeoutProducerID() {

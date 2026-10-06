@@ -19,8 +19,8 @@ func (eb *EventBus) PrepareTurnTimeoutReaction(ctx context.Context, turn effects
 		return nil, fmt.Errorf("timeout reaction requires exact acknowledged launch and cancellation evidence")
 	}
 	target := attempt.Authority.Target
-	flowID, _, path, present := target.AgentIdentity.Route.Fields()
-	if !present || target.AgentIdentity.RunID != target.RunID || path != target.FlowInstance || !attempt.Authority.ExecutionMode.Valid() {
+	flowID, _, path, err := attempt.Authority.BusinessTurnCoordinates()
+	if err != nil {
 		return nil, fmt.Errorf("timeout reaction requires its admitted constructed actor identity")
 	}
 	source, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: target.EntityID})

@@ -74,8 +74,11 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 			return nil, err
 		}
 		id, _, err := businessTurnIdentity(attempt.Origin)
-		if err != nil || id != row.turnID || attempt.Authority.Target.RunID != row.runID ||
-			attempt.Authority.Target.AgentID != row.agentID || attempt.Authority.Target.FlowInstance != row.flow {
+		if err != nil || id != row.turnID {
+			return nil, fmt.Errorf("canceled turn recovery contradicts its exact first origin")
+		}
+		owner, err := businessTurnOwner(attempt.Authority)
+		if err != nil || owner.RunID != row.runID || attempt.Authority.Target.AgentID != row.agentID || owner.Route.InstancePath != row.flow {
 			return nil, fmt.Errorf("canceled turn recovery contradicts its exact first origin")
 		}
 		clock := runtimeeffects.LogicalTurnClock{Origin: attempt.Origin, FirstAttempt: row.firstAttempt.String, TimeoutEvent: row.timeoutEvent.String}

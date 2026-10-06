@@ -1486,13 +1486,16 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 }
 
 func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan) completionSettlementFixture {
+	return newCompletionSettlementFixtureForFlow(t, store, db, sqlite, memory, "global")
+}
+
+func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string) completionSettlementFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
-	flowInstance := "global"
 	leaseHolder := "completion-worker"
 	grantID := uuid.NewString()
 	identity := mustTestAgentIdentityForRun(runID, agentID, flowInstance)

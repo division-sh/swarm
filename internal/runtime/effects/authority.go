@@ -82,6 +82,34 @@ func (t UsageTarget) Valid() bool {
 	}
 }
 
+// BusinessTurnCoordinates projects the constructed instance without rewriting the
+// actor's root declaration or the immutable usage target. It grants no execution.
+func (a Authority) BusinessTurnCoordinates() (scope, instance, path string, err error) {
+	if !a.Valid() || a.Target.Kind != UsageTargetAgentTurn || !a.Target.Valid() {
+		return "", "", "", fmt.Errorf("business turn requires exact admitted agent authority")
+	}
+	switch a.Kind {
+	case AuthorityNormalAgent:
+		if same, err := agentidentity.Equal(a.Normal.Identity, a.Target.AgentIdentity); err != nil || !same {
+			return "", "", "", fmt.Errorf("business turn actor contradicts its lifecycle owner")
+		}
+	case AuthoritySelectedContractFork:
+		if a.SelectedFork.ForkRunID != a.Target.RunID {
+			return "", "", "", fmt.Errorf("business turn actor contradicts its selected run")
+		}
+	default:
+		return "", "", "", fmt.Errorf("authority kind %q does not own a business turn", a.Kind)
+	}
+	scope, instance, path, err = a.Target.AgentIdentity.ExecutionCoordinates()
+	if err != nil {
+		return "", "", "", err
+	}
+	if a.Target.AgentIdentity.Route.Presence == agentidentity.RouteRoot {
+		scope = "."
+	}
+	return scope, instance, path, nil
+}
+
 func ProviderTurnTargetMatchesCapabilitySurface(target UsageTarget, surface managedcapabilities.Surface) bool {
 	sameActor, err := agentidentity.Equal(target.AgentIdentity, surface.ActorIdentity)
 	return err == nil && sameActor &&

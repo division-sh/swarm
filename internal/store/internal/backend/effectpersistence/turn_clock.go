@@ -6,10 +6,19 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
 )
+
+func businessTurnOwner(authority runtimeeffects.Authority) (flowidentity.RunScopedFlowInstance, error) {
+	scope, instance, path, err := authority.BusinessTurnCoordinates()
+	if err != nil {
+		return flowidentity.RunScopedFlowInstance{}, err
+	}
+	return flowidentity.NewRunScopedFlowInstance(authority.Target.RunID, flowidentity.StoredRoute(scope, instance, path))
+}
 
 func businessTurnIdentity(origin runtimeeffects.CompletionOrigin) (string, string, error) {
 	if err := origin.Validate(); err != nil {
@@ -44,6 +53,10 @@ func prepareBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, autho
 	if err != nil {
 		return err
 	}
+	owner, err := businessTurnOwner(authority)
+	if err != nil {
+		return err
+	}
 	var bound, emit, event any
 	if timeout := req.TurnTimeout; timeout != nil {
 		if err := timeout.Validate(); err != nil {
@@ -62,7 +75,7 @@ func prepareBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, autho
 			VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (origin_kind,origin_id) DO NOTHING`
 	}
 	if _, err := tx.ExecContext(ctx, query, turnID, string(req.Origin.Kind), originID, authority.Target.RunID,
-		authority.Target.AgentID, authority.Target.FlowInstance, bound, emit, event, req.Now.UTC(), req.AttemptID); err != nil {
+		authority.Target.AgentID, owner.Route.InstancePath, bound, emit, event, req.Now.UTC(), req.AttemptID); err != nil {
 		return fmt.Errorf("admit logical provider turn: %w", err)
 	}
 	query = `SELECT run_id::text,agent_id,flow_instance,bound_ns,bound_emit,cancel_reason,settled_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid FOR UPDATE`
@@ -76,7 +89,7 @@ func prepareBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, autho
 	if err := tx.QueryRowContext(ctx, query, turnID).Scan(&runID, &agentID, &flow, &storedBound, &storedEmit, &canceled, &settled); err != nil {
 		return fmt.Errorf("lock logical provider turn: %w", err)
 	}
-	if runID != authority.Target.RunID || agentID != authority.Target.AgentID || flow != authority.Target.FlowInstance {
+	if runID != owner.RunID || agentID != authority.Target.AgentID || flow != owner.Route.InstancePath {
 		return fmt.Errorf("logical provider turn contradicts its exact origin owner")
 	}
 	if canceled.Valid || settled != nil {
@@ -97,6 +110,10 @@ func launchBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 	if err != nil {
 		return nil, err
 	}
+	owner, err := businessTurnOwner(attempt.Authority)
+	if err != nil {
+		return nil, err
+	}
 	query := `SELECT run_id::text,agent_id,flow_instance,bound_ns,bound_emit,first_attempt_id::text,first_launched_at,timeout_event_id::text,cancel_reason,settled_at
 		FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid FOR UPDATE`
 	if !postgres {
@@ -110,7 +127,7 @@ func launchBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 	if err := tx.QueryRowContext(ctx, query, turnID).Scan(&runID, &agentID, &flow, &bound, &emit, &first, &launched, &event, &canceled, &settled); err != nil {
 		return nil, fmt.Errorf("lock logical turn launch: %w", err)
 	}
-	if runID != attempt.Authority.Target.RunID || agentID != attempt.Authority.Target.AgentID || flow != attempt.Authority.Target.FlowInstance {
+	if runID != owner.RunID || agentID != attempt.Authority.Target.AgentID || flow != owner.Route.InstancePath {
 		return nil, fmt.Errorf("logical turn launch contradicts its exact origin owner")
 	}
 	if canceled.Valid || settled != nil {

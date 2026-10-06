@@ -64,6 +64,10 @@ func requestTurnTimeoutTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 	if err != nil {
 		return runtimeeffects.TurnCancellation{}, err
 	}
+	owner, err := businessTurnOwner(attempt.Authority)
+	if err != nil {
+		return runtimeeffects.TurnCancellation{}, err
+	}
 	query := `SELECT run_id::text,agent_id,flow_instance,first_launched_at,bound_ns,timeout_event_id::text,cancel_reason,cancel_cause_event_id::text,cancel_requested_at,settled_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid FOR UPDATE`
 	if !postgres {
 		query = `SELECT run_id,agent_id,flow_instance,first_launched_at,bound_ns,timeout_event_id,cancel_reason,cancel_cause_event_id,cancel_requested_at,settled_at FROM runtime_agent_turn_lifetimes WHERE turn_id=?`
@@ -75,7 +79,7 @@ func requestTurnTimeoutTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 	if err := tx.QueryRowContext(ctx, query, turnID).Scan(&runID, &agentID, &flow, &launchedRaw, &bound, &event, &reason, &cause, &requestedRaw, &settledRaw); err != nil {
 		return runtimeeffects.TurnCancellation{}, err
 	}
-	if runID != attempt.Authority.Target.RunID || agentID != attempt.Authority.Target.AgentID || flow != attempt.Authority.Target.FlowInstance {
+	if runID != owner.RunID || agentID != attempt.Authority.Target.AgentID || flow != owner.Route.InstancePath {
 		return runtimeeffects.TurnCancellation{}, fmt.Errorf("turn timeout contradicts its exact origin owner")
 	}
 	result := runtimeeffects.TurnCancellation{Origin: attempt.Origin, OriginSettled: !pending}

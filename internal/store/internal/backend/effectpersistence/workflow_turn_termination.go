@@ -76,7 +76,11 @@ func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationproto
 				return err
 			}
 			id, _, err := businessTurnIdentity(attempt.Origin)
-			if err != nil || id != row.id || attempt.Authority.Target.RunID != owner.RunID || attempt.Authority.Target.FlowInstance != owner.Route.InstancePath {
+			if err != nil || id != row.id {
+				return fmt.Errorf("authored termination found contradictory origin ownership")
+			}
+			turnOwner, err := businessTurnOwner(attempt.Authority)
+			if err != nil || turnOwner != owner {
 				return fmt.Errorf("authored termination found contradictory origin ownership")
 			}
 			// Match timeout's origin -> physical -> logical lock order. No

@@ -75,6 +75,10 @@ func prepareCanceledTurnSettlementTx(ctx context.Context, tx *sql.Tx, postgres b
 	if err != nil {
 		return canceledTurnSettlementFacts{}, err
 	}
+	owner, err := businessTurnOwner(attempt.Authority)
+	if err != nil {
+		return canceledTurnSettlementFacts{}, err
+	}
 	query := `SELECT run_id::text,agent_id,flow_instance,cancel_reason,cancel_cause_event_id::text,cancel_requested_at,first_launched_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid FOR UPDATE`
 	if !postgres {
 		query = `SELECT run_id,agent_id,flow_instance,cancel_reason,cancel_cause_event_id,cancel_requested_at,first_launched_at FROM runtime_agent_turn_lifetimes WHERE turn_id=?`
@@ -85,7 +89,7 @@ func prepareCanceledTurnSettlementTx(ctx context.Context, tx *sql.Tx, postgres b
 	if err := tx.QueryRowContext(ctx, query, turnID).Scan(&runID, &agentID, &flow, &reason, &cause, &requested, &launched); err != nil {
 		return canceledTurnSettlementFacts{}, err
 	}
-	if runID != attempt.Authority.Target.RunID || agentID != attempt.Authority.Target.AgentID || flow != attempt.Authority.Target.FlowInstance || !reason.Valid || !cause.Valid || requested == nil {
+	if runID != owner.RunID || agentID != attempt.Authority.Target.AgentID || flow != owner.Route.InstancePath || !reason.Valid || !cause.Valid || requested == nil {
 		return canceledTurnSettlementFacts{}, fmt.Errorf("canceled turn lacks exact durable authored intent")
 	}
 	cancellation, err := deliverylifecycle.ParseCancellationReason(reason.String)

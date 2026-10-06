@@ -16860,6 +16860,11 @@ platform_tables:
       description: >-
         The existing external-effect owner retains one logical business-turn clock
         and authored cancellation intent for an exact delivery or directive origin.
+        Logical-turn ownership uses the constructed run-scoped instance coordinate.
+        A root actor keeps its root declaration and empty usage-target flow_instance,
+        while its logical-turn row, cancellation and recovery use the run-root path.
+        Child actors retain the constructor's exact scope and concrete instance path.
+        The authority projection grants no new execution or routing permission.
         Admission does not start the clock. The first actual provider launch
         atomically fixes its first attempt and deadline; later tool rounds and
         recovery consume those immutable coordinates. This is not an execution
