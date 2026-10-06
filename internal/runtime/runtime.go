@@ -1239,20 +1239,14 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	if runtimeDeps.WorkflowPersistence.Valid() {
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{
-			ExecutionPosture:      boot.ExecutionPosture,
-			ReceiverExecution:     eventreceiver.NormalExecution(),
-			Module:                opts.WorkflowModule,
-			Persistence:           runtimeDeps.WorkflowPersistence,
-			DeliveryStore:         runtimeDeps.DeliveryStore,
-			DeadLetters:           runtimeDeps.EventBusDurable.TargetFailureRecorder,
-			PipelineObligations:   runtimeDeps.PipelineObligations,
-			RunBundleAvailability: runtimeDeps.RunBundleAvailability,
-			InstanceDeactivationPreparer: func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) (runtimepipeline.PreparedFlowInstanceDeactivation, error) {
-				if managerRef == nil {
-					return nil, fmt.Errorf("flow instance deactivator is required")
-				}
-				return managerRef.PrepareFlowInstanceDeactivation(ctx, req)
-			},
+			ExecutionPosture:          boot.ExecutionPosture,
+			ReceiverExecution:         eventreceiver.NormalExecution(),
+			Module:                    opts.WorkflowModule,
+			Persistence:               runtimeDeps.WorkflowPersistence,
+			DeliveryStore:             runtimeDeps.DeliveryStore,
+			DeadLetters:               runtimeDeps.EventBusDurable.TargetFailureRecorder,
+			PipelineObligations:       runtimeDeps.PipelineObligations,
+			RunBundleAvailability:     runtimeDeps.RunBundleAvailability,
 			TimerScheduler:            rt.Scheduler,
 			GenericSchedules:          rt.GenericSchedules,
 			TimerObligationReader:     runtimeDeps.TimerObligationReader,

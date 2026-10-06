@@ -190,21 +190,8 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if err != nil {
 		return true, false, err
 	}
-	terminal, err := pc.prepareTerminalFlowInstanceDeactivation(ctx, flowIdentity, address.EntityID, nextStage)
-	if err != nil {
-		return true, false, err
-	}
-	if terminal != nil {
-		defer func() {
-			release()
-			resultErr = errors.Join(resultErr, terminal.Abort())
-		}()
-	}
 	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
 		State: state, Lifecycle: lifecycle.Commit,
-		PostCommit: WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{
-			Identity: flowIdentity, EntityID: entityID, NextState: nextStage,
-		}},
 	})
 	release()
 	if !committed.Committed {
@@ -212,9 +199,6 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 			err = fmt.Errorf("workflow timer transition has no acknowledged commit")
 		}
 		return true, false, err
-	}
-	if committed.PostCommit.FlowDeactivation != nil && terminal != nil {
-		err = errors.Join(err, terminal.Commit())
 	}
 	err = errors.Join(err, pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle))
 	pc.notifyTestEntityStateUpdated(entityID, nextStage)

@@ -1039,7 +1039,6 @@ func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *test
 			MockConnectorResponses: plan,
 		},
 		SelectedContractAgentRuntimeOptions{},
-		nil,
 	)
 	if opts.MockConnectorResponses != plan {
 		t.Fatal("selected-contract pipeline did not retain exact mock connector response owner")

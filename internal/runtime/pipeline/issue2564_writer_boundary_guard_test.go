@@ -309,16 +309,113 @@ func writerBoundaryEntityFence(fn *ast.FuncDecl) []writerBoundaryViolation {
 	return violations
 }
 
+func writerBoundaryRejectsOrdinaryPostCommit(fn *ast.FuncDecl) bool {
+	if len(fn.Recv.List[0].Names) != 1 {
+		return false
+	}
+	receiver := fn.Recv.List[0].Names[0]
+	for _, statement := range fn.Body.List {
+		branch, ok := statement.(*ast.IfStmt)
+		if !ok {
+			continue
+		}
+		assignment, ok := branch.Init.(*ast.AssignStmt)
+		if !ok || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
+			continue
+		}
+		deactivation, ok := assignment.Lhs[0].(*ast.Ident)
+		field, fieldOK := assignment.Rhs[0].(*ast.SelectorExpr)
+		if !ok || !fieldOK || field.Sel.Name != "FlowDeactivation" || !writerBoundaryField(field.X, receiver, "PostCommit") {
+			continue
+		}
+		condition, ok := branch.Cond.(*ast.BinaryExpr)
+		if !ok || condition.Op != token.NEQ || !writerBoundaryIdent(condition.X, deactivation) {
+			continue
+		}
+		if nilValue, ok := condition.Y.(*ast.Ident); !ok || nilValue.Name != "nil" {
+			continue
+		}
+		// Rejection must precede identity validation and cover every non-terminated
+		// status. A final stage label is not operational retirement authority.
+		if len(branch.Body.List) == 0 {
+			continue
+		}
+		rejection, ok := branch.Body.List[0].(*ast.IfStmt)
+		if !ok || rejection.Init != nil {
+			continue
+		}
+		statusCheck, ok := rejection.Cond.(*ast.BinaryExpr)
+		if !ok || statusCheck.Op != token.NEQ {
+			continue
+		}
+		status, ok := statusCheck.X.(*ast.SelectorExpr)
+		if !ok || status.Sel.Name != "Status" || !writerBoundaryField(status.X, receiver, "State") {
+			continue
+		}
+		terminated, ok := statusCheck.Y.(*ast.BasicLit)
+		if !ok || terminated.Kind != token.STRING {
+			continue
+		}
+		if value, err := strconv.Unquote(terminated.Value); err != nil || value != "terminated" {
+			continue
+		}
+		if len(rejection.Body.List) == 1 {
+			if ret, ok := rejection.Body.List[0].(*ast.ReturnStmt); ok && len(ret.Results) == 1 {
+				if failure, ok := ret.Results[0].(*ast.CallExpr); ok && writerBoundaryCall(failure, "Errorf") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func writerBoundaryFileViolations(path string, file *ast.File) []writerBoundaryViolation {
 	var violations []writerBoundaryViolation
 	entityStore := strings.Contains(filepath.ToSlash(path), "/backend/entityruntime/")
+	ast.Inspect(file, func(node ast.Node) bool {
+		if name, ok := node.(*ast.Ident); ok {
+			switch name.Name {
+			case "isTerminalFlowState", "prepareTerminalFlowInstanceDeactivation", "finishCommittedFlowDeactivation",
+				"commitPreparedFlowDeactivation", "abortPreparedFlowDeactivation", "committedEngineFlowDeactivation",
+				"CommittedFlowDeactivation", "FinalizeFlowDeactivation", "FlowInstanceDeactivationPreparer",
+				"InstanceDeactivationPreparer", "instanceDeactivationPreparer", "notifyTestWorkflowTerminalCommitted":
+				violations = append(violations, writerBoundaryViolation{"ordinary_flow_deactivation", name.Pos()})
+			}
+		}
+		return true
+	})
 	for _, declaration := range file.Decls {
 		switch decl := declaration.(type) {
 		case *ast.FuncDecl:
-			if decl.Name.Name == "commitPreparedEngineMutation" {
+			// Explicit termination retains its typed post-commit evidence. Ordinary
+			// mutations cannot restore the producer under a different helper name.
+			explicitTermination := filepath.ToSlash(path) == "internal/runtime/pipeline/workflow_gate_terminal.go" &&
+				decl.Name.Name == "commitWorkflowTerminationAttempt" && writerBoundaryReceiver(decl, "PipelineCoordinator")
+			if !explicitTermination {
 				ast.Inspect(decl.Body, func(node ast.Node) bool {
-					if call, ok := node.(*ast.CallExpr); ok && writerBoundaryCall(call, "finishCommittedFlowDeactivation") {
-						violations = append(violations, writerBoundaryViolation{"terminal_finalize_under_entity_lock", call.Pos()})
+					switch n := node.(type) {
+					case *ast.KeyValueExpr:
+						if name, ok := n.Key.(*ast.Ident); ok && name.Name == "FlowDeactivation" {
+							violations = append(violations, writerBoundaryViolation{"ordinary_flow_deactivation", n.Pos()})
+						}
+					case *ast.AssignStmt:
+						for _, target := range n.Lhs {
+							if field, ok := target.(*ast.SelectorExpr); ok && field.Sel.Name == "FlowDeactivation" {
+								violations = append(violations, writerBoundaryViolation{"ordinary_flow_deactivation", field.Pos()})
+							}
+						}
+					case *ast.CompositeLit:
+						var name string
+						switch typ := n.Type.(type) {
+						case *ast.Ident:
+							name = typ.Name
+						case *ast.SelectorExpr:
+							name = typ.Sel.Name
+						}
+						if name == "WorkflowEngineFlowDeactivation" {
+							violations = append(violations, writerBoundaryViolation{"ordinary_flow_deactivation", n.Pos()})
+						}
 					}
 					return true
 				})
@@ -332,13 +429,30 @@ func writerBoundaryFileViolations(path string, file *ast.File) []writerBoundaryV
 			if decl.Name.Name == "prepareMutation" {
 				violations = append(violations, writerBoundaryR1Preparation(decl)...)
 			}
+			if decl.Name.Name == "Validate" && writerBoundaryReceiver(decl, "WorkflowEngineMutationCommand") && !writerBoundaryRejectsOrdinaryPostCommit(decl) {
+				violations = append(violations, writerBoundaryViolation{"ordinary_postcommit_authority", decl.Pos()})
+			}
 			if decl.Name.Name == "handleWorkflowStageTimerFire" || decl.Name.Name == "routeWorkflowGateDecisionAttempt" || decl.Name.Name == "commitWorkflowTerminationAttempt" {
 				violations = append(violations, writerBoundaryEntityFence(decl)...)
 			}
 		case *ast.GenDecl:
 			for _, specification := range decl.Specs {
 				typ, ok := specification.(*ast.TypeSpec)
-				if !ok || typ.Name.Name != "EntityPersistence" {
+				if !ok {
+					continue
+				}
+				if typ.Name.Name == "CommittedEngineMutation" && filepath.ToSlash(path) == "internal/runtime/engine/interfaces.go" {
+					if fields, ok := typ.Type.(*ast.StructType); ok {
+						for _, field := range fields.Fields.List {
+							for _, name := range field.Names {
+								if name.Name == "FlowDeactivation" {
+									violations = append(violations, writerBoundaryViolation{"ordinary_flow_deactivation", name.Pos()})
+								}
+							}
+						}
+					}
+				}
+				if typ.Name.Name != "EntityPersistence" {
 					continue
 				}
 				if methods, ok := typ.Type.(*ast.InterfaceType); ok {
@@ -369,12 +483,21 @@ func writerBoundarySources(t *testing.T) map[string]string {
 	t.Helper()
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
 	paths := []string{
+		"internal/runtime/engine/executor.go",
+		"internal/runtime/engine/interfaces.go",
+		"internal/runtime/pipeline/coordinator.go",
 		"internal/runtime/pipeline/engine_adapter.go",
+		"internal/runtime/pipeline/engine_mutation_commit.go",
+		"internal/runtime/pipeline/lifecycle_probe.go",
+		"internal/runtime/pipeline/workflow_instance_activation.go",
 		"internal/runtime/pipeline/workflow_timer_lifecycle.go",
 		"internal/runtime/pipeline/workflow_gate_decision.go",
 		"internal/runtime/pipeline/workflow_gate_terminal.go",
 		"internal/runtime/pipeline/workflow_instance_store.go",
 		"internal/runtime/pipeline/persistence_ports.go",
+		"internal/runtime/runforkexecution/execution.go",
+		"internal/runtime/runforkexecution/runtime_container.go",
+		"internal/runtime/runtime.go",
 		"internal/runtime/tools/persistence.go",
 		"internal/store/internal/runtimepersistence/facade_forwarders_generated.go",
 	}
@@ -414,13 +537,16 @@ func TestIssue2564LiveWriterBoundaryGuard(t *testing.T) {
 		for _, decl := range file.Decls {
 			if fn, ok := decl.(*ast.FuncDecl); ok {
 				checked[fn.Name.Name] = true
+				if fn.Name.Name == "Validate" && writerBoundaryReceiver(fn, "WorkflowEngineMutationCommand") {
+					checked["WorkflowEngineMutationCommand.Validate"] = true
+				}
 			}
 		}
 		for _, violation := range writerBoundaryFileViolations(path, file) {
 			t.Errorf("%s: writer boundary %s", set.Position(violation.pos), violation.code)
 		}
 	}
-	for _, required := range []string{"prepareMutation", "handleWorkflowStageTimerFire", "routeWorkflowGateDecisionAttempt", "commitWorkflowTerminationAttempt"} {
+	for _, required := range []string{"prepareMutation", "handleWorkflowStageTimerFire", "routeWorkflowGateDecisionAttempt", "commitWorkflowTerminationAttempt", "WorkflowEngineMutationCommand.Validate"} {
 		if !checked[required] {
 			t.Errorf("writer boundary consumer %s is missing", required)
 		}
@@ -461,7 +587,26 @@ func (s *workflowInstanceStore) MarkTerminated(ctx context.Context) error {
 		{"gate_read_before_lock", "internal/runtime/pipeline/workflow_gate_decision.go", "unlock := pc.lockWorkflowEntity(anchor.EntityID)", "pc.workflowStore.Load(ctx, flowIdentity)\n unlock := pc.lockWorkflowEntity(anchor.EntityID)", "read_before_lock"},
 		{"gate_finalizer_locked", "internal/runtime/pipeline/workflow_gate_decision.go", "unlock()\n\tunlock = nil\n\tif planner", "unlock = nil\n if planner", "postcommit_unlock"},
 		{"unlocked_termination", "internal/runtime/pipeline/workflow_gate_terminal.go", "unlock := pc.lockWorkflowEntity(entityID.String())", "unlock := func() {}", "entity_lock"},
-		{"terminal_handoff_locked", "internal/runtime/pipeline/engine_adapter.go", "result.FlowDeactivation = committedEngineFlowDeactivation{owner: o, terminal: terminal}", "resultErr = errors.Join(resultErr, o.finishCommittedFlowDeactivation(ctx, terminal))", "terminal_finalize_under_entity_lock"},
+		{"ordinary_engine_retirement", "internal/runtime/pipeline/engine_adapter.go", "ProposedEffects: proposedEffects, Publications: publications,", "ProposedEffects: proposedEffects, Publications: publications,\n PostCommit: WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{Identity: state.Identity, EntityID: mutation.Address.EntityID.String(), NextState: state.CurrentState}},", "ordinary_flow_deactivation"},
+		{"ordinary_timer_retirement", "internal/runtime/pipeline/workflow_timer_lifecycle.go", "State: state, Lifecycle: lifecycle.Commit,", "State: state, Lifecycle: lifecycle.Commit,\n PostCommit: WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{Identity: flowIdentity, EntityID: entityID, NextState: nextStage}},", "ordinary_flow_deactivation"},
+		{"ordinary_handoff_restored", "internal/runtime/pipeline/engine_adapter.go", "result.Committed = true", "result.Committed = true\n result.FlowDeactivation = committedEngineFlowDeactivation{owner: o, terminal: terminal}", "ordinary_flow_deactivation"},
+		{"ordinary_finalizer_restored", "internal/runtime/pipeline/engine_adapter.go", "result.Committed = true", "result.Committed = true\n resultErr = errors.Join(resultErr, o.finishCommittedFlowDeactivation(ctx, terminal))", "ordinary_flow_deactivation"},
+		{"renamed_retirement_producer", "internal/runtime/pipeline/engine_adapter.go", "", `
+func restoredOrdinaryRetirement(command *WorkflowEngineMutationCommand) {
+ command.PostCommit.FlowDeactivation = &WorkflowEngineFlowDeactivation{}
+}
+`, "ordinary_flow_deactivation"},
+		{"ordinary_preparer_injection", "internal/runtime/pipeline/coordinator.go", "type PipelineCoordinatorOptions struct {", "type PipelineCoordinatorOptions struct {\n InstanceDeactivationPreparer FlowInstanceDeactivationPreparer", "ordinary_flow_deactivation"},
+		{"normal_runtime_preparer_injection", "internal/runtime/runtime.go", "runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{", "runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{\n InstanceDeactivationPreparer: managerRef.PrepareFlowInstanceDeactivation,", "ordinary_flow_deactivation"},
+		{"selected_runtime_preparer_injection", "internal/runtime/runforkexecution/execution.go", "return runtimepipeline.PipelineCoordinatorOptions{", "return runtimepipeline.PipelineCoordinatorOptions{\n InstanceDeactivationPreparer: agentRuntime.AgentManagerOptions.InstanceDeactivationPreparer,", "ordinary_flow_deactivation"},
+		{"selected_container_preparer_injection", "internal/runtime/runforkexecution/runtime_container.go", "pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options)", "req.AgentRuntime.Options.AgentManagerOptions.InstanceDeactivationPreparer = lifecycleManager.PrepareFlowInstanceDeactivation\n pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options)", "ordinary_flow_deactivation"},
+		{"engine_result_callback_restored", "internal/runtime/engine/interfaces.go", "type CommittedEngineMutation struct {", "type CommittedEngineMutation struct {\n FlowDeactivation func(context.Context) error", "ordinary_flow_deactivation"},
+		{"engine_callback_consumer_restored", "internal/runtime/engine/executor.go", "postCommitErr = errors.Join(postCommitErr, err)", "postCommitErr = errors.Join(postCommitErr, err)\n if flowDeactivation != nil { postCommitErr = errors.Join(postCommitErr, flowDeactivation.FinalizeFlowDeactivation(ctx)) }", "ordinary_flow_deactivation"},
+		{"ordinary_postcommit_check_deleted", "internal/runtime/pipeline/engine_mutation_commit.go", "\t\tif c.State.Status != \"terminated\" {\n\t\t\treturn fmt.Errorf(\"stage mutation cannot declare operational flow retirement\")\n\t\t}\n", "", "ordinary_postcommit_authority"},
+		{"ordinary_postcommit_check_ignored", "internal/runtime/pipeline/engine_mutation_commit.go", "if c.State.Status != \"terminated\" {", "if false {", "ordinary_postcommit_authority"},
+		{"ordinary_postcommit_stage_label", "internal/runtime/pipeline/engine_mutation_commit.go", "if c.State.Status != \"terminated\" {", "if c.State.CurrentState != \"terminated\" {", "ordinary_postcommit_authority"},
+		{"ordinary_postcommit_rejection_swallowed", "internal/runtime/pipeline/engine_mutation_commit.go", "return fmt.Errorf(\"stage mutation cannot declare operational flow retirement\")", "return nil", "ordinary_postcommit_authority"},
+		{"ordinary_postcommit_branch_ignored", "internal/runtime/pipeline/engine_mutation_commit.go", "if deactivation := c.PostCommit.FlowDeactivation; deactivation != nil {", "if deactivation := c.PostCommit.FlowDeactivation; false {", "ordinary_postcommit_authority"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source, ok := sources[tc.path]
@@ -510,6 +655,44 @@ func TestIssue2564WriterBoundaryAllowsCanonicalTerminationOnly(t *testing.T) {
 		if violation.code == "raw_termination_authority" {
 			t.Fatal("canonical coordinator termination was confused with the retired raw store writer")
 		}
+	}
+	path = "internal/runtime/pipeline/workflow_gate_terminal.go"
+	set := token.NewFileSet()
+	file, err = parser.ParseFile(set, path, writerBoundarySources(t)[path], 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deactivation := false
+	for _, declaration := range file.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "commitWorkflowTerminationAttempt" || !writerBoundaryReceiver(fn, "PipelineCoordinator") {
+			continue
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			assignment, ok := node.(*ast.AssignStmt)
+			if !ok || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
+				return true
+			}
+			field, ok := assignment.Lhs[0].(*ast.SelectorExpr)
+			if !ok || field.Sel.Name != "FlowDeactivation" {
+				return true
+			}
+			address, ok := assignment.Rhs[0].(*ast.UnaryExpr)
+			if !ok || address.Op != token.AND {
+				return true
+			}
+			if producer, ok := address.X.(*ast.CompositeLit); ok {
+				name, ok := producer.Type.(*ast.Ident)
+				deactivation = deactivation || (ok && name.Name == "WorkflowEngineFlowDeactivation")
+			}
+			return true
+		})
+	}
+	if !deactivation {
+		t.Fatal("explicit workflow termination lost its typed post-commit deactivation evidence")
+	}
+	for _, violation := range writerBoundaryFileViolations(path, file) {
+		t.Errorf("%s: explicit termination writer boundary %s", set.Position(violation.pos), violation.code)
 	}
 }
 

@@ -174,6 +174,67 @@ func t22RestoreTrigger(unexpected t22ErasedTrigger) runtimeengine.StateMutation 
 	want["internal/runtime/pipeline.t22RewriteTrigger::accepted trigger TriggeredAt"] = 2
 	want["internal/runtime/pipeline.t22EraseTrigger::erase typed evidence internal/runtime/engine.StateMutation"] = 1
 	want["internal/runtime/pipeline.t22RestoreTrigger::construct internal/runtime/engine.StateMutation"] = 1
+	// D1 deletes ordinary final-entry retirement, not explicit flow termination.
+	// Restore the deleted chain in memory to prove both declarations and uses
+	// remain forbidden after removing their obsolete inventory entries.
+	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/engine_adapter.go", `
+func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
+    graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), flowID)
+    if !ok || graph.FlowID != flowID { return false }
+    ref, err := graph.ResolveStoredStage(state)
+    return err == nil && ref.IsTerminal()
+}
+func (pc *PipelineCoordinator) prepareTerminalFlowInstanceDeactivation(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, nextState string) (PreparedFlowInstanceDeactivation, error) {
+    _ = pc.isTerminalFlowState(flowIdentity.Route.InstancePath, nextState)
+    return nil, nil
+}
+func (o pipelineEngineMutationOwner) finishCommittedFlowDeactivation(ctx context.Context, terminal PreparedFlowInstanceDeactivation) error {
+    o.state.coordinator.notifyTestWorkflowTerminalCommitted(ctx)
+    return errors.Join(commitPreparedFlowDeactivation(terminal), abortPreparedFlowDeactivation(terminal))
+}
+func commitPreparedFlowDeactivation(terminal PreparedFlowInstanceDeactivation) error { return terminal.Commit() }
+func abortPreparedFlowDeactivation(terminal PreparedFlowInstanceDeactivation) error { return terminal.Abort() }
+type committedEngineFlowDeactivation struct { owner pipelineEngineMutationOwner; terminal PreparedFlowInstanceDeactivation }
+func (d committedEngineFlowDeactivation) FinalizeFlowDeactivation(ctx context.Context) error {
+    return d.owner.finishCommittedFlowDeactivation(ctx, d.terminal)
+}
+func t22OrdinaryRetirement(pc *PipelineCoordinator, owner pipelineEngineMutationOwner, ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, nextState string) error {
+    terminal, err := pc.prepareTerminalFlowInstanceDeactivation(ctx, flowIdentity, entityID, nextState)
+    if err != nil || terminal == nil { return err }
+    return owner.finishCommittedFlowDeactivation(ctx, terminal)
+}
+`)
+	overlay[path] = raw
+	for _, function := range []string{
+		"PipelineCoordinator.isTerminalFlowState", "PipelineCoordinator.prepareTerminalFlowInstanceDeactivation",
+		"pipelineEngineMutationOwner.finishCommittedFlowDeactivation", "commitPreparedFlowDeactivation",
+		"abortPreparedFlowDeactivation", "committedEngineFlowDeactivation.FinalizeFlowDeactivation",
+	} {
+		want["internal/runtime/pipeline."+function+"::retired declaration"] = 1
+	}
+	want["internal/runtime/pipeline.<package>::retired type committedEngineFlowDeactivation"] = 1
+	want["internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState::call internal/runtime/semanticview.WorkflowStageTopology"] = 1
+	want["internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState::graph metadata"] = 1
+	want["internal/runtime/pipeline.PipelineCoordinator.prepareTerminalFlowInstanceDeactivation::retired use internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState"] = 1
+	want["internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation::retired use internal/runtime/pipeline.PipelineCoordinator.notifyTestWorkflowTerminalCommitted"] = 1
+	want["internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation::retired use internal/runtime/pipeline.commitPreparedFlowDeactivation"] = 1
+	want["internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation::retired use internal/runtime/pipeline.abortPreparedFlowDeactivation"] = 1
+	want["internal/runtime/pipeline.committedEngineFlowDeactivation.FinalizeFlowDeactivation::retired use internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation"] = 1
+	want["internal/runtime/pipeline.t22OrdinaryRetirement::retired use internal/runtime/pipeline.PipelineCoordinator.prepareTerminalFlowInstanceDeactivation"] = 1
+	want["internal/runtime/pipeline.t22OrdinaryRetirement::retired use internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation"] = 1
+	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/lifecycle_probe.go", `
+func (pc *PipelineCoordinator) notifyTestWorkflowTerminalCommitted(ctx context.Context) {
+    _, _ = runtimecorrelation.InboundEventFromContext(ctx)
+}
+`)
+	overlay[path] = raw
+	want["internal/runtime/pipeline.PipelineCoordinator.notifyTestWorkflowTerminalCommitted::retired declaration"] = 1
+	want["internal/runtime/pipeline.PipelineCoordinator.notifyTestWorkflowTerminalCommitted::call internal/runtime/correlation.InboundEventFromContext"] = 1
+	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/workflow_instance_activation.go", `
+type FlowInstanceDeactivationPreparer func(context.Context, FlowInstanceDeactivationRequest) (PreparedFlowInstanceDeactivation, error)
+`)
+	overlay[path] = raw
+	want["internal/runtime/pipeline.<package>::retired type FlowInstanceDeactivationPreparer"] = 1
 	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/delivery_target_application.go", "")
 	for _, entry := range []struct {
 		needle, extra, boundary string
@@ -263,7 +324,15 @@ func t22RetiredHandlerSelection(unexpected Transition) { _ = unexpected.Validate
 	path, raw = transitionGuardOverlay(t, "internal/runtime/engine/interfaces.go", `
 type TransitionValidator interface { ValidateTransition(currentState, nextState string) error }
 func t22RetiredValidatorPort(unexpected TransitionValidator) error { return unexpected.ValidateTransition("from", "to") }
+type CommittedFlowDeactivation interface { FinalizeFlowDeactivation(context.Context) error }
+func t22OrdinaryRetirementHandoff(unexpected CommittedFlowDeactivation, ctx context.Context) error { return unexpected.FinalizeFlowDeactivation(ctx) }
+func t22RawRetirementCallback(unexpected CommittedEngineMutation, ctx context.Context) error { return unexpected.FlowDeactivation(ctx) }
 `)
+	needle = "type CommittedEngineMutation struct {"
+	if strings.Count(string(raw), needle) != 1 {
+		t.Fatal("retired callback fixture cannot find its exact committed-result owner")
+	}
+	raw = []byte(strings.Replace(string(raw), needle, needle+"\nFlowDeactivation func(context.Context) error", 1))
 	needle = "type RuntimeDependencies struct {"
 	if strings.Count(string(raw), needle) != 1 {
 		t.Fatal("retired validator fixture cannot find its exact dependency owner")
@@ -273,6 +342,11 @@ func t22RetiredValidatorPort(unexpected TransitionValidator) error { return unex
 	want["internal/runtime/engine.<package>::retired field RuntimeDependencies.TransitionValidator"] = 1
 	want["internal/runtime/engine.<package>::retired declaration internal/runtime/engine.TransitionValidator.ValidateTransition"] = 1
 	want["internal/runtime/engine.t22RetiredValidatorPort::retired use internal/runtime/engine.TransitionValidator.ValidateTransition"] = 1
+	want["internal/runtime/engine.<package>::retired type CommittedFlowDeactivation"] = 1
+	want["internal/runtime/engine.<package>::retired declaration internal/runtime/engine.CommittedFlowDeactivation.FinalizeFlowDeactivation"] = 1
+	want["internal/runtime/engine.t22OrdinaryRetirementHandoff::retired use internal/runtime/engine.CommittedFlowDeactivation.FinalizeFlowDeactivation"] = 1
+	want["internal/runtime/engine.<package>::retired field CommittedEngineMutation.FlowDeactivation"] = 1
+	want["internal/runtime/engine.t22RawRetirementCallback::retired field internal/runtime/engine.CommittedEngineMutation.FlowDeactivation"] = 1
 
 	uses := loadTransitionBoundaryUses(t, overlay)
 	counts := map[string]int{}
@@ -316,39 +390,38 @@ func allowedTransitionBoundaryUses() map[string]int {
 	return map[string]int{
 		// Existing typed-event context producers/readers. These exact diagnostic,
 		// lineage and dispatch uses do not grant transition selection authority.
-		"internal/runtime/bus.EventBus.activeAgentDescriptors::call internal/runtime/correlation.InboundEventFromContext":                              1,
-		"internal/runtime/bus.EventBus.activeTargetDescriptors::call internal/runtime/correlation.InboundEventFromContext":                             1,
-		"internal/runtime/bus.EventBus.planSubscribedRoutePlanWithPlanner::call internal/runtime/correlation.WithInboundEvent":                         1,
-		"internal/runtime/pipeline.FreshActivityRequestLineage::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":   1,
-		"internal/runtime/pipeline.PipelineCoordinator.notifyTestFlowTerminationCommitted::call internal/runtime/correlation.InboundEventFromContext":  1,
-		"internal/runtime/pipeline.PipelineCoordinator.notifyTestWorkflowTerminalCommitted::call internal/runtime/correlation.InboundEventFromContext": 1,
-		"internal/runtime.BudgetTracker.evaluateScope::call internal/runtime/correlation.InboundEventFromContext":                                      1,
-		"internal/runtime/bus.EventBus.beginReceiverDispatch::call internal/runtime/correlation.WithInboundEvent":                                      1,
-		"internal/runtime/bus.EventBus.materializePublishRecipientPlanWithPlanner::call internal/runtime/correlation.WithInboundEvent":                 1,
-		"internal/runtime/bus.EventBus.receiverRouteContext::call internal/runtime/correlation.WithInboundEvent":                                       1,
-		"internal/runtime/bus.InboundEventFromContext::call internal/runtime/correlation.InboundEventFromContext":                                      1,
-		"internal/runtime/bus.WithInboundEvent::call internal/runtime/correlation.WithInboundEvent":                                                    1,
-		"internal/runtime/bus.connectRoutePlanResolver.Plan::call internal/runtime/correlation.WithInboundEvent":                                       1,
-		"internal/runtime/bus.deliveryPlanner.PlanDirect::call internal/runtime/correlation.WithInboundEvent":                                          1,
-		"internal/runtime/bus.deliveryPlanner.PlanExactDirect::call internal/runtime/correlation.WithInboundEvent":                                     1,
-		"internal/runtime/bus.deliveryPlanner.planAtGeneration::call internal/runtime/correlation.WithInboundEvent":                                    1,
-		"internal/runtime/currentstate.RunIDFromContext::call internal/runtime/correlation.InboundEventFromContext":                                    1,
-		"internal/runtime/decisioncard.CausalExecutionMode::call internal/runtime/correlation.InboundEventFromContext":                                 1,
-		"internal/runtime/effects.logicalOperationIdentity::call internal/runtime/correlation.InboundEventFromContext":                                 1,
-		"internal/runtime/effects.validateManagedAgentFramePrelaunch::call internal/runtime/correlation.InboundEventFromContext":                       1,
-		"internal/runtime/ingress.Controller.publishTransitionEvent::call internal/runtime/correlation.InboundEventFromContext":                        1,
-		"internal/runtime/llm.newAgentStartedRuntimeDiagnostic::call internal/runtime/correlation.InboundEventFromContext":                             1,
-		"internal/runtime/manager.AgentManager.processEventDetailedOwned::call internal/runtime/correlation.WithInboundEvent":                          1,
-		"internal/runtime/manager.agentDeliveryExecutionContext::call internal/runtime/correlation.WithInboundEvent":                                   1,
-		"internal/runtime/manager.newPlatformContextualRuntimeDiagnosticEvent::call internal/runtime/correlation.InboundEventFromContext":              1,
-		"internal/runtime/manager.terminalFlowSelfRetiringAgent::call internal/runtime/correlation.InboundEventFromContext":                            1,
-		"internal/runtime/pipeline.PipelineCoordinator.publish::call internal/runtime/correlation.InboundEventFromContext":                             1,
-		"internal/runtime/pipeline.PipelineCoordinator.publishDirect::call internal/runtime/correlation.InboundEventFromContext":                       1,
-		"internal/runtime/pipeline.PipelineCoordinator.claimAndServeFanOutTurn::call internal/runtime/correlation.WithInboundEvent":                    1,
-		"internal/runtime/pipeline.pipelineActivityDispatcher.logActivityRuntime::call internal/runtime/correlation.InboundEventFromContext":           1,
-		"internal/store/internal/backend/mutationlog.Insert::call internal/runtime/correlation.InboundEventFromContext":                                1,
-		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                        1,
-		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                                  1,
+		"internal/runtime/bus.EventBus.activeAgentDescriptors::call internal/runtime/correlation.InboundEventFromContext":                             1,
+		"internal/runtime/bus.EventBus.activeTargetDescriptors::call internal/runtime/correlation.InboundEventFromContext":                            1,
+		"internal/runtime/bus.EventBus.planSubscribedRoutePlanWithPlanner::call internal/runtime/correlation.WithInboundEvent":                        1,
+		"internal/runtime/pipeline.FreshActivityRequestLineage::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":  1,
+		"internal/runtime/pipeline.PipelineCoordinator.notifyTestFlowTerminationCommitted::call internal/runtime/correlation.InboundEventFromContext": 1,
+		"internal/runtime.BudgetTracker.evaluateScope::call internal/runtime/correlation.InboundEventFromContext":                                     1,
+		"internal/runtime/bus.EventBus.beginReceiverDispatch::call internal/runtime/correlation.WithInboundEvent":                                     1,
+		"internal/runtime/bus.EventBus.materializePublishRecipientPlanWithPlanner::call internal/runtime/correlation.WithInboundEvent":                1,
+		"internal/runtime/bus.EventBus.receiverRouteContext::call internal/runtime/correlation.WithInboundEvent":                                      1,
+		"internal/runtime/bus.InboundEventFromContext::call internal/runtime/correlation.InboundEventFromContext":                                     1,
+		"internal/runtime/bus.WithInboundEvent::call internal/runtime/correlation.WithInboundEvent":                                                   1,
+		"internal/runtime/bus.connectRoutePlanResolver.Plan::call internal/runtime/correlation.WithInboundEvent":                                      1,
+		"internal/runtime/bus.deliveryPlanner.PlanDirect::call internal/runtime/correlation.WithInboundEvent":                                         1,
+		"internal/runtime/bus.deliveryPlanner.PlanExactDirect::call internal/runtime/correlation.WithInboundEvent":                                    1,
+		"internal/runtime/bus.deliveryPlanner.planAtGeneration::call internal/runtime/correlation.WithInboundEvent":                                   1,
+		"internal/runtime/currentstate.RunIDFromContext::call internal/runtime/correlation.InboundEventFromContext":                                   1,
+		"internal/runtime/decisioncard.CausalExecutionMode::call internal/runtime/correlation.InboundEventFromContext":                                1,
+		"internal/runtime/effects.logicalOperationIdentity::call internal/runtime/correlation.InboundEventFromContext":                                1,
+		"internal/runtime/effects.validateManagedAgentFramePrelaunch::call internal/runtime/correlation.InboundEventFromContext":                      1,
+		"internal/runtime/ingress.Controller.publishTransitionEvent::call internal/runtime/correlation.InboundEventFromContext":                       1,
+		"internal/runtime/llm.newAgentStartedRuntimeDiagnostic::call internal/runtime/correlation.InboundEventFromContext":                            1,
+		"internal/runtime/manager.AgentManager.processEventDetailedOwned::call internal/runtime/correlation.WithInboundEvent":                         1,
+		"internal/runtime/manager.agentDeliveryExecutionContext::call internal/runtime/correlation.WithInboundEvent":                                  1,
+		"internal/runtime/manager.newPlatformContextualRuntimeDiagnosticEvent::call internal/runtime/correlation.InboundEventFromContext":             1,
+		"internal/runtime/manager.terminalFlowSelfRetiringAgent::call internal/runtime/correlation.InboundEventFromContext":                           1,
+		"internal/runtime/pipeline.PipelineCoordinator.publish::call internal/runtime/correlation.InboundEventFromContext":                            1,
+		"internal/runtime/pipeline.PipelineCoordinator.publishDirect::call internal/runtime/correlation.InboundEventFromContext":                      1,
+		"internal/runtime/pipeline.PipelineCoordinator.claimAndServeFanOutTurn::call internal/runtime/correlation.WithInboundEvent":                   1,
+		"internal/runtime/pipeline.pipelineActivityDispatcher.logActivityRuntime::call internal/runtime/correlation.InboundEventFromContext":          1,
+		"internal/store/internal/backend/mutationlog.Insert::call internal/runtime/correlation.InboundEventFromContext":                               1,
+		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                       1,
+		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                                 1,
 		// T19: accepted execution binding and the existing exact delivery owners.
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::call internal/runtime/correlation.WithInboundEvent":                                                    1,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::call internal/runtime/pipeline.DeliveryTargetApplication.Event":                                        1,
@@ -530,7 +603,6 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.handleWorkflowStageTimerFire::call internal/runtime/semanticview.WorkflowStageTopology":                     1,
 		"internal/runtime/pipeline.PipelineCoordinator.handleWorkflowStageTimerFire::call internal/runtime/workflowlifecycle.NewCompiledTransition":                1,
 		"internal/runtime/pipeline.PipelineCoordinator.handleWorkflowStageTimerFire::construct internal/runtime/contracts.WorkflowTransitionSite":                  1,
-		"internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState::call internal/runtime/semanticview.WorkflowStageTopology":                              1,
 		"internal/runtime/pipeline.PipelineCoordinator.planWorkflowGateEffect::call internal/runtime/contracts.WorkflowStageTopology.AdmitTransition":              1,
 		"internal/runtime/pipeline.PipelineCoordinator.planWorkflowGateEffect::call internal/runtime/semanticview.WorkflowStageTopology":                           1,
 		"internal/runtime/pipeline.PipelineCoordinator.planWorkflowGateEffect::construct internal/runtime/contracts.WorkflowTransitionSite":                        1,
@@ -610,7 +682,6 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/contracts.WorkflowStageTopology.StageIDs::graph metadata":                                                                                    2,
 		"internal/runtime/contracts.WorkflowStageTopology.ValidStageCatalog::graph metadata":                                                                           3,
 		"internal/runtime/engine.Executor.admitSelectedTransition::carrier site fields":                                                                                10,
-		"internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState::graph metadata":                                                                            1,
 		"internal/runtime/pipeline.PipelineCoordinator.planWorkflowLifecycleEffect::call internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition": 1,
 		"internal/runtime/pipeline.pipelineEngineGuardRunner.EvaluateGuard::graph metadata":                                                                            2,
 		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::graph metadata":                                                                 1,
@@ -890,7 +961,9 @@ func protectedTransitionConstruction(owner string) bool {
 func retiredTransitionType(object *types.TypeName) bool {
 	key := strings.TrimPrefix(object.Pkg().Path(), transitionGuardModule) + "." + object.Name()
 	switch key {
-	case "internal/runtime/contracts.WorkflowTransitionContract", "internal/runtime/pipeline.WorkflowDefinition", "internal/runtime/pipeline.WorkflowTransition", "internal/runtime/engine.TransitionValidator":
+	case "internal/runtime/contracts.WorkflowTransitionContract", "internal/runtime/pipeline.WorkflowDefinition", "internal/runtime/pipeline.WorkflowTransition", "internal/runtime/engine.TransitionValidator",
+		"internal/runtime/pipeline.FlowInstanceDeactivationPreparer", "internal/runtime/pipeline.committedEngineFlowDeactivation",
+		"internal/runtime/engine.CommittedFlowDeactivation":
 		return true
 	}
 	return false
@@ -899,7 +972,8 @@ func retiredTransitionType(object *types.TypeName) bool {
 func retiredTransitionField(owner, field string) bool {
 	return (owner == "internal/runtime/contracts.WorkflowSemanticView" && field == "Transitions") ||
 		(owner == "internal/runtime/contracts.SystemNodeContract" && field == "OwnedTransitions") ||
-		(owner == "internal/runtime/engine.RuntimeDependencies" && field == "TransitionValidator")
+		(owner == "internal/runtime/engine.RuntimeDependencies" && field == "TransitionValidator") ||
+		(owner == "internal/runtime/engine.CommittedEngineMutation" && field == "FlowDeactivation")
 }
 
 func retiredTransitionFunction(fn *types.Func) bool {
@@ -916,6 +990,10 @@ func retiredTransitionFunction(fn *types.Func) bool {
 		"internal/runtime/pipeline.WorkflowStateTransition", "internal/runtime/pipeline.workflowTransitionRecord",
 		"internal/runtime/pipeline.workflowTransitionIdentity", "internal/runtime/pipeline.workflowTransitionFromHandlerOutcome",
 		"internal/runtime/pipeline.terminalStateFlowCandidates", "internal/runtime/pipeline.flowIDForWorkflowState",
+		"internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState", "internal/runtime/pipeline.PipelineCoordinator.prepareTerminalFlowInstanceDeactivation",
+		"internal/runtime/pipeline.PipelineCoordinator.notifyTestWorkflowTerminalCommitted", "internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation",
+		"internal/runtime/pipeline.commitPreparedFlowDeactivation", "internal/runtime/pipeline.abortPreparedFlowDeactivation",
+		"internal/runtime/pipeline.committedEngineFlowDeactivation.FinalizeFlowDeactivation", "internal/runtime/engine.CommittedFlowDeactivation.FinalizeFlowDeactivation",
 		"internal/runtime/bootverify.transitionOwningFlowID", "internal/runtime/bootverify.transitionTriggerIsTimerReference",
 		"internal/runtime/engine.TransitionValidator.ValidateTransition", "internal/runtime/engine.Executor.killStateTarget",
 		"internal/runtime/workflowlifecycle.Transition.ValidateHandlerSelection":

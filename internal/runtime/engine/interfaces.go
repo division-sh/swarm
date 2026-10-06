@@ -116,17 +116,10 @@ type CommittedDurablePublication interface {
 
 type CommittedEngineMutation struct {
 	Committed              bool
-	FlowDeactivation       CommittedFlowDeactivation
 	ActivityIntents        []ActivityIntent
 	ActivityRequestIntents []EmitIntent
 	EmitIntents            []EmitIntent
 	SettledDeliveryClaim   *runtimedelivery.Claim
-}
-
-// A committed terminal reservation must be consumed after entity serialization
-// ends: retirement can perform a fresh, independently fenced instance mutation.
-type CommittedFlowDeactivation interface {
-	FinalizeFlowDeactivation(context.Context) error
 }
 
 type EngineMutationOwner interface {

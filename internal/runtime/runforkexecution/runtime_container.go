@@ -381,12 +381,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract fork-local runtime container bus: %w", err)
 	}
-	pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options, func(ctx context.Context, deactivation runtimepipeline.FlowInstanceDeactivationRequest) (runtimepipeline.PreparedFlowInstanceDeactivation, error) {
-		if lifecycleManager == nil {
-			return nil, fmt.Errorf("selected-contract fork-local lifecycle manager is not initialized")
-		}
-		return lifecycleManager.PrepareFlowInstanceDeactivation(ctx, deactivation)
-	})
+	pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options)
 	bus.SetInterceptors(pipeline)
 
 	runCtx := selectedContractRuntimeContainerLineageContext(ctx, c.proof)

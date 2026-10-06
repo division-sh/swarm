@@ -337,9 +337,8 @@ func newSelectedContractPipeline(
 	ports *selectedContractExecutionPorts,
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
-	instanceDeactivationPreparer runtimepipeline.FlowInstanceDeactivationPreparer,
 ) *runtimepipeline.PipelineCoordinator {
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime, instanceDeactivationPreparer))
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime))
 }
 
 func selectedContractPipelineCoordinatorOptions(
@@ -347,37 +346,35 @@ func selectedContractPipelineCoordinatorOptions(
 	ports *selectedContractExecutionPorts,
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
-	instanceDeactivationPreparer runtimepipeline.FlowInstanceDeactivationPreparer,
 ) runtimepipeline.PipelineCoordinatorOptions {
 	var scenarioProfiles runtimepipeline.ScenarioExecutionProfileReader
 	if reader, ok := ports.fork.(runtimepipeline.ScenarioExecutionProfileReader); ok {
 		scenarioProfiles = reader
 	}
 	return runtimepipeline.PipelineCoordinatorOptions{
-		ExecutionPosture:             agentRuntime.ExecutionPosture,
-		WorkOwner:                    agentRuntime.AgentManagerOptions.WorkOwner,
-		TestLifecycleProbe:           agentRuntime.AgentManagerOptions.TestLifecycleProbe,
-		ReceiverExecution:            agentRuntime.AgentManagerOptions.ReceiverExecution,
-		Module:                       loaded.Module,
-		Persistence:                  ports.workflow,
-		DeliveryStore:                ports.busDurable.DeliveryLifecycle,
-		DeadLetters:                  ports.busDurable.TargetFailureRecorder,
-		PipelineObligations:          ports.pipelineObligations,
-		InstanceDeactivationPreparer: instanceDeactivationPreparer,
-		DecisionCards:                ports.decisionCards,
-		ProposedEffects:              ports.proposedEffects,
-		HumanTasks:                   ports.humanTasks,
-		DecisionCardDraftExpiry:      ports.decisionCardDraftExpiry,
-		HumanTaskExpiry:              ports.humanTaskExpiry,
-		DeliveryRuntime:              bus,
-		FlowRoutes:                   bus,
-		RunLifecycle:                 ports.busDurable.RunLifecycle,
-		Credentials:                  agentRuntime.Credentials,
-		ManagedCredentials:           agentRuntime.ManagedCredentials,
-		MockConnectorResponses:       loaded.MockConnectorResponses,
-		SourceArtifactFact:           loaded.SourceArtifactFact,
-		ScenarioExecutionProfiles:    scenarioProfiles,
-		EffectiveSourceIdentity:      loaded.EffectiveSourceIdentity,
+		ExecutionPosture:          agentRuntime.ExecutionPosture,
+		WorkOwner:                 agentRuntime.AgentManagerOptions.WorkOwner,
+		TestLifecycleProbe:        agentRuntime.AgentManagerOptions.TestLifecycleProbe,
+		ReceiverExecution:         agentRuntime.AgentManagerOptions.ReceiverExecution,
+		Module:                    loaded.Module,
+		Persistence:               ports.workflow,
+		DeliveryStore:             ports.busDurable.DeliveryLifecycle,
+		DeadLetters:               ports.busDurable.TargetFailureRecorder,
+		PipelineObligations:       ports.pipelineObligations,
+		DecisionCards:             ports.decisionCards,
+		ProposedEffects:           ports.proposedEffects,
+		HumanTasks:                ports.humanTasks,
+		DecisionCardDraftExpiry:   ports.decisionCardDraftExpiry,
+		HumanTaskExpiry:           ports.humanTaskExpiry,
+		DeliveryRuntime:           bus,
+		FlowRoutes:                bus,
+		RunLifecycle:              ports.busDurable.RunLifecycle,
+		Credentials:               agentRuntime.Credentials,
+		ManagedCredentials:        agentRuntime.ManagedCredentials,
+		MockConnectorResponses:    loaded.MockConnectorResponses,
+		SourceArtifactFact:        loaded.SourceArtifactFact,
+		ScenarioExecutionProfiles: scenarioProfiles,
+		EffectiveSourceIdentity:   loaded.EffectiveSourceIdentity,
 	}
 }
 

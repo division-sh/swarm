@@ -3819,10 +3819,9 @@ handler_specification:
       positively acknowledged result remains committed despite later cancellation, panic or cleanup failure; those
       diagnostics do not authorize rollback, plan release or handler retry. Provider calls, asynchronous waits,
       descendant execution and postcommit dispatch run under neither the handler SQL transaction nor its entity lock.
-      A prepared terminal-retirement reservation transfers with the positively acknowledged engine result and is
-      consumed immediately after the entity lock is released, before dispatch. Retirement may acquire its own fresh
-      instance mutation fence; it cannot recursively reacquire the still-held handler fence. Unacknowledged attempts
-      abort their reservation, while committed cleanup failure preserves the original acknowledgement and follow-up.
+      Ordinary handler or stage-timer entry into a terminal stage does not prepare operational flow retirement or
+      transfer a retirement callback. Explicit flow termination retains its own acknowledged state mutation and
+      postcommit route cleanup, releasing the entity lock before acquiring or joining retirement authority.
       After acknowledgement, publication and lifecycle finalizers attempt every independent committed consequence;
       one diagnostic does not abandon sibling handoffs. A publication with failed activation or receiver-readiness
       prerequisites retains an exact recovery disposition and cannot be dispatched directly. A diagnostic-only
@@ -6309,8 +6308,8 @@ engine:
         and decision history for post-mortem analysis.
       behavior:
       - Entity stops accepting new events (handlers reject events for terminal entities)
-      - Timers are cancelled
-      - Agent sessions are terminated
+      - Stage changes, including entry to a terminal stage, do not cancel accepted agent work or discard late results. A stage deadline only advances the stage.
+      - Stage movement does not itself retire the flow instance or its agents. Explicit termination and work-derived resource cleanup retain their existing ownership and validation.
       - All persisted state remains in the database
       - Entity remains queryable through explicit read/query surfaces; for normal agents this means generated current-entity
         reads, while legacy query_entities remains a trusted runtime-internal compatibility surface.
