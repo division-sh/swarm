@@ -1,8 +1,8 @@
 name: map-worker
 instance: member_id
 stages:
-  waiting: {initial: true}
-  complete: {terminal: true}
+  waiting: {}
+  complete: {final: true}
 pins:
   inputs:
     - item.requested

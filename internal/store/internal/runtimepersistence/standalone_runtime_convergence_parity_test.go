@@ -328,10 +328,10 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 }
 
 func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, selected any, runID string) {
-	executeStandaloneCompletionCandidateWithCatalog(t, ctx, selected, runID, runtimerunlifecycle.TerminalCatalog{})
+	executeStandaloneCompletionCandidateWithCatalog(t, ctx, selected, runID, runtimerunlifecycle.FinalCatalog{})
 }
 
-func executeStandaloneCompletionCandidateWithCatalog(t *testing.T, ctx context.Context, selected any, runID string, catalog runtimerunlifecycle.TerminalCatalog) {
+func executeStandaloneCompletionCandidateWithCatalog(t *testing.T, ctx context.Context, selected any, runID string, catalog runtimerunlifecycle.FinalCatalog) {
 	t.Helper()
 	owner, ok := selected.(runtimerunlifecycle.CandidateStore)
 	if !ok {

@@ -1,8 +1,8 @@
 stages:
-  evaluating: {initial: true}
-  tier_a: {terminal: true}
-  tier_b: {terminal: true}
-  tier_c: {terminal: true}
+  evaluating: {}
+  tier_a: {final: true}
+  tier_b: {final: true}
+  tier_c: {final: true}
 pins:
   inputs:
     - eval.submitted

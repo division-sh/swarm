@@ -1061,7 +1061,7 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
 		"schema.yaml":          "name: flow-activation-proof\n",
-		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    - task.started\n",
+		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
 		"review/entities.yaml": "review_item:\n  request_id: text\n",
 		"review/events.yaml":   "task.started:\n  request_id: text\n",
 	})
@@ -1577,7 +1577,7 @@ func assertSQLiteRuntimeCount(t *testing.T, store *SQLiteRuntimeStore, query str
 func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	f := newReceiverConfigActivationFixtureWithDocuments(t, "sqlite", false, map[string]string{
 		"schema.yaml":        "name: persistence-proof\n",
-		"root/schema.yaml":   "name: root\ninstance: company_id\nstages:\n  qualified: {initial: true}\npins:\n  inputs:\n    - company.opened\n",
+		"root/schema.yaml":   "name: root\ninstance: company_id\nstages:\n  qualified: {}\npins:\n  inputs:\n    - company.opened\n",
 		"root/entities.yaml": "company:\n  company_id: text\n  score: {type: numeric, initial: 9}\n",
 		"root/events.yaml":   "company.opened:\n",
 	}, nil)

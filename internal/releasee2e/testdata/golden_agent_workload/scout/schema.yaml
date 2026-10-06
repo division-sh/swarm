@@ -1,8 +1,8 @@
 name: golden-agent-scout
 stages:
-  pending: {initial: true}
+  pending: {}
   active: {}
-  complete: {terminal: true}
+  complete: {final: true}
 pins:
   inputs:
     - scout.requested

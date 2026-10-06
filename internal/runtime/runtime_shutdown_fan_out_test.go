@@ -155,7 +155,7 @@ func TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive(t *testing.T) {
 	releaseCompletion := func() { releaseOnce.Do(func() { close(completion.release) }) }
 	t.Cleanup(releaseCompletion)
 	executor, err := runlifecycle.NewExecutor(completion, runlifecycle.CandidateScope{BundleHash: runtimeTestBundleHash},
-		runlifecycle.TerminalCatalog{}, rt.workOccurrence, runlifecycle.ExecutorOptions{})
+		runlifecycle.FinalCatalog{}, rt.workOccurrence, runlifecycle.ExecutorOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -62,10 +62,10 @@ func CopyForkFanOutCarrier(t testing.TB, loop, barrier bool) string {
 	root := t.TempDir()
 	schema := `name: fork-fan-out-carrier
 stages:
-  pending: {initial: true}
+  pending: {}
   review: {}
-  done: {terminal: true}
-  exhausted: {terminal: true}
+  done: {final: true}
+  exhausted: {final: true}
 pins:
   inputs:
     - items.ready

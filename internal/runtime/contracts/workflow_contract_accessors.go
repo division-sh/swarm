@@ -35,10 +35,7 @@ func (b *WorkflowContractBundle) WorkflowStages() []WorkflowStageContract {
 	return b.Semantics.Stages
 }
 func (b *WorkflowContractBundle) WorkflowInitialStage() string {
-	if b == nil {
-		return ""
-	}
-	return strings.TrimSpace(b.Semantics.InitialStage)
+	return b.FlowInitialStage(".")
 }
 func (b *WorkflowContractBundle) WorkflowTimers() []WorkflowTimerContract {
 	if b == nil {
@@ -82,7 +79,7 @@ func (b *WorkflowContractBundle) WorkflowStageTopology(flowID string) (WorkflowS
 	}
 	topology, ok := b.Semantics.StageTopologies[strings.TrimSpace(flowID)]
 	topology.Stages = append([]string(nil), topology.Stages...)
-	topology.TerminalStages = append([]string(nil), topology.TerminalStages...)
+	topology.FinalStages = append([]string(nil), topology.FinalStages...)
 	topology.Edges = append([]WorkflowStageTopologyEdge(nil), topology.Edges...)
 	topology.Handlers = append([]WorkflowHandlerStageScope(nil), topology.Handlers...)
 	for i := range topology.Handlers {
@@ -677,30 +674,25 @@ func (b *WorkflowContractBundle) GuardEntryByID(id string) (GuardActionEntry, bo
 	return entry, ok
 }
 func (b *WorkflowContractBundle) FlowInitialStage(flowID string) string {
-	if b == nil {
-		return ""
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "." {
-		return b.WorkflowInitialStage()
-	}
-	if initial := strings.TrimSpace(b.Semantics.FlowInitial[flowID]); initial != "" {
-		return initial
+	graph, ok := b.flowStageCatalog(flowID)
+	if ok && graph.HasInitialStage() {
+		ref, err := graph.InitialStageRef()
+		if err == nil {
+			return ref.ID()
+		}
 	}
 	return ""
 }
 func (b *WorkflowContractBundle) FlowStates(flowID string) []string {
-	if b == nil {
-		return nil
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "." {
-		return rootSchemaStates(b.RootSchema)
-	}
-	if states := b.Semantics.FlowStates[flowID]; len(states) > 0 {
-		return append([]string{}, states...)
+	if graph, ok := b.flowStageCatalog(flowID); ok {
+		return graph.StageIDs()
 	}
 	return nil
+}
+
+func (b *WorkflowContractBundle) flowStageCatalog(flowID string) (WorkflowStageTopology, bool) {
+	graph, ok := b.WorkflowStageTopology(flowID)
+	return graph, ok && graph.ValidStageCatalog()
 }
 
 func rootSchemaStates(root *FlowSchemaDocument) []string {
@@ -710,25 +702,18 @@ func rootSchemaStates(root *FlowSchemaDocument) []string {
 	return root.LoweredStates()
 }
 
-func (b *WorkflowContractBundle) FlowTerminalStages(flowID string) []string {
-	if b == nil {
-		return nil
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "." {
-		return rootSchemaTerminalStates(b.RootSchema)
-	}
-	if terminal := b.Semantics.FlowTerminal[flowID]; len(terminal) > 0 {
-		return append([]string{}, terminal...)
+func (b *WorkflowContractBundle) FlowFinalStages(flowID string) []string {
+	if graph, ok := b.flowStageCatalog(flowID); ok {
+		return graph.FinalStageIDs()
 	}
 	return nil
 }
 
-func rootSchemaTerminalStates(root *FlowSchemaDocument) []string {
+func rootSchemaFinalStates(root *FlowSchemaDocument) []string {
 	if root == nil {
 		return nil
 	}
-	return root.LoweredTerminalStates()
+	return root.LoweredFinalStates()
 }
 func (b *WorkflowContractBundle) FlowNamespace(flowID string) string {
 	if b == nil {

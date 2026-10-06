@@ -1,6 +1,6 @@
 stages:
-  pending: {initial: true}
-  resolved: {terminal: true}
+  pending: {}
+  resolved: {final: true}
 pins:
   inputs:
     - conflict.submitted

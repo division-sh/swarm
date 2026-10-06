@@ -92,10 +92,9 @@ func TestFlowSchemaDocumentDecodeStagesKeyedMap(t *testing.T) {
 name: validation
 stages:
   queued:
-    initial: true
     description: Waiting for work
   approved:
-    terminal: true
+    final: true
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -108,8 +107,8 @@ stages:
 	if got, want := doc.LoweredStates(), []string{"queued", "approved"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("LoweredStates = %#v, want %#v", got, want)
 	}
-	if got, want := doc.LoweredTerminalStates(), []string{"approved"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("LoweredTerminalStates = %#v, want %#v", got, want)
+	if got, want := doc.LoweredFinalStates(), []string{"approved"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("LoweredFinalStates = %#v, want %#v", got, want)
 	}
 	stages := doc.LoweredWorkflowStages("validation")
 	if len(stages) != 2 || stages[0].ID != "queued" || stages[0].Phase != "validation" || stages[0].Description != "Waiting for work" {
@@ -157,7 +156,6 @@ func TestFlowSchemaDocumentDecodeTypedStageGate(t *testing.T) {
 name: launch
 stages:
   awaiting_launch_approval:
-    initial: true
     gate:
       decision: launch_review
       context:
@@ -176,7 +174,7 @@ stages:
             fields:
               feedback: decision.feedback
   building: {}
-  operating: {terminal: true}
+  operating: {final: true}
 `), &doc)
 	if err != nil {
 		t.Fatalf("decode gate: %v", err)
@@ -271,9 +269,9 @@ func TestFlowSchemaDocumentDecodeBoundedLoopCanonicalSyntax(t *testing.T) {
 	var schema FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
 stages:
-  drafting: {initial: true}
+  drafting: {}
   review: {}
-  exhausted: {terminal: true}
+  exhausted: {final: true}
 loops:
   revision:
     revision_field: revision_id
@@ -405,8 +403,8 @@ stages: []
 	if !doc.UsesAuthoredStages() {
 		t.Fatalf("UsesAuthoredStages = false, want true")
 	}
-	if len(doc.LoweredStates()) != 0 || doc.LoweredInitialState() != "" || len(doc.LoweredTerminalStates()) != 0 {
-		t.Fatalf("lowered explicit stateless lifecycle = initial %q states %#v terminals %#v, want empty", doc.LoweredInitialState(), doc.LoweredStates(), doc.LoweredTerminalStates())
+	if len(doc.LoweredStates()) != 0 || doc.LoweredInitialState() != "" || len(doc.LoweredFinalStates()) != 0 {
+		t.Fatalf("lowered explicit stateless lifecycle = initial %q states %#v terminals %#v, want empty", doc.LoweredInitialState(), doc.LoweredStates(), doc.LoweredFinalStates())
 	}
 }
 
@@ -1814,7 +1812,7 @@ func TestFlowPinsDecode_RejectsRetiredScalarPermissions(t *testing.T) {
 func TestFlowPinsDecode_PreservesCanonicalScalarEventEntries(t *testing.T) {
 	var schema FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`stages:
-  pending: {initial: true}
+  pending: {}
 pins:
   inputs: [check.requested]
   outputs: [check.passed]

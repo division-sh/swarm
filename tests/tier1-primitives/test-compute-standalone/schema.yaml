@@ -1,6 +1,6 @@
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 pins:
   inputs:
     - scores.ready

@@ -3410,8 +3410,8 @@ func writeVerifyBootTimerCommandFixture(t *testing.T, cancelOn string) string {
 
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-boot-timer
 stages:
-  waiting: {initial: true}
-  done: {terminal: true}
+  waiting: {}
+  done: {final: true}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 ticket:
@@ -3515,8 +3515,8 @@ func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testi
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
 stages:
-  idle: {initial: true}
-  done: {terminal: true}
+  idle: {}
+  done: {final: true}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
 case:
@@ -3678,8 +3678,8 @@ func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumul
 
 	schema := `name: verify-accumulator-safety
 stages:
-  collecting: {initial: true}
-  done: {terminal: true}
+  collecting: {}
+  done: {final: true}
 `
 	if opts.publicInput {
 		schema += "pins:\n  inputs: [item.arrived]\n"

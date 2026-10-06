@@ -1,6 +1,6 @@
 stages:
-  waiting: {initial: true}
-  admitted: {terminal: true}
+  waiting: {}
+  admitted: {final: true}
 pins:
   inputs:
     - admission.requested

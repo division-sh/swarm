@@ -377,5 +377,5 @@ func terminalStateHandlerRejected(pc *PipelineCoordinator, flowID string, state 
 	if err != nil {
 		return false, err
 	}
-	return ref.IsTerminal(), nil
+	return ref.IsFinal(), nil
 }

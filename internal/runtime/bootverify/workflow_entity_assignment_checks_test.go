@@ -213,10 +213,10 @@ func TestEntityDefiniteAssignmentStages(t *testing.T) {
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: assignment-proof\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
 stages:
-  idle: {initial: true}
+  idle: {}
   assess: {}
   consume: {}
-  done: {terminal: true}
+  done: {final: true}
 `)
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "work:\n  score: {type: integer}\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `work.opened:

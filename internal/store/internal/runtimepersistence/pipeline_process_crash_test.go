@@ -189,7 +189,7 @@ func TestPipelineProcessSIGKILLRecovery(t *testing.T) {
 				// killed settlement can authorize the candidate tested at restart.
 				candidates := fixture.store.(runlifecycle.CandidateStore)
 				if pending := pipelineCrashCandidate(t, ctx, candidates, runID); pending.RunID != "" {
-					result, err := candidates.ExecuteCompletionCandidate(ctx, pending, stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}))
+					result, err := candidates.ExecuteCompletionCandidate(ctx, pending, stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}))
 					if err != nil || result.Outcome != runlifecycle.OutcomeAwaitMutation {
 						t.Fatalf("drain setup candidate: %#v %v", result, err)
 					}
@@ -420,7 +420,7 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	})
 	observed := &pipelineCrashCandidateObserver{CandidateStore: candidates, results: make(chan pipelineCrashCandidateResult, 8)}
 	executor, err := runlifecycle.NewExecutor(observed, runlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash},
-		stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runlifecycle.ExecutorOptions{})
+		stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runlifecycle.ExecutorOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ type pipelineCrashCandidateObserver struct {
 	results    chan pipelineCrashCandidateResult
 }
 
-func (s *pipelineCrashCandidateObserver) ExecuteCompletionCandidate(ctx context.Context, candidate runlifecycle.Candidate, catalog runlifecycle.TerminalCatalog) (runlifecycle.CompletionResult, error) {
+func (s *pipelineCrashCandidateObserver) ExecuteCompletionCandidate(ctx context.Context, candidate runlifecycle.Candidate, catalog runlifecycle.FinalCatalog) (runlifecycle.CompletionResult, error) {
 	s.executions.Add(1)
 	outcome, err := s.CandidateStore.ExecuteCompletionCandidate(ctx, candidate, catalog)
 	select {

@@ -43,8 +43,8 @@ func CopyStaticMultiEntityRetirement(t testing.TB, handler StaticRetirementHandl
 	writeClosedVariantFile(t, root, "events.yaml", "opco.spend_requested:\n  entity_id: uuid\n  vertical_id: text\n  amount_usd: number\n")
 	writeClosedVariantFile(t, root, "treasury/schema.yaml", `name: treasury
 stages:
-  active: {initial: true}
-  archived: {terminal: true}
+  active: {}
+  archived: {final: true}
 pins:
   inputs:
     - opco.spend_requested
@@ -95,7 +95,7 @@ func CopyRootDefaultStaticInput(t testing.TB, handler RootStaticHandler, entityI
 
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-default-static-fixture
 stages:
-  active: {initial: true}
+  active: {}
 pins:
   inputs:
     - subject.created
@@ -158,14 +158,13 @@ func CopyServedJoinProof(t testing.TB) string {
 
 		"schema.yaml": `name: served-join-proof
 stages:
-  new:
-    initial: true
+  new: {}
   dispatching: {}
   awaiting: {}
   ready:
-    terminal: true
+    final: true
   attention:
-    terminal: true
+    final: true
 pins:
   inputs:
     - order.started
@@ -249,16 +248,16 @@ func CopyTestSetupValidation(t testing.TB) string {
 
 		"schema.yaml": `name: review
 stages:
-  new: {initial: true}
-  done: {terminal: true}
+  new: {}
+  done: {final: true}
 `,
 		"events.yaml": "scan.requested:\n  topic: text\n",
 		"nodes.yaml":  "scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
 		"operating/schema.yaml": `name: operating
 stages:
-  initializing: {initial: true}
+  initializing: {}
   waiting: {}
-  ready: {terminal: true}
+  ready: {final: true}
 `,
 		"operating/entities.yaml": `product:
   product_id: text
@@ -280,7 +279,7 @@ stages:
       sets_gate: review_ready
       advances_to: ready
 `,
-		"secondary/schema.yaml":   "name: secondary\nstages:\n  open: {initial: true}\n  closed: {terminal: true}\n",
+		"secondary/schema.yaml":   "name: secondary\nstages:\n  open: {}\n  closed: {final: true}\n",
 		"secondary/entities.yaml": "ticket:\n  ticket_id: text\n",
 	}
 	for name, source := range files {
@@ -366,8 +365,8 @@ portfolio-node:
 		"operating/schema.yaml": `name: operating
 instance: instance_id
 stages:
-  initializing: {initial: true}
-  ready: {terminal: true}
+  initializing: {}
+  ready: {final: true}
 pins:
   inputs:
     - opco.create_requested

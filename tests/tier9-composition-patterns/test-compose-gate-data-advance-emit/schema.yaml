@@ -1,8 +1,8 @@
 name: test-compose-gate-data-advance-emit
 stages:
-  stage_one: {initial: true}
+  stage_one: {}
   stage_two: {}
-  complete: {terminal: true}
+  complete: {final: true}
 pins:
   inputs:
     - stage.one_done

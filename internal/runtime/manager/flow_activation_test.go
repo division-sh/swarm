@@ -5914,7 +5914,7 @@ item.created:
 
 	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), `name: support
 stages:
-  waiting: {initial: true}
+  waiting: {}
   done: {}
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), `

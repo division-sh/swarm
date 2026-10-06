@@ -1,6 +1,6 @@
 name: work
 stages:
-  ready: {initial: true}
+  ready: {}
 pins:
   inputs:
     - work.requested

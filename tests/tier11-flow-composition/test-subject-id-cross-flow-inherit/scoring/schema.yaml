@@ -1,7 +1,7 @@
 name: scoring
 stages:
-  pending: {initial: true}
-  scored: {terminal: true}
+  pending: {}
+  scored: {final: true}
 pins:
   inputs:
     - score.requested

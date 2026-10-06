@@ -13,14 +13,14 @@ func CopyRootIngressServedFollowUp(t testing.TB) string {
 
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
 stages:
-  pending: {initial: true}
+  pending: {}
   processed: {}
-  done: {terminal: true}
+  done: {final: true}
 `, `name: served-event-publish-followup
 stages:
-  new: {initial: true}
+  new: {}
   waiting: {}
-  done: {terminal: true}
+  done: {final: true}
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    item.received:
       advances_to: processed
@@ -70,12 +70,11 @@ func CopyRootIngressServedDecisionControl(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedFollowUp(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `stages:
-  new: {initial: true}
+  new: {}
   waiting: {}
-  done: {terminal: true}
+  done: {final: true}
 `, `stages:
   awaiting_review:
-    initial: true
     gate:
       decision: launch_review
       outcomes:
@@ -83,7 +82,7 @@ func CopyRootIngressServedDecisionControl(t testing.TB) string {
         reject: {advances_to: rework}
   waiting: {}
   rework: {}
-  done: {terminal: true}
+  done: {final: true}
 `)
 	return root
 }
@@ -111,9 +110,9 @@ func CopyRootIngressServedConversationFork(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "fork-source/schema.yaml", `name: fork-source
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - fork.source_message
@@ -153,9 +152,9 @@ func CopyRootIngressServedSessionCleanup(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "hold/schema.yaml", `name: hold
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - item.agent_hold
@@ -207,9 +206,9 @@ func CopyRootIngressLegacyTemplateTargetRoute(t testing.TB) string {
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
 instance: instance_id
 stages:
-  initializing: {initial: true}
+  initializing: {}
   waiting: {}
-  ready: {terminal: true}
+  ready: {final: true}
 pins:
   inputs:
     - opco.create_requested
@@ -280,9 +279,9 @@ func CopyRootIngressLegacyTemplateAutoEmit(t testing.TB) string {
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
 instance: instance_id
 stages:
-  initializing: {initial: true}
+  initializing: {}
   spawning: {}
-  ready: {terminal: true}
+  ready: {final: true}
 pins:
   inputs:
     - opco.create_requested
@@ -334,17 +333,17 @@ func addLegacyTemplateRoot(t testing.TB, root string) {
 
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
 stages:
-  pending: {initial: true}
+  pending: {}
   processed: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - item.received
 `, `name: routing-root-ingress
 stages:
-  new: {initial: true}
+  new: {}
   waiting: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - item.received

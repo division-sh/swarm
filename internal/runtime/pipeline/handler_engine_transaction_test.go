@@ -153,7 +153,7 @@ type recordingPipelineBus struct {
 func handlerEngineProjectNodeModule(t *testing.T, fields ...map[string]runtimecontracts.EntityFieldDecl) *previewWorkflowModule {
 	t.Helper()
 	module := &previewWorkflowModule{bundle: loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: handler-engine-test\nstages:\n  queued: {initial: true}\n",
+		"schema.yaml":   "name: handler-engine-test\nstages:\n  queued: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "custom.trigger:\ncustom.emitted:\n  summary: EmitSummary?\n  flags: EmitFlags?\n  label: text?\n  kill_reason_missing: boolean?\n",
 		"types.yaml":    "types:\n  EmitSummary:\n    entity_id: text\n    stage: text\n  EmitFlags:\n    ready: boolean\n",
@@ -532,7 +532,7 @@ func TestExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmit
 		"schema.yaml": "name: runtime-test\n",
 		"scoring/schema.yaml": `name: scoring
 stages:
-  queued: {initial: true}
+  queued: {}
 `,
 		"scoring/entities.yaml": `
 subject:
@@ -738,7 +738,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 func handlerDataAccumulationModule(t *testing.T) *previewWorkflowModule {
 	t.Helper()
 	return &previewWorkflowModule{bundle: loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: validation\nstages:\n  queued: {initial: true}\n",
+		"schema.yaml":   "name: validation\nstages:\n  queued: {}\n",
 		"entities.yaml": "test_entity:\n  revision_count: integer\n  kill_reason: text\n  kill_reason_missing: boolean\n",
 		"events.yaml":   "validation.spec_requested:\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
@@ -915,7 +915,7 @@ func newEmitPersistenceTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoord
 	t.Helper()
 	bus := &recordingPipelineBus{}
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: validation\nstages:\n  researching: {initial: true}\n  mvp_speccing: {}\n",
+		"schema.yaml":   "name: validation\nstages:\n  researching: {}\n  mvp_speccing: {}\n",
 		"entities.yaml": "test_entity:\n  business_brief: {type: BusinessBrief}\n",
 		"types.yaml":    "types:\n  BusinessBrief:\n    summary: text\n",
 		"events.yaml":   "research.completed:\n  business_brief: BusinessBrief?\nspec.requested:\n",
@@ -979,7 +979,7 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBefore
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
 stages:
-  queued: {initial: true}
+  queued: {}
 `,
 		"validation/entities.yaml": `
 validation_entity:
@@ -1102,7 +1102,7 @@ func TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext(t *test
 		"validation/schema.yaml": `name: validation
 instance: validation_id
 stages:
-  queued: {initial: true}
+  queued: {}
 `,
 		"validation/entities.yaml": `
 validation_request:
@@ -1227,7 +1227,7 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIde
 		"schema.yaml": "name: runtime-test\n",
 		"review/schema.yaml": `name: review
 stages:
-  queued: {initial: true}
+  queued: {}
 `,
 		"review/entities.yaml": `
 review_entity:
@@ -1340,7 +1340,7 @@ func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialVa
 		"schema.yaml": "name: runtime-test\n",
 		"validation/schema.yaml": `name: validation
 stages:
-  queued: {initial: true}
+  queued: {}
 `,
 		"validation/entities.yaml": `
 validation_entity:
@@ -1437,7 +1437,7 @@ node-a:
 
 func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *testing.T) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": "name: demo\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
+		"schema.yaml": "name: demo\nstages:\n  queued: {}\n  done: {final: true}\n",
 		"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [custom.trigger]\n  event_handlers:\n    custom.trigger: {}\n",
 		"events.yaml": "custom.trigger:\n",
 	})
@@ -1673,7 +1673,7 @@ func declarativeEmitContractTestBundle(t *testing.T, eventType string) *runtimec
 func additiveOnSuccessContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: test\nstages:\n  queued: {initial: true}\n",
+		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
 		"events.yaml":   "rule.emitted:\nhandler.succeeded:\n",
@@ -1683,7 +1683,7 @@ func additiveOnSuccessContractBundle(t *testing.T) *runtimecontracts.WorkflowCon
 func rulesEmitTemplateContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: test\nstages:\n  queued: {initial: true}\n",
+		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
 		"events.yaml":   "account.scored:\n  account_id: text\n  score: float\naccount.bucketed:\n  account_id: text\n  score: float\n  bucket: text\n",
@@ -1706,7 +1706,7 @@ func declarativeEmitContractTestBundleWithEntry(t *testing.T, eventType string, 
 		},
 	}
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: test\nstages:\n  queued: {initial: true}\n",
+		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
 		"events.yaml":   eventType + ":\n",

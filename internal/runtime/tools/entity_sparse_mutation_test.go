@@ -82,7 +82,7 @@ func TestEntitySparseGeneratedToolMutation(t *testing.T) {
 			actor := models.AgentConfig{ExecutionMode: "live", ID: "writer", Role: "writer"}
 			bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 				"work": {
-					SchemaYAML: "name: work\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
+					SchemaYAML: "name: work\nstages:\n  queued: {}\n  done: {final: true}\n",
 					TypesYAML:  "types:\n  Profile:\n    name: text\n    note: text?\n",
 					EntitiesYAML: `
 work:

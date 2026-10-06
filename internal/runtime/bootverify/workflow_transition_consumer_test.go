@@ -331,13 +331,12 @@ func testCompiledOrdinaryConsumerAgreement(t *testing.T) {
 		writeBootverifyFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), `
 stages:
   ready:
-    initial: true
     timers:
       - {id: advance, after: 1h, advances_to: working}
       - {id: notify, after: 2h, emit: tick}
   working: {}
   awaiting: {}
-  done: {terminal: true}
+  done: {final: true}
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, flow, "entities.yaml"), `
 item:

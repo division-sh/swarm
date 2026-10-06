@@ -145,18 +145,18 @@ rows:
     corpus: {schemas: 34, entity_explicit: 0, instance_scalar: 7}
 
   - id: flow.lifecycle
-    ruled: R1
-    paths: "schema.initial_state, schema.states, schema.terminal_states, schema.stages"
-    owners: [projectSchemaStagesValue, FlowStageDeclarations, CompileWorkflowTransitions]
+    ruled: "D2-corrected-2566"
+    paths: "schema.stages, schema.stages.<stage>.final"
+    owners: [projectSchemaStagesValue, FlowStageDeclarations, BuildWorkflowStageTopology]
     information:
-      fact: [stage IDs]
-      choice: [initial and terminal membership]
+      fact: [stage IDs, first effective declaration is entry]
+      choice: [optional final membership]
       annotation: [stage description]
     spelling:
       canonical_candidate: stages_keyed_mapping
-      retired_duplicates: [initial_state_plus_states_plus_terminal_states]
+      retired_duplicates: [initial_state_plus_states_plus_terminal_states, stage_initial, stage_terminal]
       distinct_overrides: []
-    presence: {stages_missing: markerless_stateless, stages_null: reject, stages_empty_sequence: explicit_stateless, stages_empty_mapping: reject, legacy_fields_any_presence: reject}
+    presence: {stages_missing: markerless_stateless, stages_null: reject, stages_empty_sequence: explicit_stateless, stages_empty_mapping: reject, legacy_fields_any_presence: reject, final_missing: non_final, final_false: non_final, final_true: final, final_other: reject, retired_stage_fields_any_presence: reject}
     corpus: {legacy_schemas: 7, stage_schemas: 1, stage_rows: 4}
 
   - id: flow.stage_timer

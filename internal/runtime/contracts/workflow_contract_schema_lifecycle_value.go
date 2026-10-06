@@ -25,15 +25,10 @@ func projectSchemaStagesValue(value yamlsource.Value) (FlowStageDeclarations, er
 		if err := schemaValueTexts(members, map[string]*string{"description": &stage.Description}, false); err != nil {
 			return out, err
 		}
-		for _, flag := range []struct {
-			key    string
-			target *bool
-		}{{"initial", &stage.Initial}, {"terminal", &stage.Terminal}} {
-			if member, present := members[flag.key]; present {
-				*flag.target, err = schemaValueBool(member, flag.key)
-				if err != nil {
-					return out, err
-				}
+		if member, present := members["final"]; present {
+			stage.Final, err = schemaValueBool(member, "final")
+			if err != nil {
+				return out, err
 			}
 		}
 		if timers, present := members["timers"]; present {
@@ -61,6 +56,9 @@ func projectSchemaStagesValue(value yamlsource.Value) (FlowStageDeclarations, er
 			if err != nil {
 				return out, err
 			}
+		}
+		if stage.Final && len(stage.Timers) != 0 {
+			return out, nodeValueError(members["timers"], fmt.Errorf("final stage %q cannot own executable timers", stage.ID))
 		}
 		if err := stage.normalizeTimerIDs(); err != nil {
 			return out, nodeValueError(field.Value, err)

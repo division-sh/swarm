@@ -110,7 +110,7 @@ func (s *runtimeShutdownCompletionStore) ListCompletionCandidates(
 func (s *runtimeShutdownCompletionStore) ExecuteCompletionCandidate(
 	ctx context.Context,
 	_ runtimerunlifecycle.Candidate,
-	_ runtimerunlifecycle.TerminalCatalog,
+	_ runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	close(s.started)
 	select {
@@ -732,7 +732,7 @@ func TestRuntimeShutdownBoundsLifecycleExecutorRetirementByGrace(t *testing.T) {
 	executor, err := runtimerunlifecycle.NewExecutor(
 		runtimeTestCandidateOwner{},
 		runtimerunlifecycle.CandidateScope{BundleHash: runtimeTestBundleHash},
-		runtimerunlifecycle.TerminalCatalog{},
+		runtimerunlifecycle.FinalCatalog{},
 		occurrence,
 		runtimerunlifecycle.ExecutorOptions{},
 	)
@@ -801,7 +801,7 @@ func TestRuntimeShutdownRetiresGrantAfterCompletionPersistenceSettles(t *testing
 	executor, err := runtimerunlifecycle.NewExecutor(
 		store,
 		runtimerunlifecycle.CandidateScope{BundleHash: runtimeTestBundleHash},
-		runtimerunlifecycle.TerminalCatalog{},
+		runtimerunlifecycle.FinalCatalog{},
 		occurrence,
 		runtimerunlifecycle.ExecutorOptions{},
 	)

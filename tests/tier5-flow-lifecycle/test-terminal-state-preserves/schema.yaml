@@ -1,7 +1,7 @@
 name: test-terminal-state-preserves
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 pins:
   inputs:
     - task.completed

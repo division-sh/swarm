@@ -1,8 +1,8 @@
 name: processing
 stages:
-  ready: {initial: true}
+  ready: {}
   approved: {}
-  rejected: {terminal: true}
+  rejected: {final: true}
 pins:
   inputs:
     - item.review_requested

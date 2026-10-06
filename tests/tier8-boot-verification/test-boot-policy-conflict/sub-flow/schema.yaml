@@ -1,7 +1,7 @@
 name: sub-flow
 stages:
-  idle: {initial: true}
-  done: {terminal: true}
+  idle: {}
+  done: {final: true}
 pins:
   inputs:
     - sub.requested

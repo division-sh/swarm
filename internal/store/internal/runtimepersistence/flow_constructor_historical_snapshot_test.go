@@ -53,7 +53,7 @@ func TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores(t *testin
 func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged, fielded, terminal bool) {
 	stages := ""
 	if staged {
-		stages = "stages:\n  pending: {initial: true}\n"
+		stages = "stages:\n  pending: {}\n"
 	}
 	files := map[string]string{
 		"schema.yaml":        "name: historical-fieldless\n" + stages,

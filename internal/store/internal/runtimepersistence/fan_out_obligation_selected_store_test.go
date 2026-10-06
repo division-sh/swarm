@@ -1036,7 +1036,7 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 				intercept,
 				occurrence,
 				completing.bundleHash,
-				stagecatalogfixture.NewTerminalCatalog(nil, terminals),
+				stagecatalogfixture.NewFinalCatalog(nil, terminals),
 			)
 			registration, err := candidateRegistrar.RegisterCompletionCandidateSink(
 				runtimeCtx,

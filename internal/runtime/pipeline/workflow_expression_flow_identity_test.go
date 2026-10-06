@@ -11,10 +11,10 @@ import (
 
 func TestPipelineExpressionPreservesExactExecutionFlowOnBothStores(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":         "name: display-name-is-not-a-flow\nstages:\n  ready: {initial: true}\n",
+		"schema.yaml":         "name: display-name-is-not-a-flow\nstages:\n  ready: {}\n",
 		"entities.yaml":       "root_entity:\n  root_only: text\n",
 		"events.yaml":         "query.requested:\n  value: text\n",
-		"child/schema.yaml":   "name: child\nstages:\n  ready: {initial: true}\n",
+		"child/schema.yaml":   "name: child\nstages:\n  ready: {}\n",
 		"child/entities.yaml": "child_entity:\n  child_only: text\n",
 		"child/events.yaml":   "query.requested:\n  value: text\n",
 	})

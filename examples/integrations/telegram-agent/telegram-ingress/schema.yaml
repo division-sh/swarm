@@ -1,14 +1,13 @@
 name: telegram-ingress
 stages:
   active:
-    initial: true
     gate:
       decision: retire_service
       outcomes:
         retire:
           advances_to: done
   done:
-    terminal: true
+    final: true
 pins:
   inputs:
     - inbound.telegram

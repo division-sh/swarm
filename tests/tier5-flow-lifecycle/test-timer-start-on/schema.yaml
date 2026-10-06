@@ -1,7 +1,7 @@
 stages:
-  pending: {initial: true}
+  pending: {}
   active: {}
-  timed_out: {terminal: true}
+  timed_out: {final: true}
 pins:
   inputs:
     - task.started

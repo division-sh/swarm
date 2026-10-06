@@ -1,8 +1,7 @@
 name: scout
 instance: batch_id
 stages:
-  collecting:
-    initial: true
+  collecting: {}
   review:
     timers:
       - id: review_timeout
@@ -17,9 +16,9 @@ stages:
           advances_to: awaiting
   awaiting: {}
   complete:
-    terminal: true
+    final: true
   timed_out:
-    terminal: true
+    final: true
 pins:
   inputs:
     - scout.setup

@@ -1,7 +1,6 @@
 name: telegram-ingress
 stages:
   warming:
-    initial: true
     timers:
       - id: warmup
         after: 100ms
@@ -19,7 +18,7 @@ stages:
           advances_to: retired
   serving: {}
   retired:
-    terminal: true
+    final: true
 pins:
   inputs:
     - inbound.telegram

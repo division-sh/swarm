@@ -362,7 +362,7 @@ func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, 
 	return s.eventPostgresOwner.EventExists(ctx, eventID)
 }
 
-func (s *PostgresStore) ExecuteCompletionCandidate(ctx context.Context, candidate runlifecycle.Candidate, catalog runlifecycle.TerminalCatalog) (runlifecycle.CompletionResult, error) {
+func (s *PostgresStore) ExecuteCompletionCandidate(ctx context.Context, candidate runlifecycle.Candidate, catalog runlifecycle.FinalCatalog) (runlifecycle.CompletionResult, error) {
 	return s.runLifecyclePostgresOwner.ExecuteCompletionCandidate(ctx, candidate, catalog)
 }
 
@@ -1614,7 +1614,7 @@ func (s *SQLiteRuntimeStore) EventExists(ctx context.Context, eventID string) (b
 	return s.eventSQLiteOwner.EventExists(ctx, eventID)
 }
 
-func (s *SQLiteRuntimeStore) ExecuteCompletionCandidate(ctx context.Context, candidate runlifecycle.Candidate, catalog runlifecycle.TerminalCatalog) (runlifecycle.CompletionResult, error) {
+func (s *SQLiteRuntimeStore) ExecuteCompletionCandidate(ctx context.Context, candidate runlifecycle.Candidate, catalog runlifecycle.FinalCatalog) (runlifecycle.CompletionResult, error) {
 	return s.runLifecycleSQLiteOwner.ExecuteCompletionCandidate(ctx, candidate, catalog)
 }
 

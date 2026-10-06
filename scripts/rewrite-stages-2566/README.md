@@ -35,8 +35,9 @@ edits in the same implementation PR; they are not silently skipped as closed.
 Embedded spec examples also await their authoritative semantic rewrite. Current
 production code and the actual corpus stay untouched while Gate D reviews.
 
-Regenerate the positive preparation from its exact baseline (diagnostic test
-files must be present):
+Regenerate the historical positive preparation on local commit `61dcdda4d`
+against its named baseline (the diagnostic test is deliberately not retained as
+a legacy reader after the final-grammar cut):
 
 ```sh
 ISSUE2566_PLAN_OUTPUT=scripts/rewrite-stages-2566/intent.json \

@@ -371,8 +371,8 @@ item:
 
 	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
 stages:
-  discovered: {initial: true}
-  done: {terminal: true}
+  discovered: {}
+  done: {final: true}
 pins:
   outputs:
     - vertical.shortlisted
@@ -395,8 +395,8 @@ scoring-node:
 
 	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `name: validation
 stages:
-  researching: {initial: true}
-  done: {terminal: true}
+  researching: {}
+  done: {final: true}
 pins:
   inputs:
     - vertical.shortlisted
@@ -445,8 +445,8 @@ item:
 
 	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
 stages:
-  discovered: {initial: true}
-  done: {terminal: true}
+  discovered: {}
+  done: {final: true}
 pins:
   outputs:
     - vertical.shortlisted
@@ -469,8 +469,8 @@ scoring-node:
 
 	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `name: validation
 stages:
-  researching: {initial: true}
-  done: {terminal: true}
+  researching: {}
+  done: {final: true}
 pins:
   inputs:
     - vertical.shortlisted
@@ -540,8 +540,8 @@ item:
   status: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
-  idle: {initial: true}
-  done: {terminal: true}
+  idle: {}
+  done: {final: true}
 pins:
   inputs:
     - item.created

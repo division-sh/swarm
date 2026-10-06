@@ -13,9 +13,9 @@ func CopyForkChronologicalDispatch(t testing.TB) string {
 	for path, body := range map[string]string{
 		"schema.yaml": `name: fork-chronological-dispatch
 stages:
-  pending: {initial: true}
+  pending: {}
   processed: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - item.received

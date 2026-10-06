@@ -130,7 +130,7 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 		}
 		h := req.Handler
 		copyBundle.Semantics.StageTopologies[flowID] = runtimecontracts.BuildWorkflowStageTopology(
-			flowID, e.deps.Source.FlowInitialStage(flowID), e.deps.Source.FlowStates(flowID), e.deps.Source.FlowTerminalStages(flowID),
+			flowID, e.deps.Source.FlowInitialStage(flowID), e.deps.Source.FlowStates(flowID), e.deps.Source.FlowFinalStages(flowID),
 			[]runtimecontracts.HandlerTransitionSemantic{{Node: req.Node, EventType: req.HandlerEventKey,
 				AdvancesTo: h.AdvancesTo, Rules: h.Rules, OnComplete: h.OnComplete, Join: h.Join, Loop: h.Loop}},
 			nil, bundle.Semantics.Loops,
@@ -201,7 +201,7 @@ func sourceWithFixtureStages(source semanticview.Source, flowID, initial string,
 			schema = *bundle.RootSchema
 		}
 		schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true}
-		terminals := source.FlowTerminalStages(flowID)
+		terminals := source.FlowFinalStages(flowID)
 		copyBundle.Semantics.InitialStage = initial
 		copyBundle.Semantics.Stages = nil
 		for _, stage := range stages {

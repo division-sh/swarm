@@ -12,8 +12,8 @@ func CopyGuardForkContinuation(t testing.TB) string {
 	root := t.TempDir()
 	copyTree(t, filepath.Join(RepoRoot(t), "tests/tier12-runtime-fork/test-selected-contract-fork-execution"), root)
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
-  ready: {initial: true}
-  done: {terminal: true}
+  ready: {}
+  done: {final: true}
 pins:
   inputs:
     - check.requested
@@ -33,8 +33,8 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "guarded/schema.yaml", `name: guarded
 stages:
-  ready: {initial: true}
-  killed: {terminal: true}
+  ready: {}
+  killed: {final: true}
 pins:
   inputs:
     - check.requested

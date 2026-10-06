@@ -38,14 +38,14 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					flowID, path := "owner", "owner/one"
 					files := map[string]string{
 						"schema.yaml":         "name: fork-entry-history\n",
-						"owner/schema.yaml":   "name: owner\ninstance: owner_key\nstages:\n  active: {initial: true}\npins:\n  inputs:\n    - construct.requested\n",
+						"owner/schema.yaml":   "name: owner\ninstance: owner_key\nstages:\n  active: {}\npins:\n  inputs:\n    - construct.requested\n",
 						"owner/entities.yaml": "review_item:\n  owner_key: text\n",
 						"owner/events.yaml":   "construct.requested:\n",
 					}
 					if root {
 						flowID, path = ".", "."
 						files = map[string]string{
-							"schema.yaml":   "name: fork-entry-history\nstages:\n  active: {initial: true}\n",
+							"schema.yaml":   "name: fork-entry-history\nstages:\n  active: {}\n",
 							"entities.yaml": "review_item:\n  owner_key: {type: text, initial: one}\n",
 						}
 					}

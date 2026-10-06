@@ -1,7 +1,7 @@
 instance: worker_id
 stages:
-  idle: {initial: true}
-  complete: {terminal: true}
+  idle: {}
+  complete: {final: true}
 pins:
   inputs:
     - worker.ready

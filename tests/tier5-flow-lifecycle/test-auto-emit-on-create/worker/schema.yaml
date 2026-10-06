@@ -1,12 +1,12 @@
 name: worker
 instance: instance_id
 stages:
-  idle: {initial: true}
+  idle: {}
   requested: {}
   started: {}
   requested_started: {}
   awaiting_requested: {}
-  done: {terminal: true}
+  done: {final: true}
 auto_emit_on_create:
   event: auto.started
 pins:

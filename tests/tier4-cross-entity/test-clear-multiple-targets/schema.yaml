@@ -1,6 +1,6 @@
 stages:
-  active: {initial: true}
-  cleared: {terminal: true}
+  active: {}
+  cleared: {final: true}
 pins:
   inputs:
     - state.reset_requested

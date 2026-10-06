@@ -1,7 +1,7 @@
 name: grandchild
 stages:
-  ready: {initial: true}
-  finished: {terminal: true}
+  ready: {}
+  finished: {final: true}
 pins:
   inputs:
     - micro.start

@@ -89,7 +89,7 @@ func TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAn
 			bus := &recordingPipelineBus{}
 			pc := newDurablePipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
 				Module: staticSemanticWorkflowModule{source: loadWorkflowTempSource(t, map[string]string{
-					"schema.yaml": "stages:\n  active: {initial: true}\n",
+					"schema.yaml": "stages:\n  active: {}\n",
 					"events.yaml": "work.ready:\n  item_id: text\nwork.emitted:\n",
 					"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [work.ready]\n",
 				})},
@@ -252,7 +252,7 @@ func TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores(t *testin
 			bus := &recordingPipelineBus{}
 			pc := newDurablePipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
 				Module: staticSemanticWorkflowModule{source: loadWorkflowTempSource(t, map[string]string{
-					"schema.yaml": "stages:\n  active: {initial: true}\n",
+					"schema.yaml": "stages:\n  active: {}\n",
 					"events.yaml": "work.ready:\n  item_id: text\n",
 					"nodes.yaml": `node-a:
   execution_type: system_node

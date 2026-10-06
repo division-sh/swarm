@@ -30,7 +30,7 @@ func TestSelectedCompletionCatalogPreservesCaseAndRejectsUnknown(t *testing.T) {
 		terminal, known bool
 	}{{"ready", false, true}, {"Ready", true, true}, {"unknown", false, false}} {
 		t.Run(tc.stage, func(t *testing.T) {
-			terminal, known := c.Terminal("child", "child", tc.stage)
+			terminal, known := c.Final("child", "child", tc.stage)
 			if terminal != tc.terminal || known != tc.known {
 				t.Fatalf("terminal=%v known=%v; want %v/%v", terminal, known, tc.terminal, tc.known)
 			}
@@ -128,7 +128,7 @@ func TestSelectedCompletionStageReadersBothStores(t *testing.T) {
 				id := seedCompletionBlockerRun(t, f, ctx)
 				set(id, "completed")
 				child := contracts.BuildWorkflowStageTopology(semanticRunFixtureFlow, "completed", []string{"completed", "Ready"}, []string{"Ready"}, nil, nil, nil)
-				if len(child.TerminalStages) != 1 || child.TerminalStages[0] != "Ready" {
+				if len(child.FinalStages) != 1 || child.FinalStages[0] != "Ready" {
 					t.Fatal("bad child graph")
 				}
 				reader := f.store.(interface {
@@ -154,7 +154,7 @@ func TestSelectedCompletionStageReadersBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				catalog, err := run.NewCompiledTerminalCatalog(owner)
+				catalog, err := run.NewCompiledFinalCatalog(owner)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -176,7 +176,7 @@ func TestSelectedCompletionStageReadersBothStores(t *testing.T) {
 	}
 }
 
-func stageIdentityCompiledCatalog(t *testing.T, flowID string) run.TerminalCatalog {
+func stageIdentityCompiledCatalog(t *testing.T, flowID string) run.FinalCatalog {
 	t.Helper()
 	root := contracts.BuildWorkflowStageTopology(".", "ready", []string{"ready", "Ready"}, []string{"Ready"}, nil, nil, nil)
 	child := contracts.BuildWorkflowStageTopology(flowID, "ready", []string{"ready", "Ready"}, []string{"Ready"}, nil, nil, nil)
@@ -184,7 +184,7 @@ func stageIdentityCompiledCatalog(t *testing.T, flowID string) run.TerminalCatal
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := run.NewCompiledTerminalCatalog(owner)
+	catalog, err := run.NewCompiledFinalCatalog(owner)
 	if err != nil {
 		t.Fatal(err)
 	}

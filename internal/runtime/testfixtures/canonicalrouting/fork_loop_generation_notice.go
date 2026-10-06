@@ -28,9 +28,9 @@ func CopyForkLoopGenerationState(t testing.TB) string {
 	files := map[string]string{
 		"schema.yaml": `name: fork-loop-generation-state
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - work.requested
@@ -62,11 +62,11 @@ connect:
 `,
 		"review/schema.yaml": `name: review
 stages:
-  queued: {initial: true}
+  queued: {}
   working: {}
   reviewing: {}
-  approved: {terminal: true}
-  exhausted: {terminal: true}
+  approved: {final: true}
+  exhausted: {final: true}
 loops:
   revision:
     revision_field: revision_id

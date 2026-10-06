@@ -22,7 +22,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 		for _, shape := range []string{"fieldless", "fields"} {
 			for _, cell := range []string{"current", "stale", "wrong_entity", "wrong_path", "wrong_header_flow", "missing_header", "malformed_bucket"} {
 				t.Run(backend+"/"+shape+"/"+cell, func(t *testing.T) {
-					files := map[string]string{"schema.yaml": "name: activity-header\nstages:\n  review: {initial: true}\n"}
+					files := map[string]string{"schema.yaml": "name: activity-header\nstages:\n  review: {}\n"}
 					if shape == "fields" {
 						files["entities.yaml"] = "default:\n  title: text\n"
 					}

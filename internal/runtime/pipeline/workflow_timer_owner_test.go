@@ -2696,7 +2696,7 @@ func workflowTimerOwnerBundleWithDelay(t *testing.T, recurring bool, delay strin
 
 func workflowTimerOwnerSourceFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {initial: true}\n  done: {}\n",
+		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {}\n  done: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.timeout:\nwork.completed:\nwork.reopened:\nreview.reopened:\ntest.workflow_progressed:\n",
 		"nodes.yaml": `timer-owner:
@@ -2727,7 +2727,7 @@ func workflowTimerSourceRevisionBundle(t *testing.T, revised bool) *runtimecontr
 
 func workflowTimerFirstDeclarationRevisionBundle(t *testing.T, revised bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	schema := "name: workflow-timer-first-revision\nstages:\n  waiting:\n    initial: true\n"
+	schema := "name: workflow-timer-first-revision\nstages:\n  waiting: {}\n"
 	if revised {
 		schema += "    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
 	}
@@ -2741,7 +2741,7 @@ func workflowTimerFirstDeclarationRevisionBundle(t *testing.T, revised bool) *ru
 func workflowTimerProgressedSourceRevisionBundle(t *testing.T, revised bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := workflowTimerOwnerSourceFiles()
-	files["schema.yaml"] = "name: workflow-timer-progressed-revision\nstages:\n  waiting: {initial: true}\n  done: {}\n"
+	files["schema.yaml"] = "name: workflow-timer-progressed-revision\nstages:\n  waiting: {}\n  done: {}\n"
 	files["events.yaml"] += "timer.keep:\ntimer.changed.v1:\ntimer.changed.v2:\ntimer.removed:\ntimer.added:\n"
 	files["nodes.yaml"] += "  timers:\n    - {id: waiting.keep, event: timer.keep, start_on: 'state:waiting', delay: 1h}\n"
 	if revised {
@@ -2755,7 +2755,7 @@ func workflowTimerProgressedSourceRevisionBundle(t *testing.T, revised bool) *ru
 func workflowTimerInitialAndEventBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-initial-event\nstages:\n  waiting:\n    initial: true\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
+		"schema.yaml":   "name: workflow-timer-initial-event\nstages:\n  waiting:\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.initial:\ntimer.event:\n",
 		"nodes.yaml":    "timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n",
@@ -2783,7 +2783,7 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 func workflowTimerEventOnlyStateTriggerBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting:\n    initial: true\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
+		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.arm:\ntimer.state_entry:\ntimer.event_armed:\n",
 		"nodes.yaml":    "observer:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  event_handlers:\n    timer.arm: {}\n",
@@ -2793,7 +2793,7 @@ func workflowTimerEventOnlyStateTriggerBundle(t *testing.T) *runtimecontracts.Wo
 func workflowTimerLoopEventBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  ready: {initial: true}\n  waiting: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n",
+		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  ready: {}\n  waiting: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "loop.start:\nloop.repeat:\n  revision_id: text\ntimer.arm:\n  revision_id: text\ntimer.event_armed:\n",
 		"nodes.yaml": `observer:
@@ -2816,7 +2816,7 @@ func workflowTimerLoopEventBundle(t *testing.T) *runtimecontracts.WorkflowContra
 func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {initial: true}\n",
+		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "dedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:

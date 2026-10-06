@@ -1,9 +1,9 @@
 name: test-compose-accumulate-compute-branch
 stages:
-  collecting: {initial: true}
-  high: {terminal: true}
-  mid: {terminal: true}
-  low: {terminal: true}
+  collecting: {}
+  high: {final: true}
+  mid: {final: true}
+  low: {final: true}
 pins:
   inputs:
     - score.submitted

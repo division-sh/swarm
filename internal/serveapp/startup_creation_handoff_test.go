@@ -152,7 +152,7 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				neutralSchema := strings.Replace(string(schemaRaw), "stages:\n  idle: {initial: true}\n  spawned: {terminal: true}\n", "stages: []\n", 1)
+				neutralSchema := strings.Replace(string(schemaRaw), "stages:\n  idle: {}\n  spawned: {final: true}\n", "stages: []\n", 1)
 				if neutralSchema == string(schemaRaw) {
 					t.Fatal("canonical startup fixture lifecycle marker is missing")
 				}

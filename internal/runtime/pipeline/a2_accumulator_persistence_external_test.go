@@ -50,7 +50,7 @@ func newA2AccumulatorPersistenceProof(t *testing.T, selected gateRecoveryStoreCa
 	source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, map[string]string{
 		"schema.yaml": `name: accumulator-persistence-proof
 stages:
-  active: {initial: true}
+  active: {}
 pins:
   inputs:
     - seed

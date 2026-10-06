@@ -218,7 +218,7 @@ func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, source runtim
 	}
 	if _, err := storetest.ExecuteRunCompletionCandidate(
 		runStatusAuthorActivityContext(source), pg, bundleHash, runID,
-		stagecatalogfixture.NewTerminalCatalog([]string{"ready"}, map[string][]string{".": {"ready"}}),
+		stagecatalogfixture.NewFinalCatalog([]string{"ready"}, map[string][]string{".": {"ready"}}),
 	); err != nil {
 		t.Fatalf("execute normal run completion candidate: %v", err)
 	}

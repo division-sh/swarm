@@ -170,8 +170,8 @@ func seedCompletionShortCircuitFanOut(t *testing.T, fixture runLifecycleCandidat
 	return fan, event.ID(), raw
 }
 
-func completionShortCircuitCatalog() runtimerunlifecycle.TerminalCatalog {
-	return stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
+func completionShortCircuitCatalog() runtimerunlifecycle.FinalCatalog {
+	return stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
 }
 
 func loadCompletionShortCircuitSummaries(ctx context.Context, fixture runLifecycleCandidateParityFixture, runID string, now time.Time) (runCompletionOwnerSummaries, error) {

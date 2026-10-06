@@ -1,6 +1,6 @@
 name: agent-only
 stages:
-  active: {initial: true}
+  active: {}
 pins:
   inputs:
     - mixed.agent

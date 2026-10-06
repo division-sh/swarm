@@ -24,11 +24,11 @@ func compiledLoopEvidenceSource(t *testing.T) semanticview.Source {
 	return loadWorkflowTempSource(t, map[string]string{
 		"schema.yaml": `name: loop-evidence
 stages:
-  waiting: {initial: true}
+  waiting: {}
   drafting: {}
   review: {}
-  done: {terminal: true}
-  escaped: {terminal: true}
+  done: {final: true}
+  escaped: {final: true}
 loops:
   revision:
     revision_field: revision_id

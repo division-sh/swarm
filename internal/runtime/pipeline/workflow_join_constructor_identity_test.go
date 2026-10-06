@@ -11,7 +11,7 @@ import (
 
 func TestWorkflowJoinAdmissionUsesConstructedDescendantCoordinate(t *testing.T) {
 	files := workflowJoinLifecycleFixtureFiles(false, "")
-	files["orders/child/schema.yaml"] = "name: child\nstages:\n  awaiting: {initial: true}\n  ready: {terminal: true}\n  attention: {terminal: true}\n"
+	files["orders/child/schema.yaml"] = "name: child\nstages:\n  awaiting: {}\n  ready: {final: true}\n  attention: {final: true}\n"
 	for _, name := range []string{"entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 		files["orders/child/"+name] = files["orders/"+name]
 	}

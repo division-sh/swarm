@@ -1,10 +1,10 @@
 name: worker-flow
 instance: worker_id
 stages:
-  idle: {initial: true}
+  idle: {}
   awaiting_ready: {}
   awaiting_spawned: {}
-  complete: {terminal: true}
+  complete: {final: true}
 auto_emit_on_create:
   event: worker.ready
 pins:

@@ -1,8 +1,8 @@
 name: test-dynamic-flow-instance
 stages:
-  pending: {initial: true}
+  pending: {}
   spawned: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - spawn.requested

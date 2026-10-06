@@ -1,9 +1,9 @@
 name: intake
 stages:
-  queued: {initial: true}
+  queued: {}
   collecting: {}
   ready: {}
-  rejected: {terminal: true}
+  rejected: {final: true}
 pins:
   inputs:
     - item.created

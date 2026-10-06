@@ -21,12 +21,12 @@ func runLifecycleRequiresGenericSchedules(source semanticview.Source) bool {
 	return false
 }
 
-func runLifecycleTerminalCatalog(source semanticview.Source) (runtimerunlifecycle.TerminalCatalog, error) {
+func runLifecycleTerminalCatalog(source semanticview.Source) (runtimerunlifecycle.FinalCatalog, error) {
 	classifier, err := selectedWorkflowStageClassifier(source)
 	if err != nil {
-		return runtimerunlifecycle.TerminalCatalog{}, err
+		return runtimerunlifecycle.FinalCatalog{}, err
 	}
-	return runtimerunlifecycle.NewCompiledTerminalCatalog(classifier)
+	return runtimerunlifecycle.NewCompiledFinalCatalog(classifier)
 }
 
 func selectedWorkflowStageClassifier(source semanticview.Source) (runtimecontracts.WorkflowStageClassifier, error) {

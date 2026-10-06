@@ -1160,7 +1160,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 			return false, true, fmt.Errorf("%w: stage %q is not declared in flow %s", runtimeengine.ErrInvalidConfig, currentState, graph.FlowID)
 		}
 		if builtin != "state_in_phase" {
-			return !stage.IsTerminal(), true, nil
+			return !stage.IsFinal(), true, nil
 		}
 		required := strings.TrimSpace(entry.PolicyRef)
 		if required != "" {
@@ -1412,7 +1412,7 @@ func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
 		return false
 	}
 	ref, err := graph.ResolveStoredStage(state)
-	return err == nil && ref.IsTerminal()
+	return err == nil && ref.IsFinal()
 }
 
 func cloneEvent(evt events.Event) events.Event {

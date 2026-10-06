@@ -16,8 +16,8 @@ func TestCompiledTransitionRootTopologyUsesExactSchema(t *testing.T) {
 		}
 		return schema
 	}
-	root := decode("stages: {queued: {initial: true}, shared: {}, done: {terminal: true}}")
-	child := decode("stages: {queued: {initial: true}, shared: {terminal: true}, child_only: {}, killed: {terminal: true}}")
+	root := decode("stages: {queued: {}, shared: {}, done: {final: true}}")
+	child := decode("stages: {queued: {}, shared: {final: true}, child_only: {}, killed: {final: true}}")
 	for _, order := range [][]string{{"child", "outer/inner"}, {"outer/inner", "child"}} {
 		bundle := &WorkflowContractBundle{RootSchema: &root, FlowSchemas: map[string]FlowSchemaDocument{}, Nodes: map[string]SystemNodeContract{
 			"worker": {EventHandlers: map[string]SystemNodeEventHandler{"advance": {AdvancesTo: "done"}}},
@@ -29,7 +29,7 @@ func TestCompiledTransitionRootTopologyUsesExactSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 		graph, ok := bundle.WorkflowStageTopology(".")
-		if !ok || graph.InitialStage != "queued" || !reflect.DeepEqual(graph.Stages, []string{"done", "queued", "shared"}) || !reflect.DeepEqual(graph.TerminalStages, []string{"done"}) {
+		if !ok || graph.InitialStage != "queued" || !reflect.DeepEqual(graph.Stages, []string{"done", "queued", "shared"}) || !reflect.DeepEqual(graph.FinalStages, []string{"done"}) {
 			t.Fatalf("root graph contaminated by child metadata: %#v", graph)
 		}
 		if graph.GuardTerminationTarget() != "" {
@@ -48,7 +48,7 @@ func TestCompiledTransitionRootTopologyUsesExactSchema(t *testing.T) {
 		}
 		for _, flow := range order {
 			childGraph, found := bundle.WorkflowStageTopology(flow)
-			if !found || !reflect.DeepEqual(childGraph.Stages, []string{"child_only", "killed", "queued", "shared"}) || !reflect.DeepEqual(childGraph.TerminalStages, []string{"killed", "shared"}) {
+			if !found || !reflect.DeepEqual(childGraph.Stages, []string{"child_only", "killed", "queued", "shared"}) || !reflect.DeepEqual(childGraph.FinalStages, []string{"killed", "shared"}) {
 				t.Fatalf("lost scoped child metadata: %#v", childGraph)
 			}
 		}
@@ -61,25 +61,21 @@ func TestCompiledTransitionRootTopologyUsesExactSchema(t *testing.T) {
 func TestCompiledTransitionRootTopologyNeverUsesAggregateFallback(t *testing.T) {
 	for _, root := range []*FlowSchemaDocument{nil, {StageDeclarations: FlowStageDeclarations{Declared: true}}} {
 		semantics := WorkflowSemanticView{
-			InitialStage: "root-descriptor-initial",
-			Stages:       []WorkflowStageContract{{ID: "foreign", Phase: "child"}},
-			FlowStates:   map[string][]string{".": {"foreign"}, "child": {"foreign"}},
-			FlowInitial:  map[string]string{".": "foreign", "child": "foreign"},
-			FlowTerminal: map[string][]string{".": {"foreign"}, "child": {"foreign"}},
+			Stages: []WorkflowStageContract{{ID: "foreign", Phase: "child"}},
 		}
-		graph := deriveWorkflowStageTopologies(root, semantics)["."]
+		graph := deriveWorkflowStageTopologies(root, map[string]FlowSchemaDocument{}, semantics)["."]
 		bundle := &WorkflowContractBundle{RootSchema: root, Semantics: semantics}
-		if len(bundle.FlowStates(".")) != 0 || len(bundle.FlowTerminalStages(".")) != 0 {
+		if len(bundle.FlowStates(".")) != 0 || len(bundle.FlowFinalStages(".")) != 0 {
 			t.Fatal("root accessor rescued membership from aggregate metadata")
 		}
-		if bundle.FlowInitialStage(".") != semantics.InitialStage {
-			t.Fatal("root descriptor initial-stage accessor was lost")
+		if bundle.FlowInitialStage(".") != "" {
+			t.Fatal("root accessor rescued an entry from aggregate metadata")
 		}
-		if len(graph.Stages) != 0 || len(graph.TerminalStages) != 0 || len(graph.Edges) != 0 {
+		if len(graph.Stages) != 0 || len(graph.FinalStages) != 0 || len(graph.Edges) != 0 {
 			t.Fatalf("root rescued from aggregate or scoped-map override: %#v", graph)
 		}
-		if graph.InitialStage != semantics.InitialStage {
-			t.Fatalf("root descriptor initial stage dropped: %#v", graph)
+		if graph.InitialStage != "" {
+			t.Fatalf("root catalog synthesized an entry: %#v", graph)
 		}
 	}
 }

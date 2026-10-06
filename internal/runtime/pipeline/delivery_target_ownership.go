@@ -54,7 +54,7 @@ func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID 
 		if err != nil {
 			return fmt.Errorf("receiver stage admission: %w", err)
 		}
-		if stage.IsTerminal() {
+		if stage.IsFinal() {
 			return &TerminalReceiverError{FlowID: flowID, Stage: stage.ID()}
 		}
 	}

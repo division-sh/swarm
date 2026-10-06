@@ -523,7 +523,7 @@ func (runtimeTestCandidateOwner) ListCompletionCandidates(
 func (runtimeTestCandidateOwner) ExecuteCompletionCandidate(
 	context.Context,
 	runtimerunlifecycle.Candidate,
-	runtimerunlifecycle.TerminalCatalog,
+	runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	return runtimerunlifecycle.CompletionResult{}, errors.New("unexpected runtime test completion candidate")
 }

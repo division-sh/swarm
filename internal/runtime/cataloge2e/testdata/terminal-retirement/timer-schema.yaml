@@ -1,12 +1,11 @@
 instance: worker_id
 stages:
   idle:
-    initial: true
     timers:
       - after: 20ms
         advances_to: complete
   complete:
-    terminal: true
+    final: true
 pins:
   inputs:
     - worker.inspect.requested

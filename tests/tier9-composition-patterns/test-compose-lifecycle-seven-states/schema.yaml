@@ -1,11 +1,11 @@
 stages:
-  created: {initial: true}
+  created: {}
   setup: {}
   active: {}
   running: {}
   stable: {}
   winding_down: {}
-  closed: {terminal: true}
+  closed: {final: true}
 pins:
   inputs:
     - phase.init

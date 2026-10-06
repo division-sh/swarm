@@ -120,9 +120,9 @@ func CopyReceiverMaterializationIntoRoot(t testing.TB) string {
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", `name: receiver-root-materialization
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - work.closed
@@ -205,9 +205,9 @@ func CopyForkReceiverNestedOwnership(t testing.TB, receivers []ForkReceiver) str
 	copyTree(t, inner, filepath.Join(root, "branch"))
 	writeClosedVariantFile(t, root, "schema.yaml", `name: fork-receiver-outer
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - outer.seeded
@@ -298,7 +298,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		entities := "receipt: {}\n"
 		if receiver.Policy != ForkReceiverOptionalAbsent {
 			closeEdges += fmt.Sprintf("  - {event: receiver.closed, from: ., to: %s}\n", receiver.Path)
-			stages = "stages:\n  waiting: {initial: true}\n  active: {}\n  done: {terminal: true}\n"
+			stages = "stages:\n  waiting: {}\n  active: {}\n  done: {final: true}\n"
 			inputs += ", receiver.closed"
 			pinInputs += "    - receiver.closed\n"
 			seedHandler += "    receiver.closed:\n      advances_to: done\n"
@@ -352,9 +352,9 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", `name: fork-receiver-ownership
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - start.seeded
@@ -388,7 +388,7 @@ connect:
 `+receiptNodes)
 	producerStages, producerBody := "", ""
 	if !entitylessProducer {
-		producerStages = "stages:\n  waiting: {initial: true}\n  active: {terminal: true}\n"
+		producerStages = "stages:\n  waiting: {}\n  active: {final: true}\n"
 		producerBody = "      advances_to: active\n      data_accumulation:\n        writes:\n          - target_field: marker\n            value: \"producer-owned\"\n"
 		writeClosedVariantFile(t, root, "producer/entities.yaml", "work:\n  marker: text\n")
 	}

@@ -33,7 +33,7 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := runtimerunlifecycle.NewCompiledTerminalCatalog(classifier)
+	catalog, err := runtimerunlifecycle.NewCompiledFinalCatalog(classifier)
 	if err != nil {
 		t.Fatal(err)
 	}

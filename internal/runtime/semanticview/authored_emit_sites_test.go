@@ -204,8 +204,8 @@ root.audit:
 	}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 pins:
   inputs: [support.start]
   outputs: [support.ready]
@@ -244,8 +244,8 @@ func loadAuthoredEmitSiteLoweringFixture(t *testing.T) Source {
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 pins:
   inputs: [scan.corpus_dispatch]
   outputs: [market_research.scan_assigned]

@@ -468,7 +468,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	}
 	var terminalReview bool
 	for _, node := range graph.Nodes {
-		if node.ID == "review" && node.Terminal {
+		if node.ID == "review" && node.Final {
 			terminalReview = true
 		}
 	}

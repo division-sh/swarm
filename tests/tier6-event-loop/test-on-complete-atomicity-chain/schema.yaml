@@ -1,7 +1,7 @@
 stages:
-  pending: {initial: true}
+  pending: {}
   processing: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - task.started

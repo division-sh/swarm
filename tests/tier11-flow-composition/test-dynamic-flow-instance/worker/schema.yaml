@@ -1,8 +1,8 @@
 name: worker
 instance: worker_id
 stages:
-  idle: {initial: true}
-  complete: {terminal: true}
+  idle: {}
+  complete: {final: true}
 auto_emit_on_create:
   event: work.setup
 pins:
