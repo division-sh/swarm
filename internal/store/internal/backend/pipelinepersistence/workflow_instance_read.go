@@ -14,6 +14,43 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
+type ReceiverJoinedInventoryStorageRow struct {
+	EntityID, FlowInstance, EntityType, CurrentState, Fields string
+}
+
+// This physical witness deliberately includes terminal rows and preserves the
+// stored field text rather than substituting the active-target projection.
+func ReadReceiverJoinedInventoryStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]ReceiverJoinedInventoryStorageRow, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("receiver inventory requires the selected read transaction")
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT es.entity_id,es.flow_instance,es.entity_type,
+		fi.current_state,CAST(es.fields AS TEXT)
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.run_id=es.run_id
+			AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
+		WHERE es.run_id=$1 ORDER BY es.entity_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ReceiverJoinedInventoryStorageRow
+	for rows.Next() {
+		var row ReceiverJoinedInventoryStorageRow
+		if err := rows.Scan(&row.EntityID, &row.FlowInstance, &row.EntityType, &row.CurrentState, &row.Fields); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *PipelinePostgresOwner) LoadWorkflowInstance(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
 	if s == nil || s.backend == nil {
 		return runtimepipeline.WorkflowInstance{}, false, fmt.Errorf("postgres workflow instance reader is required")

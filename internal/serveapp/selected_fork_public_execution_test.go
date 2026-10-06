@@ -97,6 +97,9 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					t.Fatal("completed reset retry replaced its selected successor")
 				}
 				rt.Runtime = supervisor.CurrentRuntime()
+				rt.Events = selected.RuntimeDeps().EventStore
+				rt.Lifecycle = selected.RuntimeDeps().ManagerPersistenceRoles.LifecycleState
+				rt.Observability = selected.Observability()
 			}
 			declarations := semanticview.AgentDeclarations(rt.Runtime.Options.WorkflowModule.SemanticSource())
 			if len(declarations) != 1 || declarations[0].LocalID != "same-name" || declarations[0].Entry.Role != "loaded-decoy" {
@@ -193,7 +196,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if err != nil || childHash != fact.BundleHash() {
 				t.Fatalf("public fork selected a loaded source instead of target: hash=%q err=%v", childHash, err)
 			}
-			rows := readForkReceiverRows(t, rt, fork.ForkRunID)
+			rows := readWorkspaceProofReceiverRows(t, rt.Events, fork.ForkRunID)
 			requireSelectedForkMixedBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent, rows["consumer"].ID)
 			if nativeRead {
 				requireSelectedForkNativeMCPRead(t, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent)
