@@ -16,6 +16,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
@@ -243,6 +244,8 @@ func TestIssue2564AsyncNodeHandoffPreservesPublicationDiagnostic(t *testing.T) {
 			bus, prepared, owner, _ := issue2564PreparedHandoff(t)
 			logger := &issue2564HandoffDiagnosticLogger{}
 			bus.SetLoggerHook(logger)
+			probe := lifecycleprobe.New()
+			bus.testLifecycleProbe = probe
 			if name != "success" {
 				owner.settleErr = fault
 				owner.committed = name == "acknowledged_cleanup_error"
@@ -259,6 +262,15 @@ func TestIssue2564AsyncNodeHandoffPreservesPublicationDiagnostic(t *testing.T) {
 			}
 			if logger.runIDs[0] != prepared.Event.RunID() || logger.eventIDs[0] != prepared.Event.ID() {
 				t.Fatalf("publication diagnostics borrowed caller scope: runs=%v events=%v", logger.runIDs, logger.eventIDs)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_, cursor, err := probe.WaitAfter(ctx, lifecycleprobe.Cursor{}, lifecycleprobe.Signal{Kind: lifecycleprobe.PostCommitDispatchStarted, EventID: prepared.Event.ID()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := probe.WaitAfter(ctx, cursor, lifecycleprobe.Signal{Kind: lifecycleprobe.PostCommitDispatchCompleted, EventID: prepared.Event.ID()}); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
