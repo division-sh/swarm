@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -92,11 +93,25 @@ func TestWorkspaceObserverActualSnapshotJoinsAndDoesNotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	var diagnostic struct {
-		Tables map[string]storetest.SelectedForkStorageTableSnapshot
+		Phases storetest.WorkspaceInvocationPhases
 	}
-	if err := json.Unmarshal(data, &diagnostic); err != nil || !reflect.DeepEqual(before, diagnostic.Tables) {
+	if err := json.Unmarshal(data, &diagnostic); err != nil || len(diagnostic.Phases.Deliveries) != 0 || len(diagnostic.Phases.Effects) != 0 {
 		t.Fatalf("observer lost exact diagnostics before any agent delivery: %v", err)
 	}
+	timing, err := os.ReadFile(diagnosticPath + ".timing.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var overhead struct {
+		Samples      int   `json:"samples"`
+		TotalNanos   int64 `json:"total_nanos"`
+		MaximumNanos int64 `json:"maximum_nanos"`
+		Unavailable  bool  `json:"unavailable"`
+	}
+	if err := json.Unmarshal(timing, &overhead); err != nil || overhead.Samples != 1 || overhead.TotalNanos <= 0 || overhead.MaximumNanos != overhead.TotalNanos || overhead.Unavailable {
+		t.Fatalf("optional diagnostic overhead was not measured: %+v %v", overhead, err)
+	}
+	t.Logf("optional diagnostic sample: %s", time.Duration(overhead.TotalNanos))
 	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("independent observer changed writer storage: %v", err)
@@ -197,10 +212,10 @@ func TestWorkspaceObserverDiagnosticsRetainExactNativeSnapshot(t *testing.T) {
 	}
 	var got struct {
 		At     time.Time
-		Tables map[string]storetest.SelectedForkStorageTableSnapshot
+		Phases storetest.WorkspaceInvocationPhases
 	}
-	if err := json.Unmarshal(data, &got); err != nil || got.At.IsZero() || !reflect.DeepEqual(want, got.Tables) {
-		t.Fatalf("diagnostics lost original native rows/columns: %v", err)
+	if err := json.Unmarshal(data, &got); err != nil || got.At.IsZero() || len(got.Phases.Deliveries) != 0 || len(got.Phases.Effects) != 0 {
+		t.Fatalf("diagnostics lost original native phase facts: %v", err)
 	}
 	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
 	if err != nil || !reflect.DeepEqual(want, after) {
@@ -217,5 +232,63 @@ func TestWorkspaceObserverDiagnosticsRetainExactNativeSnapshot(t *testing.T) {
 	}
 	if err := writeWorkspaceObserverSnapshot(ctx, observer, "relative"); err == nil {
 		t.Fatal("relative evidence location accepted")
+	}
+}
+
+func TestWorkspaceObserverOptionalDiagnosticFailureCannotAbortCounts(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writer, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx, filepath.Join(root, "swarm-test-session-owned", "state.db"))
+	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A missing directory makes evidence/timing publication fail. It must
+	// neither clear a real count nor fail the independent correctness reader.
+	t.Setenv("SWARM_TEST_WORKSPACE_OBSERVER_DIAGNOSTICS", filepath.Join(root, "missing", "snapshot.json"))
+	reader, output := io.Pipe()
+	defer reader.Close()
+	defer output.Close()
+	observerCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	joined := make(chan error, 1)
+	go func() {
+		result, err := runWorkspaceObserverChild(observerCtx, root, json.NewEncoder(output))
+		if err == nil && !result.Observed {
+			err = errors.New("optional failure lost real observation")
+		}
+		joined <- err
+	}()
+	decoder := json.NewDecoder(reader)
+	var ready struct{ Ready bool }
+	var observed workspaceObserverResult
+	if err := decoder.Decode(&ready); err != nil || !ready.Ready {
+		t.Fatalf("optional failure changed readiness: %v", err)
+	}
+	if err := decoder.Decode(&observed); err != nil || !observed.Observed {
+		t.Fatalf("optional failure changed correctness observation: %v", err)
+	}
+	stop()
+	if err := <-joined; err != nil {
+		t.Fatalf("optional diagnostics aborted correctness reader: %v", err)
+	}
+	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("optional failure changed writer state: %v", err)
+	}
+}
+
+func TestWorkspaceObserverDiagnosticPresentationExcludesPrivateBytes(t *testing.T) {
+	types := reflect.TypeOf(storetest.WorkspaceInvocationPhases{})
+	for i := 0; i < types.NumField(); i++ {
+		row := types.Field(i).Type.Elem()
+		for j := 0; j < row.NumField(); j++ {
+			name := strings.ToLower(row.Field(j).Name)
+			for _, forbidden := range []string{"payload", "source", "credential", "capability", "claimtoken", "authority", "result", "request", "failure"} {
+				if strings.Contains(name, forbidden) {
+					t.Fatalf("private bytes can enter failure output through %s.%s", types.Field(i).Name, row.Field(j).Name)
+				}
+			}
+		}
 	}
 }
