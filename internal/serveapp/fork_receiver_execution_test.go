@@ -19,6 +19,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -95,14 +96,18 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					targetRoot = canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 					writeSelectedForkAgentProofFixture(t, targetRoot, "observer", "[work.ready]", "Observe the explicitly delivered closure event.", "return {'text': 'Observed delivery.', 'usage': {'input_tokens': 1, 'output_tokens': 1}}")
 				}
-				checkBusiness := func(t *testing.T, rt servedControlProofRuntime, runID, eventID, entityID string) {
+				checkBusiness := func(t *testing.T, endpoint, runID, eventID, entityID string) {
 					if declaredAgent {
-						requireSelectedForkMixedBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, runID, eventID, entityID)
+						requireSelectedForkMixedBusinessMutation(t, endpoint, selected.RuntimeDeps().EventStore, runID, eventID, entityID)
 					} else {
-						requireForkReceiverBusinessMutation(t, rt, runID, eventID, entityID)
+						requireWorkspaceProofBusinessMutation(t, endpoint, selected.RuntimeDeps().EventStore, selected.RuntimeDeps().DeliveryStore, runID, eventID, entityID)
 					}
 				}
 				rt := startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, root, name == "same_name_agent_control")
+				fieldReader, ok := selected.RuntimeDeps().EventStore.(pipeline.WorkflowEntityStatePersistenceReader)
+				if !ok {
+					t.Fatal("source proof requires its original receiver field reader")
+				}
 				if name == "same_name_agent_control" {
 					declarations := semanticview.AgentDeclarations(rt.Runtime.Options.WorkflowModule.SemanticSource())
 					if len(declarations) != 1 || declarations[0].OwnerFlowID != "consumer" || declarations[0].LocalID != "same-name" || declarations[0].Entry.Role != "loaded-decoy" {
@@ -113,19 +118,16 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-settlement-seed",
 				})
-				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+				waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, seed.RunID)
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 					"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-settlement-request",
 				})
-				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-				var frontier string
-				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
-					t.Fatal(err)
-				}
-				sourceRows := readForkReceiverRows(t, rt, seed.RunID)
-				requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, sourceRows["consumer"].ID)
-				sourceBefore := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+				waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, seed.RunID)
+				frontier := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, selected.RuntimeDeps().EventStore, seed.RunID)
+				sourceRows := readWorkspaceProofReceiverRows(t, selected.RuntimeDeps().EventStore, seed.RunID)
+				requireWorkspaceProofBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, selected.RuntimeDeps().DeliveryStore, seed.RunID, frontier, sourceRows["consumer"].ID)
+				sourceBefore := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
 				family, ok := selected.RunFork()
 				if !ok {
 					t.Fatal("missing selected fork owner")
@@ -138,7 +140,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				resumeSettlement := func() { barrier.releaseSettlement.Do(func() { close(barrier.resumeSettlement) }) }
 				t.Cleanup(resumeClaim)
 				t.Cleanup(resumeSettlement)
-				ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 30*time.Second)
+				ctx, cancel := context.WithTimeout(servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), 30*time.Second)
 				defer cancel()
 				forkOptions := rt.ForkRuntime
 				if declaredAgent {
@@ -208,11 +210,8 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if !ok || admission.Kind != managedexecution.KindSelectedContractFork || admission.RunID != claim.RunID() {
 					t.Fatal("receiver did not retain actual selected-fork execution context")
 				}
-				var rawTarget, status string
-				var version int64
-				if err := rt.DB.QueryRow(`SELECT CAST(delivery_target_route AS TEXT),status,claim_version FROM event_deliveries WHERE delivery_id=$1 AND run_id=$2`, claim.DeliveryID(), claim.RunID()).Scan(&rawTarget, &status, &version); err != nil {
-					t.Fatal(err)
-				}
+				rawTarget, claimStorage := readWorkspaceProofClaimStorage(t, selected.RuntimeDeps().EventStore, selected.RuntimeDeps().DeliveryStore, claim)
+				status, version := string(claimStorage.Status), claimStorage.ClaimVersion
 				var target events.DeliveryTargetOwnership
 				if err := json.Unmarshal([]byte(rawTarget), &target); err != nil {
 					t.Fatal(err)
@@ -220,16 +219,12 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if !target.ExistingEntity() || target.Route().FlowID != "consumer" || target.Route().FlowInstance != "consumer" || status != "in_progress" || version != claim.Version() {
 					t.Fatalf("claim lacks exact committed receiving target: %s status=%s version=%d", rawTarget, status, version)
 				}
-				forkRows := readForkReceiverRows(t, rt, claim.RunID())
+				forkRows := readWorkspaceProofReceiverRows(t, selected.RuntimeDeps().EventStore, claim.RunID())
 				receiver := forkRows["consumer"]
 				if receiver.ID != target.Route().EntityID || receiver.State != "active" || receiver.Type != "receipt" || receiver.Fields["marker"] != "consumer-owned" || receiver.Fields["processed_token"] != "seeded" || receiver.ID == forkRows["producer"].ID {
 					t.Fatalf("fork preparation borrowed producer state: %+v", forkRows)
 				}
-				var beforeFields string
-				var beforeRevision int
-				if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2`, claim.RunID(), receiver.ID).Scan(&beforeFields, &beforeRevision); err != nil {
-					t.Fatal(err)
-				}
+				beforeFields, beforeRevision := readWorkspaceProofReceiverFields(t, fieldReader, claim.RunID(), receiver)
 				if unavailable {
 					// Invalidate the real receiver only after materialization, publication
 					// and claim commit. Its target and business fields remain untouched.
@@ -255,23 +250,20 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					if !ok || !settledClaim.Same(claim) || settled.signal.EventID != claimed.signal.EventID || settled.signal.Status != wantStatus {
 						t.Fatalf("receiver settled a different claim or disposition: %+v, want %s", settled.signal, wantStatus)
 					}
-					var afterTarget, afterFields string
-					var afterRevision, outcomes, openAttempts int
-					if err := rt.DB.QueryRow(`SELECT CAST(delivery_target_route AS TEXT),status,claim_version FROM event_deliveries WHERE delivery_id=$1`, claim.DeliveryID()).Scan(&afterTarget, &status, &version); err != nil {
-						t.Fatal(err)
-					}
+					afterTarget, settledStorage := readWorkspaceProofClaimStorage(t, selected.RuntimeDeps().EventStore, selected.RuntimeDeps().DeliveryStore, claim)
+					status, version = string(settledStorage.Status), settledStorage.ClaimVersion
 					if status != wantStatus || version != claim.Version() || afterTarget != rawTarget {
 						t.Fatalf("settlement changed ownership/version: status=%s version=%d target=%s", status, version, afterTarget)
 					}
-					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1 AND claim_version=$2 AND outcome=$3`, claim.DeliveryID(), claim.Version(), wantStatus).Scan(&outcomes); err != nil || outcomes != 1 {
+					physical := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, claim.RunID())
+					outcomes, openAttempts, err := workspaceProofClaimAttemptCounts(physical["event_delivery_attempts"], claim.DeliveryID(), claim.Version(), wantStatus)
+					if err != nil || outcomes != 1 {
 						t.Fatalf("exact claim outcomes=%d err=%v", outcomes, err)
 					}
-					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND open_marker=TRUE`, claim.DeliveryID()).Scan(&openAttempts); err != nil || openAttempts != 0 {
-						t.Fatalf("settled receiver retained open attempts=%d err=%v", openAttempts, err)
+					if openAttempts != 0 {
+						t.Fatalf("settled receiver retained open attempts=%d", openAttempts)
 					}
-					if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2`, claim.RunID(), receiver.ID).Scan(&afterFields, &afterRevision); err != nil {
-						t.Fatal(err)
-					}
+					afterFields, afterRevision := readWorkspaceProofReceiverFields(t, fieldReader, claim.RunID(), receiver)
 					if unavailable {
 						if afterFields != beforeFields || afterRevision != beforeRevision {
 							t.Fatal("unavailable receiver settlement mutated business fields or revision")
@@ -284,14 +276,11 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 						receiver.Fields["processed_token"] = "receiver-proof"
 					}
 					forkRows["consumer"] = receiver
-					if actual := readForkReceiverRows(t, rt, claim.RunID()); !reflect.DeepEqual(forkRows, actual) {
+					if actual := readWorkspaceProofReceiverRows(t, selected.RuntimeDeps().EventStore, claim.RunID()); !reflect.DeepEqual(forkRows, actual) {
 						t.Fatalf("receiver execution changed child or producer state beyond its exact authored write or availability fault: expected=%+v actual=%+v", forkRows, actual)
 					}
 					if unavailable {
-						var emitted int
-						if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND source_event_id=$2 AND NOT (event_class=$3 AND event_name=$4)`, claim.RunID(), claimed.signal.EventID, string(events.EventAdmissionDiagnosticDirect), string(events.EventTypePlatformRuntimeLog)).Scan(&emitted); err != nil || emitted != 0 {
-							t.Fatalf("unavailable receiver emitted business work=%d err=%v", emitted, err)
-						}
+						requireWorkspaceProofNoBusinessEmissions(t, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID)
 					}
 				}
 				resumeSettlement()
@@ -306,32 +295,28 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				case <-ctx.Done():
 					t.Fatalf("settled fork did not relinquish execution: %v", ctx.Err())
 				}
-				waitForkReceiverExecutionCompletion(t, rt, selected, ctx, claim, unavailable)
+				waitForkReceiverExecutionCompletion(t, selected, ctx, claim, unavailable)
 				wantReceipt := "success"
 				if unavailable {
 					wantReceipt = "dead_letter"
 				}
-				waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, claimed.signal.EventID, "platform", "pipeline", wantReceipt, 1)
+				waitWorkspaceProofPipelineReceipt(t, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID, wantReceipt)
 				if newerClaim {
-					var count int
-					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND source_event_id=$2 AND NOT (event_class=$3 AND event_name=$4)`, claim.RunID(), claimed.signal.EventID, string(events.EventAdmissionDiagnosticDirect), string(events.EventTypePlatformRuntimeLog)).Scan(&count); err != nil || count != 0 {
-						t.Fatalf("stale runtime claim emitted business work=%d err=%v", count, err)
-					}
+					requireWorkspaceProofNoBusinessEmissions(t, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID)
 					receiver.State = "done"
 					forkRows["consumer"] = receiver
-					if actual := readForkReceiverRows(t, rt, claim.RunID()); !reflect.DeepEqual(forkRows, actual) {
+					if actual := readWorkspaceProofReceiverRows(t, selected.RuntimeDeps().EventStore, claim.RunID()); !reflect.DeepEqual(forkRows, actual) {
 						t.Fatalf("stale runtime claim changed receiver or producer state: expected=%+v actual=%+v", forkRows, actual)
 					}
-					var fields string
-					var revision int
-					if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2`, claim.RunID(), receiver.ID).Scan(&fields, &revision); err != nil || fields != beforeFields || revision != beforeRevision {
-						t.Fatalf("stale runtime claim changed business fields/revision: %s revision=%d err=%v", fields, revision, err)
+					fields, revision := readWorkspaceProofReceiverFields(t, fieldReader, claim.RunID(), receiver)
+					if fields != beforeFields || revision != beforeRevision {
+						t.Fatalf("stale runtime claim changed business fields/revision: %s revision=%d", fields, revision)
 					}
 				}
 				if !unavailable {
-					checkBusiness(t, rt, claim.RunID(), claimed.signal.EventID, receiver.ID)
+					checkBusiness(t, rt.Endpoint, claim.RunID(), claimed.signal.EventID, receiver.ID)
 				}
-				if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
+				if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
 				if !unavailable {
@@ -518,10 +503,10 @@ func requireSelectedForkMixedBusinessMutation(t *testing.T, endpoint string, own
 
 // Failed deliveries have no successful pipeline handoff stamp. The lifecycle
 // owner decides terminality; callers retain their exact outcome/receipt checks.
-func waitForkReceiverExecutionCompletion(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, ctx context.Context, claim runtimedelivery.Claim, terminalFailure bool) {
+func waitForkReceiverExecutionCompletion(t *testing.T, selected *selectedStoreOwner, ctx context.Context, claim runtimedelivery.Claim, terminalFailure bool) {
 	t.Helper()
 	if !terminalFailure {
-		waitForkReceiverSourceCompletion(t, rt, claim.RunID())
+		waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, claim.RunID())
 		return
 	}
 	owner := selected.RuntimeDeps().DeliveryStore
