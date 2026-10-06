@@ -30,6 +30,7 @@ type stage2566CensusRow struct {
 	OldInitial     string   `json:"old_initial,omitempty"`
 	InitialFields  int      `json:"initial_fields,omitempty"`
 	TerminalFields int      `json:"terminal_fields,omitempty"`
+	FinalTimerRows int      `json:"marked_end_timer_rows,omitempty"`
 	BeforeHash     string   `json:"before_hash"`
 	AfterHash      string   `json:"dry_run_after_hash,omitempty"`
 	Detail         string   `json:"detail,omitempty"`
@@ -37,9 +38,11 @@ type stage2566CensusRow struct {
 
 func stage2566Digest(body string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(body))) }
 
+const stage2566CorrectedBaseline = "83482f4ad0df7536975f427a25d60f2a997e4e23"
+
 func TestIssue2566CensusAndDryRuns(t *testing.T) {
 	repo := repoRootForContractsTest(t)
-	command := exec.Command("git", "ls-tree", "-r", "--name-only", "52b954ec26c85a47605cefb8d7030f2a842f8c24")
+	command := exec.Command("git", "ls-tree", "-r", "--name-only", stage2566CorrectedBaseline)
 	command.Dir = repo
 	names, err := command.Output()
 	if err != nil {
@@ -112,7 +115,7 @@ func TestIssue2566CensusAndDryRuns(t *testing.T) {
 			Scope    string               `json:"scope"`
 			Totals   map[string]int       `json:"totals"`
 			Rows     []stage2566CensusRow `json:"rows"`
-		}{"52b954ec26c85a47605cefb8d7030f2a842f8c24", "diagnostic-only; dry outputs not applied; source eligibility and sink equivalence not evaluated", totals, rows}, "", "  ")
+		}{stage2566CorrectedBaseline, "diagnostic-only corrected D2; remove initial, rename terminal to final; no production changes or final-grammar execution qualification", totals, rows}, "", "  ")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -202,7 +205,7 @@ func stage2566TypedStageRows(name string, body []byte, positions *token.FileSet,
 			return
 		}
 		text := string(body[positions.Position(literal.Pos()).Offset:positions.Position(literal.End()).Offset])
-		rows = append(rows, stage2566CensusRow{File: name, Site: positions.Position(literal.Pos()).String(), Kind: "typed-go-stage-fixture", Disposition: "remove-typed-marker-fields-after-source-rule", InitialFields: initial, TerminalFields: terminal, BeforeHash: stage2566Digest(text)})
+		rows = append(rows, stage2566CensusRow{File: name, Site: positions.Position(literal.Pos()).String(), Kind: "typed-go-stage-fixture", Disposition: "remove-typed-initial-rename-terminal-to-final", InitialFields: initial, TerminalFields: terminal, BeforeHash: stage2566Digest(text)})
 	}
 	ast.Inspect(file, func(node ast.Node) bool {
 		if literal, ok := node.(*ast.CompositeLit); ok && typeName(literal.Type) == "FlowStageDeclaration" {
@@ -273,6 +276,11 @@ func stage2566Analyze(t *testing.T, name, site, kind, text string) stage2566Cens
 		return row
 	}
 	row.OldInitial = before.LoweredInitialState()
+	for _, stage := range before.StageDeclarations.Entries {
+		if stage.Terminal {
+			row.FinalTimerRows += len(stage.Timers)
+		}
+	}
 	if before.StageDeclarations.InitialCount() != 1 || len(row.StageOrder) == 0 || row.OldInitial != row.StageOrder[0] {
 		row.Disposition = "entry-equivalence-or-negative-oracle-review"
 		return row
@@ -288,22 +296,59 @@ func stage2566Analyze(t *testing.T, name, site, kind, text string) stage2566Cens
 	}
 	expected := before.StageDeclarations
 	for i := range expected.Entries {
-		expected.Entries[i].Initial, expected.Entries[i].Terminal = false, false
+		expected.Entries[i].Initial = false
 	}
 	if !reflect.DeepEqual(expected, after.StageDeclarations) {
 		t.Fatalf("dry run changes stage order/metadata/carriers at %s", site)
 	}
-	second, err := stage2566DryErase(afterText, func() []yamlsource.MappingField {
+	afterEntries := func() []yamlsource.MappingField {
 		s, _ := yamlsource.Load([]byte(afterText))
 		st, _ := s.Document(name).Root().Lookup("stages")
 		fields, _ := st.Value.Mapping()
 		return fields
-	}())
-	if err != nil || second != afterText {
+	}()
+	finalText, err := stage2566DryRenameFinal(afterText, afterEntries)
+	if err != nil {
+		row.Disposition, row.Detail = "complex-byte-edit-review", err.Error()
+		return row
+	}
+	finalSnapshot, err := yamlsource.Load([]byte(finalText))
+	if err != nil {
+		t.Fatalf("final rename corrupts %s at %s: %v", name, site, err)
+	}
+	finalStages, _ := finalSnapshot.Document(name).Root().Lookup("stages")
+	finalEntries, err := finalStages.Value.Mapping()
+	if err != nil || len(finalEntries) != len(afterEntries) {
+		t.Fatalf("final rename changed declarations at %s: %v", site, err)
+	}
+	for i, entry := range finalEntries {
+		old := afterEntries[i]
+		if entry.Name != old.Name {
+			t.Fatalf("final rename changed order at %s", site)
+		}
+		terminal, _ := old.Value.Lookup("terminal")
+		final, _ := entry.Value.Lookup("final")
+		if terminal.Presence != final.Presence {
+			t.Fatalf("final rename changed flag presence at %s", site)
+		}
+		if terminal.Presence != yamlsource.PresenceMissing {
+			beforeScalar, _ := terminal.Value.Scalar()
+			afterScalar, _ := final.Value.Scalar()
+			if beforeScalar.Value != afterScalar.Value || beforeScalar.Tag != afterScalar.Tag || beforeScalar.Style != afterScalar.Style || beforeScalar.Anchor != afterScalar.Anchor || beforeScalar.Alias != afterScalar.Alias {
+				t.Fatalf("final rename changed flag value/style at %s", site)
+			}
+		}
+	}
+	second, err := stage2566DryErase(finalText, finalEntries)
+	if err == nil {
+		second, err = stage2566DryRenameFinal(second, finalEntries)
+	}
+	if err != nil || second != finalText {
 		t.Fatalf("dry run is not byte-idempotent at %s: %v", site, err)
 	}
-	row.Disposition = "dry-run-order-and-metadata-preserved-not-eligibility-proof"
-	row.AfterHash = stage2566Digest(afterText)
+	row.Disposition = "dry-run-entry-and-final-rename-metadata-preserved"
+	row.Detail = "initial-removed intermediate re-admitted by current owner; final spelling source-parsed only, runtime grammar not yet implemented"
+	row.AfterHash = stage2566Digest(finalText)
 	return row
 }
 
@@ -328,7 +373,7 @@ func stage2566DryErase(text string, entries []yamlsource.MappingField) (string, 
 		}
 		removed := 0
 		for _, field := range fields {
-			if field.Name != "initial" && field.Name != "terminal" {
+			if field.Name != "initial" {
 				continue
 			}
 			if field.FromMerge || stage.FromMerge || field.Value.Location() != field.Value.ResolvedLocation() {
@@ -422,6 +467,39 @@ func stage2566DryErase(text string, entries []yamlsource.MappingField) (string, 
 	return text, nil
 }
 
+func stage2566DryRenameFinal(text string, entries []yamlsource.MappingField) (string, error) {
+	lines := strings.SplitAfter(text, "\n")
+	offsets := make([]int, len(lines))
+	for i := 1; i < len(lines); i++ {
+		offsets[i] = offsets[i-1] + len(lines[i-1])
+	}
+	var edits []stage2566ByteEdit
+	for _, stage := range entries {
+		fields, err := stage.Value.Mapping()
+		if err != nil {
+			return "", err
+		}
+		for _, field := range fields {
+			if field.Name != "terminal" {
+				continue
+			}
+			if field.FromMerge || stage.FromMerge || field.Value.Location() != field.Value.ResolvedLocation() {
+				return "", fmt.Errorf("alias/merge rename needs explicit source-anchor decision")
+			}
+			line, column := field.KeyLocation.Line-1, field.KeyLocation.Column-1
+			if line < 0 || line >= len(lines) || column < 0 || column >= len(lines[line]) || !strings.HasPrefix(lines[line][column:], "terminal:") {
+				return "", fmt.Errorf("quoted or complex terminal key needs explicit edit")
+			}
+			edits = append(edits, stage2566ByteEdit{offsets[line] + column, offsets[line] + column + len("terminal"), "final"})
+		}
+	}
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+	for _, edit := range edits {
+		text = text[:edit.start] + edit.replacement + text[edit.end:]
+	}
+	return text, nil
+}
+
 func TestIssue2566DryRunPreservesIndependentInitialAndQuotes(t *testing.T) {
 	source := "name: preserve\nstages:\n  waiting:\n    initial: true\n  done:\n    terminal: true\ninstance_variables:\n  variables:\n    note: {type: text, default: 'payload.external'}\n    data: {type: json, default: {initial: true, terminal: false}}\n"
 	snapshot, err := yamlsource.Load([]byte(source))
@@ -434,7 +512,7 @@ func TestIssue2566DryRunPreservesIndependentInitialAndQuotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(after, "waiting: {}") || !strings.Contains(after, "done: {}") || !strings.Contains(after, "default: 'payload.external'") || !strings.Contains(after, "default: {initial: true, terminal: false}") {
+	if !strings.Contains(after, "waiting: {}") || !strings.Contains(after, "terminal: true") || !strings.Contains(after, "default: 'payload.external'") || !strings.Contains(after, "default: {initial: true, terminal: false}") {
 		t.Fatalf("dry run changed independent source: %s", after)
 	}
 	if _, err := admitSchemaFragment(after); err != nil {
