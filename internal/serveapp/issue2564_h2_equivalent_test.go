@@ -1056,7 +1056,7 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 
 var _ lifecycleprobe.Observer = (*issue2564H2Cut)(nil)
 
-func TestIssue2564WorkloadObservationPortsBothStores(t *testing.T) {
+func TestIssue2564H2WorkloadObservationPortsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			start, _, _ := issue2564H2Harness(t, backend, issue2564H2Source(t))
@@ -1150,7 +1150,7 @@ func issue2564WorkloadObservationChecks(t *testing.T, rt issue2564H2Fixture, run
 	}
 }
 
-func TestIssue2564WorkloadObservationsRejectOtherOwner(t *testing.T) {
+func TestIssue2564H2WorkloadObservationsRejectOtherOwner(t *testing.T) {
 	selected := struct{}{}
 	if facts, err := storetest.ObserveH1DeliveryAccounting(t.Context(), selected, "run"); err == nil || facts != (storetest.H1DeliveryAccountingEvidence{}) {
 		t.Fatalf("foreign delivery owner exposed evidence: %+v %v", facts, err)
