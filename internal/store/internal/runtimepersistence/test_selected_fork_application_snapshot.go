@@ -118,6 +118,10 @@ func encodeSelectedForkSnapshotRow(rows *sql.Rows, columns int) (string, error) 
 	if err := rows.Scan(pointers...); err != nil {
 		return "", err
 	}
+	return encodeSelectedForkSnapshotValues(values)
+}
+
+func encodeSelectedForkSnapshotValues(values []any) (string, error) {
 	for i, value := range values {
 		if raw, ok := value.([]byte); ok {
 			values[i] = string(raw)

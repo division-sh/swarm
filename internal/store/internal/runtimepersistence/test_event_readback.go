@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/division-sh/swarm/internal/events"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
@@ -115,10 +116,8 @@ func ReadSemanticEventFixtureEvidenceForTest(ctx context.Context, selected any, 
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a
-			JOIN event_deliveries d ON d.delivery_id = a.delivery_id
-			WHERE d.event_id = $1 AND a.closure_kind = 'settled'`, eventID).
-			Scan(&evidence.SettledDeliveryAttemptCount); err != nil {
+		evidence.SettledDeliveryAttemptCount, err = delivery.ReadSemanticEventSettledAttemptCount(ctx, tx, eventID)
+		if err != nil {
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id = $1`, runID).Scan(&evidence.RevisionCount); err != nil {
@@ -142,36 +141,8 @@ func ReadSemanticEventFixtureEvidenceForTest(ctx context.Context, selected any, 
 				}
 			}
 		}
-		rows, err := tx.QueryContext(ctx, `
-			SELECT delivery_id, status, route_identity, subscriber_type, subscriber_id,
-				agent_name_owner, agent_name_source, agent_route_presence,
-				agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
-				CAST(delivery_target_route AS TEXT), CAST(delivery_context AS TEXT),
-				CAST(delivery_payload_projection AS TEXT), CAST(connect_execution_claim AS TEXT),
-				CAST(receiver_materialization_plan AS TEXT), execution_authority_kind,
-				authority_bundle_hash, execution_authority_id, CAST(execution_authority_generation AS TEXT)
-			FROM event_deliveries WHERE event_id = $1`, eventID)
+		evidence.DeliveryProjections, evidence.DeliveryStatuses, err = delivery.ReadSemanticEventDeliveryStorage(ctx, tx, eventID)
 		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var deliveryID, status string
-			var projection [18]string
-			args := []any{&deliveryID, &status}
-			for index := range projection {
-				args = append(args, &projection[index])
-			}
-			if err := rows.Scan(args...); err != nil {
-				return err
-			}
-			evidence.DeliveryProjections[deliveryID] = projection
-			evidence.DeliveryStatuses[deliveryID] = status
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		if err := rows.Close(); err != nil {
 			return err
 		}
 		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts
