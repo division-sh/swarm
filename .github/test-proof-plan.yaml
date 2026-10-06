@@ -946,6 +946,9 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[I-O].*$
     required_children:
+      TestIssue2269MutationEvidencePreservesOriginalOwnerAndNullContractBothStores: [sqlite, postgres]
+      TestIssue2269MutationEvidenceRefusesUnavailableAndCanceledOwnersBothStores: [sqlite, postgres]
+      TestIssue2269HeaderContentionPreservesCompanionBothStores: [sqlite, postgres]
       TestManagerOwnsDirectiveLaunchTimeoutAndReactionBothStores: [sqlite, postgres]
       TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores: [unstarted/sqlite, unstarted/postgres, prelaunch/sqlite, prelaunch/postgres, launched/sqlite, launched/postgres]
       TestLogicalTurnExecutionCancelsAndSettlesRealDeliveryOriginBothStores: [sqlite, postgres]

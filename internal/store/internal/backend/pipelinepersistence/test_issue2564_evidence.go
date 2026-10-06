@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -81,4 +83,60 @@ func observeMutationHistory(ctx context.Context, tx *sql.Tx, runID string) ([]En
 		return nil, err
 	}
 	return out, nil
+}
+
+type CardContentionEvidence struct{ Requests, DecidedChanges int }
+
+func (s *PipelinePostgresOwner) ObserveCardContentionForTest(ctx context.Context, key, cardID string) (CardContentionEvidence, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return CardContentionEvidence{}, err
+	}
+	var out CardContentionEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error { return observeCardContention(ctx, tx, key, cardID, &out) })
+	if err != nil {
+		return CardContentionEvidence{}, err
+	}
+	return out, nil
+}
+
+func (s *PipelineSQLiteOwner) ObserveCardContentionForTest(ctx context.Context, key, cardID string) (CardContentionEvidence, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return CardContentionEvidence{}, err
+	}
+	var out CardContentionEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error { return observeCardContention(ctx, tx, key, cardID, &out) })
+	if err != nil {
+		return CardContentionEvidence{}, err
+	}
+	return out, nil
+}
+
+func observeCardContention(ctx context.Context, tx *sql.Tx, key, cardID string, out *CardContentionEvidence) error {
+	if _, err := uuid.Parse(cardID); err != nil {
+		return err
+	}
+	return tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM api_idempotency WHERE idempotency_key=$1),(SELECT COUNT(*) FROM decision_card_changes WHERE card_id=$2 AND change_type='decided')`, key, cardID).Scan(&out.Requests, &out.DecidedChanges)
+}
+
+func (s *PipelinePostgresOwner) AdvanceGateHeaderRevisionForTest(ctx context.Context, state pipeline.WorkflowEngineStateRecord) error {
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error { return advanceGateHeaderRevision(ctx, tx, state) })
+}
+
+func (s *PipelineSQLiteOwner) AdvanceGateHeaderRevisionForTest(ctx context.Context, state pipeline.WorkflowEngineStateRecord) error {
+	return s.backend.RunTransaction(ctx, "gate header contention fixture", func(ctx context.Context, tx *sql.Tx) error { return advanceGateHeaderRevision(ctx, tx, state) })
+}
+
+func advanceGateHeaderRevision(ctx context.Context, tx *sql.Tx, state pipeline.WorkflowEngineStateRecord) error {
+	result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET revision=revision+1 WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, state.Identity.RunID, state.EntityID, state.ExpectedRevision)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("CAS fault did not change exact header: rows=%d", n)
+	}
+	return nil
 }
