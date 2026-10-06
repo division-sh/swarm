@@ -647,8 +647,8 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector(t *testing.T) {
 	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
 entity: vertical
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 `)
 	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:
@@ -668,8 +668,8 @@ func TestLoadWorkflowContractBundle_RejectsRootSchemaEntitySelector(t *testing.T
 	writeFixtureFile(t, root+"/schema.yaml", `name: root-schema-entity-selector
 entity: vertical
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 `)
 	writeFixtureFile(t, root+"/entities.yaml", `
 vertical:
@@ -690,8 +690,8 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelectorForMissingEntity(
 	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
 entity: missing
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 `)
 	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:

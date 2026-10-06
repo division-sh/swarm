@@ -2053,9 +2053,9 @@ name: support
 initial_state: waiting
 stages:
   waiting:
-    initial: true
+    {}
   done:
-    terminal: true
+    final: true
 `)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	if err == nil || !strings.Contains(err.Error(), "schema field \"initial_state\" is not supported") || !strings.Contains(err.Error(), "Valid fields:") {

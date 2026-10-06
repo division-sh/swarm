@@ -1122,8 +1122,12 @@ func workflowJoinLifecycleBundleStartingAt(t *testing.T, stage string) *runtimec
 	t.Helper()
 	files := workflowJoinLifecycleFixtureFiles(false, "")
 	for _, name := range []string{"schema.yaml", "orders/schema.yaml"} {
-		files[name] = strings.Replace(files[name], "  awaiting: {initial: true}", "  awaiting: {}", 1)
-		files[name] = strings.Replace(files[name], "  "+stage+": {}", "  "+stage+": {initial: true}", 1)
+		line := "  " + stage + ": {}\n"
+		if strings.Count(files[name], line) != 1 {
+			t.Fatalf("%s: missing exact entry declaration %s", name, stage)
+		}
+		files[name] = strings.Replace(files[name], line, "", 1)
+		files[name] = strings.Replace(files[name], "stages:\n", "stages:\n"+line, 1)
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -1202,7 +1206,7 @@ join-node:
 `,
 	}
 	if review {
-		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  awaiting: {initial: true}", "  awaiting: {initial: true}\n  reviewing: {}", 1)
+		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  awaiting: {}", "  awaiting: {}\n  reviewing: {}", 1)
 		files["orders/events.yaml"] += "review.requested:\napproval.completed:\n  member_id: text\n  result: ItemResult\n"
 		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    manual.abort:", "    review.requested:\n      advances_to: reviewing\n    manual.abort:", 1)
 		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "id: awaiting", "id: shared", 1)
@@ -1218,7 +1222,7 @@ join-node:
 `
 	}
 	if loop != "" {
-		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  ready: {terminal: true}", "  ready: {}", 1)
+		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  ready: {final: true}", "  ready: {}", 1)
 		files["orders/schema.yaml"] += "loops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: attention}\n"
 		from := "awaiting"
 		if loop == "reentrant" || loop == "captured" {

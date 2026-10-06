@@ -29,7 +29,7 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
 	if !rootRequester {
 		connect += "  - {event: request.finished, from: requester, to: .}\n"
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: root-reply-boundary\nstages:\n  waiting: {initial: true}\n  done: {terminal: true}\npins:\n  inputs: [request.started, request.stop]\n  outputs: [request.finished]\nconnect:\n"+connect)
+	writeClosedVariantFile(t, root, "schema.yaml", "name: root-reply-boundary\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs: [request.started, request.stop]\n  outputs: [request.finished]\nconnect:\n"+connect)
 	startSchema := "request.started:\n  account_id: text\n  request_id: text\nrequest.stop:\n"
 	requestSchema := "provider.requested:\n  account_id: text\n  request_id: text\n"
 	responseSchema := "provider.replied:\n  account_id: text\n  request_id: text\n  result: text\n"

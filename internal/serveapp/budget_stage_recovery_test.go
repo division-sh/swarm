@@ -74,8 +74,8 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 	spec := runtimecontracts.DefaultPlatformSpecFile(repo)
 	packBases := testPlatformPackBaseGenerations(t)
 	artifacts := []*sourceartifact.AdmittedSourceArtifact{
-		stageRecoveryArtifact(t, "ready:\n    initial: true\n  Ready:\n    terminal: true"),
-		stageRecoveryArtifact(t, "open:\n    initial: true\n  ready:\n    terminal: true"),
+		stageRecoveryArtifact(t, "ready: {}\n  Ready:\n    final: true"),
+		stageRecoveryArtifact(t, "open: {}\n  ready:\n    final: true"),
 		stageRecoveryArtifact(t, "[]"),
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {

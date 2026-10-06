@@ -11,7 +11,7 @@ import (
 func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	type row struct{ path, template, key, scalar, object, list, admit string }
 	root := "name: presence\nstages: []\n%s\n"
-	stage := "stages:\n  waiting:\n    initial: true\n    description: ''\n    %s\n  done: {terminal: true}\n"
+	stage := "stages:\n  waiting:\n    final: false\n    description: ''\n    %s\n  done: {final: true}\n"
 	gate := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes: {approve: {advances_to: done}}\n      %s\n"
 	outcome := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes:\n        approve:\n          advances_to: done\n          %s\n"
 	input := "stages:\n  waiting:\n    gate:\n      decision: approval\n      outcomes:\n        approve:\n          advances_to: done\n          input:\n            note:\n              type: text\n              %s\n"
@@ -31,10 +31,11 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"mode", root, "mode", "static", "", "", "M"},
 		{"activation", root, "activation", "standing", "", "", "MS"},
 		{"instance", root, "instance", "work_id", "", "", "MS"},
-		{"stages", root, "stages", "x", "{waiting: {initial: true}, done: {terminal: true}}", "[x]", "MPZ"},
-		{"stages.waiting", "stages:\n  %s\n", "waiting", "x", "{initial: true}", "[x]", "OP"},
-		{"stages.waiting.initial", stage, "initial", "false", "", "", "MS"},
-		{"stages.waiting.terminal", stage, "terminal", "true", "", "", "MS"},
+		{"stages", root, "stages", "x", "{waiting: {}, done: {final: true}}", "[x]", "MPZ"},
+		{"stages.waiting", "stages:\n  %s\n", "waiting", "x", "{final: true}", "[x]", "OP"},
+		{"retired.stages.waiting.initial", stage, "initial", "false", "", "", "M"},
+		{"retired.stages.waiting.terminal", stage, "terminal", "true", "", "", "M"},
+		{"stages.waiting.final", stage, "final", "true", "", "", "MS"},
 		{"stages.waiting.description", stage, "description", "Description", "", "", "MES"},
 		{"stages.waiting.timers", stage, "timers", "x", "", "[{after: 1s, emit: work.expired}]", "MZQ"},
 		{"timer.id", timer, "id", "timeout", "", "", "MS"},

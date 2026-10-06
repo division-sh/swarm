@@ -524,6 +524,9 @@ func (e ConnectRoutePlanEndpoint) IsRoot() bool     { return e.kind == connectEn
 func (e ConnectRoutePlanEndpoint) IsStatic() bool   { return e.kind == connectEndpointStaticFlow }
 func (e ConnectRoutePlanEndpoint) IsTemplate() bool { return e.kind == connectEndpointTemplateFlow }
 
+// FlowID exposes the compiled owner, not its mutable display readback.
+func (e ConnectRoutePlanEndpoint) FlowID() string { return e.flowID.value }
+
 // ConnectRoutePlanEndpointReadback is a one-way display projection. No graph
 // evaluator or application API accepts this type.
 type ConnectRoutePlanEndpointReadback struct {

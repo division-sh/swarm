@@ -85,7 +85,7 @@ pins:
 		files["review/events.yaml"] = "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n  request_id: string\n  label: string\n  enabled: boolean\n  nested: json\n"
 	}
 	if withTimer {
-		files["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending: {initial: true}", "  pending:\n    initial: true\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}", 1)
+		files["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending: {}", "  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}", 1)
 		files["review/events.yaml"] += "timer.elapsed:\n"
 	}
 	return newReceiverConfigActivationFixtureWithDocuments(t, backend, withAgents, files, decorate, func(options *manager.AgentManagerOptions) {

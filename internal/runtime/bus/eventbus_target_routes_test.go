@@ -1375,7 +1375,7 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 	admitted := loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml":                        "name: target-route-test\nversion: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":                          "name: target-route-test\n",
-		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nstages:\n  active: {initial: true}\n", flowID),
+		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nstages:\n  active: {}\n", flowID),
 		filepath.Join(flowID, "entities.yaml"): "test_entity:\n  items:\n    type: '[text]'\n  expected:\n    type: '[text]'\n",
 	})
 	admitted.FlowTree = base.FlowTree

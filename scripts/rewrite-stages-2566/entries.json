@@ -1,0 +1,2753 @@
+[
+  {
+    "file": "examples/integrations/telegram-agent/telegram-ingress/schema.yaml",
+    "source": "examples/integrations/telegram-agent",
+    "flow": "telegram-ingress",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "examples/routing/fan-in/barrier/portfolio/period/schema.yaml",
+    "source": "examples/routing/fan-in/barrier",
+    "flow": "portfolio/period",
+    "entry": "collecting",
+    "order": [
+      "collecting",
+      "awaiting",
+      "complete",
+      "failed"
+    ],
+    "finals": [
+      "complete",
+      "failed"
+    ]
+  },
+  {
+    "file": "examples/routing/map-scatter-gather/schema.yaml",
+    "source": "examples/routing/map-scatter-gather",
+    "flow": ".",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "collecting",
+      "complete",
+      "failed"
+    ],
+    "finals": [
+      "complete",
+      "failed"
+    ]
+  },
+  {
+    "file": "examples/routing/map-scatter-gather/workers/schema.yaml",
+    "source": "examples/routing/map-scatter-gather",
+    "flow": "workers",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "examples/routing/notify-all-children/account/schema.yaml",
+    "source": "examples/routing/notify-all-children",
+    "flow": "account",
+    "entry": "active",
+    "order": [
+      "active",
+      "completed"
+    ],
+    "finals": [
+      "completed"
+    ]
+  },
+  {
+    "file": "examples/routing/root-ingress/schema.yaml",
+    "source": "examples/routing/root-ingress",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processed",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/claude_cli_managed_lifecycle/worker/schema.yaml",
+    "source": "internal/releasee2e/testdata/claude_cli_managed_lifecycle",
+    "flow": "worker",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/claude_resource_read/schema.yaml",
+    "source": "internal/releasee2e/testdata/claude_resource_read",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/claude_resource_read/worker/schema.yaml",
+    "source": "internal/releasee2e/testdata/claude_resource_read",
+    "flow": "worker",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/full_lifecycle/standing_telegram/telegram-ingress/schema.yaml",
+    "source": "internal/releasee2e/testdata/full_lifecycle/standing_telegram",
+    "flow": "telegram-ingress",
+    "entry": "warming",
+    "order": [
+      "warming",
+      "review",
+      "serving",
+      "retired"
+    ],
+    "finals": [
+      "retired"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/golden_agent_workload/candidate/schema.yaml",
+    "source": "internal/releasee2e/testdata/golden_agent_workload",
+    "flow": "candidate",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "active",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/golden_agent_workload/schema.yaml",
+    "source": "internal/releasee2e/testdata/golden_agent_workload",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "scouting",
+      "collecting",
+      "complete",
+      "failed"
+    ],
+    "finals": [
+      "complete",
+      "failed"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/golden_agent_workload/scout/schema.yaml",
+    "source": "internal/releasee2e/testdata/golden_agent_workload",
+    "flow": "scout",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "active",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/node_identity/left/nested/schema.yaml",
+    "source": "internal/releasee2e/testdata/node_identity",
+    "flow": "left/nested",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "working",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/node_identity/left/schema.yaml",
+    "source": "internal/releasee2e/testdata/node_identity",
+    "flow": "left",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "working",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/node_identity/right/schema.yaml",
+    "source": "internal/releasee2e/testdata/node_identity",
+    "flow": "right",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "working",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/node_identity/schema.yaml",
+    "source": "internal/releasee2e/testdata/node_identity",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "working",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/static_data_invocation/registry/schema.yaml",
+    "source": "internal/releasee2e/testdata/static_data_invocation",
+    "flow": "registry",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "reading",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "internal/releasee2e/testdata/static_data_invocation/schema.yaml",
+    "source": "internal/releasee2e/testdata/static_data_invocation",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "reading",
+      "child_reading",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "internal/runtime/cataloge2e/testdata/scatter-gather-safety/collector/schema.yaml",
+    "source": "internal/runtime/cataloge2e/testdata/scatter-gather-safety",
+    "flow": "collector",
+    "entry": "collecting",
+    "order": [
+      "collecting",
+      "awaiting",
+      "complete",
+      "failed"
+    ],
+    "finals": [
+      "complete",
+      "failed"
+    ]
+  },
+  {
+    "file": "internal/runtime/cataloge2e/testdata/scatter-gather-safety/schema.yaml",
+    "source": "internal/runtime/cataloge2e/testdata/scatter-gather-safety",
+    "flow": ".",
+    "entry": "collecting",
+    "order": [
+      "collecting",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ]
+  },
+  {
+    "file": "internal/runtime/cataloge2e/testdata/scatter-gather-safety/workers/schema.yaml",
+    "source": "internal/runtime/cataloge2e/testdata/scatter-gather-safety",
+    "flow": "workers",
+    "entry": "registered",
+    "order": [
+      "registered",
+      "complete",
+      "expired"
+    ],
+    "finals": [
+      "complete",
+      "expired"
+    ]
+  },
+  {
+    "file": "internal/runtime/conformance/testdata/stage-lifecycle-identity/scout/schema.yaml",
+    "source": "internal/runtime/conformance/testdata/stage-lifecycle-identity",
+    "flow": "scout",
+    "entry": "collecting",
+    "order": [
+      "collecting",
+      "review",
+      "awaiting",
+      "complete",
+      "timed_out"
+    ],
+    "finals": [
+      "complete",
+      "timed_out"
+    ]
+  },
+  {
+    "file": "internal/runtime/pipeline/testdata/entity-requirement-execution/schema.yaml",
+    "source": "internal/runtime/pipeline/testdata/entity-requirement-execution",
+    "flow": ".",
+    "entry": "active",
+    "order": [
+      "active",
+      "killed"
+    ],
+    "finals": [
+      "killed"
+    ]
+  },
+  {
+    "file": "internal/runtime/scenarioderivation/testdata/hostile/work/schema.yaml",
+    "source": "internal/runtime/scenarioderivation/testdata/hostile",
+    "flow": "work",
+    "entry": "ready",
+    "order": [
+      "ready"
+    ],
+    "finals": []
+  },
+  {
+    "file": "internal/runtime/testdata/generic-swarm-bundle/delivery/schema.yaml",
+    "source": "internal/runtime/testdata/generic-swarm-bundle/delivery",
+    "flow": ".",
+    "entry": "approved",
+    "order": [
+      "approved",
+      "completed",
+      "rejected"
+    ],
+    "finals": [
+      "completed",
+      "rejected"
+    ]
+  },
+  {
+    "file": "internal/runtime/testdata/generic-swarm-bundle/intake/schema.yaml",
+    "source": "internal/runtime/testdata/generic-swarm-bundle/intake",
+    "flow": ".",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "collecting",
+      "ready",
+      "rejected"
+    ],
+    "finals": [
+      "rejected"
+    ]
+  },
+  {
+    "file": "internal/runtime/testdata/generic-swarm-bundle/processing/schema.yaml",
+    "source": "internal/runtime/testdata/generic-swarm-bundle/processing",
+    "flow": ".",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "approved",
+      "rejected"
+    ],
+    "finals": [
+      "rejected"
+    ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent/agent-only/schema.yaml",
+    "source": "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent",
+    "flow": "agent-only",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": []
+  },
+  {
+    "file": "tests/conformance/entity-progressive-presence/schema.yaml",
+    "source": "tests/conformance/entity-progressive-presence",
+    "flow": ".",
+    "entry": "draft",
+    "order": [
+      "draft",
+      "assess",
+      "consume",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-advances-to-terminal/schema.yaml",
+    "source": "tests/tier1-primitives/test-advances-to-terminal",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-advances-to/schema.yaml",
+    "source": "tests/tier1-primitives/test-advances-to",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processing"
+    ],
+    "finals": [
+      "processing"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-compute-standalone/schema.yaml",
+    "source": "tests/tier1-primitives/test-compute-standalone",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-data-accumulation-direct/schema.yaml",
+    "source": "tests/tier1-primitives/test-data-accumulation-direct",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-data-accumulation-literal/schema.yaml",
+    "source": "tests/tier1-primitives/test-data-accumulation-literal",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-data-accumulation-mapped/schema.yaml",
+    "source": "tests/tier1-primitives/test-data-accumulation-mapped",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-emits-multiple/schema.yaml",
+    "source": "tests/tier1-primitives/test-emits-multiple",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-emits-payload-transform/schema.yaml",
+    "source": "tests/tier1-primitives/test-emits-payload-transform",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-from-filter/schema.yaml",
+    "source": "tests/tier1-primitives/test-from-filter",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-compound-condition/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-compound-condition",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-discard/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-discard",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-entity-ref/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-entity-ref",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-escalate/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-escalate",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-kill/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-kill",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done",
+      "killed"
+    ],
+    "finals": [
+      "done",
+      "killed"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-multi-fail/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-multi-fail",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-multi/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-multi",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-pass/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-pass",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-policy-ref/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-policy-ref",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-guard-reject/schema.yaml",
+    "source": "tests/tier1-primitives/test-guard-reject",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-on-complete-first-match/schema.yaml",
+    "source": "tests/tier1-primitives/test-on-complete-first-match",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "passed",
+      "failed"
+    ],
+    "finals": [
+      "passed",
+      "failed"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-on-complete-second-match/schema.yaml",
+    "source": "tests/tier1-primitives/test-on-complete-second-match",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "passed",
+      "failed"
+    ],
+    "finals": [
+      "passed",
+      "failed"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-on-complete-with-state/schema.yaml",
+    "source": "tests/tier1-primitives/test-on-complete-with-state",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-payload-transform-multi-source/schema.yaml",
+    "source": "tests/tier1-primitives/test-payload-transform-multi-source",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier1-primitives/test-rules-advances-to/schema.yaml",
+    "source": "tests/tier1-primitives/test-rules-advances-to",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "approved"
+    ],
+    "finals": [
+      "approved"
+    ]
+  },
+  {
+    "file": "tests/tier10-policy-patterns/test-policy-capacity-query/schema.yaml",
+    "source": "tests/tier10-policy-patterns/test-policy-capacity-query",
+    "flow": ".",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "active"
+    ],
+    "finals": [
+      "active"
+    ]
+  },
+  {
+    "file": "tests/tier10-policy-patterns/test-policy-hard-gate-override/schema.yaml",
+    "source": "tests/tier10-policy-patterns/test-policy-hard-gate-override",
+    "flow": ".",
+    "entry": "scoring",
+    "order": [
+      "scoring",
+      "promoted",
+      "demoted",
+      "rejected"
+    ],
+    "finals": [
+      "promoted",
+      "demoted",
+      "rejected"
+    ]
+  },
+  {
+    "file": "tests/tier10-policy-patterns/test-policy-multi-guard-partial/schema.yaml",
+    "source": "tests/tier10-policy-patterns/test-policy-multi-guard-partial",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "accepted"
+    ],
+    "finals": [
+      "accepted"
+    ]
+  },
+  {
+    "file": "tests/tier10-policy-patterns/test-policy-threshold-three-way/schema.yaml",
+    "source": "tests/tier10-policy-patterns/test-policy-threshold-three-way",
+    "flow": ".",
+    "entry": "evaluating",
+    "order": [
+      "evaluating",
+      "tier_a",
+      "tier_b",
+      "tier_c"
+    ],
+    "finals": [
+      "tier_a",
+      "tier_b",
+      "tier_c"
+    ]
+  },
+  {
+    "file": "tests/tier10-policy-patterns/test-policy-timeout-elapsed/schema.yaml",
+    "source": "tests/tier10-policy-patterns/test-policy-timeout-elapsed",
+    "flow": ".",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done",
+      "timed_out"
+    ],
+    "finals": [
+      "done",
+      "timed_out"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-absolute-path/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-absolute-path",
+    "flow": "child",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "finished"
+    ],
+    "finals": [
+      "finished"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-absolute-path/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-absolute-path",
+    "flow": ".",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-loads/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-loads",
+    "flow": "child",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "completed"
+    ],
+    "finals": [
+      "completed"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-loads/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-loads",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-local-events/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-local-events",
+    "flow": "child",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "processing",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-local-events/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-local-events",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-pin-wiring/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-pin-wiring",
+    "flow": "child",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "completed"
+    ],
+    "finals": [
+      "completed"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-pin-wiring/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-pin-wiring",
+    "flow": ".",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-policy-inherit/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-policy-inherit",
+    "flow": "child",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "approved"
+    ],
+    "finals": [
+      "approved"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-policy-inherit/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-policy-inherit",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-sibling-isolation/flow-a/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-sibling-isolation",
+    "flow": "flow-a",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "working",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-sibling-isolation/flow-b/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-sibling-isolation",
+    "flow": "flow-b",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "finished"
+    ],
+    "finals": [
+      "finished"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-sibling-isolation/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-sibling-isolation",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-tool-inherit/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-tool-inherit",
+    "flow": "child",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-child-flow-tool-inherit/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-child-flow-tool-inherit",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-dynamic-flow-instance/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-dynamic-flow-instance",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "spawned",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-dynamic-flow-instance/worker/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-dynamic-flow-instance",
+    "flow": "worker",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-gates-in-child-flow/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-gates-in-child-flow",
+    "flow": "child",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-gates-in-child-flow/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-gates-in-child-flow",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-multi-level-policy-inherit/child/grandchild/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-multi-level-policy-inherit",
+    "flow": "child/grandchild",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "approved"
+    ],
+    "finals": [
+      "approved"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-multi-level-policy-inherit/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-multi-level-policy-inherit",
+    "flow": "child",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-multi-level-policy-inherit/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-multi-level-policy-inherit",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-nested-three-levels/child/grandchild/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-nested-three-levels",
+    "flow": "child/grandchild",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "finished"
+    ],
+    "finals": [
+      "finished"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-nested-three-levels/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-nested-three-levels",
+    "flow": "child",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "delegated",
+      "completed"
+    ],
+    "finals": [
+      "completed"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-nested-three-levels/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-nested-three-levels",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-numeric-data-scatter-park/registry/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-numeric-data-scatter-park",
+    "flow": "registry",
+    "entry": "registered",
+    "order": [
+      "registered",
+      "investigating",
+      "assessed",
+      "archived"
+    ],
+    "finals": [
+      "archived"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated/flow-a/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated",
+    "flow": "flow-a",
+    "entry": "new",
+    "order": [
+      "new",
+      "active",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated/flow-b/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated",
+    "flow": "flow-b",
+    "entry": "new",
+    "order": [
+      "new",
+      "active",
+      "finished"
+    ],
+    "finals": [
+      "finished"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-subject-id-cross-flow-inherit/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-subject-id-cross-flow-inherit",
+    "flow": ".",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "dispatched"
+    ],
+    "finals": [
+      "dispatched"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-subject-id-cross-flow-inherit/scoring/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-subject-id-cross-flow-inherit",
+    "flow": "scoring",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "scored"
+    ],
+    "finals": [
+      "scored"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-subject-id-first-flow-seeds/intake/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-subject-id-first-flow-seeds",
+    "flow": "intake",
+    "entry": "new",
+    "order": [
+      "new",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-subject-id-first-flow-seeds/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-subject-id-first-flow-seeds",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-tool-override/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-tool-override",
+    "flow": "child",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-tool-override/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-tool-override",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-wildcard-deep-subscription/child/grandchild/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-wildcard-deep-subscription",
+    "flow": "child/grandchild",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "finished"
+    ],
+    "finals": [
+      "finished"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-wildcard-deep-subscription/child/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-wildcard-deep-subscription",
+    "flow": "child",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "completed"
+    ],
+    "finals": [
+      "completed"
+    ]
+  },
+  {
+    "file": "tests/tier11-flow-composition/test-wildcard-deep-subscription/schema.yaml",
+    "source": "tests/tier11-flow-composition/test-wildcard-deep-subscription",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier12-runtime-fork/test-non-agent-replay-fail-closed/schema.yaml",
+    "source": "tests/tier12-runtime-fork/test-non-agent-replay-fail-closed",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier12-runtime-fork/test-run-scoped-flow-agent-fork/worker-flow/schema.yaml",
+    "source": "tests/tier12-runtime-fork/test-run-scoped-flow-agent-fork",
+    "flow": "worker-flow",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-fan-out-basic/schema.yaml",
+    "source": "tests/tier3-list-processing/test-fan-out-basic",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "scanning"
+    ],
+    "finals": [
+      "scanning"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-fan-out-count/schema.yaml",
+    "source": "tests/tier3-list-processing/test-fan-out-count",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processing"
+    ],
+    "finals": [
+      "processing"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-fan-out-emit-mapping/schema.yaml",
+    "source": "tests/tier3-list-processing/test-fan-out-emit-mapping",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "routing"
+    ],
+    "finals": [
+      "routing"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-fan-out-empty/schema.yaml",
+    "source": "tests/tier3-list-processing/test-fan-out-empty",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "scanning"
+    ],
+    "finals": [
+      "scanning"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-filter-basic/schema.yaml",
+    "source": "tests/tier3-list-processing/test-filter-basic",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-filter-empty/schema.yaml",
+    "source": "tests/tier3-list-processing/test-filter-empty",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-group-by-standalone/schema.yaml",
+    "source": "tests/tier3-list-processing/test-group-by-standalone",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-reduce-count/schema.yaml",
+    "source": "tests/tier3-list-processing/test-reduce-count",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-reduce-max/schema.yaml",
+    "source": "tests/tier3-list-processing/test-reduce-max",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-reduce-min/schema.yaml",
+    "source": "tests/tier3-list-processing/test-reduce-min",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-reduce-operation-count/schema.yaml",
+    "source": "tests/tier3-list-processing/test-reduce-operation-count",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-reduce-pick-or-average/schema.yaml",
+    "source": "tests/tier3-list-processing/test-reduce-pick-or-average",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-reduce-sum/schema.yaml",
+    "source": "tests/tier3-list-processing/test-reduce-sum",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier3-list-processing/test-reduce-weighted-average/schema.yaml",
+    "source": "tests/tier3-list-processing/test-reduce-weighted-average",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier4-cross-entity/test-clear-multiple-targets/schema.yaml",
+    "source": "tests/tier4-cross-entity/test-clear-multiple-targets",
+    "flow": ".",
+    "entry": "active",
+    "order": [
+      "active",
+      "cleared"
+    ],
+    "finals": [
+      "cleared"
+    ]
+  },
+  {
+    "file": "tests/tier4-cross-entity/test-clear-state/schema.yaml",
+    "source": "tests/tier4-cross-entity/test-clear-state",
+    "flow": ".",
+    "entry": "accumulating",
+    "order": [
+      "accumulating",
+      "cleared"
+    ],
+    "finals": [
+      "cleared"
+    ]
+  },
+  {
+    "file": "tests/tier4-cross-entity/test-create-entity/child-flow/schema.yaml",
+    "source": "tests/tier4-cross-entity/test-create-entity",
+    "flow": "child-flow",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "completed"
+    ],
+    "finals": [
+      "completed"
+    ]
+  },
+  {
+    "file": "tests/tier4-cross-entity/test-create-entity/schema.yaml",
+    "source": "tests/tier4-cross-entity/test-create-entity",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "creating",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier4-cross-entity/test-query-filter/schema.yaml",
+    "source": "tests/tier4-cross-entity/test-query-filter",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "filtered"
+    ],
+    "finals": [
+      "filtered"
+    ]
+  },
+  {
+    "file": "tests/tier4-cross-entity/test-query-group-by/schema.yaml",
+    "source": "tests/tier4-cross-entity/test-query-group-by",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "compiled"
+    ],
+    "finals": [
+      "compiled"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-auto-emit-on-create/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-auto-emit-on-create",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "spawned"
+    ],
+    "finals": [
+      "spawned"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-auto-emit-on-create/worker/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-auto-emit-on-create",
+    "flow": "worker",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "requested",
+      "started",
+      "requested_started",
+      "awaiting_requested",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-create-flow-instance-config/worker-flow/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-create-flow-instance-config",
+    "flow": "worker-flow",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "awaiting_ready",
+      "awaiting_spawned",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "spawned",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/worker-flow/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate",
+    "flow": "worker-flow",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "awaiting_ready",
+      "awaiting_spawned",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-create-flow-instance/worker-flow/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-create-flow-instance",
+    "flow": "worker-flow",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "awaiting_observed",
+      "awaiting_spawned",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-template-no-boot-instance/worker/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-template-no-boot-instance",
+    "flow": "worker",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-terminal-state-preserves/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-terminal-state-preserves",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-terminal-state-rejects/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-terminal-state-rejects",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processing",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-timer-cancel/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-timer-cancel",
+    "flow": ".",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "cancelled",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-timer-fire/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-timer-fire",
+    "flow": ".",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "checked"
+    ],
+    "finals": [
+      "checked"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-timer-recurring/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-timer-recurring",
+    "flow": ".",
+    "entry": "monitoring",
+    "order": [
+      "monitoring",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-timer-start-on/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-timer-start-on",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "active",
+      "timed_out"
+    ],
+    "finals": [
+      "timed_out"
+    ]
+  },
+  {
+    "file": "tests/tier5-flow-lifecycle/test-wildcard-subscription/schema.yaml",
+    "source": "tests/tier5-flow-lifecycle/test-wildcard-subscription",
+    "flow": ".",
+    "entry": "listening",
+    "order": [
+      "listening",
+      "matched"
+    ],
+    "finals": [
+      "matched"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-atomicity-commit/schema.yaml",
+    "source": "tests/tier6-event-loop/test-atomicity-commit",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-atomicity-guard-rollback/schema.yaml",
+    "source": "tests/tier6-event-loop/test-atomicity-guard-rollback",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-atomicity-rollback/schema.yaml",
+    "source": "tests/tier6-event-loop/test-atomicity-rollback",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-cross-entity-concurrent/worker/schema.yaml",
+    "source": "tests/tier6-event-loop/test-cross-entity-concurrent",
+    "flow": "worker",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-dead-letter/schema.yaml",
+    "source": "tests/tier6-event-loop/test-dead-letter",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-entity-serialization/schema.yaml",
+    "source": "tests/tier6-event-loop/test-entity-serialization",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processing",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-event-persisted-before-delivery/schema.yaml",
+    "source": "tests/tier6-event-loop/test-event-persisted-before-delivery",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-event-validation/schema.yaml",
+    "source": "tests/tier6-event-loop/test-event-validation",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-guards-pre-handler-state/schema.yaml",
+    "source": "tests/tier6-event-loop/test-guards-pre-handler-state",
+    "flow": ".",
+    "entry": "active",
+    "order": [
+      "active",
+      "processing"
+    ],
+    "finals": [
+      "processing"
+    ]
+  },
+  {
+    "file": "tests/tier6-event-loop/test-on-complete-atomicity-chain/schema.yaml",
+    "source": "tests/tier6-event-loop/test-on-complete-atomicity-chain",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processing",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier7-composition/test-agent-emits-to-node/schema.yaml",
+    "source": "tests/tier7-composition/test-agent-emits-to-node",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "assigned",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier7-composition/test-dual-delivery/schema.yaml",
+    "source": "tests/tier7-composition/test-dual-delivery",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier7-composition/test-full-lifecycle/schema.yaml",
+    "source": "tests/tier7-composition/test-full-lifecycle",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "validated",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "tests/tier7-composition/test-multi-gate-pipeline/schema.yaml",
+    "source": "tests/tier7-composition/test-multi-gate-pipeline",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "approved"
+    ],
+    "finals": [
+      "approved"
+    ]
+  },
+  {
+    "file": "tests/tier7-composition/test-two-node-chain/schema.yaml",
+    "source": "tests/tier7-composition/test-two-node-chain",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processing",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "tests/tier7-composition/test-wildcard-cross-flow/flow-alpha/schema.yaml",
+    "source": "tests/tier7-composition/test-wildcard-cross-flow",
+    "flow": "flow-alpha",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier7-composition/test-wildcard-cross-flow/flow-beta/schema.yaml",
+    "source": "tests/tier7-composition/test-wildcard-cross-flow",
+    "flow": "flow-beta",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier7-composition/test-wildcard-cross-flow/schema.yaml",
+    "source": "tests/tier7-composition/test-wildcard-cross-flow",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-advances-to-list/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-advances-to-list",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done",
+      "failed"
+    ],
+    "finals": [
+      "done",
+      "failed"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-bare-condition/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-bare-condition",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-cel-parse-error/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-cel-parse-error",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-mismatch/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-mismatch",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-rule-list-mismatch/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-rule-list-mismatch",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-condition-payload-mismatch/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-condition-payload-mismatch",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-condition-policy/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-condition-policy",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-create-entity-plus-accumulate/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-create-entity-plus-accumulate",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-deprecated-field/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-deprecated-field",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-dialect-dual/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-dialect-dual",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-dialect-guard/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-dialect-guard",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-emit-mismatch/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-emit-mismatch",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-empty-authored-rule/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-empty-authored-rule",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-event-cycle/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-event-cycle",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processing",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-event-no-consumer/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-event-no-consumer",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-event-no-producer/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-event-no-producer",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-event-no-schema/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-event-no-schema",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-handler-field-undefined/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-handler-field-undefined",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-missing-pin/child/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-missing-pin",
+    "flow": "child",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "working",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-missing-pin/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-missing-pin",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-on-complete-and-rules-mutual-exclusion/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-on-complete-and-rules-mutual-exclusion",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done",
+      "routed"
+    ],
+    "finals": [
+      "done",
+      "routed"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-on-complete-dict/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-on-complete-dict",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-on-complete-state-invalid/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-on-complete-state-invalid",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-payload-empty-schema-mismatch/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-payload-empty-schema-mismatch",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-payload-mismatch/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-payload-mismatch",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-permission-tool-mismatch/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-permission-tool-mismatch",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-policy-conflict/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-policy-conflict",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-policy-conflict/sub-flow/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-policy-conflict",
+    "flow": "sub-flow",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-produces-drift/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-produces-drift",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-prompt-missing/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-prompt-missing",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-prompt-ref-stub/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-prompt-ref-stub",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-prompt-ref/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-prompt-ref",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-prompt-stub/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-prompt-stub",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-required-agent-missing/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-required-agent-missing",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-self-emit/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-self-emit",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-state-machine-invalid/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-state-machine-invalid",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-state-machine-unreachable/support/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-state-machine-unreachable",
+    "flow": "support",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "review",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-success/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-success",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-boot-tool-missing/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-boot-tool-missing",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier8-boot-verification/test-platform-mailbox-event-subscription/schema.yaml",
+    "source": "tests/tier8-boot-verification/test-platform-mailbox-event-subscription",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "awaiting_decision",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-accumulate-compute-branch/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-accumulate-compute-branch",
+    "flow": ".",
+    "entry": "collecting",
+    "order": [
+      "collecting",
+      "high",
+      "mid",
+      "low"
+    ],
+    "finals": [
+      "high",
+      "mid",
+      "low"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-clear-gates-reenter/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-clear-gates-reenter",
+    "flow": ".",
+    "entry": "reviewing",
+    "order": [
+      "reviewing",
+      "approved"
+    ],
+    "finals": [
+      "approved"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-create-instance-config/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-create-instance-config",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "spawned"
+    ],
+    "finals": [
+      "spawned"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-create-instance-config/worker/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-create-instance-config",
+    "flow": "worker",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-gate-chain-three/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-gate-chain-three",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "stage_a",
+      "stage_b",
+      "released"
+    ],
+    "finals": [
+      "released"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-gate-data-advance-emit/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-gate-data-advance-emit",
+    "flow": ".",
+    "entry": "stage_one",
+    "order": [
+      "stage_one",
+      "stage_two",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-guard-multi-source/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-guard-multi-source",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "accepted"
+    ],
+    "finals": [
+      "accepted"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-guard-query-capacity/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-guard-query-capacity",
+    "flow": ".",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "admitted"
+    ],
+    "finals": [
+      "admitted"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-lifecycle-seven-states/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-lifecycle-seven-states",
+    "flow": ".",
+    "entry": "created",
+    "order": [
+      "created",
+      "setup",
+      "active",
+      "running",
+      "stable",
+      "winding_down",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow/tracker/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow",
+    "flow": "tracker",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "recorded"
+    ],
+    "finals": [
+      "recorded"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-rules-fanout-data/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-rules-fanout-data",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "dispatched"
+    ],
+    "finals": [
+      "dispatched"
+    ]
+  },
+  {
+    "file": "tests/tier9-composition-patterns/test-compose-rules-per-rule-data/schema.yaml",
+    "source": "tests/tier9-composition-patterns/test-compose-rules-per-rule-data",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "resolved"
+    ],
+    "finals": [
+      "resolved"
+    ]
+  }
+]

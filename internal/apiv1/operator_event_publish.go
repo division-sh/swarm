@@ -241,6 +241,11 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
+		if cfg.rootInputOnly && params.NewRunCreated {
+			if err := runtimerunstart.ValidateFinite(selectedOpts.Source); err != nil {
+				return apiidempotency.Completion{}, finiteRunStartApplicationError(err)
+			}
+		}
 		publication, err := eventPublicationEvent(params, now, selectedOpts.ExecutionPosture)
 		if err != nil {
 			return apiidempotency.Completion{}, err

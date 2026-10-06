@@ -43,8 +43,8 @@ stage graph:
   flow review (flows/review):
     nodes:
       - open [initial] - Begin
-      - done [terminal]
-      - both [initial,terminal]
+      - done [final]
+      - both [initial,final]
       - bare
     edges:
       - open,review -> done (handler receiver on ready after 1s timer deadline loop retry advance max_attempts=3 escape decision approve verdict yes)
@@ -156,7 +156,7 @@ func describeFactoringView() authoringview.View {
 		RoutingTopology: routingtopology.Topology{SchemaVersion: "routing-topology/v1", SourceAuthority: "projection_only_existing_contract_owners"},
 		StageGraphs: []authoringview.StageGraphView{
 			{FlowID: " review ", FlowPath: " flows/review ",
-				Nodes:  []authoringview.StageGraphNodeView{{ID: "open", Initial: true, Description: " Begin "}, {ID: "done", Terminal: true}, {ID: "both", Initial: true, Terminal: true}, {ID: "bare"}},
+				Nodes:  []authoringview.StageGraphNodeView{{ID: "open", Initial: true, Description: " Begin "}, {ID: "done", Final: true}, {ID: "both", Initial: true, Final: true}, {ID: "bare"}},
 				Edges:  []authoringview.StageGraphEdgeView{{From: []string{"open", "review"}, To: "done", Source: " handler ", NodeID: " receiver ", EventType: " ready ", After: " 1s ", TimerID: " deadline ", LoopID: "retry", LoopOperation: "advance", MaxAttempts: "3", LoopEscape: true, DecisionID: "approve", Verdict: "yes"}, {To: "open"}},
 				Timers: []authoringview.StageGraphTimerView{{Stage: " open ", After: " 1s ", Emit: " expired ", AdvancesTo: " done ", TimerID: " deadline "}, {Stage: "bare", After: "2s"}},
 				Joins: []authoringview.StageGraphJoinView{

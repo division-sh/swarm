@@ -71,8 +71,8 @@ stage graph:
     nodes:
       - collecting [initial]
       - awaiting
-      - complete [terminal]
-      - failed [terminal]
+      - complete [final]
+      - failed [final]
     edges:
       - awaiting -> awaiting (handler.advances_to cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg on period.setup)
       - awaiting -> complete (handler.join.on_complete cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg on period.reported)

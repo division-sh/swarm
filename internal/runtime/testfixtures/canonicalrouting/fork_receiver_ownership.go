@@ -172,7 +172,7 @@ connect:
 func CopyForkReceiverRepeatedOwnership(t testing.TB, receivers []ForkReceiver) string {
 	t.Helper()
 	root := CopyForkReceiverOwnership(t, receivers, false)
-	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "  active: {terminal: true}", "  active: {}\n  done: {terminal: true}")
+	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "  active: {final: true}", "  active: {}\n  done: {final: true}")
 	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "  inputs: [work.requested]", "  inputs: [work.requested, producer.closed]")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - start.closed\n", "    - start.closed\n    - producer.closed\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [work.requested", "outputs: [producer.closed, work.requested")

@@ -577,7 +577,7 @@ func TestRunCommandServedSourceSerializesExactIdentityAndMapsUnsupported(t *test
 func TestRunCommandStartApplicationErrorsExitSixAndDoNotFollow(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
-	for _, codeName := range []string{"BUNDLE_SCOPE_REQUIRED", "BUNDLE_UNAVAILABLE", "BUNDLE_DATA_INTEGRITY_ERROR", "BUNDLE_MISMATCH", "EVENT_NOT_DECLARED", "PAYLOAD_VALIDATION_FAILED", "EVENT_PUBLISH_FAILED"} {
+	for _, codeName := range []string{"BUNDLE_SCOPE_REQUIRED", "BUNDLE_UNAVAILABLE", "BUNDLE_DATA_INTEGRITY_ERROR", "BUNDLE_MISMATCH", "EVENT_NOT_DECLARED", "PAYLOAD_VALIDATION_FAILED", "EVENT_PUBLISH_FAILED", "RUN_NEVER_COMPLETES"} {
 		t.Run(codeName, func(t *testing.T) {
 			var calls []jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

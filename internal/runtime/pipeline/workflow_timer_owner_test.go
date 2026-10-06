@@ -2691,7 +2691,7 @@ func workflowTimerOwnerBundle(t *testing.T, recurring bool) *runtimecontracts.Wo
 func workflowTimerOwnerBundleWithDelay(t *testing.T, recurring bool, delay string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := workflowTimerOwnerSourceFiles()
-	files["schema.yaml"] = fmt.Sprintf("name: workflow-timer-owner-test\nstages:\n  waiting:\n    initial: true\n    timers:\n      - {id: waiting.timeout, after: %q, emit: timer.timeout}\n  done: {}\n", delay)
+	files["schema.yaml"] = fmt.Sprintf("name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: %q, emit: timer.timeout}\n  done: {}\n", delay)
 	bundle := loadWorkflowTempBundle(t, files)
 	// Recurrence is a scheduler variant, not a different transition declaration.
 	bundle.Semantics.Timers[0].Recurring = recurring
@@ -2723,7 +2723,7 @@ func workflowTimerSourceRevisionBundle(t *testing.T, revised bool) *runtimecontr
 		timers += "      - {id: waiting.changed, after: 1h, emit: timer.changed.v1}\n      - {id: waiting.removed, after: 1h, emit: timer.removed}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: workflow-timer-source-revision\nstages:\n  waiting:\n    initial: true\n    timers:\n" + timers,
+		"schema.yaml":   "name: workflow-timer-source-revision\nstages:\n  waiting:\n    timers:\n" + timers,
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "timer.keep:\ntimer.changed.v1:\ntimer.changed.v2:\ntimer.added:\ntimer.removed:\n",
 	})
@@ -2776,7 +2776,7 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 			path, name, prefix = "", "timer-flow-scope-root", "root"
 			armEvent = "timer.arm"
 		}
-		files[path+"schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting:\n    initial: true\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", name, prefix)
+		files[path+"schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting:\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", name, prefix)
 		files[path+"entities.yaml"] = "test_entity: {}\n"
 		files[path+"events.yaml"] = fmt.Sprintf("timer.arm:\n%s.initial:\n%s.event:\n", prefix, prefix)
 		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n", prefix, armEvent)

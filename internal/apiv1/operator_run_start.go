@@ -15,6 +15,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -35,6 +36,7 @@ type bundleIdentityParam struct {
 // permanent run-creation receipt in one transaction. A transport cache is not
 // an implementation of this port.
 type deploymentRunStartOwner interface {
+	LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
 	StartDeploymentRunAcknowledged(context.Context, durabledata.RunCreationCommand, apiidempotency.Request) (durabledata.RunCreationOperationRecord, error)
 }
 
@@ -125,6 +127,29 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	if err := admitRunStartDeploymentFeeds(selectedOpts.Source, data); err != nil {
 		return runStartResult{}, err
 	}
+	key, _, err := optionalStringParam(req.Params, "idempotency_key")
+	if err != nil {
+		return runStartResult{}, err
+	}
+	idempotency := apiidempotency.Request{
+		Method: req.Method, Actor: apiidempotency.BearerActor(req.ActorTokenID), IdempotencyKey: key,
+		RequestHash: req.RequestHash, TTL: runStartIDempotencyTTL, Now: now,
+	}
+	owner, ok := selectedOpts.Acknowledged.(deploymentRunStartOwner)
+	if !ok || owner == nil {
+		return runStartResult{}, fmt.Errorf("selected store does not support atomic deployment run creation")
+	}
+	completion, replay, err := owner.LookupAPIEventPublication(ctx, idempotency)
+	if err != nil {
+		return runStartResult{}, runStartIdempotencyError(err)
+	}
+	if replay {
+		var result runStartResult
+		if err := json.Unmarshal(completion.Response, &result); err != nil {
+			return runStartResult{}, fmt.Errorf("decode deployment run.start idempotency response: %w", err)
+		}
+		return result, nil
+	}
 	selector, err := scenarioExecutionSelectorParam(req.Params)
 	if err != nil {
 		return runStartResult{}, err
@@ -139,18 +164,10 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	if _, _, command, err = command.RequestHash(); err != nil {
 		return runStartResult{}, NewInvalidParamsError(map[string]any{"field": "data", "reason": err.Error()})
 	}
-	owner, ok := selectedOpts.Acknowledged.(deploymentRunStartOwner)
-	if !ok || owner == nil {
-		return runStartResult{}, fmt.Errorf("selected store does not support atomic deployment run creation")
+	if err := runtimerunstart.ValidateFinite(selectedOpts.Source); err != nil {
+		return runStartResult{}, finiteRunStartApplicationError(err)
 	}
-	key, _, err := optionalStringParam(req.Params, "idempotency_key")
-	if err != nil {
-		return runStartResult{}, err
-	}
-	record, err := owner.StartDeploymentRunAcknowledged(ctx, command, apiidempotency.Request{
-		Method: req.Method, Actor: apiidempotency.BearerActor(req.ActorTokenID), IdempotencyKey: key,
-		RequestHash: req.RequestHash, TTL: runStartIDempotencyTTL, Now: now,
-	})
+	record, err := owner.StartDeploymentRunAcknowledged(ctx, command, idempotency)
 	if err != nil {
 		return runStartResult{}, runStartIdempotencyError(dataApplicationError(err))
 	}
@@ -167,6 +184,16 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 			"run creation %s", record.Summary.Outcome))
 	}
 	return runStartResult{RunID: record.Summary.RunID, Status: record.Summary.Status, DataBinding: record.Binding}, nil
+}
+
+func finiteRunStartApplicationError(err error) error {
+	var refusal *runtimerunstart.FiniteStartError
+	if !errors.As(err, &refusal) {
+		return err
+	}
+	return NewApplicationError(RunNeverCompletesCode, false, map[string]any{
+		"flow_id": refusal.FlowID, "detail": refusal.Error(),
+	})
 }
 
 func admitRunStartDeploymentFeeds(source semanticview.Source, data durabledata.RunCreationDataEnvelope) error {

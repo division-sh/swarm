@@ -365,15 +365,12 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
-	view, found := bundle.FlowViewByID(templateID)
-	if !found {
-		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("constructor requires the exact admitted flow tree")
+	children, err := runtimeflowidentity.KeylessChildFlowIDs(req.ContractBundle, templateID)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
-	for _, childView := range view.Children {
-		if !childView.Schema.Instance.Empty() {
-			continue
-		}
-		child, err := runtimeflowidentity.KeylessChild(req.ContractBundle, instance, childView.Paths.FlowPath)
+	for _, childFlowID := range children {
+		child, err := runtimeflowidentity.KeylessChild(req.ContractBundle, instance, childFlowID)
 		if err != nil {
 			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 		}

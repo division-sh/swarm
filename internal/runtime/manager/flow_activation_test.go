@@ -1917,7 +1917,7 @@ func loadFlowActivationEntityContracts(
 		if flowID == "" || entityType == "" {
 			t.Fatalf("flow activation entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nstages:\n  active: {initial: true}\n", flowID))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nstages:\n  active: {}\n", flowID))
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType))
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-activation-test\n")
@@ -5963,7 +5963,7 @@ item.created:
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), fmt.Sprintf(`name: support
 %sstages:
-  waiting: {initial: true}
+  waiting: {}
   done: {}
 `, shape))
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `

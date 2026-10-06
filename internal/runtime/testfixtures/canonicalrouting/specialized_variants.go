@@ -507,7 +507,7 @@ func CopyInputPinExternalScope(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml", "entities.yaml")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: input-pin-external-scope\n")
-	writeLegacyInstanceFlow(t, root, "external_consumer", "name: external_consumer\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - event: ticket.ready\n      source: external\n", "ticket.ready:\n  entity_id: string\n", "", "")
+	writeLegacyInstanceFlow(t, root, "external_consumer", "name: external_consumer\nstages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - event: ticket.ready\n      source: external\n", "ticket.ready:\n  entity_id: string\n", "", "")
 	writeLegacyInstanceFlow(t, root, "plain_consumer", "name: plain_consumer\nstages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - ticket.ready\n", "ticket.ready:\n  entity_id: string\n", "", "")
 	return root
 }

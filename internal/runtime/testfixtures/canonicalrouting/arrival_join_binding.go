@@ -56,10 +56,8 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 	case ArrivalJoinPayloadDirected, ArrivalJoinPayloadDirectedMultipleRecipients, ArrivalJoinPayloadDirectedBeforeArm:
 		files := arrivalJoinPayloadDirectedFiles()
 		if variant == ArrivalJoinPayloadDirectedBeforeArm {
-			files["orders/schema.yaml"] = strings.NewReplacer(
-				"awaiting: {initial: true}", "awaiting: {}",
-				"dispatching: {}", "dispatching: {initial: true}",
-			).Replace(files["orders/schema.yaml"])
+			files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"],
+				"  awaiting: {}\n  dispatching: {}\n", "  dispatching: {}\n  awaiting: {}\n", 1)
 		}
 		if variant == ArrivalJoinPayloadDirectedMultipleRecipients {
 			files["schema.yaml"] += "  - {event: item.completed, from: ., to: mirror, resolution: select}\n"
@@ -255,10 +253,10 @@ connect:
 		files[flow+"/schema.yaml"] = fmt.Sprintf(`name: %s
 instance: order_id
 stages:
-  awaiting: {initial: true}
+  awaiting: {}
   dispatching: {}
-  ready: {terminal: true}
-  attention: {terminal: true}
+  ready: {final: true}
+  attention: {final: true}
 pins:
   inputs:
     - halt.requested

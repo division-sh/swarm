@@ -75,7 +75,7 @@ connect:
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  detail: text\n")
 	writeClosedVariantFile(t, root, "reviews/schema.yaml", `name: reviews
 stages:
-  waiting: {initial: true}
+  waiting: {}
   review:
     gate:
       decision: review_decision
@@ -85,7 +85,7 @@ stages:
         reject:
           input: {reason: {type: `+inputType+`, required: true}}
           advances_to: done
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs: [work.requested]
 `)
