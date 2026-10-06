@@ -317,11 +317,11 @@
         },
         {
           "id": "complete",
-          "terminal": true
+          "final": true
         },
         {
           "id": "failed",
-          "terminal": true
+          "final": true
         }
       ],
       "edges": [
@@ -454,7 +454,7 @@
         },
         {
           "id": "complete",
-          "terminal": true
+          "final": true
         }
       ],
       "edges": [
@@ -513,7 +513,7 @@
         },
         {
           "id": "complete",
-          "terminal": true
+          "final": true
         }
       ],
       "edges": [
@@ -37483,7 +37483,7 @@
       }
     },
     {
-      "path": "schemas[\".\"].stages.complete.terminal",
+      "path": "schemas[\".\"].stages.complete.final",
       "provenance": {
         "origin": "authored",
         "source_file": "schema.yaml",
@@ -37503,7 +37503,7 @@
       }
     },
     {
-      "path": "schemas[\".\"].stages.failed.terminal",
+      "path": "schemas[\".\"].stages.failed.final",
       "provenance": {
         "origin": "authored",
         "source_file": "schema.yaml",
@@ -37519,17 +37519,7 @@
         "source_file": "schema.yaml",
         "source_line": 1,
         "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "schemas[\".\"].stages.pending.initial",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
+        "source_presence": "empty_mapping"
       }
     },
     {
@@ -37694,7 +37684,7 @@
       }
     },
     {
-      "path": "schemas[\"candidate\"].stages.complete.terminal",
+      "path": "schemas[\"candidate\"].stages.complete.final",
       "provenance": {
         "origin": "authored",
         "source_file": "candidate/schema.yaml",
@@ -37710,17 +37700,7 @@
         "source_file": "candidate/schema.yaml",
         "source_line": 1,
         "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "schemas[\"candidate\"].stages.pending.initial",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "candidate/schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
+        "source_presence": "empty_mapping"
       }
     },
     {
@@ -37866,7 +37846,7 @@
       }
     },
     {
-      "path": "schemas[\"scout\"].stages.complete.terminal",
+      "path": "schemas[\"scout\"].stages.complete.final",
       "provenance": {
         "origin": "authored",
         "source_file": "scout/schema.yaml",
@@ -37882,17 +37862,7 @@
         "source_file": "scout/schema.yaml",
         "source_line": 1,
         "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "schemas[\"scout\"].stages.pending.initial",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "scout/schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
+        "source_presence": "empty_mapping"
       }
     }
   ],

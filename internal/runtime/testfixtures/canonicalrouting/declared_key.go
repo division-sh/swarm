@@ -38,8 +38,8 @@ connect:
 	writeClosedVariantFile(t, root, "review/schema.yaml", fmt.Sprintf(`name: review
 instance: %s
 stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 pins:
   inputs:
     - work.keyed

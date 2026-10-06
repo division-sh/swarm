@@ -37,7 +37,7 @@ stage graph:
   flow telegram-ingress (telegram-ingress):
     nodes:
       - active [initial]
-      - done [terminal]
+      - done [final]
     edges:
       - active -> done (gate runtime on mailbox.card_decided decision retire_service verdict retire)
     gates:

@@ -128,7 +128,7 @@ stages:
       - after: "{{marginal_park_days}}d"
         advances_to: expired
   expired:
-    terminal: true
+    final: true
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -235,12 +235,11 @@ func TestFlowSchemaDocumentRejectsGateOutcomeWithoutAdvance(t *testing.T) {
 name: launch
 stages:
   awaiting:
-    initial: true
     gate:
       decision: launch_review
       outcomes:
         approve: {emit: opco.launched}
-  operating: {terminal: true}
+  operating: {final: true}
 `), &doc)
 	if err == nil || !strings.Contains(err.Error(), "advances_to is required") {
 		t.Fatalf("decode error = %v, want direct outcome closure", err)
@@ -258,7 +257,7 @@ stages:
       authority: operator
       outcomes:
         approve: {advances_to: operating}
-  operating: {terminal: true}
+  operating: {final: true}
 `), &doc)
 	if err == nil || !strings.Contains(err.Error(), "authority") {
 		t.Fatalf("decode error = %v, want unknown-field rejection", err)
@@ -385,7 +384,7 @@ stages:
         after: 72h
         advances_to: expired
   expired:
-    terminal: true
+    final: true
 `), &doc)
 	if err == nil || !strings.Contains(err.Error(), `stage timer id "sla" is declared in both stage "awaiting_review" and stage "parked"`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want cross-stage timer id rejection", err)

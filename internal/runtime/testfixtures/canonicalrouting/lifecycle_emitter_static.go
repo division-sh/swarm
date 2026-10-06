@@ -144,7 +144,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 			}
 		}
 	case LifecycleStaticGateLoopShared:
-		schema = strings.Replace(schema, "  waiting: {initial: true}", "  waiting:\n    initial: true\n    gate:\n      decision: review_decision\n      outcomes:\n        approve:\n          advances_to: escaped\n          emit:\n            event: loop.escaped\n            fields: {revision_id: \"gate\"}", 1)
+		schema = strings.Replace(schema, "  waiting: {}", "  waiting:\n    gate:\n      decision: review_decision\n      outcomes:\n        approve:\n          advances_to: escaped\n          emit:\n            event: loop.escaped\n            fields: {revision_id: \"gate\"}", 1)
 	case LifecycleStaticGateWrongFlow:
 		events = "work.requested:\n  seed: boolean\n"
 		writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\n")
@@ -152,7 +152,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	case LifecycleStaticGateDanglingStrict:
 		// Unlike the journey shell with its removed collector, this minimal
 		// dangling contract has no unrelated unused state or entity fields.
-		schema = strings.Replace(schema, "  approved: {}\n  done: {terminal: true}", "  approved: {terminal: true}", 1)
+		schema = strings.Replace(schema, "  approved: {}\n  done: {final: true}", "  approved: {final: true}", 1)
 		writeClosedVariantFile(t, root, "entities.yaml", "work: {}\n")
 	case LifecycleStaticLoopUnknownEvent:
 		schema = strings.Replace(schema, "event: loop.escaped", "event: absent.event", 1)

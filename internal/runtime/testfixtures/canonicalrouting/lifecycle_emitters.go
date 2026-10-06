@@ -150,7 +150,7 @@ pins:
 			connects.WriteString(fmt.Sprintf("  - {event: %s, from: ., to: %s}\n", event, child))
 		}
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: selected-carriers\nstages:\n  waiting: {initial: true}\n  active: {}\n  done: {terminal: true}\npins:\n  inputs:\n"+inputs.String()+"  outputs:\n"+outputs.String()+"connect:\n"+connects.String())
+	writeClosedVariantFile(t, root, "schema.yaml", "name: selected-carriers\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n"+inputs.String()+"  outputs:\n"+outputs.String()+"connect:\n"+connects.String())
 	events.WriteString("work.completed:\n  result: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", events.String())
 	return root
@@ -182,7 +182,7 @@ func CopyLifecycleGateAdvanceOnly(t testing.TB) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := strings.Replace(string(raw), "  approved: {}\n  done: {terminal: true}", "  approved: {terminal: true}", 1)
+	text := strings.Replace(string(raw), "  approved: {}\n  done: {final: true}", "  approved: {final: true}", 1)
 	writeClosedVariantFile(t, root, "schema.yaml", text)
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "work: {}\n")

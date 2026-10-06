@@ -157,7 +157,7 @@ func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycl
 		flows[scope.Path] = states
 		flows[scope.OwningFlowID] = states
 	}
-	return stagecatalogfixture.NewFinalCatalog(source.FlowFinalStages(""), flows)
+	return stagecatalogfixture.NewFinalCatalog(source.FlowFinalStages(semanticview.RootExecutionFlowID(source)), flows)
 }
 
 type runCompletionSystemNodeModule struct {

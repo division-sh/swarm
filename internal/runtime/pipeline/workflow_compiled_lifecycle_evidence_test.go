@@ -41,7 +41,7 @@ func TestPipelineCompiledTimerTransitionEvidenceOnBothStores(t *testing.T) {
 					timer += "        emit: review.expired\n"
 				}
 				files := map[string]string{
-					"schema.yaml":   "name: timer-evidence\nstages:\n  waiting:\n    initial: true\n    timers:\n      - after: 1h\n" + timer + "  done: {terminal: true}\n",
+					"schema.yaml":   "name: timer-evidence\nstages:\n  waiting:\n    timers:\n      - after: 1h\n" + timer + "  done: {final: true}\n",
 					"entities.yaml": "test_entity: {}\n",
 					"events.yaml":   "review.expired:\n",
 				}

@@ -32,7 +32,7 @@ import (
 )
 
 func compiledAdapterSource(t *testing.T, initialTimer ...bool) *contracts.WorkflowContractBundle {
-	return compiledAdapterSourceWithKillStages(t, "  killed: {terminal: true}\n", initialTimer...)
+	return compiledAdapterSourceWithKillStages(t, "  killed: {final: true}\n", initialTimer...)
 }
 
 func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initialTimer ...bool) *contracts.WorkflowContractBundle {
@@ -179,7 +179,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
 `,
 	}
 	if len(initialTimer) > 0 && initialTimer[0] {
-		files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  ready: {initial: true}", "  ready:\n    initial: true\n    timers:\n      - {id: keep, after: 1h, emit: observed}", 1)
+		files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  ready: {}", "  ready:\n    timers:\n      - {id: keep, after: 1h, emit: observed}", 1)
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -516,9 +516,9 @@ func TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores(t *testing.T)
 		for _, tc := range []struct {
 			name, stages, wantStage string
 		}{
-			{"lower_first", "  killed: {terminal: true}\n  Killed: {terminal: true}\n", "killed"},
-			{"upper_first", "  Killed: {terminal: true}\n  killed: {terminal: true}\n", "killed"},
-			{"upper_only", "  Killed: {terminal: true}\n", "ready"},
+			{"lower_first", "  killed: {final: true}\n  Killed: {final: true}\n", "killed"},
+			{"upper_first", "  Killed: {final: true}\n  killed: {final: true}\n", "killed"},
+			{"upper_only", "  Killed: {final: true}\n", "ready"},
 		} {
 			t.Run(backend+"/"+tc.name, func(t *testing.T) {
 				bundle := compiledAdapterSourceWithKillStages(t, tc.stages)

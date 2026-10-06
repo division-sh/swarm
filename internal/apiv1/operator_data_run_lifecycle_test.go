@@ -1484,8 +1484,12 @@ func dataRunEventPublishBodyForBundle(runID, idempotencyKey, bundleHash string, 
 }
 
 func dataRunStartBody(runID, idempotencyKey string, data map[string]any) string {
+	return dataRunStartBodyForBundle(runID, idempotencyKey, runStartTestBundleHash, data)
+}
+
+func dataRunStartBodyForBundle(runID, idempotencyKey, bundleHash string, data map[string]any) string {
 	params := map[string]any{
-		"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "trigger"},
+		"bundle_hash": bundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "trigger"},
 		"run_id": runID, "idempotency_key": idempotencyKey, "data": data,
 	}
 	raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": idempotencyKey, "method": "run.start", "params": params})

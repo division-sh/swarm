@@ -2885,10 +2885,10 @@ func loadWave1EntityToolBundleWithInitialStage(t *testing.T, actor models.AgentC
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf(`name: %s
 instance: fixture_key
 stages:
-  queued: {initial: %t}
-  marginal_review: {initial: %t}
-  closed: {terminal: true}
-`, flowID, initial == "queued", initial == "marginal_review"))
+  queued: {}
+  marginal_review: {}
+  closed: {final: true}
+`, flowID))
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), entityToolKeyedFixtureYAML(entitiesYAML))
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor)+"  entity_writes:\n    "+entityType+": {save: all}\n")
 
@@ -3020,15 +3020,15 @@ func loadWave1EntityToolMultiFlowBundle(t *testing.T, flows map[string]entityToo
 			schemaYAML = fmt.Sprintf(`name: %s
 instance: fixture_key
 stages:
-  queued: {initial: true}
+  queued: {}
   active: {}
   researching: {}
   marginal_review: {}
   analyzed: {}
   ready: {}
-  finished: {terminal: true}
-  closed: {terminal: true}
-  killed: {terminal: true}
+  finished: {final: true}
+  closed: {final: true}
+  killed: {final: true}
 `, flowID)
 		}
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schemaYAML)
