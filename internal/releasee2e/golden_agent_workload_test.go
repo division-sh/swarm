@@ -813,11 +813,10 @@ func clockReleaseConfig(t *testing.T, root, backend string) (string, []string) {
 	if backend == "sqlite" {
 		config += fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %q\n", filepath.Join(root, "runtime.db"))
 	} else {
-		connection, err := testpostgres.ParseConnection(testutil.StartPostgresDSN(t))
+		parameters, err := testpostgres.ParseConnectionParameters(testutil.StartPostgresDSN(t))
 		if err != nil {
 			t.Fatal(err)
 		}
-		parameters := connection.Parameters()
 		password = parameters.Password
 		config += fmt.Sprintf("store:\n  backend: postgres\ndatabase:\n  host: %q\n  port: %d\n  name: %q\n  user: %q\n  password_env: %s\n  sslmode: %q\n  pool_size: 5\n",
 			parameters.Host, parameters.Port, parameters.Database, parameters.User, "CLOCK_TEST_POSTGRES_PASSWORD", parameters.SSLMode)

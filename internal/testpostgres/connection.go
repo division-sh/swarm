@@ -41,6 +41,16 @@ func ParseConnection(raw string) (Connection, error) {
 	return newConnection(cfg)
 }
 
+// ParseConnectionParameters projects configuration values without exporting the
+// native connection/configuration carrier to semantic fixtures.
+func ParseConnectionParameters(raw string) (Parameters, error) {
+	connection, err := ParseConnection(raw)
+	if err != nil {
+		return Parameters{}, err
+	}
+	return connection.Parameters(), nil
+}
+
 func newConnection(cfg pq.Config) (Connection, error) {
 	if cfg.SSLNegotiation == "" {
 		cfg.SSLNegotiation = pq.SSLNegotiationPostgres
