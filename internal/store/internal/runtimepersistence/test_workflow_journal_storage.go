@@ -47,3 +47,31 @@ func ReadWorkflowJournalStorageForTest(ctx context.Context, selected any, runID 
 	}
 	return evidence, nil
 }
+
+// Keep the original failure-only whole-store diagnostic and ordering. This
+// detached list is neither a journal reader selector nor execution authority.
+func ReadWorkflowActivityAttemptStatusesForTest(ctx context.Context, selected any) ([]string, error) {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return nil, err
+	}
+	var statuses []string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT request_event_id, status FROM activity_attempts ORDER BY request_event_id`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var request, status string
+			if err := rows.Scan(&request, &status); err != nil {
+				return err
+			}
+			statuses = append(statuses, request+":"+status)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return statuses, nil
+}

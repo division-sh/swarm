@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
@@ -93,6 +95,27 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 			faulted, count := storetest.ActivityJournalCleanupPersistenceFault(t, selected, fault)
 			return coordinator(bus, options, faulted), count
 		},
+		Construct: func(ctx context.Context, instance pipeline.WorkflowInstance) error {
+			command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, instance.CreatedAt)
+			if err != nil {
+				return err
+			}
+			committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
+			if err != nil {
+				return err
+			}
+			if !committed.Acknowledged || !committed.Created {
+				return fmt.Errorf("loop component construction did not acknowledge exact native creation")
+			}
+			return nil
+		},
+		ClaimReplyLossCoordinator: func(ctx context.Context, bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, run, request string, fault error) (*pipeline.PipelineCoordinator, func() int32) {
+			faulted, count := storetest.ActivityClaimReplyLossPersistenceFault(t, ctx, selected, run, request, fault)
+			return coordinator(bus, options, faulted), count
+		},
+		ReadAttemptStatuses: func(ctx context.Context) ([]string, error) {
+			return storetest.ReadWorkflowActivityAttemptStatuses(ctx, selected)
+		},
 		Reopen: func() pipeline.WorkflowActivityNativeFixtureForTest {
 			if err := join(); err != nil {
 				t.Fatal(err)
@@ -149,6 +172,14 @@ func TestActivityTerminalPostCommitErrorPublishesJournaledResultBothStores(t *te
 
 func TestActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitError(t *testing.T) {
 	pipeline.VerifyActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitErrorForTest(t, workflowActivityNativeFixture)
+}
+
+func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) {
+	pipeline.VerifyLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStoresForTest(t, workflowActivityNativeFixture)
+}
+
+func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *testing.T) {
+	verifyNativeActivityBothStores(t, pipeline.VerifyLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatchForTest)
 }
 
 func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournal(t *testing.T) {

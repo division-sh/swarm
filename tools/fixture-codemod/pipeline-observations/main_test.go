@@ -15,7 +15,7 @@ func TestReviewedSnapshotsAreFiniteAndIdempotent(t *testing.T) {
 	if err := json.Unmarshal(recipeBytes, &recipes); err != nil {
 		t.Fatal(err)
 	}
-	if len(recipes) != 72 {
+	if len(recipes) != 75 {
 		t.Fatalf("recipe count=%d", len(recipes))
 	}
 	for _, row := range recipes {
