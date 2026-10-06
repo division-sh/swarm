@@ -30,7 +30,8 @@ initializers use the same operation/context traversal as function bodies.
 
 Excluded declarations retain normalized body/initializer/signature fingerprints,
 relative file, import/build context and multiplicity when not source-proven
-literal-only. Useful canonical type facts can confirm operations, but never
+literal-only or an exact source-proven typed-refusal forwarder. Useful canonical
+type facts can confirm operations, but never
 validate a foreign platform. Receiver methods stay in AST accounting rather than
 being registered against a cloned type checker's non-local receiver declarations.
 Every method's full source is covered; no broad loader-error catch exists.
@@ -108,18 +109,18 @@ These are separate metrics. They are not B's migrated integration census of
 
 ### Corrected Review Snapshot
 
-`review-bounded-ast-bootstrap-final-variants.jsonl` completes the same original
-extraction-base and candidate census with collector digest
-`d6cf92671c2d246be98898af704a0c16971f15cfa5bd31c2ae1d961c6cb8bd45`.
+`review-rebased-classified-bootstrap.jsonl` completes the original extraction
+source, current trusted integration source and candidate census with digest
+`494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5`.
 The candidate adds/removes zero debt relative to that source. The reviewed origin
 is unchanged, and all original snapshot identities/multiplicities remain covered.
 
-- Collected findings: 53,523; raw-operation occurrences across all roles: 38,280.
-- Debt occurrences: 15,318; distinct identities: 12,047.
+- Collected findings: 53,521; raw-operation occurrences across all roles: 38,280.
+- Debt occurrences: 15,316; distinct identities: 12,045.
 - Confirmed raw-operation debt: 11,406.
-- Separately accounted unresolved excluded-source occurrences: 69.
+- Separately accounted unresolved excluded-source occurrences: 67.
 - Newly represented inherited omissions: 15 raw operations, one local raw type,
-  and 69 uncertainties. No original entry is retired or paid for by a removal.
+  and 67 uncertainties. No original entry is retired or paid for by a removal.
 
 The intermediate first-file draft missed seven augmented-package raw-export
 facts. That snapshot is retained as superseded evidence, not used as the
@@ -127,10 +128,22 @@ baseline. Per-file variant evidence now merges maximum occurrence multiplicity
 per resolved fact, preserving distinct init/blank declarations without charging
 the same AST again for a package reload. Its new regression control passes.
 
-Focused final controls: 23 roots / 57 named executions, no skips, strict root and
+Focused variant controls: 23 roots / 57 named executions, no skips, strict root and
 package completion validation. Original-collector negatives fail all five review
 roots and all three bounded excluded-source roots as intended. These pre-commit
 development receipts do not replace repair-head qualification.
+
+The first rebased comparison correctly refused newer master's
+`ObserveSQLiteInspectionAbsence` as new uncertainty. It is not admitted by moving
+the origin or raising the snapshot. The narrow source-evidenced classifier
+recognizes exactly a two-statement forwarding function whose same-file callee
+returns a typed constant error without any calls, raw signature or nonconstant
+field value. The callee's full source remains uncertain and change-barriered;
+there is no interprocedural/dataflow framework or file/function-name permission.
+Negative controls preserve uncertainty for helper work, argument work and a
+callback shadowing the helper. The original origin has two identical harmless
+forwarders; the same reviewed classification removes those two uncertainties
+and proves newer master's equivalent forwarding declaration benign.
 
 ## Proof And Residual Closure
 
