@@ -807,21 +807,26 @@ func runAuthorityTransaction(
 		return false, err
 	}
 	probe.Begun()
+	serializationConflict := false
 	defer func() {
 		if tx != nil {
 			cleanupStarted := time.Now()
 			probe.RollbackAttempted()
-			cleanupErr := rollbackSessionTransaction(tx, session)
+			rolledBack, cleanupErr := rollbackSessionTransactionOutcome(tx, session)
 			probe.RecordCleanup(time.Since(cleanupStarted))
 			if cleanupErr != nil {
 				slog.Error("postgres retained transaction cleanup failed", "error", cleanupErr)
 				err = errors.Join(err, cleanupErr)
+			}
+			if serializationConflict && rolledBack && cleanupErr == nil && contextError(ctx) == nil {
+				err = &rolledBackSerializationConflict{cause: err}
 			}
 		}
 	}()
 	if runErr := session.runWithCallerCancellation(ctx, func(operationCtx context.Context) error {
 		return fn(transactiontest.WithAttempt(operationCtx, probe), tx)
 	}); runErr != nil {
+		serializationConflict = (opts == nil || !opts.ReadOnly) && exactSerializationConflict(runErr)
 		return false, runErr
 	}
 	if callerErr := contextError(ctx); callerErr != nil {
@@ -869,8 +874,13 @@ func (l *AdvisoryLockLease) RunTransaction(
 }
 
 func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
+	_, err := rollbackSessionTransactionOutcome(tx, session)
+	return err
+}
+
+func rollbackSessionTransactionOutcome(tx *sql.Tx, session *SessionAuthority) (bool, error) {
 	if tx == nil || session == nil {
-		return errors.New("PostgreSQL session transaction is missing")
+		return false, errors.New("PostgreSQL session transaction is missing")
 	}
 	rollbackErr := tx.Rollback()
 	settledElsewhere := rollbackErr == sql.ErrTxDone
@@ -885,7 +895,8 @@ func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
 	if endErr != nil {
 		discardErr = errors.Join(discardErr, session.forceDiscard())
 	}
-	return errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(discardErr))
+	cleanRollback := rollbackErr == nil && !settledElsewhere && endErr == nil && discardErr == nil && !session.fenced.Load()
+	return cleanRollback, errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(discardErr))
 }
 
 func contextError(ctx context.Context) error {

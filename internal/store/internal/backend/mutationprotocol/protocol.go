@@ -391,6 +391,9 @@ func failed[T any](err error) Result[T] { return Result[T]{err: err, phase: Befo
 func Reject[T any](err error) Result[T] { return failed[T](err) }
 
 func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence Evidence, kind Kind, baseline *Baseline, candidates *runhandoff.CandidateCoordinator, native nativeRunner, write func(context.Context, *Attempt) (T, error)) Result[T] {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if write == nil || native == nil {
 		return failed[T](errors.New("selected-store mutation writer and native runner are required"))
 	}
@@ -432,53 +435,79 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 	var value T
 	var previous *Attempt
 	phase := BeforeAttempt
-	acknowledged, nativeErr := native(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if previous != nil {
-			previous.active = false
-		}
-		resetEffects()
-		if handoff != nil {
-			if err := handoff.ResetAttempt(); err != nil {
-				return err
+	domainEntered := false
+	var acknowledged bool
+	var nativeErr error
+	retryDelay := time.Millisecond
+	for {
+		phase = BeforeAttempt
+		acknowledged, nativeErr = native(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if previous != nil {
+				previous.active = false
 			}
-		}
-		attempt := &Attempt{tx: tx, dialect: dialect, evidence: evidence, kind: kind, effects: baseline.effects, handoff: handoff, candidates: candidates, active: true}
-		previous = attempt
-		defer func() { attempt.active = false }()
-		phase = AcquireFence
-		fenceSpan := transactiontest.BeginMutationPhase(txctx, transactiontest.MutationFence)
-		switch evidence {
-		case Story:
-			story, err := privateactivity.Begin(txctx, tx, dialect)
+			resetEffects()
+			if handoff != nil {
+				if err := handoff.ResetAttempt(); err != nil {
+					return err
+				}
+			}
+			attempt := &Attempt{tx: tx, dialect: dialect, evidence: evidence, kind: kind, effects: baseline.effects, handoff: handoff, candidates: candidates, active: true}
+			previous = attempt
+			defer func() { attempt.active = false }()
+			phase = AcquireFence
+			fenceSpan := transactiontest.BeginMutationPhase(txctx, transactiontest.MutationFence)
+			switch evidence {
+			case Story:
+				story, err := privateactivity.Begin(txctx, tx, dialect)
+				if err != nil {
+					fenceSpan.End()
+					return err
+				}
+				attempt.story = story
+			case AuthorityFence:
+				if err := privateactivity.FenceMutationOrder(txctx, tx, dialect); err != nil {
+					fenceSpan.End()
+					return err
+				}
+			}
+			fenceSpan.End()
+			phase = DomainWrite
+			domainEntered = true
+			domainSpan := transactiontest.BeginMutationPhase(txctx, transactiontest.MutationDomain)
+			candidate, err := write(txctx, attempt)
+			domainSpan.End()
 			if err != nil {
-				fenceSpan.End()
 				return err
 			}
-			attempt.story = story
-		case AuthorityFence:
-			if err := privateactivity.FenceMutationOrder(txctx, tx, dialect); err != nil {
-				fenceSpan.End()
-				return err
+			finalizeSpan := transactiontest.BeginMutationPhase(txctx, transactiontest.MutationFinalize)
+			finalizeErr := attempt.finalize(txctx, &phase)
+			finalizeSpan.End()
+			if finalizeErr != nil {
+				return finalizeErr
 			}
+			value = candidate
+			phase = CommitAdmission
+			return nil
+		})
+		// The native outcome boolean is not rollback proof. Only a sealed,
+		// clean pre-COMMIT abort at the fence permits a fresh transaction.
+		if acknowledged || dialect != privateactivity.DialectPostgres || phase != AcquireFence || domainEntered || !postgresbackend.IsRolledBackSerializationConflict(nativeErr) {
+			break
 		}
-		fenceSpan.End()
-		phase = DomainWrite
-		domainSpan := transactiontest.BeginMutationPhase(txctx, transactiontest.MutationDomain)
-		candidate, err := write(txctx, attempt)
-		domainSpan.End()
-		if err != nil {
-			return err
+		if callerErr := ctx.Err(); callerErr != nil {
+			return Result[T]{err: errors.Join(nativeErr, callerErr), phase: phase}
 		}
-		finalizeSpan := transactiontest.BeginMutationPhase(txctx, transactiontest.MutationFinalize)
-		finalizeErr := attempt.finalize(txctx, &phase)
-		finalizeSpan.End()
-		if finalizeErr != nil {
-			return finalizeErr
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return Result[T]{err: errors.Join(nativeErr, ctx.Err()), phase: phase}
+		case <-timer.C:
 		}
-		value = candidate
-		phase = CommitAdmission
-		return nil
-	})
+		if retryDelay < 16*time.Millisecond {
+			retryDelay *= 2
+		}
+	}
 	if !acknowledged {
 		if nativeErr == nil {
 			nativeErr = errors.New("selected-store mutation commit was not acknowledged")
