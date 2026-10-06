@@ -42,7 +42,6 @@ func TestIssue2564M28OneEntityFenceDoesNotBlockIndependentEntityBothStores(t *te
 			f := newIssue2564OperationFixture(t, backend)
 			request := sqliteFlowActivationRequest(f.bundle, "operations", "independent", "", "operations/independent")
 			request.OccurredAt = time.Now().UTC().Truncate(time.Microsecond)
-			request.Config = map[string]any{"receiver_key": "independent"}
 			request.ConstructorInput, request.ResolvedKey = "construct.requested", "independent"
 			request.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, f.state.Identity.RunID, events.EventEnvelope{}, request.OccurredAt)
 			activation, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
