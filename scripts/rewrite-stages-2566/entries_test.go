@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -22,6 +26,67 @@ func assertEntryGolden(expected entryGolden, schema contracts.FlowSchemaDocument
 		return fmt.Errorf("%s / %s: reviewed entry/order/finals changed: entry=%s order=%v finals=%v; expected=%+v", expected.Source, expected.Flow, schema.StageDeclarations.InitialStage(), order, schema.StageDeclarations.FinalStages(), expected)
 	}
 	return nil
+}
+
+func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
+	for _, fixture := range []struct {
+		name     string
+		build    func(testing.TB) string
+		expected []entryGolden
+	}{
+		{"stage-completion", canonicalrouting.CopyStageCompletionJourney, []entryGolden{
+			{Flow: ".", Entry: "active", Order: []string{"active", "done"}, Finals: []string{"done"}},
+			{Flow: "discovery", Entry: "ready", Order: []string{"ready", "Ready"}, Finals: []string{"Ready"}},
+		}},
+		{"loop-join", canonicalrouting.CopyForkLoopRetainedJoin, []entryGolden{
+			{Flow: ".", Entry: "queued", Order: []string{"queued", "working", "reviewing", "approved", "exhausted"}, Finals: []string{"approved", "exhausted"}},
+		}},
+		{"loop-join-variant", canonicalrouting.CopyForkLoopRetainedJoinSeparateCheckpoint, []entryGolden{
+			{Flow: ".", Entry: "queued", Order: []string{"queued", "working", "reviewing", "approved", "exhausted"}, Finals: []string{"approved", "exhausted"}},
+		}},
+		{"constructed-gate", func(t testing.TB) string { return canonicalrouting.CopyConstructedGateForkControl(t, true) }, []entryGolden{
+			{Flow: ".", Entry: "pending", Order: []string{"pending", "done"}, Finals: []string{"done"}},
+		}},
+		{"describe-variant", canonicalrouting.CopyDescribeStageGraph, []entryGolden{
+			{Flow: "support", Entry: "waiting", Order: []string{"waiting", "active", "review", "timed_out"}, Finals: []string{"review", "timed_out"}},
+		}},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			root := fixture.build(t)
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			persisted, err := sourceartifact.PersistedFromArtifact(bundle.SourceArtifact, time.Unix(1, 0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog, err := persisted.Decode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			retained, err := sourceartifact.DecodeLogical(catalog.LogicalBlob())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, artifact := range []*sourceartifact.AdmittedSourceArtifact{bundle.SourceArtifact, catalog, retained} {
+				if artifact.BundleHash() != bundle.SourceArtifact.BundleHash() || !bytes.Equal(artifact.LogicalBlob(), bundle.SourceArtifact.LogicalBlob()) {
+					t.Fatal("catalog/retained reconstruction changed exact source bytes")
+				}
+				loaded, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, expected := range fixture.expected {
+					graph, ok := loaded.WorkflowStageTopology(expected.Flow)
+					if !ok || graph.InitialStage != expected.Entry || !reflect.DeepEqual(graph.StageIDs(), expected.Order) || !reflect.DeepEqual(graph.FinalStageIDs(), expected.Finals) {
+						t.Fatalf("actual generated/retained source differs from reviewed %s: graph=%+v expected=%+v", expected.Flow, graph, expected)
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestRewrite2566EntryGoldenMatchesTypedCorpus(t *testing.T) {
@@ -37,8 +102,16 @@ func TestRewrite2566EntryGoldenMatchesTypedCorpus(t *testing.T) {
 		t.Fatal("missing independently reviewed entry golden")
 	}
 	for _, entry := range entries {
-		t.Run(entry.File, func(t *testing.T) {
-			if filepath.ToSlash(filepath.Join(entry.Source, entry.Flow, "schema.yaml")) != entry.File {
+		t.Run(entry.File+"/"+entry.Flow, func(t *testing.T) {
+			if entry.Function != "" {
+				assertEmbeddedEntryGolden(t, entry)
+				return
+			}
+			if len(entry.EmbeddedPath) != 0 {
+				assertSpecEntryGolden(t, entry)
+				return
+			}
+			if filepath.ToSlash(filepath.Join(entry.Source, entry.Flow, filepath.Base(entry.File))) != entry.File {
 				t.Fatalf("invalid exact source/flow tuple: %+v", entry)
 			}
 			body, err := os.ReadFile(filepath.Join("../..", entry.File))
@@ -58,6 +131,71 @@ func TestRewrite2566EntryGoldenMatchesTypedCorpus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func assertSpecEntryGolden(t *testing.T, expected entryGolden) {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("../..", expected.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := yamlsource.Load(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := snapshot.Document(expected.File).Root()
+	for _, key := range expected.EmbeddedPath {
+		field, err := value.Lookup(key)
+		if err != nil || field.Presence == yamlsource.PresenceMissing {
+			t.Fatalf("missing embedded source field %s: %v", key, err)
+		}
+		value = field.Value
+	}
+	scalar, err := value.Scalar()
+	if err != nil {
+		t.Fatal(err)
+	}
+	embedded, err := yamlsource.Load([]byte(scalar.Value))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := contracts.AdmitFlowSchemaValue(embedded.Document(expected.Flow).Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := assertEntryGolden(expected, schema); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertEmbeddedEntryGolden(t *testing.T, expected entryGolden) {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("../..", expected.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sites, err := goLiteralSites(expected.File, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, site := range sites {
+		if site.Function != expected.Function || site.Ordinal != expected.Literal {
+			continue
+		}
+		snapshot, err := yamlsource.Load([]byte(site.Body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		schema, err := contracts.AdmitFlowSchemaValue(snapshot.Document(expected.File).Root())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := assertEntryGolden(expected, schema); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	t.Fatalf("reviewed embedded source disappeared: %+v", expected)
 }
 
 func TestRewrite2566EntryGoldenRejectsSortedDumpWithoutStranding(t *testing.T) {

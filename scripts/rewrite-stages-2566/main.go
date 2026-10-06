@@ -145,31 +145,15 @@ func apply(root, ledger string, write, check bool) error {
 	sites := 0
 	// Validate the whole plan before changing any file.
 	for _, c := range p.Changes {
-		if filepath.IsAbs(c.File) || filepath.Clean(c.File) != c.File || c.File == "." || c.File == ".." || strings.HasPrefix(c.File, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("invalid ledger path %q", c.File)
-		}
 		if _, duplicate := outputs[c.File]; duplicate {
 			return fmt.Errorf("duplicate ledger file %s", c.File)
 		}
-		if (len(c.Equivalence) == 0 && c.Review == "") || len(c.Edits) == 0 || c.BeforeHash == c.AfterHash {
-			return fmt.Errorf("%s: missing edit/equivalence decision", c.File)
-		}
-		body, err := os.ReadFile(filepath.Join(root, c.File))
+		output, err := pendingChange(root, c, check)
 		if err != nil {
 			return err
 		}
-		output, err := rewrite(c, body)
-		if err != nil {
-			return err
-		}
-		outputs[c.File] = nil
+		outputs[c.File] = output
 		sites += len(c.Equivalence)
-		if !bytes.Equal(output, body) {
-			if check {
-				return fmt.Errorf("%s: unapplied reviewed output", c.File)
-			}
-			outputs[c.File] = output
-		}
 	}
 	changed := 0
 	for _, c := range p.Changes {
@@ -190,4 +174,25 @@ func apply(root, ledger string, write, check bool) error {
 	}
 	fmt.Printf("%d prepared source sites; %d files %s\n", sites, changed, map[bool]string{true: "written", false: "would change"}[write])
 	return nil
+}
+
+func pendingChange(root string, c change, check bool) ([]byte, error) {
+	if filepath.IsAbs(c.File) || filepath.Clean(c.File) != c.File || c.File == "." || c.File == ".." || strings.HasPrefix(c.File, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("invalid ledger path %q", c.File)
+	}
+	if (len(c.Equivalence) == 0 && c.Review == "") || len(c.Edits) == 0 || c.BeforeHash == c.AfterHash {
+		return nil, fmt.Errorf("%s: missing edit/equivalence decision", c.File)
+	}
+	body, err := os.ReadFile(filepath.Join(root, c.File))
+	if err != nil {
+		return nil, err
+	}
+	output, err := rewrite(c, body)
+	if err != nil || bytes.Equal(output, body) {
+		return nil, err
+	}
+	if check {
+		return nil, fmt.Errorf("%s: unapplied reviewed output", c.File)
+	}
+	return output, nil
 }

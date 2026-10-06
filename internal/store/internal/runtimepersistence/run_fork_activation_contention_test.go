@@ -590,6 +590,7 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertRetainedStageCatalogsForFork(t, f.source, loaded.Source)
 	if loaded.Cleanup != nil {
 		t.Cleanup(func() {
 			if err := loaded.Cleanup(); err != nil {

@@ -326,14 +326,15 @@ type WorkflowGateInputField struct {
 // WorkflowStageTopology is the canonical lowered lifecycle graph for one flow.
 // Verifier, runtime loop plans, and authoring projections consume this graph.
 type WorkflowStageTopology struct {
-	FlowID            string
-	InitialStage      string
-	Stages            []string
-	FinalStages       []string
-	Edges             []WorkflowStageTopologyEdge
-	Handlers          []WorkflowHandlerStageScope
-	stageCatalog      *workflowStageCatalog
-	guardTerminations []WorkflowGuardTerminationPossibility
+	FlowID              string
+	InitialStage        string
+	Stages              []string
+	FinalStages         []string
+	Edges               []WorkflowStageTopologyEdge
+	Handlers            []WorkflowHandlerStageScope
+	stageCatalog        *workflowStageCatalog
+	guardTerminations   []WorkflowGuardTerminationPossibility
+	handlerSourceErrors []string
 }
 
 // WorkflowGuardTerminationPossibility describes a possible failed-guard outcome,
