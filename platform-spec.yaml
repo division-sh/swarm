@@ -16917,6 +16917,16 @@ platform_tables:
         original authority, origin, launch clock and declaration. It never mints a
         turn, chooses a latest attempt, or readmits physical work. Corrupt or foreign
         evidence fails closed. Selected-fork recovery remains possession-scoped.
+        The selected recovery owner retains unresolved authored cancellation after
+        fencing the exact predecessor and settling its physical effects. Pending
+        cancellation is settlement-only evidence, never executable replay or a
+        normal lifecycle token. The same named recovery transaction consumes its
+        exact canceled-origin commands and admitted timeout reaction, returning
+        acknowledged cancellation/publication evidence. It cannot terminalize
+        that origin or admit recovered finite-feed execution before this handoff
+        completes. Exact retry preserves the original launch clock and cancellation
+        cause, and does not repeatedly advance the predecessor fence. Normal
+        cancellation inventory never acquires selected-fork possession.
         Startup commits the canceled origin and reaction atomically, releases the
         preparation claim, and defers execution to the existing durable pipeline
         recovery after startup admission. Failure before this commit leaves the

@@ -12,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, origin effects.CompletionOrigin) (effects.CanceledTurnCommit, error) {
+func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, origin effects.CompletionOrigin, selectedRecoveryExecutionID string) (effects.CanceledTurnCommit, error) {
 	result := effects.CanceledTurnCommit{Origin: origin}
 	err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var directive agentcontrol.DirectiveOperation
@@ -80,7 +80,11 @@ func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol
 			return fmt.Errorf("origin-only cancellation cannot bypass provider-attempt ownership")
 		}
 		if origin.Kind == effects.CompletionOriginDelivery {
-			result.Delivery, err = delivery.SettleProviderCanceledOriginTx(ctx, mutation, origin.Delivery, deliverylifecycle.CancellationTerminate, 0)
+			if selectedRecoveryExecutionID == "" {
+				result.Delivery, err = delivery.SettleProviderCanceledOriginTx(ctx, mutation, origin.Delivery, deliverylifecycle.CancellationTerminate, 0)
+			} else {
+				result.Delivery, err = delivery.SettleSelectedCanceledOriginRecoveryTx(ctx, mutation, origin.Delivery, selectedRecoveryExecutionID, deliverylifecycle.CancellationTerminate, 0)
+			}
 		} else {
 			result.Directive, err = directives.SettleProviderCanceledDirectiveTx(ctx, mutation, origin.Directive, deliverylifecycle.CancellationTerminate, now)
 		}

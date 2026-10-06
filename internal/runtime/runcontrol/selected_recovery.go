@@ -11,9 +11,10 @@ import (
 )
 
 type SelectedForkRecoveryRequest struct {
-	Entry   runfork.SelectedForkRecoveryEntry
-	Process startupownership.Authority
-	Effects effects.RecoveryRequest
+	Entry         runfork.SelectedForkRecoveryEntry
+	Process       startupownership.Authority
+	Effects       effects.RecoveryRequest
+	Cancellations []effects.CanceledTurnCommand
 }
 
 func (r SelectedForkRecoveryRequest) Validate() error {
@@ -25,6 +26,14 @@ func (r SelectedForkRecoveryRequest) Validate() error {
 	}
 	if err := r.Effects.Validate(); err != nil {
 		return err
+	}
+	for _, command := range r.Cancellations {
+		if err := command.Validate(); err != nil {
+			return err
+		}
+		if command.Attempt != nil && (command.Attempt.Authority.Kind != effects.AuthoritySelectedContractFork || command.Attempt.Authority.Target.RunID != r.Entry.Binding.ForkRunID) {
+			return fmt.Errorf("selected recovery cancellation differs from its fork scope")
+		}
 	}
 	if err := bundleidentity.ValidateCanonicalHash(r.Entry.BundleHash); err != nil {
 		return err

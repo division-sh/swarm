@@ -31,6 +31,7 @@ type schemaQueryer interface {
 
 type providerDrainDeliveryOwner interface {
 	ValidateSelectedProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeagentidentity.Identity, runtimedelivery.ExecutionAuthority) error
+	ValidateSelectedOriginExecutionTx(context.Context, *sql.Tx, runtimedelivery.Claim, string) error
 	ClaimedAgentFlowOriginsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]storedelivery.ClaimedFlowTurn, error)
 	ValidateUnstartedClaimOwnerTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeflowidentity.RunScopedFlowInstance, string) error
 	QueuedAgentFlowSnapshotsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimedelivery.Snapshot, error)
@@ -40,6 +41,7 @@ type providerDrainDeliveryOwner interface {
 	RenewProviderOriginTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, time.Duration) error
 	SettleProviderOriginSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration) error
 	SettleProviderCanceledOriginTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.CancellationReason, time.Duration) (runtimedelivery.Snapshot, error)
+	SettleSelectedCanceledOriginRecoveryTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, string, runtimedelivery.CancellationReason, time.Duration) (runtimedelivery.Snapshot, error)
 	SettleProviderOriginFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
 	SettleProviderOriginRecoveryFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
 }

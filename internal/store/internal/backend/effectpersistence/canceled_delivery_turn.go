@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func settleCanceledDeliveryTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, attempt runtimeeffects.Attempt) (deliverylifecycle.Snapshot, error) {
+func settleCanceledDeliveryTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, attempt runtimeeffects.Attempt, selectedRecoveryExecutionID string) (deliverylifecycle.Snapshot, error) {
 	if delivery == nil || !attempt.Authority.HasBusinessTurnOrigin() ||
 		attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Origin.Kind != runtimeeffects.CompletionOriginDelivery || attempt.Origin.Validate() != nil {
 		return deliverylifecycle.Snapshot{}, fmt.Errorf("canceled delivery turn requires its exact admitted provider origin")
@@ -27,7 +27,11 @@ func settleCanceledDeliveryTurn(ctx context.Context, mutation *mutationprotocol.
 		if err != nil {
 			return err
 		}
-		snapshot, err = delivery.SettleProviderCanceledOriginTx(ctx, mutation, attempt.Origin.Delivery, facts.reason, facts.duration)
+		if selectedRecoveryExecutionID == "" {
+			snapshot, err = delivery.SettleProviderCanceledOriginTx(ctx, mutation, attempt.Origin.Delivery, facts.reason, facts.duration)
+		} else {
+			snapshot, err = delivery.SettleSelectedCanceledOriginRecoveryTx(ctx, mutation, attempt.Origin.Delivery, selectedRecoveryExecutionID, facts.reason, facts.duration)
+		}
 		if err != nil {
 			return err
 		}

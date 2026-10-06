@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -92,6 +93,35 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return results, errors.Join(diagnostics, err, ctx.Err())
 		}
+		for action == selectedRecoverySettleCancellations {
+			if err != nil {
+				return results, errors.Join(diagnostics, err)
+			}
+			commands := make([]effects.CanceledTurnCommand, 0, len(result.PendingCancellations))
+			for _, turn := range result.PendingCancellations {
+				if turn.Cancellation.Reason != deliverylifecycle.CancellationTerminate {
+					return results, errors.New("selected timeout recovery requires its exact admitted reaction publication")
+				}
+				command := effects.CanceledTurnCommand{Origin: turn.Cancellation.Origin}
+				if turn.Attempt.AttemptID != "" {
+					command.Attempt = &turn.Attempt
+				}
+				commands = append(commands, command)
+			}
+			result, err = ports.fork.RecoverSelectedFork(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process, Effects: req, Cancellations: commands})
+			if len(result.CanceledTurns) != len(commands) {
+				return results, errors.Join(err, errors.New("selected cancellation recovery lacks exact acknowledged settlements"))
+			}
+			for _, committed := range result.CanceledTurns {
+				if validation := committed.Validate(); validation != nil || committed.Publication != nil {
+					return results, errors.Join(err, validation, errors.New("selected terminate recovery returned invalid settlement evidence"))
+				}
+			}
+			action, actionErr = selectedRecoveryActionFor(result, entry)
+			if actionErr != nil {
+				return results, errors.Join(err, actionErr)
+			}
+		}
 		results = append(results, result)
 		if action == selectedRecoveryRejectCurrent {
 			return results, errors.Join(diagnostics, err, fmt.Errorf("selected startup encountered unregistered current-process execution"))
@@ -160,12 +190,27 @@ const (
 	selectedRecoveryRejectCurrent
 	selectedRecoveryResumeFiniteFeed
 	selectedRecoveryActivateFiniteFeed
+	selectedRecoverySettleCancellations
 )
 
 // Boot recognizes these outcomes but never treats one as executable authority.
 func selectedRecoveryActionFor(result runfork.SelectedForkRecoveryResult, entry runfork.SelectedForkRecoveryEntry) (selectedRecoveryAction, error) {
 	if result.RunID != entry.Binding.ForkRunID {
 		return 0, fmt.Errorf("selected recovery result differs from its fork binding")
+	}
+	if len(result.PendingCancellations) != 0 {
+		if result.Disposition != runfork.SelectedForkRecoveryFailed && result.Disposition != runfork.SelectedForkRecoveryControlOnly && result.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed && result.Disposition != runfork.SelectedForkRecoveryActivateFiniteFeed {
+			return 0, errors.New("selected pending cancellation contradicts its recovery disposition")
+		}
+		for _, turn := range result.PendingCancellations {
+			if turn.Cancellation.ValidateIntent() != nil || !turn.Cancellation.Origin.Same(turn.Attempt.Origin) {
+				return 0, errors.New("selected pending cancellation lacks exact origin evidence")
+			}
+			if turn.Attempt.AttemptID != "" && (turn.Attempt.Authority.Kind != effects.AuthoritySelectedContractFork || turn.Attempt.Authority.ID != result.ExecutionID || turn.Attempt.Authority.Target.RunID != result.RunID) {
+				return 0, errors.New("selected pending cancellation differs from its execution scope")
+			}
+		}
+		return selectedRecoverySettleCancellations, nil
 	}
 	if result.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed && result.Disposition != runfork.SelectedForkRecoveryActivateFiniteFeed && result.Resume != nil {
 		return 0, fmt.Errorf("selected recovery non-resume disposition carries executable work")

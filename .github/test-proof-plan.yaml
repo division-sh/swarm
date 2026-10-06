@@ -992,6 +992,7 @@ units:
       TestUnstartedDirectiveTurnRecoveryBothStores: [root/restart/sqlite, root/restart/postgres, root/rollback/sqlite, root/rollback/postgres, completion/restart/sqlite, completion/restart/postgres, completion/rollback/sqlite, completion/rollback/postgres]
       TestSelectedProviderTurnRetainsActualBusinessOriginBothStores: [sqlite, postgres]
       TestSelectedTurnTerminationPreservesExactOriginBothStores: [sqlite, postgres]
+      TestSelectedCanceledOriginRecoveryRetainsPendingIntentBothStores: [sqlite, postgres]
       TestWorkflowPublicationAcceptanceStageBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
       TestWorkflowEmitFeedbackBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
       TestWorkflowEmitBusReadbackBothStores: [sqlite, postgres]

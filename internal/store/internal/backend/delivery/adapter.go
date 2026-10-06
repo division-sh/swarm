@@ -1439,6 +1439,11 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, attempt *mutationproto
 	if err != nil {
 		return Snapshot{}, err
 	}
+	return a.settleExactClaim(ctx, tx, attempt, claim, settlement, cancellation, record, now)
+}
+
+func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, settlement Settlement, cancellation CancellationReason, record deliveryRecord, now time.Time) (Snapshot, error) {
+	var err error
 	if cancellation == "" && record.SubscriberClass == SubscriberAgent {
 		query := `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=$1::uuid FOR UPDATE`
 		if a.dialect == DialectSQLite {
@@ -2735,7 +2740,7 @@ func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, att
 	return declareOutcomeDeadLetterEffects(ctx, tx, attempt, deliveryID, version)
 }
 
-func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
+func (a *Adapter) requireExactClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
 	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), true)
 	if err != nil {
 		return deliveryRecord{}, time.Time{}, err
@@ -2749,6 +2754,14 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 		record.SubscriberClass != claim.SubscriberClass() || record.SubscriberID != claim.SubscriberID() ||
 		record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
 		return deliveryRecord{}, time.Time{}, fmt.Errorf("%w: delivery claim is stale", ErrConflict)
+	}
+	return record, now, nil
+}
+
+func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
+	record, now, err := a.requireExactClaim(ctx, tx, claim)
+	if err != nil {
+		return deliveryRecord{}, time.Time{}, err
 	}
 	current, err := a.selectedExecutionCurrent(ctx, tx, record.Authority)
 	if err != nil {

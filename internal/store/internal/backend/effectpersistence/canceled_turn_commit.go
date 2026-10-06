@@ -15,12 +15,12 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func commitCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, publications canceledTurnPublicationOwner, command runtimeeffects.CanceledTurnCommand) (runtimeeffects.CanceledTurnCommit, error) {
+func commitCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, publications canceledTurnPublicationOwner, command runtimeeffects.CanceledTurnCommand, selectedRecoveryExecutionID string) (runtimeeffects.CanceledTurnCommit, error) {
 	if err := command.Validate(); err != nil {
 		return runtimeeffects.CanceledTurnCommit{}, err
 	}
 	if command.Attempt == nil {
-		return commitUnstartedCanceledTurn(ctx, mutation, postgres, delivery, directives, command.Origin)
+		return commitUnstartedCanceledTurn(ctx, mutation, postgres, delivery, directives, command.Origin, selectedRecoveryExecutionID)
 	}
 	attempt := *command.Attempt
 	if attempt.Kind != runtimeeffects.KindProviderTurn || !attempt.Authority.HasBusinessTurnOrigin() || attempt.Origin.Validate() != nil {
@@ -53,7 +53,7 @@ func commitCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt,
 		}
 		switch attempt.Origin.Kind {
 		case runtimeeffects.CompletionOriginDelivery:
-			result.Delivery, err = settleCanceledDeliveryTurn(ctx, mutation, postgres, delivery, attempt)
+			result.Delivery, err = settleCanceledDeliveryTurn(ctx, mutation, postgres, delivery, attempt, selectedRecoveryExecutionID)
 		case runtimeeffects.CompletionOriginDirective:
 			result.Directive, err = settleCanceledDirectiveTurn(ctx, mutation, postgres, directives, attempt)
 		}
@@ -121,7 +121,7 @@ func validateTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, atte
 	return nil
 }
 
-func acknowledgedCanceledTurn(result runtimeeffects.CanceledTurnCommit, acknowledged bool) runtimeeffects.CanceledTurnCommit {
+func AcknowledgeCanceledTurn(result runtimeeffects.CanceledTurnCommit, acknowledged bool) runtimeeffects.CanceledTurnCommit {
 	if !acknowledged {
 		return runtimeeffects.CanceledTurnCommit{}
 	}
@@ -139,10 +139,10 @@ func (s *EffectPostgresOwner) CommitCanceledTurn(ctx context.Context, command ru
 		return runtimeeffects.CanceledTurnCommit{}, err
 	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(ctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.CanceledTurnCommit, error) {
-		return commitCanceledTurn(ctx, mutation, true, s.delivery, s.directives, s.publications, command)
+		return commitCanceledTurn(ctx, mutation, true, s.delivery, s.directives, s.publications, command, "")
 	})
 	value, acknowledged := result.Value()
-	value = acknowledgedCanceledTurn(value, acknowledged)
+	value = AcknowledgeCanceledTurn(value, acknowledged)
 	if !acknowledged {
 		return value, result.Err()
 	}
@@ -154,10 +154,10 @@ func (s *EffectSQLiteOwner) CommitCanceledTurn(ctx context.Context, command runt
 		return runtimeeffects.CanceledTurnCommit{}, err
 	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite commit canceled turn reaction", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(ctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.CanceledTurnCommit, error) {
-		return commitCanceledTurn(ctx, mutation, false, s.delivery, s.directives, s.publications, command)
+		return commitCanceledTurn(ctx, mutation, false, s.delivery, s.directives, s.publications, command, "")
 	})
 	value, acknowledged := result.Value()
-	value = acknowledgedCanceledTurn(value, acknowledged)
+	value = AcknowledgeCanceledTurn(value, acknowledged)
 	if !acknowledged {
 		return value, result.Err()
 	}
