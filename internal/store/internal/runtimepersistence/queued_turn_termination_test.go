@@ -2,26 +2,36 @@ package runtimepersistence
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
 func TestQueuedTurnTerminationBothStores(t *testing.T) {
-	for _, mode := range []string{"pending", "retry", "rollback"} {
+	for _, mode := range []string{"pending", "retry", "rollback", "isolated", "root"} {
 		t.Run(mode, func(t *testing.T) {
 			forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
-				ctx := providerDrainContext(t, fixture, "queued-termination")
-				_, _, path, _ := fixture.authority.Normal.Identity.Route.Fields()
-				owner := flowidentity.RunScopedFlowInstance{RunID: fixture.authority.Target.RunID, Route: flowidentity.RouteForInstancePath(path)}
+				if mode == "root" {
+					fixture = newCompletionSettlementFixtureForFlow(t, fixture.store, fixture.db, fixture.sqlite, agentmemory.Plan{}, "")
+				}
+				ctx := correlation.WithRunID(fixture.contextFor(fixture.authority), fixture.authority.Target.RunID)
+				scope, instance, path, err := fixture.authority.BusinessTurnCoordinates()
+				if err != nil {
+					t.Fatal(err)
+				}
+				owner := flowidentity.RunScopedFlowInstance{RunID: fixture.authority.Target.RunID, Route: flowidentity.StoredRoute(scope, instance, path)}
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				entity := uuid.NewString()
 				record := seedTurnTerminationHeader(t, fixture, owner, entity, at)
@@ -49,8 +59,28 @@ func TestQueuedTurnTerminationBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				var siblings []deliverylifecycle.Snapshot
+				if mode == "isolated" {
+					sibling := mustTestAgentIdentityForRun(owner.RunID, fixture.agentID+"-sibling", path+"/sibling")
+					if err := agentfixture.UpsertStatic(t, ctx, fixture.store, agentFixtureStaticRecord(t, sibling)); err != nil {
+						t.Fatal(err)
+					}
+					siblingRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(sibling.AgentID()), AgentIdentity: sibling}
+					siblingEvent := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")
+					if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, siblingEvent, []events.DeliveryRoute{siblingRoute}); err != nil {
+						t.Fatal(err)
+					}
+					siblings = append(siblings, loadDeliverySnapshotFixture(t, ctx, fixture.store.(deliveryFixtureStore), siblingEvent.ID(), siblingRoute))
+					other := newCompletionSettlementFixture(t, fixture.store, fixture.db, fixture.sqlite)
+					otherEvent := managedCompletionTestEventWithIdentity(other.authority, uuid.NewString(), "completion.test.requested")
+					otherRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(other.agentID), AgentIdentity: other.authority.Normal.Identity}
+					if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, otherEvent, []events.DeliveryRoute{otherRoute}); err != nil {
+						t.Fatal(err)
+					}
+					siblings = append(siblings, loadDeliverySnapshotFixture(t, ctx, fixture.store.(deliveryFixtureStore), otherEvent.ID(), otherRoute))
+				}
 				cause := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")
-				node, err := identity.AdmitExecutableNodeDeclaration(path, "router")
+				node, err := identity.AdmitExecutableNodeDeclaration(owner.Route.ScopeKey, "router")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -75,6 +105,12 @@ func TestQueuedTurnTerminationBothStores(t *testing.T) {
 				after, err := fixture.store.(deliverylifecycle.Store).Snapshot(ctx, id)
 				if err != nil || after.RetryCount != before.RetryCount || after.ClaimVersion != before.ClaimVersion {
 					t.Fatalf("cancellation invented an attempt or changed retry history: %+v before=%+v err=%v", after, before, err)
+				}
+				for _, before := range siblings {
+					after, err := fixture.store.(deliverylifecycle.Store).Snapshot(ctx, before.DeliveryID)
+					if err != nil || !reflect.DeepEqual(after, before) {
+						t.Fatalf("termination changed another instance/run's queue: before=%+v after=%+v err=%v", before, after, err)
+					}
 				}
 				if mode == "rollback" {
 					if after.Status != before.Status || !after.UpdatedAt.Equal(before.UpdatedAt) {
