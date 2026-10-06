@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -106,6 +107,22 @@ func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backen
 func workspaceProofAuthorActivityContext(t *testing.T, proof servedWorkspaceProofRuntime) context.Context {
 	t.Helper()
 	return servedRuntimeProofAuthorActivityContext(t, proof.Runtime, proof.BundleHash)
+}
+
+func waitWorkspaceProofPipelineHandoff(t *testing.T, proof servedWorkspaceProofRuntime, runID string) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for time.Now().Before(deadline) {
+		count, err := storetest.ReadServedIncompletePipelineHandoffCount(context.Background(), proof.Events, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("source pipeline completion did not finish: %s", workspaceProofDebugSummary(t, proof, runID))
 }
 
 func workspaceProofDebugSummary(t *testing.T, proof servedWorkspaceProofRuntime, runID string) string {

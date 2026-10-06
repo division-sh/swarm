@@ -83,6 +83,10 @@ func readSelectedForkSnapshotTable(ctx context.Context, tx *sql.Tx, table string
 	if err != nil {
 		return SelectedForkStorageTableSnapshot{}, err
 	}
+	return readSelectedForkSnapshotRows(rows)
+}
+
+func readSelectedForkSnapshotRows(rows *sql.Rows) (SelectedForkStorageTableSnapshot, error) {
 	defer rows.Close()
 	columns, err := rows.Columns()
 	if err != nil {
