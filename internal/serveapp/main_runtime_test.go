@@ -5098,23 +5098,19 @@ func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql
 	}
 	probe.RequireNodePending(eventID, nodeID)
 	deadline := time.Now().Add(servedEventPublishLifecycleProbeWaitTimeout)
-	signals := probe.Expect(eventID).
-		PostCommitDispatchStarted().
+	probe.Expect(eventID).
 		NodeInProgress(nodeID).
 		HandlerStarted(nodeID).
 		HandlerCompleted(nodeID).
 		NodeDelivered(nodeID).
 		Within(servedEventPublishLifecycleProbeWaitTimeout)
-	// Durable dispatch may finish its handoff before the continuation executes.
-	// Require both boundaries without imposing the former inline-node ordering.
+	// Publication diagnostics and the continuation can progress independently.
+	// Preserve each ordered lifecycle without imposing cross-owner ordering.
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		t.Fatal("node delivery consumed the complete lifecycle proof deadline")
 	}
-	completed := probe.Expect(eventID).PostCommitDispatchCompleted().Within(remaining)
-	if completed[0].At.Before(signals[0].At) {
-		t.Fatal("dispatch completion preceded its start")
-	}
+	probe.Expect(eventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
 	if count := servedEventPublishNodeDeliveryCount(t, db, backend, runID, eventID, nodeID); count != 1 {
 		t.Fatalf("%s node/%s delivery count for event %s = %d, want 1\n%s", backend, nodeID, eventID, count, servedEventPublishDebugSummary(t, db, backend, runID))
 	}

@@ -298,8 +298,8 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 						barrier.unblock()
 						t.Fatal("readiness waited circularly for its creation receiver")
 					}
-					if counts := readStartupCreationCounts(t, db, creationID); counts.receipts != 0 || counts.handedOff != 0 {
-						t.Fatalf("blocked ordinary receiver already settled: %+v", counts)
+					if counts := readStartupCreationCounts(t, db, creationID); counts.events != 1 || counts.receipts != 1 || counts.deliveries == 0 || counts.handedOff != counts.deliveries {
+						t.Fatalf("ordinary readiness returned without exact acknowledged delivery handoff: %+v", counts)
 					}
 					barrier.unblock()
 					select {

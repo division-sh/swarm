@@ -1467,7 +1467,6 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 			return releaseOnFailure(err)
 		}
 		dispatchCtx = receiverCtx.Context
-		eb.notifyTestPostCommitDispatchStarted(dispatchCtx, prepared.Event)
 		// Finish the fenced handoff before returning durable acceptance. Moving
 		// this settlement to another goroutine would retain the same unbounded
 		// post-ACK publication-session backlog; node execution is still asynchronous.
@@ -1484,6 +1483,7 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 					eb.reportLocalDispatchFailure("publication_diagnostic_cleanup_failed", prepared.Event, err)
 				}
 			}()
+			eb.notifyTestPostCommitDispatchStarted(dispatchCtx, prepared.Event)
 			// Publication evidence retains the admitted occurrence, not its SQL claim.
 			eb.logPublished(dispatchCtx, prepared.Event, 0)
 		}()
