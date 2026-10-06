@@ -562,7 +562,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	}
 	oldBuildStores := buildStoresForServe
 	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-		var stores *selectedStoreOwner
+		var stores *storeselected.Owner
 		var err error
 		if backend == servedparity.BackendExplicitPostgres {
 			if selection.Backend != storebackend.BackendPostgres {
