@@ -410,11 +410,21 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"catalog-replay-1", "catalog-replay-2-3", "catalog-runtime",
 		"catalog-runtime-scatter-safety", "catalog-runtime-fork-readiness",
 	}
-	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits} {
+	storeRuntimeUnits := []string{
+		"store-runtime-full-01", "store-runtime-full-02", "store-runtime-flow-lifecycle",
+		"store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation",
+		"store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-04",
+		"store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-full-06",
+	}
+	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits, "store/internal/runtimepersistence": storeRuntimeUnits} {
 		var selectors []string
 		for _, id := range ids {
 			unit, ok := policy.Units[id]
-			if !ok || len(unit.Packages) != 1 || unit.Packages[0] != "github.com/division-sh/swarm/internal/"+pkg || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
+			budgetClass := "full"
+			if pkg == "store/internal/runtimepersistence" && id != "store-runtime-fork-generation" {
+				budgetClass = "broad"
+			}
+			if !ok || len(unit.Packages) != 1 || unit.Packages[0] != "github.com/division-sh/swarm/internal/"+pkg || unit.CountMode != "count-1" || unit.BudgetClass != budgetClass {
 				t.Fatalf("invalid full-coverage partition %s: %+v", id, unit)
 			}
 			selectors = append(selectors, unit.Run)

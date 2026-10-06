@@ -39,7 +39,7 @@ func TestRuntimeFanOutPartitionPreservesCompleteRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var groups [3][]string
+	groups := make([][]string, len(ids))
 	for _, path := range paths {
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 		if err != nil {
@@ -82,7 +82,7 @@ func TestRuntimeFanOutPartitionPreservesCompleteRoots(t *testing.T) {
 			t.Logf("%s\t%s", ids[i], name)
 		}
 	}
-	t.Logf("complete disjoint census: %d = %d D-F + %d fanout + %d process", len(groups[0])+len(groups[1])+len(groups[2]), len(groups[0]), len(groups[1]), len(groups[2]))
+	t.Logf("complete disjoint census: %d = %d D-F + %d fanout + %d process + %d flow", len(groups[0])+len(groups[1])+len(groups[2])+len(groups[3]), len(groups[0]), len(groups[1]), len(groups[2]), len(groups[3]))
 	// Keep the whole-package census: new roots cannot escape via either partition.
 	for _, profile := range []string{ProfileLifecycle, ProfileFull} {
 		var runs []string
@@ -100,7 +100,7 @@ func TestRuntimeFanOutPartitionPreservesCompleteRoots(t *testing.T) {
 	}
 }
 
-var runtimeFanOutUnits = []string{"store-runtime-full-02", "store-runtime-fanout", "store-runtime-fanout-process"}
+var runtimeFanOutUnits = []string{"store-runtime-full-02", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-flow-lifecycle"}
 
 func validateRuntimeFanOutEnvelopes(policy Policy) error {
 	for _, id := range runtimeFanOutUnits {
