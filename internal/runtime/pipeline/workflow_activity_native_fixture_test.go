@@ -9,4 +9,11 @@ type WorkflowActivityNativeFixtureForTest struct {
 	Context        context.Context
 	RequireRun     func(context.Context, string) error
 	NewCoordinator func(Bus, PipelineCoordinatorOptions) *PipelineCoordinator
+	Reopen         func() WorkflowActivityNativeFixtureForTest
+	ReadJournal    func(context.Context, string) (WorkflowJournalStorageForTest, error)
+	CreateReply    func(context.Context, string, string, string) error
+}
+
+type WorkflowJournalStorageForTest struct {
+	StoryCount, StoryHead, RunForkRevisions int64
 }

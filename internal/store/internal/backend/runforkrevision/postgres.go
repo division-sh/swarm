@@ -93,3 +93,13 @@ func CountNotifyFanOutRevisionStorageForTest(ctx context.Context, tx *sql.Tx, ru
 	}
 	return revisions, facts, nil
 }
+
+// Journal component evidence shares the original native read snapshot; it
+// does not admit historical ledger payloads or create another revision owner.
+func CountActivityJournalRevisionsForTest(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
+	var count int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1`, runID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
