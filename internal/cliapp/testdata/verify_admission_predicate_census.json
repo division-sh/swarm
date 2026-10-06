@@ -918,6 +918,18 @@
     "body_sha256": "4eef1daad3bc77fddbf3e17cb15edc3df9a1fd7c5302f44b0a23a8050c8a4500"
   },
   {
+    "owner": "internal/runtime/llm/provider_credentials.go::*providerCredentialCache.resolve",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "680b3661ce61c9987f22932a9fc7b93dcf8aa39a6f38a3cdc9dfbac8afe5bee3"
+  },
+  {
+    "owner": "internal/runtime/llm/provider_credentials.go::*providerCredentialCache.snapshot",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "f993cfdf6eae5c83e11fc354a3a4670f4081b793376afbac7231290870cb1a9d"
+  },
+  {
     "owner": "internal/runtime/llm/provider_credentials.go::IsMissingProviderCredential",
     "audit_rows": "A12",
     "proof_families": "P10,P21",
@@ -1773,7 +1785,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "c3fae9c20bfa726789ad8ec6f3f0c03a58e2196851e60db47a4149345118ee3d"
+    "body_sha256": "477000547f44bcffcd44b390c5d6a35a778ed744eff31c3a3aaed5e285e54890"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
