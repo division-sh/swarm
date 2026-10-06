@@ -28,6 +28,44 @@ func assertEntryGolden(expected entryGolden, schema contracts.FlowSchemaDocument
 	return nil
 }
 
+func TestRewrite2566EntryGoldenInventoryCoversEveryReviewedSite(t *testing.T) {
+	read := func(name string, target any) {
+		t.Helper()
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body, target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var p plan
+	var entries []entryGolden
+	read("intent.json", &p)
+	read("entries.json", &entries)
+	wanted, actual := map[string]int{}, map[string]int{}
+	for _, change := range p.Changes {
+		wanted[change.File] += len(change.Equivalence)
+	}
+	selectors := map[string]bool{}
+	for _, entry := range entries {
+		key := entry.File + "/" + entry.Flow
+		if selectors[key] {
+			t.Fatalf("duplicate reviewed source selector %s", key)
+		}
+		selectors[key] = true
+		actual[entry.File]++
+	}
+	for file, count := range wanted {
+		if count == 0 {
+			delete(wanted, file)
+		}
+	}
+	if !reflect.DeepEqual(wanted, actual) {
+		t.Fatalf("permanent entry oracle omitted a reviewed source family: wanted=%v actual=%v", wanted, actual)
+	}
+}
+
 func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 	for _, fixture := range []struct {
 		name     string
