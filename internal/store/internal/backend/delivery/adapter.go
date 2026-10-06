@@ -47,6 +47,42 @@ type Adapter struct {
 	sqliteReads       *sqliteDeliveryReads
 }
 
+// ExpireExactDeliveryClaimFaultTx ages the held obligation and its exact open
+// attempt together. Only the real claim owner may subsequently mint a successor.
+func ExpireExactDeliveryClaimFaultTx(ctx context.Context, tx *sql.Tx, claim Claim) error {
+	if tx == nil {
+		return fmt.Errorf("exact delivery claim fault requires the selected transaction")
+	}
+	if err := claim.Validate(); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	startedAt, expiresAt := now.Add(-2*time.Hour), now.Add(-time.Hour)
+	result, err := tx.ExecContext(ctx, `UPDATE event_deliveries
+		SET created_at=$1,started_at=$1,updated_at=$2
+		WHERE delivery_id=$3 AND run_id=$4 AND claim_version=$5 AND status='in_progress'`,
+		startedAt, expiresAt, claim.DeliveryID(), claim.RunID(), claim.Version())
+	if err != nil {
+		return fmt.Errorf("age exact delivery obligation: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("exact delivery claim fault requires one in-progress obligation: count=%d err=%v", count, err)
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE event_delivery_attempts
+		SET started_at=$1,lease_expires_at=$2
+		WHERE delivery_id=$3 AND claim_version=$4 AND claim_token=$5 AND open_marker=TRUE`,
+		startedAt, expiresAt, claim.DeliveryID(), claim.Version(), claim.PersistenceToken())
+	if err != nil {
+		return fmt.Errorf("expire exact delivery attempt: %w", err)
+	}
+	count, err = result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("exact delivery claim fault requires one matching open attempt: count=%d err=%v", count, err)
+	}
+	return nil
+}
+
 func NewAdapter(dialect Dialect) (*Adapter, error) {
 	if dialect != DialectPostgres && dialect != DialectSQLite {
 		return nil, fmt.Errorf("delivery lifecycle dialect %q is unsupported", dialect)
