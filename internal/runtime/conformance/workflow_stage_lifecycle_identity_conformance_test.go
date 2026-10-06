@@ -245,9 +245,9 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 				"member_id": memberA, "batch_id": batchID, "value": 11,
 			})
 			assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, memberAEventID, activation)
-			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "complete", "terminated")
-			if instance.TerminatedAt.IsZero() {
-				t.Fatal("terminal keyed scout has no durable termination occurrence")
+			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "complete", "active")
+			if !instance.TerminatedAt.IsZero() {
+				t.Fatal("ordinary final-stage entry synthesized an operational termination occurrence")
 			}
 			join = loadStageLifecycleJoin(t, runCtx, instance, batchID)
 			if !join.JoinRef().Equal(retainedJoinRef) {
