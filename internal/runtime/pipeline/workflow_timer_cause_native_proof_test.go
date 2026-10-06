@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -53,7 +52,7 @@ func VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest(t *testing
 							files["schema.yaml"] += "  ready: {}\n"
 							files["nodes.yaml"] = "observer:\n  execution_type: system_node\n  event_handlers:\n    timer.arm: {advances_to: waiting}\n"
 						}
-						files["schema.yaml"] += fmt.Sprintf("  waiting:\n    initial: %v\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n", kind == workflowTimerCauseInitial)
+						files["schema.yaml"] += "  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\n"
 					}
 					bundle := loadWorkflowTempBundle(t, files)
 					bundle.Semantics.Timers[0].Recurring = recurring

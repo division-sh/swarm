@@ -1961,7 +1961,7 @@
     {
       "file": "internal/runtime/bootverify/workflow_transition_relation_test.go",
       "before_hash": "59fa9406cbf57593c56aed7ebd19262ba6bbb0bfb4d3d37ad67b678cf94e724c",
-      "after_hash": "a813a419f81fa56e8c1ae02485ac2ab065b907f83903887d409780bfaccdc466",
+      "after_hash": "f2ca84f2b2912777acbc966a568ac66fcff8b9ab399873838bdac6648afc5d60",
       "edits": [
         {
           "offset": 1939,
@@ -1987,6 +1987,11 @@
           "offset": 6081,
           "before": "\t\treturn []authoringview.StageGraphNodeView{{ID: \"ready\", Initial: true}, {ID: \"waiting\"}, {ID: \"done\", Terminal: true}}\n",
           "after": "\t\treturn []authoringview.StageGraphNodeView{{ID: \"ready\", Initial: true}, {ID: \"waiting\"}, {ID: \"done\", Final: true}}\n"
+        },
+        {
+          "offset": 12133,
+          "before": "\t\t\t\t\t\t// Rule order is executable policy, unlike sibling/map\n\t\t\t\t\t\t// declaration presentation; keep that policy unchanged.\n\t\t\t\t\t\tif node.Kind == yaml.MappingNode \u0026\u0026 i%2 == 1 \u0026\u0026 node.Content[i-1].Value == \"rules\" {\n\t\t\t\t\t\t\tcontinue\n",
+          "after": "\t\t\t\t\t\t// Rules select policy and stages select entry; neither\n\t\t\t\t\t\t// is presentation-only mapping order.\n\t\t\t\t\t\tif node.Kind == yaml.MappingNode \u0026\u0026 i%2 == 1 {\n\t\t\t\t\t\t\tkey := node.Content[i-1].Value\n\t\t\t\t\t\t\tif key == \"rules\" || key == \"stages\" {\n\t\t\t\t\t\t\t\tcontinue\n\t\t\t\t\t\t\t}\n"
         },
         {
           "offset": 13421,
@@ -5491,8 +5496,13 @@
     {
       "file": "internal/runtime/pipeline/workflow_timer_cause_native_proof_test.go",
       "before_hash": "a913df4b16836cf2f309d263779bb98c6353d214ac9213bf9031ee54de960607",
-      "after_hash": "0475f8d215bbc11ff16737339036b262147174ea634fe9b125863763b83d7787",
+      "after_hash": "322471a3e808fbc27aea5f04bb10f4d9e67e7744bbce06fff2582c1fd2fe387e",
       "edits": [
+        {
+          "offset": 38,
+          "before": "\t\"fmt\"\n",
+          "after": ""
+        },
         {
           "offset": 1889,
           "before": "\t\t\t\t\t\t\"schema.yaml\":   \"name: timer-cause-proof\\nstages:\\n  waiting: {initial: true}\\n\",\n",
@@ -5502,6 +5512,11 @@
           "offset": 2482,
           "before": "\t\t\t\t\t\t\tfiles[\"schema.yaml\"] += \"  ready: {initial: true}\\n\"\n",
           "after": "\t\t\t\t\t\t\tfiles[\"schema.yaml\"] += \"  ready: {}\\n\"\n"
+        },
+        {
+          "offset": 2682,
+          "before": "\t\t\t\t\t\tfiles[\"schema.yaml\"] += fmt.Sprintf(\"  waiting:\\n    initial: %v\\n    timers:\\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\\n\", kind == workflowTimerCauseInitial)\n",
+          "after": "\t\t\t\t\t\tfiles[\"schema.yaml\"] += \"  waiting:\\n    timers:\\n      - {id: waiting.timeout, after: 1h, emit: timer.elapsed}\\n\"\n"
         }
       ],
       "equivalence": [
