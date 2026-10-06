@@ -47,6 +47,8 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"internal/runtime/runforkexecution/readiness_classifier.go":                    1,
 		"internal/runtime/runforkexecution/runtime_container.go":                       1,
 		"internal/store/internal/runtimepersistence/postgres_store_additional_test.go": 6,
+		// One forbidden constructor-name literal in the debt guard's retired map.
+		"internal/store/persistence_authority_debt_test.go": 1,
 		"openrpc.json":       2,
 		"platform-spec.yaml": 50,
 	}
@@ -202,6 +204,28 @@ func retiredBuilderCandidates(relative string, body []byte) ([]retiredBuilderCan
 		}
 		return false
 	}), nil
+}
+
+func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
+	const path = "internal/store/persistence_authority_debt_test.go"
+	body, err := os.ReadFile(filepath.Join(repoRootForTest(), path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := retiredBuilderCandidates(path, body)
+	if err != nil || len(got) != 1 || !strings.Contains(got[0].text, `"APIOptionalCapabilityBuilder": true`) {
+		t.Fatalf("expected one forbidden constructor-name reference, got %+v: %v", got, err)
+	}
+	for _, extra := range []string{
+		"\n// Builder compatibility routes are available.\n",
+		"\nvar extraRetirementReference = \"APIOptionalCapabilityBuilder\"\n",
+	} {
+		candidate := append(append([]byte(nil), body...), extra...)
+		got, err := retiredBuilderCandidates(path, candidate)
+		if err != nil || len(got) != 2 {
+			t.Fatalf("additional reference escaped the one-reference inventory: %+v: %v", got, err)
+		}
+	}
 }
 
 func retiredBuilderCandidateLines(body []byte, include func(start, end int) bool) []retiredBuilderCandidate {
