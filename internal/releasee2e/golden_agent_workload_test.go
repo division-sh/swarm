@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
@@ -801,6 +802,33 @@ func goldenRuntimeConfig(store goldenStoreSelection) string {
 		"workspace:\n" +
 		"  backend: host\n" +
 		store.configYAML
+}
+
+// Clock processes need only an isolated location, not a diagnostic pool or a
+// runtime admitted in the test process.
+func clockReleaseConfig(t *testing.T, root, backend string) (string, []string) {
+	t.Helper()
+	config := "runtime:\n  recovery_on_startup: true\nllm:\n  backend: claude_cli\nworkspace:\n  backend: host\n"
+	password := ""
+	if backend == "sqlite" {
+		config += fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %q\n", filepath.Join(root, "runtime.db"))
+	} else {
+		connection, err := testpostgres.ParseConnection(testutil.StartPostgresDSN(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		parameters := connection.Parameters()
+		password = parameters.Password
+		config += fmt.Sprintf("store:\n  backend: postgres\ndatabase:\n  host: %q\n  port: %d\n  name: %q\n  user: %q\n  password_env: %s\n  sslmode: %q\n  pool_size: 5\n",
+			parameters.Host, parameters.Port, parameters.Database, parameters.User, "CLOCK_TEST_POSTGRES_PASSWORD", parameters.SSLMode)
+	}
+	path := filepath.Join(root, ".swarm", "swarm.yaml")
+	writeReleaseFile(t, path, config)
+	env := goldenProcessEnv(t, root, "", 0)
+	if password != "" {
+		env = append(env, "CLOCK_TEST_POSTGRES_PASSWORD="+password)
+	}
+	return path, env
 }
 
 func goldenProcessEnv(t *testing.T, root, postgresPassword string, processGOMAXPROCS int) []string {

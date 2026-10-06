@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/cli/readwindow"
+	"github.com/division-sh/swarm/internal/events"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
@@ -635,7 +636,7 @@ func validateEventFull(prefix string, event eventFull) error {
 	if event.ExecutionMode != "live" && event.ExecutionMode != "mock" {
 		return fmt.Errorf("malformed %s: execution_mode must be live or mock", prefix)
 	}
-	if event.ProducerType != "node" && event.ProducerType != "agent" && event.ProducerType != "platform" && event.ProducerType != "external" {
+	if event.ProducerType != strings.TrimSpace(event.ProducerType) || !events.EventProducerType(event.ProducerType).Valid() {
 		return fmt.Errorf("malformed %s: producer_type=%q is invalid", prefix, event.ProducerType)
 	}
 	if event.Payload == nil {

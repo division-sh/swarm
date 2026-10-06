@@ -87,6 +87,37 @@ func TestEventsListUsesEventListV1RPC(t *testing.T) {
 	}
 }
 
+func TestEventReadbackConsumesCanonicalProducerKinds(t *testing.T) {
+	for _, producer := range []string{"node", "agent", "platform", "external", "instance", "unknown", "instance-extra", " instance "} {
+		t.Run(producer, func(t *testing.T) {
+			setCLIAPITestToken(t, "test-token")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Method != eventObservationMethodGet {
+					t.Errorf("event readback request=%+v err=%v", req, err)
+					return
+				}
+				event := validEventObservationEvent("event-1")
+				event["producer_type"] = producer
+				writeJSONRPCResult(t, w, req.ID, event)
+			}))
+			defer server.Close()
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(t.Context(), t.TempDir(), []string{"event", "view", "event-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			switch producer {
+			case "unknown", "instance-extra", " instance ":
+				if code != eventObservationExitRuntime || !strings.Contains(stderr.String(), "producer_type=") {
+					t.Fatalf("malformed producer accepted: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+				}
+			default:
+				if code != 0 || !strings.Contains(stdout.String(), "producer_type="+producer) {
+					t.Fatalf("canonical producer rejected: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+				}
+			}
+		})
+	}
+}
+
 func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
