@@ -7,20 +7,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
-// ReleaseProcessReadOnlyInspection retains an independently opened inspection
+// ReadOnlyInspection retains an independently opened inspection
 // lifetime. It cannot admit a runtime, mutate a store, or expose a SQL handle.
 // Closed storage observations still validate the original native owner.
 // All reads run inside the existing InspectSnapshot boundary; PostgreSQL binds
 // its independent transport and both stores fence the snapshot's lifetime.
-type ReleaseProcessReadOnlyInspection interface {
+type ReadOnlyInspection interface {
 	pipeline.WorkflowTargetPersistenceReader
 	InspectSnapshot(context.Context, func(context.Context) error) error
 	Close() error
 }
 
-func OpenReleaseProcessReadOnlyInspectionForTest(backend, location string) (ReleaseProcessReadOnlyInspection, error) {
+func OpenReadOnlyInspection(backend, location string) (ReadOnlyInspection, error) {
 	if location == "" {
-		return nil, fmt.Errorf("release-process inspection requires the original nonempty location")
+		return nil, fmt.Errorf("read-only inspection requires the original nonempty location")
 	}
 	switch backend {
 	case "sqlite":
@@ -36,6 +36,6 @@ func OpenReleaseProcessReadOnlyInspectionForTest(backend, location string) (Rele
 		}
 		return selected, nil
 	default:
-		return nil, fmt.Errorf("unsupported release-process inspection backend %q", backend)
+		return nil, fmt.Errorf("unsupported read-only inspection backend %q", backend)
 	}
 }
