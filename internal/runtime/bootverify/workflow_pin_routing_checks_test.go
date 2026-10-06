@@ -105,7 +105,7 @@ func useStagedLifecycleForFlow(t *testing.T, bundle *runtimecontracts.WorkflowCo
 	}
 	bundle.Semantics.FlowInitial[flowID] = schema.LoweredInitialState()
 	bundle.Semantics.FlowStates[flowID] = schema.LoweredStates()
-	bundle.Semantics.FlowTerminal[flowID] = schema.LoweredTerminalStates()
+	bundle.Semantics.FlowTerminal[flowID] = schema.LoweredFinalStates()
 	if view, ok := bundle.FlowViewByID(flowID); ok && view != nil {
 		view.Schema = schema
 	}

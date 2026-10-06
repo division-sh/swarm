@@ -1,10 +1,10 @@
 name: collector
 instance: batch_id
 stages:
-  collecting: {initial: true}
+  collecting: {}
   awaiting: {}
-  complete: {terminal: true}
-  failed: {terminal: true}
+  complete: {final: true}
+  failed: {final: true}
 pins:
   inputs:
     - batch.opened

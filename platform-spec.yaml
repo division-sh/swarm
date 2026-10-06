@@ -654,28 +654,55 @@ contract_formats:
         current source. There is no legacy transition-identity fallback or
         selected-store compatibility reader.
     stages_authoring:
-      status: merge_bearing_first_slice
-      implementation_tracker: '#1845'
+      status: canonical
+      implementation_tracker: '#2566'
       rule: >
         `stages:` is the canonical lifecycle node authoring owner for staged
         bundles. It is a keyed mapping whose keys are per-flow stage IDs and
-        whose values carry declaration metadata such as `initial: true`,
-        `terminal: true`, and `description`. It lowers to the existing
-        `initial_state` / `states` / `terminal_states` kernel. It does not
-        replace transition-edge carriers; handlers still contribute edges
-        through `advances_to`, `rules`, and `on_complete` in this slice.
+        whose values carry optional boolean `final`, `description`, timers
+        and gates. Entry is the first effective declaration in the existing
+        node-backed YAML order, including the existing alias/merge rules; map
+        iteration and sorted stage IDs must never choose entry. Describe exposes
+        the actual entry. The immutable compiled stage catalog owns entry and
+        final membership; mutable schema and metadata projections are not
+        runtime authority. Handlers still contribute transition carriers through
+        `advances_to`, `rules`, and `on_complete`.
+      final_stages: >
+        `final: true` is an explicit optional end choice. Omission or false is
+        non-final; end membership is never inferred from graph outdegree or a
+        stage name. No handler fires and no timer arms on a final stage. Final
+        stages cannot own gates or admit an exit transition. Final entry alone
+        does not cancel accepted work, revoke writes or release resources.
+        Ordinary handlers are eligible in every non-final stage; independent
+        loop/join/guard/gate/timer carrier restrictions remain in force.
+      services: >
+        A flow without final stages is a valid service and never completes.
+        Finite run.start refuses a service in its canonical construction/routing
+        closure before creating a run, event, data, feed or receipt. Include the
+        selected root, eagerly constructed keyless descendants and reachable
+        instance-bearing receivers/templates with their constructor children.
+        Stateless does not imply an exempt container. Unknown or contradictory
+        catalog evidence fails closed. The diagnostic names the offending flow
+        and says: this flow never completes; use `serve`, or mark its end stages
+        `final`. Standing/schedule/serve owners and existing-run event.publish
+        are separate; idempotent committed receipt replay remains authoritative.
       stateless_form: >
         `stages: []` is the explicit stateless form for staged bundles.
       retired_legacy_authoring: >
-        `initial_state`, `states`, and `terminal_states` are retired on any
-        authored presence, whether or not stages is present. Only stages owns
+        `initial_state`, `states`, `terminal_states`, stage `initial` and stage
+        `terminal` are unsupported on any authored presence and receive the
+        canonical unknown-key diagnostic. There is no migration/compatibility
+        surface or marker-aware runtime lint. Only stages owns
         lifecycle authoring. Missing stages preserves markerless/stateless
         posture; it does not derive an authored pending stage.
       temporal_rows:
         implementation_tracker: '#1846'
         rule: >
           A stage may declare one-shot temporal rows under
-          `stages.<stage>.timers`. Each row uses `after:` plus `emit:`,
+          `stages.<stage>.timers`. Executable rows on final stages are rejected
+          at admission; new activation also consumes the same compiled final
+          fact. This cannot cancel or invalidate an accepted occurrence/retry.
+          Each row uses `after:` plus `emit:`,
           `advances_to:`, or both. The timer arms when the entity enters the
           owning stage and cancels when the entity leaves that stage. A row with
           `advances_to` terminates the stage by lowering to the existing
@@ -2689,7 +2716,7 @@ contract_formats:
       platform_version: ">=0.7.0 <0.8.0"
 
       flows: []'
-    schema_yaml: "stages:\n  waiting: {initial: true}\n  done: {terminal: true}\npins:\n  inputs: [hello.requested]\n  outputs: [hello.completed]"
+    schema_yaml: "stages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs: [hello.requested]\n  outputs: [hello.completed]"
     nodes_yaml: "hello-node:\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emit:\n        event: hello.completed\n\
       \        fields:\n          result: payload.message"
     events_yaml: "hello.requested:\n  message: text\nhello.completed:\n  result: text"

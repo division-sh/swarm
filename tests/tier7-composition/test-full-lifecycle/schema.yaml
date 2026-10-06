@@ -1,7 +1,7 @@
 stages:
-  pending: {initial: true}
+  pending: {}
   validated: {}
-  complete: {terminal: true}
+  complete: {final: true}
 pins:
   inputs:
     - order.submitted

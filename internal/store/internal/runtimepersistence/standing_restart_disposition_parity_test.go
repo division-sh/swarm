@@ -719,7 +719,7 @@ func (f standingDispositionParityFixture) terminalize(t *testing.T, ctx context.
 			owner,
 			f.hash,
 			runID,
-			stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
+			stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
 		)
 		if err != nil {
 			t.Fatalf("complete standing run %s: %v", runID, err)

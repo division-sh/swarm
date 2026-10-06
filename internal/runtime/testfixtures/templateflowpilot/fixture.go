@@ -51,7 +51,7 @@ func Write(t testing.TB, opts Options) string {
 func addLifecycleOverlay(t testing.TB, root string) {
 	t.Helper()
 	canonicalrouting.ApplyOverlay(t, root, "account/schema.yaml",
-		"stages:\n  pending: {initial: true}\n  done: {terminal: true}\n")
+		"stages:\n  pending: {}\n  done: {final: true}\n")
 }
 
 func applyNegativeMutation(t testing.TB, root string, opts Options) {

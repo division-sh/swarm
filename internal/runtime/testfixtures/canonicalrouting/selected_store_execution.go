@@ -47,8 +47,8 @@ connect:
 	for _, owner := range []struct{ path, entity string }{{"flow-a/1", "default"}, {"selected-state-flow/at-t", "selected_case"}} {
 		writeClosedVariantFile(t, root, owner.path+"/schema.yaml", `name: selected-store-state
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 pins:
   inputs:
     - state.seeded

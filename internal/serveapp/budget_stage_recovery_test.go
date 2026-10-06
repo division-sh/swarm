@@ -137,7 +137,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				t.Fatal("retained terminal source has no child graph")
 			}
 			terminalStage, err := terminalGraph.ResolveStage("ready")
-			if err != nil || !terminalStage.IsTerminal() {
+			if err != nil || !terminalStage.IsFinal() {
 				t.Fatalf("retained ready terminal stage = %#v, %v", terminalStage, err)
 			}
 			if got := stateless.FlowInitialStage("child"); got != "" {

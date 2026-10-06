@@ -1,7 +1,7 @@
 name: account
 stages:
-  active: {initial: true}
-  completed: {terminal: true}
+  active: {}
+  completed: {final: true}
 instance: account_id
 pins:
   inputs:

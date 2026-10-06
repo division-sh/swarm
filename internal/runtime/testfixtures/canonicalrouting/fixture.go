@@ -372,8 +372,8 @@ connect:
 	writeClosedNegativeFile(t, root, "events.yaml", "account.requested:\n  account_id: text\nlegacy.seen:\n  entity_id: uuid\n  legacy_id: text\n  amount: number\n")
 	writeClosedNegativeFile(t, root, "legacy_static/schema.yaml", `name: legacy_static
 stages:
-  active: {initial: true}
-  archived: {terminal: true}
+  active: {}
+  archived: {final: true}
 pins:
   inputs:
     - legacy.seen
@@ -408,7 +408,7 @@ func AddRootDefaultEntityIDForNegativeMutation(t testing.TB, root string) {
 	writeClosedNegativeFile(t, root, "events.yaml", "subject.created:\n  entity_id: text\n  display_name: text\n")
 	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
 stages:
-  active: {initial: true}
+  active: {}
 pins:
   inputs:
     - subject.created

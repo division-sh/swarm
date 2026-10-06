@@ -7845,8 +7845,8 @@ func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowCont
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-flow\n")
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `name: scoring
 stages:
-  pending: {initial: true}
-  scored: {terminal: true}
+  pending: {}
+  scored: {final: true}
 pins:
   inputs:
     - score.dimension_complete
@@ -7912,7 +7912,7 @@ func loadEngineSingletonCoordinatorFlowBundle(t *testing.T) *runtimecontracts.Wo
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-runtime\n")
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), `name: coordinator
 stages:
-  active: {initial: true}
+  active: {}
 pins:
   inputs:
     - job.received

@@ -325,7 +325,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			baseBus := &recordingPipelineBus{}
 			bus := &failOnceRetryPipelineBus{recordingPipelineBus: baseBus}
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: delivery-retry\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
+				"schema.yaml":   "name: delivery-retry\nstages:\n  queued: {}\n  done: {final: true}\n",
 				"entities.yaml": "test_entity: {}\n",
 				"events.yaml":   "source.evt:\nnode.completed:\n",
 				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      emit: node.completed\n",
@@ -461,7 +461,7 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 	// Delivery authority exercises unconditional advancement, not rule selection.
 	// The old raw rule was non-authored and produced a NotApplicable selection fact.
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
+		"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"events.yaml":   "source.evt:\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n",

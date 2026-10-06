@@ -443,8 +443,8 @@ func TestRoleScopedEntityTools_EqualityUsesFinalCandidateValidation(t *testing.T
 		"validation": {
 			SchemaYAML: `name: validation
 stages:
-  queued: {initial: true}
-  closed: {terminal: true}
+  queued: {}
+  closed: {final: true}
 `,
 			TypesYAML: `
 types:
@@ -1829,8 +1829,8 @@ root_subject:
 	writeEntityToolFixtureFile(t, filepath.Join(root, "agents.yaml"), entityToolAgentYAML(actor))
 	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
 stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 `)
 	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
 child_subject:
@@ -2871,9 +2871,9 @@ func loadRoleScopedEntityToolBundle(t *testing.T, actor models.AgentConfig) *run
 			SchemaYAML: `
 name: validation
 stages:
-  queued: {initial: true}
+  queued: {}
   ready: {}
-  closed: {terminal: true}
+  closed: {final: true}
 `,
 			TypesYAML: `
 types:

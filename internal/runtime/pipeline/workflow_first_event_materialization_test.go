@@ -14,7 +14,7 @@ import (
 
 func TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t *testing.T) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: first-event-transition\nstages:\n  waiting: {initial: true}\n  done: {terminal: true}\n",
+		"schema.yaml":   "name: first-event-transition\nstages:\n  waiting: {}\n  done: {final: true}\n",
 		"entities.yaml": "first_event_entity: {}\n",
 		"events.yaml":   "request.accepted:\n",
 		"nodes.yaml":    "acceptor:\n  execution_type: system_node\n  subscribes_to: [request.accepted]\n  event_handlers:\n    request.accepted:\n      advances_to: done\n",

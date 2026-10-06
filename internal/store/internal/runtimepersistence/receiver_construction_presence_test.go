@@ -36,7 +36,7 @@ func TestReceiverReadinessRequiresConstructedHeaderBothStores(t *testing.T) {
 			t.Run(backend+"/"+test.name, func(t *testing.T) {
 				documents := map[string]string{
 					"schema.yaml":        "name: receiver-construction\n",
-					"review/schema.yaml": "name: review\nstages:\n  pending: {initial: true}\n",
+					"review/schema.yaml": "name: review\nstages:\n  pending: {}\n",
 				}
 				if test.fielded {
 					documents["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"

@@ -140,7 +140,7 @@ func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore
 	return storetest.AdmitPostgresRuntimeStore(t, db), semanticview.Wrap(bundle)
 }
 
-func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerunlifecycle.TerminalCatalog {
+func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerunlifecycle.FinalCatalog {
 	t.Helper()
 	root, ok := semanticview.WorkflowStageTopology(source, ".")
 	if !ok {
@@ -154,7 +154,7 @@ func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerun
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := runtimerunlifecycle.NewCompiledTerminalCatalog(classifier)
+	catalog, err := runtimerunlifecycle.NewCompiledFinalCatalog(classifier)
 	if err != nil {
 		t.Fatal(err)
 	}

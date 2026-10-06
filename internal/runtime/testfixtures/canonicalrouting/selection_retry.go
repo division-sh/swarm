@@ -8,8 +8,8 @@ func CopySelectionRetry(t testing.TB) string {
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "schema.yaml", `name: selection-retry
 stages:
-  queued: {initial: true}
-  done: {terminal: true}
+  queued: {}
+  done: {final: true}
 pins:
   inputs:
     - seed

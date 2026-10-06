@@ -1,7 +1,7 @@
 stages:
-  idle: {initial: true}
+  idle: {}
   creating: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - entity.create_requested

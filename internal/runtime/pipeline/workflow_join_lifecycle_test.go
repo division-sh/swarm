@@ -1153,10 +1153,10 @@ func workflowJoinLifecycleFixtureFiles(review bool, loop string) map[string]stri
 		"orders/schema.yaml": `name: orders
 instance: instance_key
 stages:
+  awaiting: {}
   dispatching: {}
-  awaiting: {initial: true}
-  ready: {terminal: true}
-  attention: {terminal: true}
+  ready: {final: true}
+  attention: {final: true}
 `,
 		"orders/entities.yaml": "test_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n  expected: list<text>\n",
 		"orders/types.yaml":    "types:\n  ItemResult:\n    ok: boolean\n  LineItem:\n    id: text\n",

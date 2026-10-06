@@ -79,7 +79,6 @@ type WorkflowContractBundle struct {
 type WorkflowSemanticView struct {
 	Name                   string
 	Version                string
-	InitialStage           string
 	EntitySchema           EntitySchema
 	Stages                 []WorkflowStageContract
 	Timers                 []WorkflowTimerContract
@@ -88,9 +87,6 @@ type WorkflowSemanticView struct {
 	Gates                  []WorkflowGatePlan
 	Guards                 []GuardActionEntry
 	GuardByID              map[string]GuardActionEntry
-	FlowInitial            map[string]string
-	FlowStates             map[string][]string
-	FlowTerminal           map[string][]string
 	FlowNamespace          map[string]string
 	FlowPrefix             map[string]string
 	FlowRules              map[string]string
@@ -333,7 +329,7 @@ type WorkflowStageTopology struct {
 	FlowID            string
 	InitialStage      string
 	Stages            []string
-	TerminalStages    []string
+	FinalStages       []string
 	Edges             []WorkflowStageTopologyEdge
 	Handlers          []WorkflowHandlerStageScope
 	stageCatalog      *workflowStageCatalog

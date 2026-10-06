@@ -424,8 +424,8 @@ func a2ActivationJoinScheduleFault(t *testing.T, ctx context.Context, selected g
 
 func a2ActivationJoinFiles(count int) map[string]string {
 	return map[string]string{
-		"schema.yaml":          "name: a2-activation-join\nstages:\n  active: {initial: true}\n",
-		"orders/schema.yaml":   "name: orders\ninstance: order_id\npins:\n  inputs:\n    - order.created\nstages:\n  awaiting: {initial: true}\n",
+		"schema.yaml":          "name: a2-activation-join\nstages:\n  active: {}\n",
+		"orders/schema.yaml":   "name: orders\ninstance: order_id\npins:\n  inputs:\n    - order.created\nstages:\n  awaiting: {}\n",
 		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  final_count: {type: integer, initial: -1}\n",
 		"orders/events.yaml":   "order.created:\n  order_id: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: text\n",
 		"orders/nodes.yaml": fmt.Sprintf(`collector:

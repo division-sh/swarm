@@ -776,7 +776,7 @@ func seedLifecycleReadinessOwner(
 	flowID := plan.Identity.TemplateID
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
 		"schema.yaml":             "name: lifecycle-readiness-proof\n",
-		flowID + "/schema.yaml":   "name: " + flowID + "\ninstance: fixture_key\nstages:\n  pending: {initial: true}\npins:\n  inputs: [lifecycle.constructed]\n",
+		flowID + "/schema.yaml":   "name: " + flowID + "\ninstance: fixture_key\nstages:\n  pending: {}\npins:\n  inputs: [lifecycle.constructed]\n",
 		flowID + "/events.yaml":   "lifecycle.constructed:\n  fixture_key: text\n",
 		flowID + "/entities.yaml": "item:\n  fixture_key: text\n",
 	})

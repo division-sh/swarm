@@ -858,9 +858,7 @@ func gateLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle 
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml": `name: gate-test
 stages:
-  drafting: {}
   awaiting_review:
-    initial: true
     gate:
       decision: launch_review
       outcomes:
@@ -870,6 +868,7 @@ stages:
     timers:
       - after: 1h
         advances_to: operating
+  drafting: {}
   operating: {}
 `,
 		"entities.yaml": "test_entity: {}\n",

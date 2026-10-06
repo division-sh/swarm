@@ -1,8 +1,8 @@
 stages:
-  scoring: {initial: true}
-  promoted: {terminal: true}
-  demoted: {terminal: true}
-  rejected: {terminal: true}
+  scoring: {}
+  promoted: {final: true}
+  demoted: {final: true}
+  rejected: {final: true}
 pins:
   inputs:
     - score.final

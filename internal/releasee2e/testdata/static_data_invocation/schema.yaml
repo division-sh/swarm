@@ -1,9 +1,9 @@
 name: static-data-invocation
 stages:
-  pending: {initial: true}
+  pending: {}
   reading: {}
   child_reading: {}
-  complete: {terminal: true}
+  complete: {final: true}
 pins:
   inputs:
     - read.requested

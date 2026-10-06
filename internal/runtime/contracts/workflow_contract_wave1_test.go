@@ -208,8 +208,8 @@ root.ready:
 `)
 	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
 stages:
-  discovered: {initial: true}
-  shortlisted: {terminal: true}
+  discovered: {}
+  shortlisted: {final: true}
 pins:
   inputs:
     - root.ready
@@ -601,8 +601,8 @@ func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T)
 	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-flow-entities\n")
 	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 `)
 	writeFixtureFile(t, root+"/scoring/entities.yaml", `
 vertical:
@@ -623,8 +623,8 @@ func TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes(t *testing.T)
 
 	writeFixtureFile(t, root+"/schema.yaml", `name: invalid-root-entities
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 `)
 	writeFixtureFile(t, root+"/entities.yaml", `
 vertical:

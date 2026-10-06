@@ -1,8 +1,8 @@
 name: flow-a
 stages:
-  new: {initial: true}
+  new: {}
   active: {}
-  processed: {terminal: true}
+  processed: {final: true}
 pins:
   inputs:
     - work.begin

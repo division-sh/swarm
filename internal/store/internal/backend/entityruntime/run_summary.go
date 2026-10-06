@@ -27,7 +27,7 @@ func ReadRunSummary(
 	queryer SummaryQueryer,
 	dialect SummaryDialect,
 	runID string,
-	catalog runtimeentity.TerminalCatalog,
+	catalog runtimeentity.FinalCatalog,
 ) (runtimeentity.RunSummary, error) {
 	runID = strings.TrimSpace(runID)
 	if queryer == nil || runID == "" || catalog == nil {
@@ -63,7 +63,7 @@ func ReadRunSummary(
 			return runtimeentity.RunSummary{}, fmt.Errorf("scan entity run summary: %w", err)
 		}
 		summary.Total++
-		terminal, known := catalog.Terminal(flowTemplate, flowInstance, state)
+		terminal, known := catalog.Final(flowTemplate, flowInstance, state)
 		switch {
 		case !known:
 			summary.Malformed++

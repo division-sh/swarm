@@ -30,7 +30,7 @@ func TestWorkflowJoinConstructedDescendantAdmissionOnBothStores(t *testing.T) {
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			files := a2ActivationJoinFiles(1)
-			files["orders/child/schema.yaml"] = "name: child\nstages:\n  awaiting: {initial: true}\n"
+			files["orders/child/schema.yaml"] = "name: child\nstages:\n  awaiting: {}\n"
 			files["orders/child/entities.yaml"] = "child_state:\n  final_count: {type: integer, initial: -1}\n"
 			files["orders/child/events.yaml"] = "item.completed:\n  member_id: text\n  result: text\n"
 			files["orders/child/nodes.yaml"] = files["orders/nodes.yaml"]

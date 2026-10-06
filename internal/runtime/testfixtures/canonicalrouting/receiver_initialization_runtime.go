@@ -42,8 +42,8 @@ pins:
   inputs:
     - opco.spinup_created
 stages:
-  initializing: {initial: true}
-  ready: {terminal: true}
+  initializing: {}
+  ready: {final: true}
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
@@ -112,8 +112,8 @@ pins:
   inputs:
     - opco.spinup_created
 stages:
-  initializing: {initial: true}
-  ready: {terminal: true}
+  initializing: {}
+  ready: {final: true}
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,

@@ -85,10 +85,10 @@ func a2MapFanOutFiles(gather bool) map[string]string {
 	files := map[string]string{
 		"schema.yaml": `name: a2-map-fan-out
 stages:
-  active: {initial: true}
+  active: {}
   awaiting: {}
-  ready: {terminal: true}
-  attention: {terminal: true}
+  ready: {final: true}
+  attention: {final: true}
 pins:
   inputs:
     - seed

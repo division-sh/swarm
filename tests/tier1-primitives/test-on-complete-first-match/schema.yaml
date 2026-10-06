@@ -1,7 +1,7 @@
 stages:
-  pending: {initial: true}
-  passed: {terminal: true}
-  failed: {terminal: true}
+  pending: {}
+  passed: {final: true}
+  failed: {final: true}
 pins:
   inputs:
     - item.evaluated

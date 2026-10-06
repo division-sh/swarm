@@ -26,7 +26,7 @@ func TestCompiledTransitionProjectionMutationIsolation(t *testing.T) {
 	} {
 		projection, _ := read()
 		projection.Stages[0] = "foreign"
-		projection.TerminalStages[0] = "foreign"
+		projection.FinalStages[0] = "foreign"
 		projection.Edges[0].To = "foreign"
 		projection.Handlers[0].Stages[0] = "foreign"
 		projection.Handlers[0].EventType = "foreign"

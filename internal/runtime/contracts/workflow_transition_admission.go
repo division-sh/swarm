@@ -78,8 +78,8 @@ func (t WorkflowStageTopology) AdmitTransition(site WorkflowTransitionSite, from
 	if fromErr != nil || toErr != nil {
 		return CompiledTransition{}, fmt.Errorf("flow %s transition requires declared source and target: %s -> %s", t.FlowID, from, to)
 	}
-	if fromRef.ID() != toRef.ID() && fromRef.IsTerminal() {
-		return CompiledTransition{}, fmt.Errorf("flow %s cannot exit terminal stage %s", t.FlowID, from)
+	if fromRef.ID() != toRef.ID() && fromRef.IsFinal() {
+		return CompiledTransition{}, fmt.Errorf("flow %s cannot exit final stage %s", t.FlowID, from)
 	}
 	var result CompiledTransition
 	matched := false

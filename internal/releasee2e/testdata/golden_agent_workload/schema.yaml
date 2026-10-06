@@ -1,13 +1,12 @@
 name: golden-agent-workload
 stages:
-  pending:
-    initial: true
+  pending: {}
   scouting: {}
   collecting: {}
   complete:
-    terminal: true
+    final: true
   failed:
-    terminal: true
+    final: true
 pins:
   inputs:
     - search.requested

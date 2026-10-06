@@ -507,7 +507,7 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":            "name: activity-boring-proof\nstages: []\n",
-		"research/schema.yaml":   "name: research\ninstance: marker\nstages:\n  pending: {initial: true}\n",
+		"research/schema.yaml":   "name: research\ninstance: marker\nstages:\n  pending: {}\n",
 		"research/entities.yaml": "test_entity:\n  marker: text\n",
 		"research/events.yaml":   "source.requested:\n  url: text\n",
 		"research/nodes.yaml": `scanner:

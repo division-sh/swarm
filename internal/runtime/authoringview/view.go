@@ -154,7 +154,7 @@ type StageGraphGuardTerminationView struct {
 type StageGraphNodeView struct {
 	ID          string `json:"id"`
 	Initial     bool   `json:"initial,omitempty"`
-	Terminal    bool   `json:"terminal,omitempty"`
+	Final       bool   `json:"final,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 
@@ -606,7 +606,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 
 func buildStageGraphForFlow(source semanticview.Source, flowID, label, path string) StageGraphView {
 	initial := strings.TrimSpace(source.FlowInitialStage(flowID))
-	terminalSet := authoringStringSet(source.FlowTerminalStages(flowID))
+	terminalSet := authoringStringSet(source.FlowFinalStages(flowID))
 	states := source.FlowStates(flowID)
 	nodes := make([]StageGraphNodeView, 0, len(states))
 	stageDescriptions := stageDescriptionsForFlow(source, flowID)
@@ -619,7 +619,7 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 		nodes = append(nodes, StageGraphNodeView{
 			ID:          state,
 			Initial:     initial != "" && state == initial,
-			Terminal:    terminal,
+			Final:       terminal,
 			Description: strings.TrimSpace(stageDescriptions[state]),
 		})
 	}

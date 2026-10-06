@@ -10,7 +10,6 @@ func CopyParentConnectTimer(t testing.TB) string {
 	writeClosedVariantFile(t, root, "producer/schema.yaml", `name: producer
 stages:
   waiting:
-    initial: true
     timers:
       - {id: work_ready, after: 40ms, emit: work.ready}
 pins:

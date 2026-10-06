@@ -1,9 +1,9 @@
 name: golden-agent-candidate
 instance: candidate_id
 stages:
-  pending: {initial: true}
+  pending: {}
   active: {}
-  complete: {terminal: true}
+  complete: {final: true}
 pins:
   inputs:
     - candidate.requested

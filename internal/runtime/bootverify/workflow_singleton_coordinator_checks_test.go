@@ -223,9 +223,9 @@ coordinator-node:
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := loadSingletonCoordinatorFixtureBundle(t, `name: coordinator
 stages:
-  active: {initial: true}
-  done: {terminal: true}
-  failed: {terminal: true}
+  active: {}
+  done: {final: true}
+  failed: {final: true}
 pins:
   inputs:
     - job.received
@@ -430,9 +430,9 @@ func TestBuildSingletonCoordinatorDemandProjection_TreatsLoopFromAsStageIdentifi
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 stages:
-  entity.verticals: {initial: true}
+  entity.verticals: {}
   review: {}
-  exhausted: {terminal: true}
+  exhausted: {final: true}
 loops:
   revision:
     revision_field: revision_id
@@ -471,9 +471,9 @@ coordinator-node:
 func TestRun_CountArrivalJoinDoesNotRequireContainedCoordinatorState(t *testing.T) {
 	const schema = `name: coordinator
 stages:
-  active: {initial: true}
-  done: {terminal: true}
-  failed: {terminal: true}
+  active: {}
+  done: {final: true}
+  failed: {final: true}
 pins:
   inputs:
     - job.received

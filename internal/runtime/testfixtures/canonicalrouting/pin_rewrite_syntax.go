@@ -14,7 +14,7 @@ func PinRewriteSyntaxSource(t testing.TB, name string) string {
 	case "RewriteNamesOnlyPreservesOtherSourceAndIsIdempotent-1":
 		return "# original heading\nname: 'unchanged'\npins:\n  inputs:\n    events: [work.started]\n  outputs:\n    events:\n      - event: work.done\n        sink: harness\n\nstages: {idle: {initial: true}}\nconnect:\n  - {event: work.started, from: ., to: child, resolution: create}\n"
 	case "RewriteNamesOnlyPreservesOtherSourceAndIsIdempotent-2":
-		return "\nstages: {idle: {initial: true}}\nconnect:\n  - {event: work.started, from: ., to: child, resolution: create}\n"
+		return "\nstages: {idle: {}}\nconnect:\n  - {event: work.started, from: ., to: child, resolution: create}\n"
 	case "replySources-3":
 		return "name: requester\npins:\n  inputs:\n    events:\n      - event: provider.replied\n        resolution:\n          mode: reply\n          replies_to: provider.requested\n"
 	case "replySources-4":

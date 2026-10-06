@@ -13,8 +13,8 @@ func CopySemanticNumericIngress(t testing.TB) string {
 	for name, raw := range map[string]string{
 		"schema.yaml": `name: semantic-numeric-ingress
 stages:
-  waiting: {initial: true}
-  done: {terminal: true}
+  waiting: {}
+  done: {final: true}
 pins:
   inputs:
     - numeric.requested

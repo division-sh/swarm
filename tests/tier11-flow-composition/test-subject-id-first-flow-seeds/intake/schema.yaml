@@ -1,7 +1,7 @@
 name: intake
 stages:
-  new: {initial: true}
-  processed: {terminal: true}
+  new: {}
+  processed: {final: true}
 pins:
   inputs:
     - work.assigned

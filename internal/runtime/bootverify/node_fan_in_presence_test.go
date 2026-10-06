@@ -63,7 +63,7 @@ func writeJoinRetirementSource(t *testing.T, owner, body string) string {
 	root := t.TempDir()
 	stages := ""
 	if owner == "join" {
-		stages = "stages:\n  awaiting: {initial: true}\n  done: {terminal: true}\n  failed: {terminal: true}\n"
+		stages = "stages:\n  awaiting: {}\n  done: {final: true}\n  failed: {final: true}\n"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: join-retirement\n"+stages+`pins:
   inputs:
