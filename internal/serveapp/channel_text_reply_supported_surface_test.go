@@ -1,7 +1,7 @@
 package serveapp
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -11,9 +11,11 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packmodel"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -81,11 +83,15 @@ func TestChannelTextReplyBaselinePublicJourneyBothStores(t *testing.T) {
 				if backend == servedparity.BackendExplicitPostgres {
 					driver = "postgres"
 				}
-				db, err := sql.Open(driver, h.storeDSN)
+				reader, err := storetest.OpenChannelObservation(driver, h.storeDSN)
 				if err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = db.Close() })
+				t.Cleanup(func() {
+					if err := reader.Close(); err != nil {
+						t.Error(err)
+					}
+				})
 				var begun channelonboarding.Result
 				requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.onboarding_start", map[string]any{
 					"provider": "mock", "verb": "connect", "provider_credential": "object-provider-secret",
@@ -93,6 +99,11 @@ func TestChannelTextReplyBaselinePublicJourneyBothStores(t *testing.T) {
 				}, &begun)
 				if begun.IdentityOperation == nil {
 					t.Fatal("text/reply connect omitted the real human claim")
+				}
+				settled := func(kind render.IntentKind, eventID, disposition string) {
+					t.Helper()
+					waitTextReplyIntent(t, reader, render.IntentObservationQuery{Kind: kind, Provider: "mock",
+						ProviderEventID: eventID, InterfaceKey: begun.IdentityOperation.Interface.Key()}, disposition)
 				}
 				provider.mu.Lock()
 				callback, signing := provider.callback, provider.signing
@@ -132,9 +143,9 @@ func TestChannelTextReplyBaselinePublicJourneyBothStores(t *testing.T) {
 					objectChannelIngress(t, callback, signing, id, fact)
 				}
 				postText("customer-inbox", "customer-b", "/inbox", "", true)
-				waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "customer-inbox", "entry_rejected")
+				settled(render.IntentText, "customer-inbox", "entry_rejected")
 				postText("operator-inbox", "operator-a", "/inbox", "", true)
-				waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "operator-inbox", "entry")
+				settled(render.IntentText, "operator-inbox", "entry")
 				waitTextReplyMessage(t, provider, "Inbox")
 				var identity apiv1.RuntimeIdentityResult
 				requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
@@ -142,51 +153,59 @@ func TestChannelTextReplyBaselinePublicJourneyBothStores(t *testing.T) {
 					"event_name": "work.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash,
 					"payload": map[string]any{"detail": "text/reply baseline"}, "idempotency_key": "baseline-card",
 				})
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				message := waitObjectCardReceipt(t, db, card)
+				card := waitTextReplyPublicCard(t, h, seed.RunID)
+				plans := waitTextReplyCardCopies(t, reader, card, 1)
+				receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plans[0].DeliveryID, plans[0].CurrentReceiptID)
+				if err != nil || !found {
+					t.Fatalf("first card has no exact receipt: %v", err)
+				}
+				message := receipt.DeliveryReference.(map[string]any)["id"].(string)
 				firstCopy := message
 				waitTextReplyMessage(t, provider, "Action: More choices")
+				if err := reader.Close(); err != nil {
+					t.Fatal(err)
+				}
 				h.stop(t)
 				h.start(t)
+				reader, err = storetest.OpenChannelObservation(driver, h.storeDSN)
+				if err != nil {
+					t.Fatal(err)
+				}
 				postText("control-page", "operator-a", "More choices", message, false)
 				postText("control-page", "operator-a", "More choices", message, false)
-				waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "control-page", "navigation")
+				settled(render.IntentAction, "control-page", "navigation")
 				message = waitTextReplyMessage(t, provider, "Action: reject")
 				if message == firstCopy {
 					t.Fatal("no-edit navigation modified or borrowed the original physical copy")
 				}
-				var requestedCopyID string
-				if err := db.QueryRow(`SELECT p.delivery_id FROM channel_delivery_plans p
-					JOIN operator_channel_action_intents a ON a.publication_id=p.resend_action_publication_id
-					WHERE a.provider_event_id='control-page' AND p.source_kind='card' AND p.source_id=$1`, card).Scan(&requestedCopyID); err != nil {
-					t.Fatal(err)
-				}
-				waitObjectDeliveryState(t, db, requestedCopyID, "sent")
-				var copies, sent int
-				if err := db.QueryRow(`SELECT COUNT(*), SUM(CASE WHEN state='sent' THEN 1 ELSE 0 END)
-					FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, card).Scan(&copies, &sent); err != nil || copies != 2 || sent != 2 {
-					t.Fatalf("requested page did not retain exactly two accepted copies: %d/%d: %v", copies, sent, err)
-				}
+				waitTextReplyCardCopies(t, reader, card, 2)
 				postText("customer-action", "customer-b", "reject", message, false)
-				waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "customer-action", "rejected")
+				settled(render.IntentText, "customer-action", "rejected")
 				postText("no-quote", "operator-a", "reject", "", false)
 				postText("old-page-request", "operator-a", "More choices", firstCopy, false)
-				waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "old-page-request", "stale")
+				settled(render.IntentAction, "old-page-request", "stale")
 				postText("input-begin", "operator-a", "reject", message, false)
 				postText("input-begin", "operator-a", "reject", message, false)
-				waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "input-begin", "input_started")
+				settled(render.IntentAction, "input-begin", "input_started")
 				prompt := waitTextReplyMessage(t, provider, "Input: reason (text)")
 				postText("input-skip", "operator-a", "Skip field", prompt, false)
-				waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "input-skip", "applied")
+				settled(render.IntentAction, "input-skip", "applied")
 				finalPrompt := waitTextReplyMessage(t, provider, "Input: later (text) required")
+				if err := reader.Close(); err != nil {
+					t.Fatal(err)
+				}
 				h.stop(t)
 				h.start(t)
+				reader, err = storetest.OpenChannelObservation(driver, h.storeDSN)
+				if err != nil {
+					t.Fatal(err)
+				}
 				postText("obsolete-prompt", "operator-a", "old answer", prompt, false)
-				waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "obsolete-prompt", "teaching")
+				settled(render.IntentText, "obsolete-prompt", "teaching")
 				postText("input-final", "operator-a", "private-answer", finalPrompt, false)
-				waitUncertainCopyDecision(t, db, card)
+				waitTextReplyPublicDecision(t, h, card)
 				postText("old-action", "operator-a", "reject", message, false)
-				waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "old-action", "stale")
+				settled(render.IntentAction, "old-action", "stale")
 				provider.mu.Lock()
 				defer provider.mu.Unlock()
 				for path, calls := range provider.calls {
@@ -202,6 +221,142 @@ func TestChannelTextReplyBaselinePublicJourneyBothStores(t *testing.T) {
 			})
 		}
 	}
+}
+
+func waitTextReplyIntent(t *testing.T, reader render.Observer, demand render.IntentObservationQuery, disposition string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var last render.IntentObservation
+	var seen bool
+	for time.Now().Before(deadline) {
+		result, found, err := reader.ObserveChannelIntent(context.Background(), demand)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last, seen = result, found
+		if found && result.State == "settled" && result.Disposition == disposition {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if demand.Kind == render.IntentAction {
+		textDemand := demand
+		textDemand.Kind = render.IntentText
+		text, found, err := reader.ObserveChannelIntent(context.Background(), textDemand)
+		t.Logf("original text: found=%t state=%q disposition=%q err=%v", found, text.State, text.Disposition, err)
+	}
+	t.Fatalf("intent %s/%s did not settle as %s: found=%t state=%q disposition=%q", demand.Kind, demand.ProviderEventID, disposition, seen, last.State, last.Disposition)
+}
+
+func textReplyCardCopies(t *testing.T, reader render.Observer, cardID string) []render.Candidate {
+	t.Helper()
+	var result []render.Candidate
+	cursor := ""
+	for {
+		page, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), cursor, 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, plan := range page {
+			if plan.SourceKind == "card" && plan.SourceID == cardID {
+				result = append(result, plan)
+			}
+		}
+		if len(page) < 200 {
+			return result
+		}
+		next := page[len(page)-1].DeliveryID
+		if next <= cursor {
+			t.Fatal("channel observation did not advance")
+		}
+		cursor = next
+	}
+}
+
+func waitTextReplyCardCopies(t *testing.T, reader render.Observer, cardID string, count int) []render.Candidate {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		plans := textReplyCardCopies(t, reader, cardID)
+		if len(plans) > count {
+			t.Fatal("duplicate request created an extra card copy")
+		}
+		sent := 0
+		for _, plan := range plans {
+			if plan.State == "sent" && plan.CurrentReceiptID != "" {
+				sent++
+			}
+		}
+		if sent == count {
+			return plans
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("card %s did not retain %d accepted copies", cardID, count)
+	return nil
+}
+
+func waitTextReplyPublicCard(t *testing.T, h *channelOnboardingE2EHarness, runID string) string {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		var matches []string
+		cursor := ""
+		for {
+			var page struct {
+				Items []struct {
+					Kind string                `json:"kind"`
+					Card decisioncard.ListItem `json:"decision_card"`
+				} `json:"items"`
+				Next string `json:"next_cursor"`
+			}
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.list", map[string]any{
+				"run_id": runID, "anchor_kind": string(decisioncard.AnchorKindStageGate), "status": "pending", "cursor": cursor, "limit": 200}, &page)
+			for _, item := range page.Items {
+				if item.Kind == "decision_card" && item.Card.RunID == runID && item.Card.Scope.FlowInstance == "reviews" {
+					matches = append(matches, item.Card.CardID)
+				}
+			}
+			if page.Next == "" {
+				break
+			}
+			if page.Next == cursor {
+				t.Fatal("public mailbox cursor did not advance")
+			}
+			cursor = page.Next
+		}
+		if len(matches) > 1 {
+			t.Fatal("public baseline has ambiguous pending cards")
+		}
+		if len(matches) == 1 {
+			return matches[0]
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("public baseline card did not appear")
+	return ""
+}
+
+func waitTextReplyPublicDecision(t *testing.T, h *channelOnboardingE2EHarness, cardID string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		var result struct {
+			Card struct {
+				CardID string `json:"card_id"`
+				Status string `json:"status"`
+			} `json:"decision_card"`
+		}
+		requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &result)
+		if result.Card.CardID != cardID {
+			t.Fatal("public card readback changed identity")
+		}
+		if result.Card.Status == decisioncard.StatusDecided {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("public baseline card did not complete")
 }
 
 func waitTextReplyMessage(t *testing.T, provider *objectChannelProvider, contains string) string {
