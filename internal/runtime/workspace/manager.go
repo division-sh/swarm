@@ -1257,25 +1257,8 @@ func (m *DockerManager) ensureContainerRunningWithIdentity(ctx context.Context, 
 		m.recordProjectionContainer(name, identity)
 	}
 	if !exists {
-		args := []string{"create", "--name", name}
-		if runtime.GOOS == "linux" {
-			args = append(args, "--add-host", "host.docker.internal:host-gateway")
-			artifact, err := currentWorkerArtifact()
-			if err != nil {
-				return fmt.Errorf("resolve workspace worker artifact: %w", err)
-			}
-			args = append(args, "--mount", "type=bind,source="+artifact.path+",destination="+WorkerContainerPath+",readonly")
-		}
-		if network := strings.TrimSpace(m.cfg.WorkspaceNetwork); network != "" {
-			args = append(args, "--network", network)
-		}
-		if len(labels) > 0 {
-			args = append(args, runtimecontaineridentity.DockerCreateLabelArgs(labels)...)
-		}
-		args = append(args, createArgs...)
-		m.recordProjectionContainer(name, identity)
-		if _, err := m.RunDocker(ctx, args...); err != nil {
-			return fmt.Errorf("create container %s: %w", name, err)
+		if err := m.createWorkspaceContainer(ctx, name, identity, labels, createArgs); err != nil {
+			return err
 		}
 		running = false
 	}
@@ -1296,6 +1279,30 @@ func (m *DockerManager) ensureContainerRunningWithIdentity(ctx context.Context, 
 		return err
 	}
 	m.recordProjectionContainer(name, identity)
+	return nil
+}
+
+func (m *DockerManager) createWorkspaceContainer(ctx context.Context, name string, identity runtimecontaineridentity.Identity, labels map[string]string, createArgs []string) error {
+	args := []string{"create", "--name", name}
+	if runtime.GOOS == "linux" {
+		args = append(args, "--add-host", "host.docker.internal:host-gateway")
+		artifact, err := currentWorkerArtifact()
+		if err != nil {
+			return fmt.Errorf("resolve workspace worker artifact: %w", err)
+		}
+		args = append(args, "--mount", "type=bind,source="+artifact.path+",destination="+WorkerContainerPath+",readonly")
+	}
+	if network := strings.TrimSpace(m.cfg.WorkspaceNetwork); network != "" {
+		args = append(args, "--network", network)
+	}
+	if len(labels) > 0 {
+		args = append(args, runtimecontaineridentity.DockerCreateLabelArgs(labels)...)
+	}
+	args = append(args, createArgs...)
+	m.recordProjectionContainer(name, identity)
+	if _, err := m.RunDocker(ctx, args...); err != nil {
+		return fmt.Errorf("create container %s: %w", name, err)
+	}
 	return nil
 }
 

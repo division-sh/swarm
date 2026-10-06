@@ -94,53 +94,13 @@ func ReadSemanticEventFixtureEvidenceForTest(ctx context.Context, selected any, 
 		DeliveryStatuses:    make(map[string]string),
 	}
 	read := func(ctx context.Context, tx *sql.Tx) error {
+		if err := readSemanticEventFacts(ctx, tx, dialect, runID, eventID, &evidence); err != nil {
+			return err
+		}
+		if err := readSemanticEventPipelineReceipt(ctx, tx, eventID, &evidence); err != nil {
+			return err
+		}
 		var err error
-		if dialect == authoractivityfixture.DialectPostgres {
-			evidence.Record, evidence.RecordFound, err = eventrecordpostgres.Load(ctx, tx, eventID)
-		} else {
-			evidence.Record, evidence.RecordFound, err = eventrecordsqlite.Load(ctx, tx, eventID)
-		}
-		if err != nil {
-			return err
-		}
-		if evidence.RecordFound && evidence.Record.RunID != runID {
-			return fmt.Errorf("semantic event fixture %s does not belong to run %s", eventID, runID)
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT status, COALESCE(event_count, 0) FROM runs WHERE run_id = $1`, runID).
-			Scan(&evidence.RunStatus, &evidence.RunEventCount); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1`, eventID).
-			Scan(&evidence.CommittedScope); err == nil {
-			evidence.CommittedScopeFound = true
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		evidence.SettledDeliveryAttemptCount, err = delivery.ReadSemanticEventSettledAttemptCount(ctx, tx, eventID)
-		if err != nil {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id = $1`, runID).Scan(&evidence.RevisionCount); err != nil {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts
-			WHERE event_id = $1 AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).
-			Scan(&evidence.PipelineReceiptCount); err != nil {
-			return err
-		}
-		if evidence.PipelineReceiptCount != 0 {
-			var failure sql.NullString
-			if err := tx.QueryRowContext(ctx, `SELECT outcome, COALESCE(reason_code, ''), CAST(failure AS TEXT) FROM event_receipts
-				WHERE event_id = $1 AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).
-				Scan(&evidence.PipelineReceiptOutcome, &evidence.PipelineReceiptReason, &failure); err != nil {
-				return err
-			}
-			if failure.Valid {
-				if err := json.Unmarshal([]byte(failure.String), &evidence.PipelineReceiptFailure); err != nil {
-					return fmt.Errorf("decode pipeline receipt failure: %w", err)
-				}
-			}
-		}
 		evidence.DeliveryProjections, evidence.DeliveryStatuses, err = delivery.ReadSemanticEventDeliveryStorage(ctx, tx, eventID)
 		if err != nil {
 			return err
@@ -158,6 +118,59 @@ func ReadSemanticEventFixtureEvidenceForTest(ctx context.Context, selected any, 
 		return empty, err
 	}
 	return evidence, nil
+}
+
+func readSemanticEventFacts(ctx context.Context, tx *sql.Tx, dialect authoractivityfixture.Dialect, runID, eventID string, evidence *SemanticEventFixtureEvidence) error {
+	var err error
+	if dialect == authoractivityfixture.DialectPostgres {
+		evidence.Record, evidence.RecordFound, err = eventrecordpostgres.Load(ctx, tx, eventID)
+	} else {
+		evidence.Record, evidence.RecordFound, err = eventrecordsqlite.Load(ctx, tx, eventID)
+	}
+	if err != nil {
+		return err
+	}
+	if evidence.RecordFound && evidence.Record.RunID != runID {
+		return fmt.Errorf("semantic event fixture %s does not belong to run %s", eventID, runID)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT status, COALESCE(event_count, 0) FROM runs WHERE run_id = $1`, runID).
+		Scan(&evidence.RunStatus, &evidence.RunEventCount); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1`, eventID).
+		Scan(&evidence.CommittedScope); err == nil {
+		evidence.CommittedScopeFound = true
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	evidence.SettledDeliveryAttemptCount, err = delivery.ReadSemanticEventSettledAttemptCount(ctx, tx, eventID)
+	if err != nil {
+		return err
+	}
+	return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id = $1`, runID).Scan(&evidence.RevisionCount)
+}
+
+func readSemanticEventPipelineReceipt(ctx context.Context, tx *sql.Tx, eventID string, evidence *SemanticEventFixtureEvidence) error {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1 AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).
+		Scan(&evidence.PipelineReceiptCount); err != nil {
+		return err
+	}
+	if evidence.PipelineReceiptCount == 0 {
+		return nil
+	}
+	var failure sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT outcome, COALESCE(reason_code, ''), CAST(failure AS TEXT) FROM event_receipts
+		WHERE event_id = $1 AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).
+		Scan(&evidence.PipelineReceiptOutcome, &evidence.PipelineReceiptReason, &failure); err != nil {
+		return err
+	}
+	if failure.Valid {
+		if err := json.Unmarshal([]byte(failure.String), &evidence.PipelineReceiptFailure); err != nil {
+			return fmt.Errorf("decode pipeline receipt failure: %w", err)
+		}
+	}
+	return nil
 }
 
 // LoadCanonicalEventRecordForTest exposes only decoded evidence. Record and
