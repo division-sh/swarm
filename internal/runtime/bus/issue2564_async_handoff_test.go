@@ -12,7 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/channelactivation"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
@@ -78,6 +81,19 @@ func (i issue2564HandoffRouteInterceptor) InterceptDeliveryRoute(ctx context.Con
 	case <-i.release:
 		return false, nil, pipelineobligation.Continue(), consumeReceiverProjectionTestCarrier(ctx, delivery.Event(), route)
 	}
+}
+
+type issue2564HandoffDiagnosticLogger struct {
+	deadLetterAckBusLogger
+	runIDs   []string
+	eventIDs []string
+}
+
+func (l *issue2564HandoffDiagnosticLogger) Log(ctx context.Context, _ diaglog.Level, _, _, action, eventID, _, _, _, _ string, _ map[string]string, _ any, _ *runtimefailures.Envelope, _ int) error {
+	l.actions = append(l.actions, action)
+	l.runIDs = append(l.runIDs, runtimecorrelation.RunIDFromContext(ctx))
+	l.eventIDs = append(l.eventIDs, eventID)
+	return nil
 }
 
 func TestIssue2564AsyncHandoffPreservesForegroundCompletion(t *testing.T) {
@@ -217,6 +233,34 @@ func TestIssue2564AsyncNodeHandoffRetiresPublicationBeforeExecution(t *testing.T
 	continuations.mu.Unlock()
 	if retained != 0 || owner.settlements != 1 || proofs != 1 || signals != 1 {
 		t.Fatalf("retained=%d settlements=%d proofs=%d signals=%d", retained, owner.settlements, proofs, signals)
+	}
+}
+
+func TestIssue2564AsyncNodeHandoffPreservesPublicationDiagnostic(t *testing.T) {
+	fault := errors.New("injected handoff settlement failure")
+	for _, name := range []string{"success", "uncommitted_settlement_failure", "acknowledged_cleanup_error"} {
+		t.Run(name, func(t *testing.T) {
+			bus, prepared, owner, _ := issue2564PreparedHandoff(t)
+			logger := &issue2564HandoffDiagnosticLogger{}
+			bus.SetLoggerHook(logger)
+			if name != "success" {
+				owner.settleErr = fault
+				owner.committed = name == "acknowledged_cleanup_error"
+			}
+			caller := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+			err := bus.DispatchPreparedPublishAsync(caller, prepared)
+			if name == "success" && err != nil || name != "success" && !errors.Is(err, fault) {
+				t.Fatalf("dispatch error=%v, case=%s", err, name)
+			}
+			// Publication was already acknowledged, independently of handoff or
+			// node execution. Do not replace that fact with a delivered story.
+			if len(logger.actions) != 1 || logger.actions[0] != "published" {
+				t.Fatalf("publication diagnostics=%v, want only published", logger.actions)
+			}
+			if logger.runIDs[0] != prepared.Event.RunID() || logger.eventIDs[0] != prepared.Event.ID() {
+				t.Fatalf("publication diagnostics borrowed caller scope: runs=%v events=%v", logger.runIDs, logger.eventIDs)
+			}
+		})
 	}
 }
 
