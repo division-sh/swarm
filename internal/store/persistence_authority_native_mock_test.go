@@ -2,8 +2,7 @@ package store_test
 
 import "testing"
 
-func TestNativeMockFixturesDoNotReceiveRawAuthority(t *testing.T) {
-	findings := debtLoadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+func verifyNativeMockFixturesDoNotReceiveRawAuthority(t *testing.T, findings []authorityFinding) {
 	for _, finding := range findings {
 		if nativeMockFixtureAuthority(finding) {
 			t.Errorf("native mock fixture regained raw authority: %s", finding.registryLine())

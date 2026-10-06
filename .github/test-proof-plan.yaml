@@ -803,14 +803,24 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store
       - github.com/division-sh/swarm/internal/testpostgres
-    run: '^($|[^T].*|T($|[^e].*|e($|[^s].*|s($|[^t].*|t($|[^P].*|P($|[^e].*|e($|[^r].*|r($|[^s].*|s($|[^i].*|i($|[^s].*|s($|[^t].*|t($|[^e].*|e($|[^n].*|n($|[^c].*|c($|[^e].*|e($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y($|[^D].*|D($|[^e].*|e($|[^b].*|b($|[^t].*|t($|[^R].*|R($|[^a].*|a($|[^t].*|t($|[^c].*|c($|[^h].*|h($|[^e].*|e($|[^t].*|t.+)))))))))))))))))))))))))))))))))))$'
+    # Positive RE2 complement: the census unit owns the two exact scan roots.
+    run: '^($|[^T].*|T($|[^e].*|e($|[^s].*|s($|[^t].*|t($|[^NP].*|N($|[^a].*|a($|[^t].*|t($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^F].*|F($|[^i].*|i($|[^x].*|x($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^F].*|F($|[^a].*|a($|[^m].*|m($|[^i].*|i($|[^l].*|l($|[^i].*|i($|[^e].*|e($|[^s].*|s($|[^D].*|D($|[^o].*|o($|[^N].*|N($|[^o].*|o($|[^t].*|t($|[^R].*|R($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^R].*|R($|[^a].*|a($|[^w].*|w($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y.+))))))))))))))))))))))))))))))))))))))))))))|P($|[^e].*|e($|[^r].*|r($|[^s].*|s($|[^i].*|i($|[^s].*|s($|[^t].*|t($|[^e].*|e($|[^n].*|n($|[^c].*|c($|[^e].*|e($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y($|[^D].*|D($|[^e].*|e($|[^b].*|b($|[^t].*|t($|[^R].*|R($|[^a].*|a($|[^t].*|t($|[^c].*|c($|[^h].*|h($|[^e].*|e($|[^t].*|t.+)))))))))))))))))))))))))))))))))))$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
   persistence-authority-debt-census:
     packages:
       - github.com/division-sh/swarm/internal/store
-    run: '^TestPersistenceAuthorityDebtRatchet$'
+    run: '^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$'
+    required_children:
+      TestNativeFixtureFamiliesDoNotReceiveRawAuthority:
+        - TestInboundSetupSeedDoesNotReceiveRawAuthority
+        - TestNativeActivitySetupDoesNotReceiveRawAuthority
+        - TestNativeChannelTerminalFixturesDoNotReceiveRawAuthority
+        - TestNativeJournalFixturesDoNotReceiveRawAuthority
+        - TestNativeLoopClaimFixturesDoNotReceiveRawAuthority
+        - TestNativeMockFixturesDoNotReceiveRawAuthority
+        - TestNativeAPIReadSetupDoesNotReceiveRawAuthority
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

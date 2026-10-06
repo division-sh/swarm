@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"testing"
@@ -12,7 +13,19 @@ import (
 
 const persistenceDebtCensusUnit = "persistence-authority-debt-census"
 const persistenceDebtRoot = "TestPersistenceAuthorityDebtRatchet"
-const persistenceDebtAdmissionRun = `^($|[^T].*|T($|[^e].*|e($|[^s].*|s($|[^t].*|t($|[^P].*|P($|[^e].*|e($|[^r].*|r($|[^s].*|s($|[^i].*|i($|[^s].*|s($|[^t].*|t($|[^e].*|e($|[^n].*|n($|[^c].*|c($|[^e].*|e($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y($|[^D].*|D($|[^e].*|e($|[^b].*|b($|[^t].*|t($|[^R].*|R($|[^a].*|a($|[^t].*|t($|[^c].*|c($|[^h].*|h($|[^e].*|e($|[^t].*|t.+)))))))))))))))))))))))))))))))))))$`
+const persistenceNativeFamilyRoot = "TestNativeFixtureFamiliesDoNotReceiveRawAuthority"
+const persistenceDebtCensusRun = `^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$`
+const persistenceDebtAdmissionRun = `^($|[^T].*|T($|[^e].*|e($|[^s].*|s($|[^t].*|t($|[^NP].*|N($|[^a].*|a($|[^t].*|t($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^F].*|F($|[^i].*|i($|[^x].*|x($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^F].*|F($|[^a].*|a($|[^m].*|m($|[^i].*|i($|[^l].*|l($|[^i].*|i($|[^e].*|e($|[^s].*|s($|[^D].*|D($|[^o].*|o($|[^N].*|N($|[^o].*|o($|[^t].*|t($|[^R].*|R($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^R].*|R($|[^a].*|a($|[^w].*|w($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y.+))))))))))))))))))))))))))))))))))))))))))))|P($|[^e].*|e($|[^r].*|r($|[^s].*|s($|[^i].*|i($|[^s].*|s($|[^t].*|t($|[^e].*|e($|[^n].*|n($|[^c].*|c($|[^e].*|e($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y($|[^D].*|D($|[^e].*|e($|[^b].*|b($|[^t].*|t($|[^R].*|R($|[^a].*|a($|[^t].*|t($|[^c].*|c($|[^h].*|h($|[^e].*|e($|[^t].*|t.+)))))))))))))))))))))))))))))))))))$`
+
+var persistenceNativeFamilyChildren = []string{
+	"TestInboundSetupSeedDoesNotReceiveRawAuthority",
+	"TestNativeActivitySetupDoesNotReceiveRawAuthority",
+	"TestNativeChannelTerminalFixturesDoNotReceiveRawAuthority",
+	"TestNativeJournalFixturesDoNotReceiveRawAuthority",
+	"TestNativeLoopClaimFixturesDoNotReceiveRawAuthority",
+	"TestNativeMockFixturesDoNotReceiveRawAuthority",
+	"TestNativeAPIReadSetupDoesNotReceiveRawAuthority",
+}
 
 func loadPersistenceDebtPolicy(t *testing.T) Policy {
 	t.Helper()
@@ -32,12 +45,14 @@ func validatePersistenceDebtEnvelopes(policy Policy) error {
 	for _, id := range []string{"store-admission-full", persistenceDebtCensusUnit} {
 		unit, ok := policy.Units[id]
 		packages := []string{policy.Module + "/internal/store"}
-		run, skip := "^"+persistenceDebtRoot+"$", ""
+		run, skip := persistenceDebtCensusRun, ""
+		children := map[string][]string{persistenceNativeFamilyRoot: persistenceNativeFamilyChildren}
 		if id == "store-admission-full" {
 			packages = append(packages, policy.Module+"/internal/testpostgres")
 			run, skip = persistenceDebtAdmissionRun, ""
+			children = nil
 		}
-		if !ok || !slices.Equal(unit.Packages, packages) || unit.Run != run || unit.Skip != skip || unit.CountMode != "count-1" || unit.EnvironmentID != "ci-postgres-gateway-empty-v1" || unit.BudgetClass != "broad" || unit.GoTimeout != "" || len(unit.RequiredChildren) != 0 {
+		if !ok || !slices.Equal(unit.Packages, packages) || unit.Run != run || unit.Skip != skip || unit.CountMode != "count-1" || unit.EnvironmentID != "ci-postgres-gateway-empty-v1" || unit.BudgetClass != "broad" || unit.GoTimeout != "" || !reflect.DeepEqual(unit.RequiredChildren, children) {
 			return fmt.Errorf("%s changed persistence proof envelope: %+v", id, unit)
 		}
 		for _, tier := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
@@ -96,7 +111,7 @@ func TestPersistenceAuthorityCensusPartitionPreservesEveryRoot(t *testing.T) {
 				for _, pkg := range []string{policy.Module + "/internal/store", policy.Module + "/internal/testpostgres"} {
 					for _, name := range inventory.Packages[pkg].Roots {
 						want := "store-admission-full"
-						if pkg == policy.Module+"/internal/store" && name == persistenceDebtRoot {
+						if pkg == policy.Module+"/internal/store" && (name == persistenceDebtRoot || name == persistenceNativeFamilyRoot) {
 							want = persistenceDebtCensusUnit
 						}
 						if !slices.Equal(owners[TestRoot{Package: pkg, Name: name}], []string{want}) {
@@ -109,10 +124,10 @@ func TestPersistenceAuthorityCensusPartitionPreservesEveryRoot(t *testing.T) {
 					t.Fatalf("changed root union: got %d want %d", len(owners), wantTotal)
 				}
 				census, err := plan.Unit(persistenceDebtCensusUnit)
-				if err != nil || len(census.RequiredTests) != 1 || census.RequiredTests[0].Name != persistenceDebtRoot || len(census.DeferredTests) != 0 {
+				if err != nil || len(census.RequiredTests) != 2 || census.RequiredTests[0].Name != persistenceNativeFamilyRoot || census.RequiredTests[1].Name != persistenceDebtRoot || len(census.DeferredTests) != 0 || !slices.Equal(census.RequiredChildren[persistenceNativeFamilyRoot], persistenceNativeFamilyChildren) {
 					t.Fatalf("census completion obligation missing: %+v, %v", census, err)
 				}
-				t.Logf("unchanged union=%d; census=1; admission=%d; exact multiplicity one", wantTotal, wantTotal-1)
+				t.Logf("complete union=%d; census=2 roots plus all7 required family children; admission=%d; exact multiplicity one", wantTotal, wantTotal-2)
 			})
 		}
 	}
@@ -124,6 +139,14 @@ func TestPersistenceAuthorityCensusPartitionRejectsEnvelopeDrift(t *testing.T) {
 		edit func(*UnitPolicy)
 	}{
 		{"omitted-census", func(u *UnitPolicy) { u.Run = "^$" }},
+		{"omitted-native-family", func(u *UnitPolicy) { u.Run = "^TestPersistenceAuthorityDebtRatchet$" }},
+		{"omitted-required-child", func(u *UnitPolicy) {
+			u.RequiredChildren[persistenceNativeFamilyRoot] = u.RequiredChildren[persistenceNativeFamilyRoot][:6]
+		}},
+		{"duplicate-required-child", func(u *UnitPolicy) {
+			u.RequiredChildren[persistenceNativeFamilyRoot] = append(u.RequiredChildren[persistenceNativeFamilyRoot], persistenceNativeFamilyChildren[0])
+		}},
+		{"removed-required-children", func(u *UnitPolicy) { u.RequiredChildren = nil }},
 		{"extra-root", func(u *UnitPolicy) { u.Run = "^TestPersistenceAuthorityDebt" }},
 		{"changed-count", func(u *UnitPolicy) { u.CountMode = "cache-default" }},
 		{"unjustified-skip", func(u *UnitPolicy) { u.Skip = "^Test" }},
@@ -172,19 +195,21 @@ func TestPersistenceAuthorityCensusPartitionRejectsEnvelopeDrift(t *testing.T) {
 		})
 	}
 	pattern := regexp.MustCompile(persistenceDebtAdmissionRun)
-	if pattern.MatchString(persistenceDebtRoot) {
-		t.Fatal("positive admission complement duplicates the census")
-	}
-	for i := 0; i < len(persistenceDebtRoot); i++ {
-		for _, name := range []string{persistenceDebtRoot[:i], persistenceDebtRoot[:i] + "OtherProof"} {
-			if !pattern.MatchString(name) {
-				t.Fatalf("positive complement narrowed prefix sibling %q", name)
+	for _, root := range []string{persistenceDebtRoot, persistenceNativeFamilyRoot} {
+		if pattern.MatchString(root) {
+			t.Fatal("positive admission complement duplicates a census root")
+		}
+		for i := 0; i < len(root); i++ {
+			for _, name := range []string{root[:i], root[:i] + "OtherProof"} {
+				if !pattern.MatchString(name) {
+					t.Fatalf("positive complement narrowed prefix sibling %q", name)
+				}
 			}
 		}
-	}
-	for _, suffix := range []string{"Extra", "Guard", "2"} {
-		if !pattern.MatchString(persistenceDebtRoot + suffix) {
-			t.Fatal("positive complement dropped a census-name sibling")
+		for _, suffix := range []string{"Extra", "Guard", "2"} {
+			if !pattern.MatchString(root + suffix) {
+				t.Fatal("positive complement dropped a census-name sibling")
+			}
 		}
 	}
 }

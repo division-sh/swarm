@@ -2,8 +2,7 @@ package store_test
 
 import "testing"
 
-func TestNativeLoopClaimFixturesDoNotReceiveRawAuthority(t *testing.T) {
-	findings := debtLoadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+func verifyNativeLoopClaimFixturesDoNotReceiveRawAuthority(t *testing.T, findings []authorityFinding) {
 	for _, finding := range findings {
 		if nativeLoopFixtureAuthority(finding) {
 			t.Errorf("native loop fixture regained raw authority: %s", finding.registryLine())

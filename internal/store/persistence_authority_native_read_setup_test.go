@@ -2,8 +2,7 @@ package store_test
 
 import "testing"
 
-func TestNativeAPIReadSetupDoesNotReceiveRawAuthority(t *testing.T) {
-	findings := debtLoadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+func verifyNativeAPIReadSetupDoesNotReceiveRawAuthority(t *testing.T, findings []authorityFinding) {
 	for _, finding := range findings {
 		if nativeAPIReadSetupAuthority(finding) {
 			t.Errorf("native API read/control fixture regained raw authority: %s", finding.registryLine())
