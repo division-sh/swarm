@@ -114,7 +114,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				SourceArtifact: authorActivityTestSourceArtifact,
 				RootSchema: &runtimecontracts.FlowSchemaDocument{
 					StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-						{ID: "active", Initial: true}, {ID: "done", Terminal: true},
+						{ID: "active"}, {ID: "done", Final: true},
 					}},
 				},
 				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"flow": {}},

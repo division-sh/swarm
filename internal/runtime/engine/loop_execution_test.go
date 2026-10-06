@@ -28,11 +28,13 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 		EntryStage:  "drafting", RegionStages: []string{"drafting", "review"},
 		Operations: []runtimecontracts.WorkflowLoopOperationPlan{{Kind: runtimecontracts.LoopOperationRepeat, Node: testFlowExecutableNode(t, "validation", "loop-node"), HandlerEvent: "loop.event", From: "review", AdvancesTo: "drafting"}},
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-		FlowStates: map[string][]string{"validation": {"queued", "drafting", "review", "escalated"}},
-		Loops:      []runtimecontracts.WorkflowLoopPlan{plan},
-		Stages:     []runtimecontracts.WorkflowStageContract{{ID: "queued"}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated"}},
-	}})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"validation": {
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "queued"}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated"}}},
+		}}, Semantics: runtimecontracts.WorkflowSemanticView{
+			Loops:  []runtimecontracts.WorkflowLoopPlan{plan},
+			Stages: []runtimecontracts.WorkflowStageContract{{ID: "queued"}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated"}},
+		}})
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{},
 	}, nil)

@@ -907,7 +907,7 @@ func TestEventBusCompositionReceiverSettlesBeforePersistence(t *testing.T) {
 	newSource := func() semanticview.Source {
 		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}})
 		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}}
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active"}, {ID: "done", Final: true}}}}
 		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
 		return semanticview.Wrap(bundle)
 	}
@@ -1031,7 +1031,7 @@ func TestEventBusInitializedReceiverIsImmutableAfterPrepublicationLinearization(
 	newSource := func() semanticview.Source {
 		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{})
 		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}}
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active"}, {ID: "done", Final: true}}}}
 		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
 		return semanticview.Wrap(bundle)
 	}

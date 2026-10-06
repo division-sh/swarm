@@ -1668,7 +1668,7 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 					},
 				},
 				RootSchema: &runtimecontracts.FlowSchemaDocument{
-					StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending", Initial: true}, {ID: "done", Terminal: true}}},
+					StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending"}, {ID: "done", Final: true}}},
 				},
 			}
 			bundle.Platform.Platform.Name = "swarm"
@@ -1710,7 +1710,7 @@ func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.
 			},
 		},
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending", Initial: true}, {ID: "done", Terminal: true}}},
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending"}, {ID: "done", Final: true}}},
 		},
 	}
 	bundle.Platform.Platform.Name = "swarm"
@@ -1742,7 +1742,7 @@ func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *te
 				},
 			},
 		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending", Initial: true}}}},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending"}}}},
 	}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "test"
@@ -6971,7 +6971,7 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 		},
 		Nodes: nodes, Events: events,
 		Schema: runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "created", Initial: true}, {ID: "opened", Terminal: true}}},
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "created"}, {ID: "opened", Final: true}}},
 		},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{

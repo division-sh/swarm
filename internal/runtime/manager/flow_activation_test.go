@@ -2109,7 +2109,7 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	schema := bundle.FlowSchemas["review"]
-	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "queued", Initial: true}}}
+	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "queued"}}}
 	bundle.FlowSchemas["review"] = schema
 	compileFlowActivationFixture(t, bundle)
 
@@ -4522,8 +4522,8 @@ func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{
 		Declared: true,
 		Entries: []runtimecontracts.FlowStageDeclaration{
-			{ID: "queued", Initial: true},
-			{ID: "done", Terminal: true},
+			{ID: "queued"},
+			{ID: "done", Final: true},
 		},
 	}
 	bundle.FlowSchemas["review"] = schema
@@ -4546,12 +4546,11 @@ func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict
 	bundle := testFlowBundle(t, "")
 	schema := bundle.FlowSchemas["review"]
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-		{ID: "queued", Initial: true}, {ID: "other"},
+		{ID: "queued"}, {ID: "other"},
 	}}
 	bundle.FlowSchemas["review"] = schema
 	compileFlowActivationFixture(t, bundle)
-	schema.StageDeclarations.Entries[0].Initial = false
-	schema.StageDeclarations.Entries[1].Initial = true
+	schema.StageDeclarations.Entries[0], schema.StageDeclarations.Entries[1] = schema.StageDeclarations.Entries[1], schema.StageDeclarations.Entries[0]
 	bundle.FlowSchemas["review"] = schema
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setFlowActivationManagerSemanticSource(am, req.ContractBundle)

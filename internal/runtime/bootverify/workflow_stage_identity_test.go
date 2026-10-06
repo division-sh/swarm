@@ -7,28 +7,29 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestStateMachineCoherenceRejectsStaleInitialProjection(t *testing.T) {
+func TestStateMachineCoherenceIgnoresMutableInitialProjection(t *testing.T) {
 	graph := runtimecontracts.BuildWorkflowStageTopology(".", "ready", []string{"ready", "Ready"}, []string{"Ready"}, nil, nil, nil)
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{
-			Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready", Initial: true}, {ID: "Ready", Terminal: true}},
+			Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready"}, {ID: "Ready", Final: true}},
 		}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			InitialStage: "ready", StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{".": graph},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{".": graph},
 		},
 	}
 	source := semanticview.Wrap(bundle)
 	if findings := (&checkerContext{source: source}).stateMachineCoherence(); len(findings) != 0 {
 		t.Fatalf("unmodified selected stage source failed verification: %#v", findings)
 	}
-	bundle.Semantics.InitialStage = "Ready"
+	projection := bundle.Semantics.StageTopologies["."]
+	projection.InitialStage = "Ready"
+	bundle.Semantics.StageTopologies["."] = projection
 	if got := compiledInitialStageForFlow(source, "."); got != "ready" || !bootverifyFlowStateful(source, ".") {
 		t.Fatalf("raw initial projection replaced compiled initial: %q stateful=%v", got, bootverifyFlowStateful(source, "."))
 	}
-	if findings := (&checkerContext{source: source}).stateMachineCoherence(); !reportContains(findings, "state_machine_coherence", "disagrees with selected compiled initial stage") {
-		t.Fatalf("stale authored initial was accepted: %#v", findings)
+	if findings := (&checkerContext{source: source}).stateMachineCoherence(); len(findings) != 0 {
+		t.Fatalf("non-authoritative projection changed verification: %#v", findings)
 	}
-	bundle.Semantics.InitialStage = ""
 	bundle.RootSchema.StageDeclarations.Entries = nil
 	if got := compiledInitialStageForFlow(source, "."); got != "ready" {
 		t.Fatalf("cleared raw declaration changed compiled initial: %q", got)
