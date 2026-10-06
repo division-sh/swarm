@@ -103,7 +103,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 						requireWorkspaceProofBusinessMutation(t, endpoint, selected.RuntimeDeps().EventStore, selected.RuntimeDeps().DeliveryStore, runID, eventID, entityID)
 					}
 				}
-				rt := startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, root, name == "same_name_agent_control")
+				rt := startWorkspaceGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
 				fieldReader, ok := selected.RuntimeDeps().EventStore.(pipeline.WorkflowEntityStatePersistenceReader)
 				if !ok {
 					t.Fatal("source proof requires its original receiver field reader")
@@ -228,12 +228,8 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if unavailable {
 					// Invalidate the real receiver only after materialization, publication
 					// and claim commit. Its target and business fields remain untouched.
-					result, err := rt.DB.Exec(`UPDATE flow_instances SET current_state='done' WHERE run_id=$1 AND entity_id=$2 AND current_state='active'`, claim.RunID(), receiver.ID)
-					if err != nil {
+					if err := storetest.InstallActiveForkReceiverHeaderDoneFault(claimed.ctx, selected.RuntimeDeps().EventStore, claim.RunID(), receiver.ID); err != nil {
 						t.Fatal(err)
-					}
-					if count, err := result.RowsAffected(); err != nil || count != 1 {
-						t.Fatalf("invalidate exact child: count=%d err=%v", count, err)
 					}
 				}
 				wantStatus := "delivered"
@@ -241,7 +237,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					wantStatus = "dead_letter"
 				}
 				if newerClaim {
-					requireForkReceiverStaleClaimStoreFence(t, rt, selected, claimed, claim)
+					requireForkReceiverStaleClaimStoreFence(t, selected, claimed, claim)
 				}
 				resumeClaim()
 				if !newerClaim {
@@ -523,7 +519,7 @@ func waitForkReceiverExecutionCompletion(t *testing.T, selected *selectedStoreOw
 // This row challenges the real store with the old token while the runtime is
 // held. It proves mutation fencing, not private in-memory continuation identity.
 // Only canonical parent terminalization is allowed to retire the newer claim.
-func requireForkReceiverStaleClaimStoreFence(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, observation forkReceiverExecutionObservation, old runtimedelivery.Claim) {
+func requireForkReceiverStaleClaimStoreFence(t *testing.T, selected *selectedStoreOwner, observation forkReceiverExecutionObservation, old runtimedelivery.Claim) {
 	t.Helper()
 	deps := selected.RuntimeDeps()
 	owner := deps.DeliveryStore
@@ -537,29 +533,7 @@ func requireForkReceiverStaleClaimStoreFence(t *testing.T, rt servedControlProof
 	}
 	// Age the exact obligation/attempt timestamp pairs atomically, as in the
 	// lifecycle conformance fixture. ClaimDelivery alone mints the successor.
-	tx, err := rt.DB.BeginTx(observation.ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	startedAt := time.Now().Add(-2 * time.Hour).UTC()
-	expiresAt := time.Now().Add(-time.Hour).UTC()
-	result, err := tx.Exec(`UPDATE event_deliveries SET created_at=$1,started_at=$1,updated_at=$2 WHERE delivery_id=$3 AND run_id=$4 AND claim_version=$5 AND status='in_progress'`, startedAt, expiresAt, old.DeliveryID(), old.RunID(), old.Version())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count, err := result.RowsAffected(); err != nil || count != 1 {
-		t.Fatalf("age actual obligation: count=%d err=%v", count, err)
-	}
-	result, err = tx.Exec(`UPDATE event_delivery_attempts SET started_at=$1,lease_expires_at=$2 WHERE delivery_id=$3 AND claim_version=$4 AND claim_token=$5 AND open_marker=TRUE`,
-		startedAt, expiresAt, old.DeliveryID(), old.Version(), old.PersistenceToken())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count, err := result.RowsAffected(); err != nil || count != 1 {
-		t.Fatalf("expire actual claim: count=%d err=%v", count, err)
-	}
-	if err := tx.Commit(); err != nil {
+	if err := storetest.ExpireExactDeliveryClaimFault(observation.ctx, deps.EventStore, old); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err := owner.ClaimDelivery(observation.ctx, snapshot.Authority, prepared.Event.Event(), snapshot.Route)
