@@ -120,40 +120,9 @@ func matchNotifyExecutionCaller(info *types.Info, call *ast.CallExpr) (int, bool
 // A pool binding becomes a discard only if every use was an audited pure pool
 // argument removed by this exact propagation. Other reads/writes keep it live.
 func rewriteNotifyExecutionPoolBinding(fset *token.FileSet, info *types.Info, fn *ast.FuncDecl, comments []*ast.CommentGroup) (string, bool) {
-	uses, removed := map[types.Object]int{}, map[types.Object]int{}
-	ast.Inspect(fn.Body, func(node ast.Node) bool {
-		if id, ok := node.(*ast.Ident); ok && info.Uses[id] != nil {
-			uses[info.Uses[id]]++
-		}
-		if call, ok := node.(*ast.CallExpr); ok {
-			if index, ok := matchNotifyExecutionCaller(info, call); ok {
-				if id, ok := call.Args[index].(*ast.Ident); ok {
-					removed[info.Uses[id]]++
-				}
-			}
-		}
-		return true
-	})
-	changed := false
-	ast.Inspect(fn.Body, func(node ast.Node) bool {
-		if call, ok := node.(*ast.CallExpr); ok {
-			if index, ok := matchNotifyExecutionCaller(info, call); ok {
-				call.Args = append(call.Args[:index], call.Args[index+1:]...)
-				changed = true
-			}
-		}
-		if assignment, ok := node.(*ast.AssignStmt); ok && assignment.Tok == token.DEFINE && len(assignment.Lhs) > 1 {
-			for _, expression := range assignment.Lhs {
-				if id, ok := expression.(*ast.Ident); ok {
-					object := info.Defs[id]
-					if object != nil && object.Type().String() == "*database/sql.DB" && removed[object] > 0 && uses[object] == removed[object] {
-						id.Name = "_"
-					}
-				}
-			}
-		}
-		return true
-	})
+	uses, removed := notifyExecutionPoolUses(info, fn)
+	changed := removeNotifyExecutionPoolArguments(info, fn)
+	discardNotifyExecutionPoolBindings(info, fn, uses, removed)
 	if !changed {
 		return "", false
 	}
@@ -168,4 +137,56 @@ func rewriteNotifyExecutionPoolBinding(fset *token.FileSet, info *types.Info, fn
 		panic(err)
 	}
 	return out.String(), true
+}
+
+func notifyExecutionPoolUses(info *types.Info, fn *ast.FuncDecl) (map[types.Object]int, map[types.Object]int) {
+	uses, removed := map[types.Object]int{}, map[types.Object]int{}
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		if id, ok := node.(*ast.Ident); ok && info.Uses[id] != nil {
+			uses[info.Uses[id]]++
+		}
+		if call, ok := node.(*ast.CallExpr); ok {
+			if index, ok := matchNotifyExecutionCaller(info, call); ok {
+				if id, ok := call.Args[index].(*ast.Ident); ok {
+					removed[info.Uses[id]]++
+				}
+			}
+		}
+		return true
+	})
+	return uses, removed
+}
+
+func removeNotifyExecutionPoolArguments(info *types.Info, fn *ast.FuncDecl) bool {
+	changed := false
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		if call, ok := node.(*ast.CallExpr); ok {
+			if index, ok := matchNotifyExecutionCaller(info, call); ok {
+				call.Args = append(call.Args[:index], call.Args[index+1:]...)
+				changed = true
+			}
+		}
+		return true
+	})
+	return changed
+}
+
+func discardNotifyExecutionPoolBindings(info *types.Info, fn *ast.FuncDecl, uses, removed map[types.Object]int) {
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		assignment, ok := node.(*ast.AssignStmt)
+		if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) < 2 {
+			return true
+		}
+		for _, expression := range assignment.Lhs {
+			id, ok := expression.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			object := info.Defs[id]
+			if object != nil && object.Type().String() == "*database/sql.DB" && removed[object] > 0 && uses[object] == removed[object] {
+				id.Name = "_"
+			}
+		}
+		return true
+	})
 }

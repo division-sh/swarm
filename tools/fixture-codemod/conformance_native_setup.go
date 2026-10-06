@@ -80,6 +80,19 @@ func ignoredConformanceDatabaseCall(info *types.Info, call *ast.CallExpr) bool {
 // Narrow the whole finite family only when the terminal owner and every use
 // are proven safe. A forwarding wrapper alone does not prove an unused DB.
 func ignoredConformanceDatabaseFamily(info *types.Info, files []*ast.File) map[*types.Func]bool {
+	functions := collectIgnoredConformanceDatabaseFunctions(info, files)
+	if len(functions) != 2 {
+		return nil
+	}
+	for _, file := range files {
+		if !ignoredConformanceDatabaseUsesAreDirect(info, file, functions) {
+			return nil
+		}
+	}
+	return functions
+}
+
+func collectIgnoredConformanceDatabaseFunctions(info *types.Info, files []*ast.File) map[*types.Func]bool {
 	functions := map[*types.Func]bool{}
 	for _, file := range files {
 		for _, decl := range file.Decls {
@@ -97,42 +110,38 @@ func ignoredConformanceDatabaseFamily(info *types.Info, files []*ast.File) map[*
 			functions[object] = true
 		}
 	}
-	if len(functions) != 2 {
-		return nil
-	}
-	valid := true
-	for _, file := range files {
-		directUses := map[*ast.Ident]bool{}
-		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			id, ok := call.Fun.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			object, _ := info.Uses[id].(*types.Func)
-			if functions[object] {
-				directUses[id] = true
-				valid = valid && ignoredConformanceDatabaseCall(info, call)
-			}
-			return true
-		})
-		ast.Inspect(file, func(node ast.Node) bool {
-			if id, ok := node.(*ast.Ident); ok {
-				object, _ := info.Uses[id].(*types.Func)
-				if functions[object] && !directUses[id] {
-					valid = false
-				}
-			}
-			return true
-		})
-	}
-	if !valid {
-		return nil
-	}
 	return functions
+}
+
+func ignoredConformanceDatabaseUsesAreDirect(info *types.Info, file *ast.File, functions map[*types.Func]bool) bool {
+	valid := true
+	directUses := map[*ast.Ident]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		id, ok := call.Fun.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		object, _ := info.Uses[id].(*types.Func)
+		if functions[object] {
+			directUses[id] = true
+			valid = valid && ignoredConformanceDatabaseCall(info, call)
+		}
+		return true
+	})
+	ast.Inspect(file, func(node ast.Node) bool {
+		if id, ok := node.(*ast.Ident); ok {
+			object, _ := info.Uses[id].(*types.Func)
+			if functions[object] && !directUses[id] {
+				valid = false
+			}
+		}
+		return true
+	})
+	return valid
 }
 
 func rewriteIgnoredConformanceDatabase(fset *token.FileSet, info *types.Info, fn *ast.FuncDecl, family map[*types.Func]bool) (string, bool) {
