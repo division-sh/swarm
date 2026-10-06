@@ -92,7 +92,9 @@ func mockProofWorkloadCall(call *ast.CallExpr) bool {
 	switch name {
 	case "NewServer", "testTelegramConnectorTool", "WithSchemas", "WithStaticCredentials",
 		"CompileMockResponsePlan", "NewMockResponsePlan", "testNonIdempotentActivityIntent",
-		"mustActivityInput", "executeActivityIntent":
+		"mustActivityInput", "executeActivityIntent", "handleEventResult", "executeNonIdempotentActivityIntent",
+		"activityRequestEmitIntent", "activityAttemptStartRecord", "activityRoundTripFunc",
+		"CompiledResultExecution", "ResolveJSONSchemaStructuralType", "EvalValueExpressionWithOptions":
 		return true
 	}
 	return false

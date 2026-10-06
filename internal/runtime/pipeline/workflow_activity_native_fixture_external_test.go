@@ -37,6 +37,44 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 		}
 		return nil
 	}
+	coordinator := func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, workflow pipeline.WorkflowPersistence) *pipeline.PipelineCoordinator {
+		if options.ExecutionPosture == "" {
+			options.ExecutionPosture = executionposture.Live
+		}
+		deliveryBus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+			ContractBundle: options.Module.SemanticSource(), ExecutionPosture: options.ExecutionPosture,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		buses = append(buses, deliveryBus)
+		options.WorkOwner = pipelineExternalTestWorkOwner(t)
+		// The recording bus remains the result-publication oracle. Durable
+		// delivery and obligation ports still belong to the native bus/store.
+		options.ReceiverExecution = eventreceiver.NormalExecution()
+		options.SourceArtifactFact = authorActivityTestSourceArtifactFact
+		options.Persistence = workflow
+		options.DeliveryStore, options.DeadLetters = selected, selected
+		options.DecisionCards, options.ProposedEffects = selected, selected
+		options.HumanTasks, options.DecisionCardDraftExpiry, options.HumanTaskExpiry = selected, selected, selected
+		options.RunLifecycle = selected
+		options.PipelineObligations = selected.PipelineObligations()
+		options.DeliveryRuntime = deliveryBus
+		pc := pipeline.NewPipelineCoordinatorWithOptions(bus, options)
+		if pc == nil {
+			t.Fatal("native activity coordinator rejected its selected semantic owners")
+		}
+		// Register after the bus catalog lease so cleanup joins this bus
+		// before releasing its catalog, runtime occurrence or selected store.
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := deliveryBus.WaitForQuiescence(ctx); err != nil {
+				t.Error(err)
+			}
+		})
+		return pc
+	}
 	return pipeline.WorkflowActivityNativeFixtureForTest{
 		Persistence: persistence,
 		Context:     ctx,
@@ -46,42 +84,14 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 			})
 		},
 		NewCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
-			if options.ExecutionPosture == "" {
-				options.ExecutionPosture = executionposture.Live
-			}
-			deliveryBus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
-				ContractBundle: options.Module.SemanticSource(), ExecutionPosture: options.ExecutionPosture,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			buses = append(buses, deliveryBus)
-			options.WorkOwner = pipelineExternalTestWorkOwner(t)
-			// The recording bus remains the result-publication oracle. Durable
-			// delivery and obligation ports still belong to the native bus/store.
-			options.ReceiverExecution = eventreceiver.NormalExecution()
-			options.SourceArtifactFact = authorActivityTestSourceArtifactFact
-			options.Persistence = persistence
-			options.DeliveryStore, options.DeadLetters = selected, selected
-			options.DecisionCards, options.ProposedEffects = selected, selected
-			options.HumanTasks, options.DecisionCardDraftExpiry, options.HumanTaskExpiry = selected, selected, selected
-			options.RunLifecycle = selected
-			options.PipelineObligations = selected.PipelineObligations()
-			options.DeliveryRuntime = deliveryBus
-			pc := pipeline.NewPipelineCoordinatorWithOptions(bus, options)
-			if pc == nil {
-				t.Fatal("native activity coordinator rejected its selected semantic owners")
-			}
-			// Register after the bus catalog lease so cleanup joins this bus
-			// before releasing its catalog, runtime occurrence or selected store.
-			t.Cleanup(func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := deliveryBus.WaitForQuiescence(ctx); err != nil {
-					t.Error(err)
-				}
-			})
-			return pc
+			return coordinator(bus, options, persistence)
+		},
+		CleanupFault: func(fault error) (pipeline.WorkflowPersistence, func() int32) {
+			return storetest.ActivityJournalCleanupPersistenceFault(t, selected, fault)
+		},
+		CleanupFaultCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, fault error) (*pipeline.PipelineCoordinator, func() int32) {
+			faulted, count := storetest.ActivityJournalCleanupPersistenceFault(t, selected, fault)
+			return coordinator(bus, options, faulted), count
 		},
 		Reopen: func() pipeline.WorkflowActivityNativeFixtureForTest {
 			if err := join(); err != nil {
@@ -123,6 +133,22 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 
 func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) {
 	pipeline.VerifyActivityAttemptJournalPreservesReplyContextAcrossRestartForTest(t, workflowActivityNativeFixture)
+}
+
+func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t *testing.T) {
+	pipeline.VerifyChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStoresForTest(t, workflowActivityNativeFixture)
+}
+
+func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStores(t *testing.T) {
+	pipeline.VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStoresForTest(t, workflowActivityNativeFixture)
+}
+
+func TestActivityTerminalPostCommitErrorPublishesJournaledResultBothStores(t *testing.T) {
+	pipeline.VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForTest(t, workflowActivityNativeFixture)
+}
+
+func TestActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitError(t *testing.T) {
+	pipeline.VerifyActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitErrorForTest(t, workflowActivityNativeFixture)
 }
 
 func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournal(t *testing.T) {
