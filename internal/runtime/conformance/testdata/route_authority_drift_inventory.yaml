@@ -1177,6 +1177,32 @@ seam_families:
       route generations. Tests consume and settle the real local carriers;
       the adapters do not expose production tokenless subscription or
       retirement authority.
+  - id: locked_entity_operation_test_adapter
+    layer: test_fixture_semantics
+    classification: valid_consumer
+    paths:
+      - internal/runtime/tools/entity_sparse_mutation_test.go
+    search_dimensions: [direct_delivery_path]
+    invalid_authority:
+      - entity-tool mutation authorizing direct publication or recipient selection
+    notes: >
+      The sparse entity operation fixture installs the canonical pipeline writer.
+      Its test bus rejects every publication and dispatch, including PublishDirect;
+      the literal mutation tests prove schema-bound commits without a competing
+      publication path. This adapter is not production direct-route authority.
+  - id: acknowledged_node_handoff_test_routes
+    layer: test_fixture_semantics
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/issue2564_async_handoff_test.go
+    search_dimensions: [route_plan_source_reason]
+    invalid_authority:
+      - route source or reason labels granting claim or handoff authority
+    notes: >
+      Handoff tests retain finalized route evidence while exercising exact
+      coverage, claim settlement, readiness, stale claims and recovery. Route
+      source/reason metadata is fixture evidence, not a replacement for the
+      current acknowledged obligation or canonical recipient identity.
   - id: exact_receiver_materialization_dependency
     layer: route_plan_authority
     classification: valid_consumer

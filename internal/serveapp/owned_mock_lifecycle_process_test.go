@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	"github.com/google/uuid"
 )
@@ -296,8 +298,54 @@ func ownedMockLifecycleRoot(t *testing.T) string {
 	return root
 }
 
+var ownedMockLifecycleProbes sync.Map // Exact subtest -> startup-only observer; never runtime authority.
+
+func configureOwnedMockLifecycleProbe(t *testing.T, observer lifecycleprobe.Observer) {
+	t.Helper()
+	if observer == nil {
+		t.Fatal("owned lifecycle observer is required")
+	}
+	if _, loaded := ownedMockLifecycleProbes.LoadOrStore(t, observer); loaded {
+		t.Fatal("owned lifecycle observer already configured for this subtest")
+	}
+	t.Cleanup(func() { ownedMockLifecycleProbes.Delete(t) })
+}
+
+func TestOwnedMockLifecycleProbeStaysWithinExactSubtest(t *testing.T) {
+	var scopes []*testing.T
+	t.Run("concurrent_scopes", func(t *testing.T) {
+		for _, name := range []string{"first", "second"} {
+			t.Run(name, func(t *testing.T) {
+				scopes = append(scopes, t)
+				t.Parallel()
+				probe := lifecycleprobe.New()
+				configureOwnedMockLifecycleProbe(t, probe)
+				if got, ok := ownedMockLifecycleProbes.Load(t); !ok || got != probe {
+					t.Fatal("startup observer borrowed another subtest's configuration")
+				}
+				t.Run("unconfigured_child", func(t *testing.T) {
+					if _, ok := ownedMockLifecycleProbes.Load(t); ok {
+						t.Fatal("startup observer inferred from the parent subtest")
+					}
+				})
+			})
+		}
+	})
+	for _, scope := range scopes {
+		if _, ok := ownedMockLifecycleProbes.Load(scope); ok {
+			t.Fatal("startup observer survived its subtest cleanup")
+		}
+	}
+}
+
 func startOwnedMockLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
 	t.Helper()
+	if observer, ok := ownedMockLifecycleProbes.Load(t); ok {
+		if opts.TestLifecycleProbe != nil {
+			t.Fatal("owned lifecycle observer conflicts with explicit startup options")
+		}
+		opts.TestLifecycleProbe = observer.(lifecycleprobe.Observer)
+	}
 	root := ownedMockLifecycleRoot(t)
 	process := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), root, opts)
 	process.waitForReadyLine()

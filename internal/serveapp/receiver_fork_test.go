@@ -71,7 +71,8 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				if surface == "pending_refusal" {
 					observer = publication
 				}
-				rt := startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, root, false, observer, func(ctx context.Context, _ string, evt events.Event) error {
+				configureOwnedMockLifecycleProbe(t, observer)
+				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root, func(ctx context.Context, _ string, evt events.Event) error {
 					if surface != "pending_refusal" || evt.Type() != "work.requested" {
 						return nil
 					}
