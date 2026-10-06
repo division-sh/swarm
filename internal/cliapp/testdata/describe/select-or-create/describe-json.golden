@@ -13828,6 +13828,94 @@
       }
     },
     {
+      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].capabilities",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.telegram.hitl_channel",
+        "source_file": "channels/telegram/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].capabilities.acknowledgment",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.telegram.hitl_channel",
+        "source_file": "channels/telegram/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].capabilities.actions_as_buttons",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.telegram.hitl_channel",
+        "source_file": "channels/telegram/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].capabilities.actions_as_text",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.telegram.hitl_channel",
+        "source_file": "channels/telegram/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].capabilities.card_render",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.telegram.hitl_channel",
+        "source_file": "channels/telegram/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].capabilities.edit",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.telegram.hitl_channel",
+        "source_file": "channels/telegram/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].capabilities.inbox_listing",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.telegram.hitl_channel",
+        "source_file": "channels/telegram/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].capabilities.reply_to_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.telegram.hitl_channel",
+        "source_file": "channels/telegram/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].events",
       "provenance": {
         "origin": "authored",
@@ -14155,17 +14243,6 @@
         "source_line": 1,
         "source_column": 1,
         "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].onboarding.activation",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.hitl_channel",
-        "source_file": "channels/telegram/channel.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
       }
     },
     {
@@ -15666,6 +15743,17 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].registration.slot.namespace",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.telegram.hitl_channel",
+        "source_file": "channels/telegram/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.telegram.hitl_channel.channel\"].transport",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.hitl_channel",
@@ -25308,6 +25396,196 @@
     },
     {
       "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.presentation.type",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.additionalProperties",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.properties",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.properties.label",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.properties.label.maxLength",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.properties.label.minLength",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.properties.label.type",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.properties.token",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.properties.token.maxLength",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.properties.token.minLength",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.properties.token.type",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.required",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.required[0]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.required[1]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.items.type",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.maxItems",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.minItems",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.interfaces[\"swarm.hitl-channel\"].v2.schemas.text_reply_controls.type",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
