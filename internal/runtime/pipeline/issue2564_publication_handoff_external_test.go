@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -23,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -120,19 +120,16 @@ child:
 		source: semanticview.Wrap(bundle), fact: mustAuthorActivityTestSourceArtifactFactForHash(bundle.SourceArtifact.BundleHash()),
 		observer: observer, failures: make(chan error, 16)}
 	seedCtx := correlation.WithSourceArtifactFact(context.Background(), f.fact)
-	seed := runlifecyclefixture.Fixture{RunID: f.runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact}
-	if backend == "postgres" {
-		runlifecyclefixture.RequirePostgres(t, seedCtx, storetest.DatabaseForTest(selected), seed)
-	} else {
-		runlifecyclefixture.RequireSQLite(t, seedCtx, storetest.DatabaseForTest(selected), seed)
-	}
+	storetest.RequireRun(t, seedCtx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+		RunID: f.runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+	})
 	f.start(t, 1, dispatchGate)
 	commitKeylessConstructorComponent(t, f.ctx, f.selected(), f.pc, f.source)
 	return f
 }
 
 func (f *issue2564PublicationFixture) selected() gateRecoveryStoreCase {
-	return gateRecoveryStoreCase{name: f.backend, postgres: f.backend == "postgres", db: storetest.DatabaseForTest(f.store),
+	return gateRecoveryStoreCase{name: f.backend, postgres: f.backend == "postgres",
 		events: f.store, cards: f.store, lifecycle: f.store, trace: f.store.(gateRecoveryTraceStore), persistence: pipeline.NewWorkflowPersistence(f.store)}
 }
 
@@ -247,9 +244,13 @@ func (f *issue2564PublicationFixture) snapshot(t *testing.T, eventID string) del
 func (f *issue2564PublicationFixture) assertHandoff(t *testing.T, eventID string, want int) {
 	t.Helper()
 	var count int
-	if err := storetest.DatabaseForTest(f.store).QueryRowContext(f.ctx,
-		`SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND continuation_handoff_at IS NOT NULL`, eventID).Scan(&count); err != nil || count != want {
-		t.Fatalf("persisted handoff for exact event %s=%d want=%d err=%v", eventID, count, want, err)
+	for _, row := range storetest.ObserveDeliveryEventEvidence(t, f.ctx, f.store, eventID).Deliveries {
+		if row.HandoffPresent {
+			count++
+		}
+	}
+	if count != want {
+		t.Fatalf("persisted handoff for exact event %s=%d want=%d", eventID, count, want)
 	}
 }
 
@@ -264,11 +265,9 @@ func (f *issue2564PublicationFixture) assertReleased(t *testing.T, eventID strin
 	if !errors.Is(err, pipelineobligation.ErrIneligible) {
 		t.Fatalf("exact publication %s retained or left unfinished its native claim AFTER acknowledgment: %v", eventID, err)
 	}
-	var count int
-	var outcome, reason string
-	if err := storetest.DatabaseForTest(f.store).QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MAX(outcome),''),COALESCE(MAX(reason_code),'')
-		FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, eventID).Scan(&count, &outcome, &reason); err != nil || count != 1 || outcome != "success" || reason != "pipeline_persisted" {
-		t.Fatalf("exact pipeline acknowledgement %s=%d/%s/%s err=%v", eventID, count, outcome, reason, err)
+	receipt := storetest.ObservePipelineReceipt(t, ctx, f.store, eventID)
+	if receipt.Count != 1 || receipt.Outcome != "success" || receipt.Reason != "pipeline_persisted" {
+		t.Fatalf("exact pipeline acknowledgement %s=%d/%s/%s", eventID, receipt.Count, receipt.Outcome, receipt.Reason)
 	}
 }
 
@@ -402,7 +401,7 @@ func TestIssue2564OrdinaryAcknowledgedNodeHandoffBothStores(t *testing.T) {
 				t.Fatal("durable continuation page omitted accepted event identities")
 			}
 			f.assertCounters(t, 0, 0, 0)
-			stats := storetest.DatabaseForTest(f.store).Stats()
+			stats := storetest.ObserveSelectedPool(t, f.store)
 			t.Logf("blocked acknowledged nodes=%d pool_in_use=%d pool_idle=%d pool_open=%d pool_max=%d", backlog, stats.InUse, stats.Idle, stats.OpenConnections, stats.MaxOpenConnections)
 			// Cancel/join only unacquired dispatcher jobs, then genuinely close the
 			// selected store. No extra event wakes the reconstructed generation.
@@ -542,8 +541,25 @@ func TestIssue2564OrdinaryNodeHandoffRecursiveProgressBothStores(t *testing.T) {
 			}
 			f.assertCounters(t, 1, 1, 2)
 			var children int
-			if err := storetest.DatabaseForTest(f.store).QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND source_event_id=$2`, f.runID, parent.ID()).Scan(&children); err != nil || children != 2 {
-				t.Fatalf("actual recursive children (nested plus compiled emit)=%d want=2 err=%v", children, err)
+			reader := f.store.(operatorread.ObservabilityReader)
+			options := operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: f.runID}, Limit: 100}
+			for {
+				page, err := reader.ListOperatorEvents(f.ctx, options)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, event := range page.Events {
+					if event.SourceEventID == parent.ID() {
+						children++
+					}
+				}
+				if page.NextCursor == "" {
+					break
+				}
+				options.Cursor = page.NextCursor
+			}
+			if children != 2 {
+				t.Fatalf("actual recursive children (nested plus compiled emit)=%d want=2", children)
 			}
 			if err := f.bus.PublishAcknowledged(f.ctx, parent); err != nil {
 				t.Fatal(err)
