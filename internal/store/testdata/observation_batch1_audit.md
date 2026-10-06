@@ -83,6 +83,22 @@ server2 window; no full run, hosted green CI or final qualification is claimed
 by this local preparation. Earlier failed compilation/classification and
 ratchet receipts remain retained as failures.
 
+The first explicit server2 core atb22e281b2 is RED: the CLI boundary's text
+patterns mistook inert old-source/type strings in five codemod files for live
+SQL authority. Fourteen units passed; the failed CLI unit caused three active
+units to be interrupted and three never to start. These are not completion
+credit. The joined workers.json and original red log are retained. No named
+server2 supplements or PR were opened against that failed qualification.
+
+The bounded CLI guard repair parses owned Go source before the existing
+pattern classification: import paths, actual code, compiler directives and
+cgo-owned comment evidence remain; ordinary data literals/comments are inert.
+Malformed owned source fails closed with no partial inventory. Same-path real
+SQL and aliased-import mutants in all five codemod paths, original producer/
+concrete controls and compiler-evidence controls pass. No ledger entry, path
+exemption, source-walker/census/role change, timeout or tier relaxation was
+added. Repair-head core plus named supplements still requires its own run.
+
 Chosen-class commitment: eliminate raw authority from these fixed observation
 owners and their enumerated shared consumers, not the full raw-test corpus.
 Achieved local closure: those seams canonicalized, pending tier/review gates.
