@@ -91,7 +91,7 @@ func TestStageGateContextPreservesNestedEntityPresence(t *testing.T) {
 		bundle := stageGateValidationBundle(plan, nil, nil)
 		bundle.RootSchema = &rc.FlowSchemaDocument{
 			StageDeclarations: rc.FlowStageDeclarations{Declared: true, Entries: []rc.FlowStageDeclaration{
-				{ID: "awaiting_review", Initial: true}, {ID: "complete", Terminal: true},
+				{ID: "awaiting_review"}, {ID: "complete", Final: true},
 			}},
 		}
 		bundle.RootTypes = rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}

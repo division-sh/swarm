@@ -243,7 +243,6 @@ func TestExecutorCompiledGuardDispositionHasExplicitCause(t *testing.T) {
 	node := testFlowExecutableNode(t, "orders", "worker")
 	graph := contracts.BuildWorkflowStageTopology("orders", "ready", []string{"ready", "done", "killed"}, []string{"killed"}, nil, nil, nil)
 	source := semanticview.Wrap(&contracts.WorkflowContractBundle{Semantics: contracts.WorkflowSemanticView{
-		FlowStates: map[string][]string{"orders": {"ready", "done", "killed"}}, FlowTerminal: map[string][]string{"orders": {"killed"}},
 		StageTopologies: map[string]contracts.WorkflowStageTopology{"orders": graph},
 	}})
 	for _, disposition := range []string{"kill", "reject", "discard"} {

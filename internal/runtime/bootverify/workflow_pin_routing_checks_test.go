@@ -90,23 +90,20 @@ func useStagedLifecycleForFlow(t *testing.T, bundle *runtimecontracts.WorkflowCo
 			continue
 		}
 		_, terminal := terminalSet[state]
-		entries = append(entries, runtimecontracts.FlowStageDeclaration{ID: state, Initial: state == strings.TrimSpace(initial), Terminal: terminal})
+		entries = append(entries, runtimecontracts.FlowStageDeclaration{ID: state, Final: terminal})
+	}
+	for i, entry := range entries {
+		if entry.ID == initial {
+			entries = append(append([]runtimecontracts.FlowStageDeclaration{entry}, entries[:i]...), entries[i+1:]...)
+			break
+		}
 	}
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: entries}
 	bundle.FlowSchemas[flowID] = schema
-	if bundle.Semantics.FlowInitial == nil {
-		bundle.Semantics.FlowInitial = map[string]string{}
-	}
-	if bundle.Semantics.FlowStates == nil {
-		bundle.Semantics.FlowStates = map[string][]string{}
-	}
-	if bundle.Semantics.FlowTerminal == nil {
-		bundle.Semantics.FlowTerminal = map[string][]string{}
-	}
-	bundle.Semantics.FlowInitial[flowID] = schema.LoweredInitialState()
-	bundle.Semantics.FlowStates[flowID] = schema.LoweredStates()
-	bundle.Semantics.FlowTerminal[flowID] = schema.LoweredFinalStates()
 	if view, ok := bundle.FlowViewByID(flowID); ok && view != nil {
 		view.Schema = schema
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
 	}
 }

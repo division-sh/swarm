@@ -48,8 +48,19 @@ func main() {
 	ledger := flag.String("ledger", "scripts/rewrite-stages-2566/intent.json", "finite reviewed ledger")
 	write := flag.Bool("write", false, "apply the complete prepared plan (only after the gate)")
 	check := flag.Bool("check", false, "require reviewed outputs already present")
+	typed := flag.Bool("prepare-typed", false, "prepare the inventoried typed Go stage fixture field cut")
 	flag.Parse()
-	if err := apply(*root, *ledger, *write, *check); err != nil {
+	var err error
+	if *typed {
+		if *write || *check {
+			err = fmt.Errorf("typed preparation is separate from finite plan application")
+		} else {
+			err = prepareTyped(*root)
+		}
+	} else {
+		err = apply(*root, *ledger, *write, *check)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

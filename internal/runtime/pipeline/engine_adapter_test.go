@@ -394,8 +394,7 @@ func TestPrepareTerminalFlowInstanceDeactivationIgnoresRootWorkflowEntity(t *tes
 
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "root",
-			InitialStage: "pending",
+			Name: "root",
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"root": {},

@@ -121,7 +121,7 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: handlers}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			InitialStage: "waiting",
+
 			Stages:       stageContracts(stages),
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{"join-node": handlers},
 			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{

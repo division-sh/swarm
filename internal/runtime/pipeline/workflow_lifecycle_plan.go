@@ -493,6 +493,13 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, runI
 		if !workflowTimerShouldStartOnTransition(declaration, currentState, nextState, cause.EventType) {
 			continue
 		}
+		mayArm, err := workflowTimerMayArmAtStage(source, declaration, generationStage)
+		if err != nil {
+			return err
+		}
+		if !mayArm {
+			continue
+		}
 		if err := validateWorkflowTimerTopology(source, declaration); err != nil {
 			return err
 		}

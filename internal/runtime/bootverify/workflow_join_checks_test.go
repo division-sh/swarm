@@ -305,7 +305,7 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 		OnDeadline:      runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention", Emit: runtimecontracts.EmitSpec{Event: "join.timed_out", Fields: map[string]runtimecontracts.ExpressionValue{"missing": runtimecontracts.CELExpression("join.missing")}}},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema:   &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting", Initial: true}, {ID: "ready"}, {ID: "attention", Terminal: true}}}},
+		RootSchema:   &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention", Final: true}}}},
 		RootEntities: runtimecontracts.EntityContractsDocument{"Order": {Fields: map[string]runtimecontracts.EntityFieldDecl{"expected": {Type: "[text]", Initial: []any{}}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"item.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "text"}}, Required: []string{"member_id", "result"}}},
@@ -314,7 +314,7 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &spec}}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			InitialStage: "awaiting", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}},
+			Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}},
 		},
 	}
 	rebuildJoinValidationTopology(bundle)
