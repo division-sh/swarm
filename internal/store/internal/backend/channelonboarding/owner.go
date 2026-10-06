@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
@@ -378,6 +379,12 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 	var outOp domain.Operation
 	var out domain.ConnectedChannelActivation
 	err := r.mutate(ctx, "publish connected channel activation", func(txctx context.Context, tx *sql.Tx) error {
+		// Delivery locks principal before activation. Fence publication likewise,
+		// including the principal FK lock taken by the successor INSERT.
+		principal, principalFound, err := channeldelivery.LockCurrentPrincipalTx(txctx, tx, r.dialect() == dialectPostgres)
+		if err != nil {
+			return err
+		}
 		op, found, err := loadOperation(txctx, tx, r.dialect(), req.OperationID, true)
 		if err != nil {
 			return err
@@ -389,6 +396,9 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 			return domain.ErrRevisionConflict
 		}
 		if op.Phase != domain.PhasePublishingActivation {
+			return domain.ErrConflict
+		}
+		if !principalFound || principal != op.PrincipalID {
 			return domain.ErrConflict
 		}
 		now := canonicalTime(req.Now)
