@@ -445,13 +445,6 @@ func (c *Coordinator) DispatchPublished(event events.Event, routes []events.Deli
 	if c.workerFailure != nil {
 		return c.workerFailure
 	}
-	if !c.started || c.runContext == nil {
-		// Startup's existing exhaustive scan consumes these committed handoffs.
-		return nil
-	}
-	if err := c.runContext.Err(); err != nil {
-		return err
-	}
 	ids := make([]string, len(routes))
 	seen := make(map[string]struct{}, len(routes))
 	for index, route := range routes {
@@ -470,6 +463,13 @@ func (c *Coordinator) DispatchPublished(event events.Event, routes []events.Deli
 		}
 		seen[id] = struct{}{}
 		ids[index] = id
+	}
+	if !c.started || c.runContext == nil {
+		// Startup's existing exhaustive scan consumes these committed handoffs.
+		return nil
+	}
+	if err := c.runContext.Err(); err != nil {
+		return err
 	}
 	jobs := make([]dispatchJob, 0, len(routes))
 	for index, route := range routes {
