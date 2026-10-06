@@ -254,7 +254,7 @@ func TestPreparedRuntimeAbortReturnsBeforeOuterStandingChildrenRetire(t *testing
 				targets = append(targets, StandingTarget{ServiceID: fmt.Sprintf("service-%d", i), RunID: fmt.Sprintf("run-%d", i), Generation: 1})
 			}
 			manager := &RuntimeContextManager{}
-			children, err := manager.newStandingOccurrencesLocked(rt.WorkOccurrence(), targets)
+			children, err := manager.newStandingOccurrencesLocked(rt.WorkOccurrence(), targets, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

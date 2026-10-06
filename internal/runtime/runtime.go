@@ -1910,7 +1910,7 @@ func (rt *Runtime) releaseAutonomousStartupProducers(ctx, startCtx context.Conte
 		restoredFamilies := make([]string, 0, 2)
 		if rt.GenericSchedules != nil {
 			decision.ScheduleRestoreAttempted = true
-			reconciled, err := rt.GenericSchedules.Restore(ctx)
+			reconciled, err := rt.GenericSchedules.RestoreControlSchedules(ctx)
 			if err != nil {
 				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
 				return fmt.Errorf("restore generic schedules after topology completion: %w", err)

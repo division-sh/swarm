@@ -112,7 +112,7 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish, recovered b
 		}
 		if publish {
 			entry := prepared.contexts[candidate.BundleHash()]
-			standing, err := prepared.newStandingOccurrencesLocked(candidate.WorkOwner, entry.context.StandingTargets)
+			standing, err := prepared.newStandingOccurrencesLocked(candidate.WorkOwner, entry.context.StandingTargets, entry.context.StandingActivations)
 			if err != nil {
 				discardPrepared()
 				return err

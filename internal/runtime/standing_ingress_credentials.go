@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -536,26 +537,26 @@ func (rt *Runtime) evaluateStandingIngressAdmission(ctx context.Context, target 
 
 // Explicit connect is the only in-process credential-producing activation
 // boundary. Ordinary planning and diagnostic reads retain the frozen decision.
-func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation channelonboarding.Operation, candidate channelonboarding.Candidate) ([]StandingTarget, error) {
+func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation channelonboarding.Operation, candidate channelonboarding.Candidate) ([]StandingTarget, []StandingActivation, error) {
 	if rt == nil || rt.Options.ChannelOnboardingStore == nil || rt.Options.WorkflowModule == nil {
-		return nil, fmt.Errorf("channel target promotion requires runtime and selected onboarding owner")
+		return nil, nil, fmt.Errorf("channel target promotion requires runtime and selected onboarding owner")
 	}
 	if err := candidate.ValidateDeclaration(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	current, err := rt.Options.ChannelOnboardingStore.GetChannelOnboarding(ctx, operation.OperationID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if current.Phase != channelonboarding.PhaseCredentialsAdmitted || current.Revision != operation.Revision || !current.Coordinate.MatchesDeclaration(candidate.Coordinate) || current.TargetSelector != candidate.Target.Selector || current.Coordinate.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
-		return nil, fmt.Errorf("%w: channel target promotion has no exact admitted credential responsibility", channelonboarding.ErrRevisionConflict)
+		return nil, nil, fmt.Errorf("%w: channel target promotion has no exact admitted credential responsibility", channelonboarding.ErrRevisionConflict)
 	}
 	if err := rt.refreshStandingCredentialAdmission(ctx, candidate.Target.Selector); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	plans, err := rt.standingTargetPlans()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, plan := range plans {
 		if plan.serviceID != candidate.Target.ServiceID {
@@ -566,27 +567,38 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 			InstanceID: plan.instance.InstanceID, EntityID: plan.instance.EntityID, Source: rt.Options.SourceArtifactFact,
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if found && current.RestartDisposition.Executable() && current.PublicationSequence > 0 {
 			if candidate.Target.Generation > 0 && (candidate.Target.Generation != uint64(current.Generation) || candidate.Target.PublicationSequence != current.PublicationSequence) {
-				return nil, fmt.Errorf("%w: channel standing target changed before promotion", channelonboarding.ErrRevisionConflict)
+				return nil, nil, fmt.Errorf("%w: channel standing target changed before promotion", channelonboarding.ErrRevisionConflict)
+			}
+			instance, err := runtimeflowidentity.StandingForGeneration(rt.Options.WorkflowModule.SemanticSource(), current.FlowPath, current.RunID)
+			if err != nil || instance.InstanceID != current.InstanceID || instance.EntityID != current.EntityID {
+				return nil, nil, errors.Join(err, fmt.Errorf("channel target has inconsistent constructed coordinates"))
+			}
+			activation := StandingActivation{
+				BundleHash: current.BundleHash, ServiceID: current.ServiceID, FlowPath: current.FlowPath,
+				RunID: current.RunID, Generation: current.Generation, PublicationSequence: current.PublicationSequence,
+				InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
+				EffectiveState: current.EffectiveState, RestartDisposition: current.RestartDisposition,
 			}
 			targets := append([]StandingTarget(nil), plan.targets...)
 			for i := range targets {
 				targets[i].RunID, targets[i].Generation, targets[i].PublicationSequence = current.RunID, current.Generation, current.PublicationSequence
+				targets[i].InstanceID, targets[i].FlowInstance, targets[i].EntityID = instance.InstanceID, instance.InstancePath, instance.EntityID
 			}
-			return targets, nil
+			return targets, []StandingActivation{activation}, nil
 		}
 	}
-	targets, _, err := rt.EnsureStandingServiceTargets(ctx, candidate.Target.ServiceID)
+	targets, activations, err := rt.EnsureStandingServiceTargets(ctx, candidate.Target.ServiceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("channel target %s has no executable standing owner; inspect standing service %s", candidate.Target.Selector, candidate.Target.ServiceID)
+		return nil, nil, fmt.Errorf("channel target %s has no executable standing owner; inspect standing service %s", candidate.Target.Selector, candidate.Target.ServiceID)
 	}
-	return targets, nil
+	return targets, activations, nil
 }
 
 func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selected string) error {

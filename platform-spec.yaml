@@ -8400,8 +8400,8 @@ engine:
       cannot substitute for producer provenance.
     generic_schedule_lifecycle:
       ownership: >
-        GenericScheduleLifecycle is the sole semantic owner for agent schedules, join completion and timeout schedules,
-        global boot one-shots, and global boot recurrence. Its closed model separates an immutable admission command, one
+        GenericScheduleLifecycle is the sole semantic owner for agent schedules, instance-owned deployment clocks, join
+        completion and timeout schedules, global boot one-shots, and global boot recurrence. Its closed model separates an immutable admission command, one
         durable activation, an inert process-local wakeup, one deterministic occurrence, and a typed commit result. A
         workflow_timer row is owned by WorkflowTimerLifecycle and is never interpreted by this owner.
       admission: >
@@ -8479,6 +8479,8 @@ engine:
           - Compilation and offline describe project declaration facts only. Describe renders declared; arms on deployment. No input pin, active binding, next-due coordinate or retention is inferred from a clock declaration.
           - Only deployment through serve enables clock bindings. Offline verify, describe, test and finite run start do not arm clocks. A timer-only deployment requires neither ingress nor authored activation standing.
           - Arming consumes the genuine construction and attachment owner and the standing transaction's actual selected generation run. No synthetic instance, root entity, lazy constructor, generation prediction or ready-success substitute is permitted. Startup callback release ordering is unchanged.
+          - Process execution scope consumes acknowledged deployment activation coordinates independently of provider transport targets. Clock-only services have no fabricated ingress alias or provider target. Startup recovery, context registration, reset and service controls consume the same exact run/generation coordinate; contradictory ingress and activation evidence is rejected.
+          - Ordinary runtime restoration restores control-schedule families only. Serve admits or exactly replays declared instance clocks after construction, attachment and executable context publication, under the binding's exact standing work occurrence. Finite entry points cannot restore a deployment clock implicitly; replay preserves its existing activation and due coordinate.
           - Instance-owned admission carries exact run, declaration owner, typed static-instance source, bare payload and recurrence in the immutable hash and persisted activation. It has no agent identity, task or reply context. Other control-schedule families do not acquire business emission authority.
           - A wake directly creates its instance_publication business event. Event acceptance and recurrence advancement commit atomically through CommitGenericScheduleOccurrence. No intermediate platform event, second dispatcher, process-local recurrence or acknowledgment-loss resend.
           - Retention derives from an enabled binding or an actually active durable schedule in the current generation, never from declaration presence. Stop, removal, suspension, restart and reset consume the existing desired-state and exact cancellation owners.
@@ -9775,7 +9777,7 @@ engine:
           Unperformed observations and startup execution obligations remain visible; never bare ok or an unconditional
           promise of live readiness. Portable validation explicitly reports structural scope.
         stderr: Human-readable analyzer diagnostics, advisory lint evidence, warnings, and blocking failures.
-    check_count: 69 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation and constructor eligibility has one source check
+    check_count: 70 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation and constructor eligibility has one source check
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and
