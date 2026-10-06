@@ -296,7 +296,7 @@ func providerRawSettlementSemanticSource(t *testing.T, target runtimepkg.Inbound
 		Name:    flowID,
 		Ingress: &runtimecontracts.ProjectFlowIngress{Alias: target.Alias, Providers: []runtimecontracts.ProjectFlowIngressProvider{binding}},
 		StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-			{ID: "active", Initial: true}, {ID: "done", Terminal: true},
+			{ID: "active"}, {ID: "done", Final: true},
 		}},
 		Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{pin}}},
 	}

@@ -262,6 +262,13 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			if !workflowTimerShouldStartOnTransition(declaration, "", currentState, "state:"+currentState) {
 				continue
 			}
+			mayArm, err := workflowTimerMayArmAtStage(source, declaration, currentState)
+			if err != nil {
+				return err
+			}
+			if !mayArm {
+				continue
+			}
 			if !initialMode.Valid() {
 				initialMode, err = initialWorkflowTimerExecutionMode(ctx, readinessMode, active)
 				if err != nil {
@@ -524,6 +531,21 @@ func validateWorkflowTimerTopology(source semanticview.Source, timer runtimecont
 	return nil
 }
 
+// Applicability is checked only for new arms. Accepted rows and their readback,
+// fire, retry and cancellation paths do not consume this predicate.
+func workflowTimerMayArmAtStage(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, state string) (bool, error) {
+	flowID := timer.OwningFlowID()
+	graph, ok := semanticview.WorkflowStageTopology(source, flowID)
+	if !ok || !graph.ValidStageCatalog() {
+		return false, fmt.Errorf("timer %s has no compiled stage catalog for flow %s", timer.ID, flowID)
+	}
+	stage, err := graph.ResolveStoredStage(state)
+	if err != nil {
+		return false, err
+	}
+	return !stage.IsFinal(), nil
+}
+
 func workflowTimerGenerationKey(declarationKey string, generation attemptgeneration.Generation) string {
 	return strings.TrimSpace(declarationKey) + "\x00" + generation.Normalize().KeySuffix()
 }
@@ -537,21 +559,6 @@ func workflowTimerActivationForCause(
 	cause workflowTimerCause,
 	interval time.Duration,
 ) (WorkflowTimerActivation, error) {
-	// This guards new activation, not accepted fire/retry or cancellation.
-	if declaration.StageOwned {
-		flowID := declaration.OwningFlowID()
-		graph, ok := semanticview.WorkflowStageTopology(source, flowID)
-		if !ok || !graph.ValidStageCatalog() {
-			return WorkflowTimerActivation{}, fmt.Errorf("timer %s has no compiled stage catalog for flow %s", declaration.ID, flowID)
-		}
-		stage, err := graph.ResolveStage(declaration.Stage)
-		if err != nil {
-			return WorkflowTimerActivation{}, err
-		}
-		if stage.IsFinal() {
-			return WorkflowTimerActivation{}, fmt.Errorf("final stage %s in flow %s cannot arm timer %s", declaration.Stage, flowID, declaration.ID)
-		}
-	}
 	cause = cause.normalized()
 	generation = generation.Normalize()
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)

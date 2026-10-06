@@ -190,7 +190,7 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	existingEntityID := eventtest.UUID("selected-root-owner")
 	flow := runtimecontracts.FlowContractView{
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "waiting", Initial: true}, {ID: "done"}}}},
+		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "waiting"}, {ID: "done"}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"timer.cancel": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"controller": {
@@ -524,7 +524,7 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Instance:          mustDeliveryTargetTemplateField(t),
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}},
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active"}, {ID: "done", Final: true}}},
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{
 				{Event: "work.created"},
 				{Event: "work.selected"},

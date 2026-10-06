@@ -414,7 +414,7 @@ func sourceWithDeclarativeEmitExternalizationFlows(t testing.TB) semanticview.So
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "component-scaffold"},
 		Path:  "component-scaffold",
 		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready", Initial: true}}},
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready"}}},
 
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "component.scaffolded"}}}},
 		},
@@ -584,7 +584,7 @@ func sourceWithKilledState() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{
 			Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-				{ID: "pending", Initial: true}, {ID: "killed", Terminal: true}, {ID: "done", Terminal: true},
+				{ID: "pending"}, {ID: "killed", Final: true}, {ID: "done", Final: true},
 			},
 		}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -6798,7 +6798,7 @@ func sourceWithChildOutputPin(t testing.TB) semanticview.Source {
 			FlowPath: "child",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}},
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running"}}},
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
 					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
@@ -6829,7 +6829,7 @@ func sourceWithChildOutputPin(t testing.TB) semanticview.Source {
 func sourceWithNestedStaticOutputPin() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "root/child"},
-		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}}, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+		Schema: runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running"}}}, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
@@ -6850,7 +6850,7 @@ func sourceWithChildOutputPinAndRootConnect(t testing.TB) semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running", Initial: true}}}, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "running"}}}, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},

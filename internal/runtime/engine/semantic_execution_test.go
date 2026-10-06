@@ -118,19 +118,30 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 	// but stage membership must come from the fixture source, never runtime state
 	// or the requested target. Existing compiled graphs remain authoritative.
 	flowID := req.ExecutionFlowID.String()
-	if _, exists := semanticview.WorkflowStageTopology(e.deps.Source, flowID); !exists && len(e.deps.Source.FlowStates(flowID)) > 0 {
+	if _, exists := semanticview.WorkflowStageTopology(e.deps.Source, flowID); !exists {
 		bundle, ok := semanticview.Bundle(e.deps.Source)
 		if !ok {
 			return ExecutionResult{}, fmt.Errorf("isolated handler fixture requires a contract bundle")
 		}
 		copyBundle := *bundle
+		schema := bundle.RootSchema
+		if flowID != "." {
+			child, known := bundle.FlowSchemas[flowID]
+			if !known {
+				return ExecutionResult{}, fmt.Errorf("isolated handler fixture has no flow %s", flowID)
+			}
+			schema = &child
+		}
+		if schema == nil {
+			schema = &runtimecontracts.FlowSchemaDocument{}
+		}
 		copyBundle.Semantics.StageTopologies = maps.Clone(bundle.Semantics.StageTopologies)
 		if copyBundle.Semantics.StageTopologies == nil {
 			copyBundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{}
 		}
 		h := req.Handler
 		copyBundle.Semantics.StageTopologies[flowID] = runtimecontracts.BuildWorkflowStageTopology(
-			flowID, e.deps.Source.FlowInitialStage(flowID), e.deps.Source.FlowStates(flowID), e.deps.Source.FlowFinalStages(flowID),
+			flowID, schema.LoweredInitialState(), schema.LoweredStates(), schema.LoweredFinalStates(),
 			[]runtimecontracts.HandlerTransitionSemantic{{Node: req.Node, EventType: req.HandlerEventKey,
 				AdvancesTo: h.AdvancesTo, Rules: h.Rules, OnComplete: h.OnComplete, Join: h.Join, Loop: h.Loop}},
 			nil, bundle.Semantics.Loops,
@@ -185,32 +196,34 @@ func sourceWithFixtureStages(source semanticview.Source, flowID, initial string,
 		panic("fixture stages require a contract bundle")
 	}
 	copyBundle := *bundle
-	copyBundle.Semantics.FlowStates = maps.Clone(bundle.Semantics.FlowStates)
-	copyBundle.Semantics.FlowInitial = maps.Clone(bundle.Semantics.FlowInitial)
-	if copyBundle.Semantics.FlowStates == nil {
-		copyBundle.Semantics.FlowStates = map[string][]string{}
+	var schema runtimecontracts.FlowSchemaDocument
+	if flowID == "." && bundle.RootSchema != nil {
+		schema = *bundle.RootSchema
+	} else {
+		schema = bundle.FlowSchemas[flowID]
 	}
-	if copyBundle.Semantics.FlowInitial == nil {
-		copyBundle.Semantics.FlowInitial = map[string]string{}
+	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true}
+	finals := source.FlowFinalStages(flowID)
+	for _, stage := range stages {
+		schema.StageDeclarations.Entries = append(schema.StageDeclarations.Entries, runtimecontracts.FlowStageDeclaration{
+			ID: stage, Final: slices.Contains(finals, stage),
+		})
 	}
-	copyBundle.Semantics.FlowStates[flowID] = append([]string(nil), stages...)
-	copyBundle.Semantics.FlowInitial[flowID] = initial
+	for i, entry := range schema.StageDeclarations.Entries {
+		if entry.ID == initial {
+			entries := schema.StageDeclarations.Entries
+			schema.StageDeclarations.Entries = append(append([]runtimecontracts.FlowStageDeclaration{entry}, entries[:i]...), entries[i+1:]...)
+			break
+		}
+	}
 	if flowID == "." {
-		schema := runtimecontracts.FlowSchemaDocument{}
-		if bundle.RootSchema != nil {
-			schema = *bundle.RootSchema
-		}
-		schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true}
-		terminals := source.FlowFinalStages(flowID)
-		copyBundle.Semantics.InitialStage = initial
-		copyBundle.Semantics.Stages = nil
-		for _, stage := range stages {
-			schema.StageDeclarations.Entries = append(schema.StageDeclarations.Entries, runtimecontracts.FlowStageDeclaration{
-				ID: stage, Initial: stage == initial, Terminal: slices.Contains(terminals, stage),
-			})
-			copyBundle.Semantics.Stages = append(copyBundle.Semantics.Stages, runtimecontracts.WorkflowStageContract{ID: stage})
-		}
 		copyBundle.RootSchema = &schema
+	} else {
+		copyBundle.FlowSchemas = maps.Clone(bundle.FlowSchemas)
+		if copyBundle.FlowSchemas == nil {
+			copyBundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{}
+		}
+		copyBundle.FlowSchemas[flowID] = schema
 	}
 	// This explicit stage-only fixture override invalidates that flow's old
 	// topology. ExecuteSemanticFixture compiles it with the supplied handler.

@@ -31,7 +31,7 @@ func TestStageGateContextValidationPreservesAdmittedLiteralKind(t *testing.T) {
 
 func TestStageGateVerificationRejectsProgrammaticNonCanonicalInputType(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-		Name: "launch", InitialStage: "awaiting_review", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "building"}},
+		Name: "launch", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "building"}},
 		Gates: []runtimecontracts.WorkflowGatePlan{{
 			Stage: "awaiting_review", Decision: "launch_review",
 			Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
@@ -57,7 +57,7 @@ func TestStageGateVerificationRejectsProgrammaticNonCanonicalInputType(t *testin
 
 func TestStageGateVerificationRejectsProgrammaticNonExactCanonicalInputType(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-		Name: "launch", InitialStage: "awaiting_review", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "building"}},
+		Name: "launch", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "building"}},
 		Gates: []runtimecontracts.WorkflowGatePlan{{
 			Stage: "awaiting_review", Decision: "launch_review",
 			Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
@@ -255,7 +255,7 @@ func stageGateLiteralEmitReport(field runtimecontracts.EventFieldSpec, rootTypes
 			},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "launch", InitialStage: "awaiting_review", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "complete"}},
+			Name: "launch", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "complete"}},
 			Gates: []runtimecontracts.WorkflowGatePlan{{
 				Stage: "awaiting_review", Decision: "launch_review",
 				Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
@@ -279,7 +279,7 @@ func stageGateValidationBundle(plan runtimecontracts.WorkflowGatePlan, fields ma
 			"review.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: fields, Required: required}},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "launch", InitialStage: "awaiting_review", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "complete"}},
+			Name: "launch", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "complete"}},
 			Gates: []runtimecontracts.WorkflowGatePlan{plan},
 		},
 	}
@@ -293,7 +293,7 @@ func stageGateValidationBundle(plan runtimecontracts.WorkflowGatePlan, fields ma
 func stageGateInputTestSchema() *runtimecontracts.FlowSchemaDocument {
 	return &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{
 		Declared: true,
-		Entries:  []runtimecontracts.FlowStageDeclaration{{ID: "awaiting_review", Initial: true}, {ID: "complete", Terminal: true}},
+		Entries:  []runtimecontracts.FlowStageDeclaration{{ID: "awaiting_review"}, {ID: "complete", Final: true}},
 	}}
 }
 

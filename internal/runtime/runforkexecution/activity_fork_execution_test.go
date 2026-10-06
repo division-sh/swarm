@@ -506,15 +506,18 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "flow_a"},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending", Initial: true}}}},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "pending"}}}},
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"review.requested": {}}, Path: "flow_a",
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "activity-fork-proof", Version: "v1", InitialStage: "pending",
-			FlowInitial: map[string]string{"flow_a": "pending"}, FlowStates: map[string][]string{"flow_a": {"pending"}},
+			Name: "activity-fork-proof", Version: "v1",
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+				".":      runtimecontracts.BuildWorkflowStageTopology(".", "", nil, nil, nil, nil, nil),
+				"flow_a": runtimecontracts.BuildWorkflowStageTopology("flow_a", "pending", []string{"pending"}, nil, nil, nil, nil),
+			},
 			Loops: []runtimecontracts.WorkflowLoopPlan{{
 				FlowID: "flow_a", ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
 				Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "pending"},

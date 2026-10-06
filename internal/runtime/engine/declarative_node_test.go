@@ -42,7 +42,7 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{
 			Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-				{ID: "pending", Initial: true}, {ID: "done"},
+				{ID: "pending"}, {ID: "done"},
 			},
 		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
