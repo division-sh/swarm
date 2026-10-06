@@ -16946,9 +16946,13 @@ platform_tables:
         Startup commits the canceled origin and reaction atomically, releases the
         preparation claim, and defers execution to the existing durable pipeline
         recovery after startup admission. PrepareRecoveredTurnTimeoutReaction
-        retains the exact recovered publication but does not plan receiver claims
-        or allocate executable delivery authority before admission. This applies
-        to normal and selected startup. The original targetless source is checked
+        persists the complete canonical recipient manifest with the exact
+        already-issued generation's delivery stamp, not an empty manifest
+        interpreted as successful dispatch. The stamp is preparation data: it
+        neither admits execution nor acquires a receiver claim, and the bus
+        dispatch remains queued until admission. Normal preparation does not
+        install the stamp as bus execution authority. This applies to normal and
+        selected startup. The original targetless source is checked
         against immutable admitted publication evidence; journal receiver-target
         projections are not producer target claims. Failure before this commit leaves the
         unresolved intent discoverable; acknowledged cleanup errors retain committed

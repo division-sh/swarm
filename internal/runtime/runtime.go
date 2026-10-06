@@ -430,7 +430,16 @@ func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context) error {
 	if grant == nil {
 		return errors.New("runtime generation grant is required before startup preparation")
 	}
-	if _, err := grant.Evidence(); err != nil {
+	evidence, err := grant.Evidence()
+	if err != nil {
+		return err
+	}
+	preparationAuthority, err := runtimedelivery.NewNormalExecutionAuthority(rt.Options.SourceArtifactFact, evidence.GrantID, evidence.RuntimeGeneration)
+	if err != nil {
+		return err
+	}
+	ctx, err = runtimebus.WithTurnTimeoutRecoveryDeliveryAuthority(ctx, preparationAuthority)
+	if err != nil {
 		return err
 	}
 	if err := rt.Manager.RebindLifecycleExecutionForStartup(ctx); err != nil {

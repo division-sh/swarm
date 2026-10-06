@@ -655,15 +655,6 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	planner := eb.deliveryPlanner
 	planner.recipientPolicy.prospective = publication.prospective
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
-		if recoveringTimeout {
-			connection, err := planner.connectPlanner.Plan(withClosedPublicationPlanning(ctx), evt)
-			if err != nil {
-				return RoutePlan{}, err
-			}
-			plan := newRoutePlan(evt)
-			plan.ConnectEvaluation = connection.Evaluation
-			return plan, nil
-		}
 		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}
 	replayScope := runtimepipelineobligation.ScopeSubscribed
@@ -730,6 +721,16 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		publicationClaim:      claim,
 		targetFailureInput:    targetFailureInput,
 		providerRawSettlement: publication.providerRawSettlement,
+	}
+	if recoveringTimeout {
+		authority, ok := ctx.Value(turnTimeoutRecoveryDeliveryAuthorityKey{}).(runtimedelivery.ExecutionAuthority)
+		if !ok {
+			authority, err = eb.DeliveryAuthority()
+		}
+		if err != nil || authority.Validate() != nil || !authority.SourceArtifact().Matches(eb.sourceArtifactFact) {
+			return releaseFailure(errors.New("startup timeout publication requires its exact preparation delivery authority"))
+		}
+		prepared.recoveryDeliveryAuthority = &authority
 	}
 	prepared.settlement, err = eb.routeSettlementForPlan(evt, targetFailureInput, routePlan, events.EventWriteNormalPublication, prepared.providerRawSettlement, publication.outputConsumers)
 	if err != nil {
@@ -887,26 +888,27 @@ func publicationAuthorDescriptor(ctx context.Context, evt events.Event) (runtime
 // Its route plan remains EventBus-owned; callers may persist the exported
 // delivery-route manifest but cannot reinterpret or replace the plan.
 type PreparedPublish struct {
-	Event                 events.Event
-	admitted              events.AdmittedEvent
-	plan                  RoutePlan
-	settlement            events.RouteSettlement
-	exactDuplicate        bool
-	targetFailure         bool
-	dispatchQueued        bool
-	queueReason           string
-	direct                bool
-	publicationClaim      *pipelinePublicationClaim
-	targetFailureInput    events.Event
-	providerRawSettlement providerRawSettlementAdmission
-	receiver              receiverDispatchProjection
-	committedHandoffs     []runtimedelivery.DurableHandoffProof
-	authorScope           runtimeauthoractivity.Scope
-	hasAuthorScope        bool
-	authorDescriptor      runtimeauthoractivity.EventDescriptor
-	hasAuthorDescriptor   bool
-	stageFeedback         *runtimepipeline.WorkflowPublicationStageRequest
-	acceptedStage         *runtimepipelineobligation.CommittedStageReceipt
+	Event                     events.Event
+	admitted                  events.AdmittedEvent
+	plan                      RoutePlan
+	settlement                events.RouteSettlement
+	exactDuplicate            bool
+	targetFailure             bool
+	dispatchQueued            bool
+	queueReason               string
+	direct                    bool
+	publicationClaim          *pipelinePublicationClaim
+	targetFailureInput        events.Event
+	providerRawSettlement     providerRawSettlementAdmission
+	receiver                  receiverDispatchProjection
+	committedHandoffs         []runtimedelivery.DurableHandoffProof
+	authorScope               runtimeauthoractivity.Scope
+	hasAuthorScope            bool
+	authorDescriptor          runtimeauthoractivity.EventDescriptor
+	hasAuthorDescriptor       bool
+	stageFeedback             *runtimepipeline.WorkflowPublicationStageRequest
+	acceptedStage             *runtimepipelineobligation.CommittedStageReceipt
+	recoveryDeliveryAuthority *runtimedelivery.ExecutionAuthority
 }
 
 func (p PreparedPublish) AcceptedPublicationStage() (runtimepipelineobligation.CommittedStageReceipt, bool) {
@@ -951,6 +953,9 @@ func (p PreparedPublish) RecipientIDs() []string {
 // reinterpret or replace the private plan used for later dispatch.
 func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 	authority, _ := p.publicationClaim.bus.DeliveryAuthority()
+	if p.recoveryDeliveryAuthority != nil {
+		authority = *p.recoveryDeliveryAuthority
+	}
 	request := CommitPublishRequest{
 		Event:               p.admitted,
 		RouteSettlement:     p.settlement,

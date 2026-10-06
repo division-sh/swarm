@@ -15,14 +15,27 @@ func (eb *EventBus) PrepareTurnTimeoutReaction(ctx context.Context, turn effects
 	return eb.prepareTurnTimeoutReaction(ctx, turn, false)
 }
 
-// Recovery commits publication before executable admission. Existing subscribed
-// pipeline recovery plans recipients after admission; no grant is minted here.
+// Recovery commits the exact recipient manifest before executable admission.
+// The preparation stamp is data; dispatch remains queued until admission.
 func (eb *EventBus) PrepareRecoveredTurnTimeoutReaction(ctx context.Context, turn effects.TurnExecutionResult) (effects.TurnReactionPlan, error) {
 	return eb.prepareTurnTimeoutReaction(ctx, turn, true)
 }
 
 type startupTurnTimeoutPublicationKey struct{}
 type startupTurnTimeoutPublication struct{ eventID, runID string }
+type turnTimeoutRecoveryDeliveryAuthorityKey struct{}
+
+// WithTurnTimeoutRecoveryDeliveryAuthority carries the already-issued startup
+// generation's stamp for durable obligations, without installing bus execution.
+func WithTurnTimeoutRecoveryDeliveryAuthority(ctx context.Context, authority deliverylifecycle.ExecutionAuthority) (context.Context, error) {
+	if err := authority.Validate(); err != nil {
+		return nil, err
+	}
+	if authority.Kind() != deliverylifecycle.ExecutionAuthorityNormalRuntime {
+		return nil, errors.New("normal startup timeout preparation requires a normal generation stamp")
+	}
+	return context.WithValue(ctx, turnTimeoutRecoveryDeliveryAuthorityKey{}, authority), nil
+}
 
 func (eb *EventBus) prepareTurnTimeoutReaction(ctx context.Context, turn effects.TurnExecutionResult, recovery bool) (effects.TurnReactionPlan, error) {
 	intent, clock, attempt := turn.Cancellation, turn.Clock, turn.Attempt

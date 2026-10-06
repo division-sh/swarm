@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -22,15 +23,20 @@ type turnCancellationCutStore struct {
 	effects.Store
 	effects.TurnLifetimeStore
 	effects.CanceledTurnStore
-	cut  *atomic.Bool
-	seen chan effects.CanceledTurnCommand
-	once *sync.Once
+	cut       *atomic.Bool
+	seen      chan effects.CanceledTurnCommand
+	once      *sync.Once
+	recovered chan effects.CanceledTurnCommand
 }
 
 func (s turnCancellationCutStore) CommitCanceledTurn(ctx context.Context, command effects.CanceledTurnCommand) (effects.CanceledTurnCommit, error) {
 	if s.cut.Load() {
 		s.once.Do(func() { s.seen <- command })
 		return effects.CanceledTurnCommit{}, errors.New("injected canceled-origin commit interruption after physical cleanup")
+	}
+	select {
+	case s.recovered <- command:
+	default:
 	}
 	return s.CanceledTurnStore.CommitCanceledTurn(ctx, command)
 }
@@ -45,6 +51,7 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			var recoverNext atomic.Bool
 			cut.Store(true)
 			seen := make(chan effects.CanceledTurnCommand, 1)
+			recovered := make(chan effects.CanceledTurnCommand, 1)
 			var once sync.Once
 			original := projectRuntimePersistenceForServe
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
@@ -55,7 +62,7 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 				role := persistence.deps.ManagerPersistenceRoles.LifecycleEffects
 				persistence.deps.ManagerPersistenceRoles.LifecycleEffects = turnCancellationCutStore{
 					Store: role, TurnLifetimeStore: role.(effects.TurnLifetimeStore), CanceledTurnStore: role.(effects.CanceledTurnStore),
-					cut: &cut, seen: seen, once: &once,
+					cut: &cut, seen: seen, once: &once, recovered: recovered,
 				}
 				return persistence
 			}
@@ -116,6 +123,19 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			// successor releases it; cleanup must not masquerade as startup proof.
 			recoverNext.Store(true)
 			rt, _ = restart()
+			select {
+			case recoveredCommand := <-recovered:
+				plan, ok := recoveredCommand.Publication.(bus.EnginePublicationPlan)
+				if !ok {
+					t.Fatal("startup omitted its exact admitted reaction plan")
+				}
+				request := plan.PublicationCommand().Commit
+				if len(request.DeliveryRoutes) != 1 || !request.DeliveryRoutes[0].Recipient.IsNode() || request.DeliveryAuthority.Validate() != nil || request.DeliveryAuthority.Kind() != deliverylifecycle.ExecutionAuthorityNormalRuntime {
+					t.Fatalf("startup lost the declared consumer or exact preparation stamp: %+v", request)
+				}
+			default:
+				t.Fatal("successor did not own canceled-turn settlement before recovery dispatch")
+			}
 			var trace struct {
 				Trace []operatorread.RunDebugTraceRow `json:"trace"`
 			}
