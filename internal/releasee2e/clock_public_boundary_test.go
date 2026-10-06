@@ -29,6 +29,9 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			source := filepath.Join(root, "contracts")
 			writeClockReleaseFixture(t, source)
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
+			writeReleaseFile(t, filepath.Join(root, "home", ".config", "swarm", "swarm.yaml"),
+				fmt.Sprintf("serve:\n  api_token_file: %q\nconnection:\n  api_token_file: %q\n",
+					filepath.Join(root, "api-token"), filepath.Join(root, "api-token")))
 			writeReleaseFile(t, filepath.Join(root, "payload.json"), "{}\n")
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
@@ -54,13 +57,12 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			if finite.err != nil || !strings.Contains(finite.output, "status=completed") {
 				t.Fatalf("local finite clock run: %v\n%s", finite.err, finite.output)
 			}
-			writeReleaseFile(t, filepath.Join(root, "home", ".config", "swarm", "swarm.yaml"),
-				fmt.Sprintf("connection:\n  api_token_file: %q\n", filepath.Join(root, "api-token")))
 			deploymentStarted := time.Now().UTC()
-			process := startReleaseServe(t, releaseProcessSpec{
+			spec := releaseProcessSpec{
 				BinaryPath: binary, WorkingDir: root, Source: source, ConfigPath: config,
 				Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env,
-			})
+			}
+			process := startReleaseServe(t, spec)
 			ctx, cancel := context.WithTimeout(t.Context(), goldenStartupTimeout)
 			defer cancel()
 			if err := process.waitReady(ctx); err != nil {
@@ -104,6 +106,22 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			assertClockTransportReadback(t, process, binary, root, config, env, parked)
 			if err := process.stopAndWait(goldenShutdownGrace); err != nil {
 				t.Fatalf("clock public shutdown: %v\n%s", err, process.output.String())
+			}
+			finiteAgain := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
+				"run", "start", source, "--config", config, "--event", "start.requested",
+				"--payload", "payload.json", "--run-id", uuid.NewString(), "--mcp-port", fmt.Sprint(freeReleaseTCPPort(t)))
+			if finiteAgain.err != nil || !strings.Contains(finiteAgain.output, "status=completed") {
+				t.Fatalf("finite host with a parked deployment: %v\n%s", finiteAgain.err, finiteAgain.output)
+			}
+			restarted := startReleaseServe(t, spec)
+			if err := restarted.waitReady(ctx); err != nil {
+				t.Fatalf("parked deployment after finite host: %v\n%s", err, restarted.output.String())
+			}
+			if after := readPublicClockRun(t, restarted, standing.RunID); !reflect.DeepEqual(after.ClockSchedules, parked.ClockSchedules) {
+				t.Fatalf("finite host mutated the parked deployment: before=%+v after=%+v", parked.ClockSchedules, after.ClockSchedules)
+			}
+			if err := restarted.stopAndWait(goldenShutdownGrace); err != nil {
+				t.Fatalf("parked clock restart shutdown: %v\n%s", err, restarted.output.String())
 			}
 			t.Log("proof_surface=real binary verify/describe/private scenario/local finite run/serve/connected finite run; parked HTTP+CLI clock inventory and HTTP+WebSocket+CLI occurrence readback; no external executor, provider or SQL test access")
 		})

@@ -209,7 +209,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				for _, candidate := range candidates {
 					installSelectedStoreTestGeneration(t, capability, candidate.runtime, plan, 1)
 				}
-				reconciled, err := reconcileServeStandingServices(ctx, candidates[0].runtime.Pipeline, candidates)
+				reconciled, err := reconcileServeStandingServices(ctx, candidates[0].runtime.Pipeline, candidates, true)
 				if err != nil {
 					t.Fatal(err)
 				}
