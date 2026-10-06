@@ -512,9 +512,6 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if baseCollector != collector || trusted.Collector != collector {
-			t.Fatal("authority census/role policy changed; silent scan narrowing is forbidden")
-		}
 		if headErr != nil {
 			t.Fatalf("landed debt baseline cannot be removed or bootstrapped again: %v", headErr)
 		}
@@ -522,8 +519,11 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if err := debtValidateCollectorIdentity(baseCollector, collector, trusted, head); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if head.BootstrapSource != trusted.BootstrapSource || head.Collector != trusted.Collector {
+	if head.BootstrapSource != trusted.BootstrapSource || head.Collector != collector {
 		t.Fatal("debt baseline was reseeded or changed collector identity")
 	}
 	if bootstrap && !debtSitesEqual(head.Sites, trusted.Sites) {
@@ -574,6 +574,21 @@ func debtSortedKeys(sites map[string]authorityDebtSite) []string {
 	sort.Strings(keys)
 	return keys
 }
+func debtValidateCollectorIdentity(base, current string, trusted, head authorityDebtBaseline) error {
+	if head.BootstrapSource != trusted.BootstrapSource {
+		return fmt.Errorf("debt baseline bootstrap source changed")
+	}
+	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if base == debtG01CollectorFrom && trusted.Collector == debtG01CollectorFrom &&
+		current == debtG01CollectorTo && head.Collector == debtG01CollectorTo &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil
+	}
+	return fmt.Errorf("authority census/role policy changed outside the exact reviewed G01 transition; silent scan narrowing is forbidden")
+}
+
 func debtSitesEqual(left, right map[string]authorityDebtSite) bool {
 	if len(left) != len(right) {
 		return false

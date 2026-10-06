@@ -481,6 +481,43 @@ func TestPersistenceAuthorityDebtExcludedTypedRefusalForwarder(t *testing.T) {
 	}
 }
 
+func TestPersistenceAuthorityDebtExcludedReadCloserFileRefusal(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "active.go", "package probe;import(\"fmt\";\"io\";\"os\");var _=fmt.Errorf;var _ io.ReadCloser;var _ *os.File\n")
+	const prefix = "//go:build !linux\n\npackage probe\nimport(\"fmt\";\"io\";\"os\")\n"
+	const benign = `func transport(input io.ReadCloser)(io.ReadCloser,error){if _,native:=input.(*os.File);native{return nil,fmt.Errorf("remote worker requires Linux")};return input,nil}`
+	for _, tc := range []struct {
+		name, source string
+		benign       bool
+	}{
+		{"closed-transport", prefix + benign, true},
+		{"renamed-same-semantics", prefix + strings.Replace(benign, "transport", "anotherName", 1), true},
+		{"sql-injected-body", prefix + strings.Replace(benign, ";return input,nil", ";injected.QueryRow(\"SELECT 1\");return input,nil", 1) + "\n", false},
+		{"work-in-error", prefix + strings.Replace(benign, "fmt.Errorf(\"remote worker requires Linux\")", "fmt.Errorf(unknownMessage())", 1), false},
+		{"replaced-input", prefix + strings.Replace(benign, "return input,nil", "return replacement(),nil", 1), false},
+		{"extra-unknown-declaration", prefix + benign + "\nfunc sibling(){unknownWork()}\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			debtWriteModuleSource(t, root, "hidden.go", tc.source)
+			// Load SQL in the active canonical scope so the injected operation is
+			// resolved evidence, not merely an unresolved-body fingerprint.
+			debtWriteModuleSource(t, root, "injected.go", "package probe;import \"database/sql\";var injected *sql.DB\n")
+			var uncertain, sqlCall bool
+			for _, site := range authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)) {
+				if site.File != "hidden.go" {
+					continue
+				}
+				uncertain = uncertain || site.Kind == "unresolved-excluded-source"
+				sqlCall = sqlCall || strings.Contains(site.Operation, "QueryRow")
+			}
+			if uncertain == tc.benign || (tc.name == "sql-injected-body" && !sqlCall) {
+				t.Fatalf("closed transport boundary: benign=%v uncertainty=%v SQL=%v", tc.benign, uncertain, sqlCall)
+			}
+		})
+	}
+}
+
 func TestPersistenceAuthorityDebtCensusFailsClosedOnMissingAndTypeFailedSource(t *testing.T) {
 	const probe = "SWARM_DEBT_CENSUS_HOSTILE_SOURCE"
 	if root := os.Getenv(probe); root != "" {
