@@ -332,6 +332,9 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 	if err != nil {
 		return err
 	}
+	if !compiled.Plan.Capabilities().Vector().Acknowledgment {
+		return nil
+	}
 	ctx, err = withChannelProviderAdmission(ctx, lease, compiled.Plan)
 	if err != nil {
 		return err

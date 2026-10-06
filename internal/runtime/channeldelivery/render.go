@@ -657,7 +657,7 @@ func FreezeSummary(firstOperationID string, count int64, audience Audience) (Fro
 	if count == 1 {
 		noun = "notice"
 	}
-	fullText := fmt.Sprintf("%d earlier %s waiting in your inbox. Open inbox from the chat menu to review them.", count, noun)
+	fullText := fmt.Sprintf("%d earlier %s waiting in your inbox. Send /inbox or reply with Open inbox to review them.", count, noun)
 	input := map[string]any{
 		"projection_version": ProjectionVersion, "source_kind": "summary", "source_id": firstOperationID,
 		"source_revision": 1, "audience": audienceProjection(audience), "summary_count": count,
@@ -780,8 +780,11 @@ func FullTextPage(fullText string, index int, bounds packs.PresentationBounds) (
 	if len(runes) == 0 {
 		return "", 0, fmt.Errorf("view-full source is empty")
 	}
-	pageRunes := bounds.TextRunes - len("Page 1000/1000\n") - textReplySuffixRunes("00000000-0000-0000-0000-000000000000",
-		[]Action{{Label: bounds.Label("Next page")}})
+	continuation, err := visibleControlWords([]Action{{Kind: "next_page", Label: "Next page"}}, bounds)
+	if err != nil {
+		return "", 0, err
+	}
+	pageRunes := bounds.TextRunes - len("Page 1000/1000\n") - textReplySuffixRunes("00000000-0000-0000-0000-000000000000", continuation)
 	if pageRunes < 1 {
 		return "", 0, fmt.Errorf("view-full page cannot retain its exact reference and continuation")
 	}
