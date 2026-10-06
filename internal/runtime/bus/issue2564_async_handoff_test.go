@@ -237,6 +237,79 @@ func TestIssue2564AsyncNodeHandoffRetiresPublicationBeforeExecution(t *testing.T
 	}
 }
 
+type issue2564BlockedPublicationLogger struct {
+	issue2564HandoffDiagnosticLogger
+	entered chan struct{}
+	release <-chan struct{}
+}
+
+func (l *issue2564BlockedPublicationLogger) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {
+	close(l.entered)
+	select {
+	case <-l.release:
+		return l.issue2564HandoffDiagnosticLogger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, failure, durationUS)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestIssue2564AsyncNodeHandoffDoesNotJoinDiagnosticPersistence(t *testing.T) {
+	bus, prepared, owner, _ := issue2564PreparedHandoff(t)
+	release := make(chan struct{})
+	releaseLog := sync.OnceFunc(func() { close(release) })
+	logger := &issue2564BlockedPublicationLogger{entered: make(chan struct{}), release: release}
+	bus.SetLoggerHook(logger)
+	returned := make(chan error, 1)
+	go func() { returned <- bus.DispatchPreparedPublishAsync(context.Background(), prepared) }()
+	t.Cleanup(func() {
+		releaseLog()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := bus.WaitForQuiescence(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	select {
+	case <-logger.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("publication diagnostic was never admitted")
+	}
+	select {
+	case <-owner.settled:
+	default:
+		t.Fatal("diagnostic persistence precedes durable handoff and retains its publication claim")
+	}
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("asynchronous publication joined diagnostic I/O after its committed handoff")
+	}
+	owner.mu.Lock()
+	retained := len(owner.current)
+	owner.mu.Unlock()
+	if retained != 0 || owner.settlements != 1 {
+		t.Fatalf("blocked diagnostic retained publication authority: claims=%d settlements=%d", retained, owner.settlements)
+	}
+	// A diagnostic is owned work, not a detached best-effort goroutine.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := bus.WaitForQuiescence(ctx); err == nil {
+		t.Fatal("blocked diagnostic disappeared from runtime quiescence")
+	}
+	releaseLog()
+	ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := bus.WaitForQuiescence(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(logger.actions) != 1 || logger.actions[0] != "published" || logger.runIDs[0] != prepared.Event.RunID() || logger.eventIDs[0] != prepared.Event.ID() {
+		t.Fatalf("released diagnostic lost publication or exact attribution: actions=%v runs=%v events=%v", logger.actions, logger.runIDs, logger.eventIDs)
+	}
+}
+
 func TestIssue2564AsyncNodeHandoffPreservesPublicationDiagnostic(t *testing.T) {
 	fault := errors.New("injected handoff settlement failure")
 	for _, name := range []string{"success", "uncommitted_settlement_failure", "acknowledged_cleanup_error"} {
