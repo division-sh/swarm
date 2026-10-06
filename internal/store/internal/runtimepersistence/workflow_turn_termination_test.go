@@ -189,8 +189,9 @@ func turnTerminationCommandForClaim(t *testing.T, record pipeline.WorkflowEngine
 		t.Fatal(err)
 	}
 	flow := record.Identity.Route.ScopeKey
-	graph := contracts.BuildWorkflowStageTopology(flow, "ready", []string{"ready", "done"}, []string{"done"}, []contracts.HandlerTransitionSemantic{{Node: node, EventType: string(event.Type()), AdvancesTo: "done", Terminate: true}}, nil, nil)
-	compiled, err := graph.AdmitTransition(contracts.WorkflowTransitionSite{Node: node, HandlerEvent: string(event.Type()), AdvanceCarrier: contracts.HandlerAdvanceCarrierHandler}, "ready", "done")
+	from := record.CurrentState
+	graph := contracts.BuildWorkflowStageTopology(flow, from, []string{from, "done"}, []string{"done"}, []contracts.HandlerTransitionSemantic{{Node: node, EventType: string(event.Type()), AdvancesTo: "done", Terminate: true}}, nil, nil)
+	compiled, err := graph.AdmitTransition(contracts.WorkflowTransitionSite{Node: node, HandlerEvent: string(event.Type()), AdvanceCarrier: contracts.HandlerAdvanceCarrierHandler}, from, "done")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +211,7 @@ func turnTerminationCommandForClaim(t *testing.T, record pipeline.WorkflowEngine
 	if err != nil {
 		t.Fatal(err)
 	}
-	record.CurrentState, record.ExpectedState, record.ExpectedRevision = "done", "ready", 1
+	record.CurrentState, record.ExpectedState, record.ExpectedRevision = "done", from, 1
 	record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	record.UpdatedAt, record.EnteredStageAt = at.Add(time.Second), at.Add(time.Second)
 	return pipeline.WorkflowEngineMutationCommand{State: record, Lifecycle: pipeline.WorkflowLifecycleMutationPlan{TurnTermination: &termination},

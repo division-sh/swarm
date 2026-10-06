@@ -16968,6 +16968,14 @@ platform_tables:
         snapshots do not acquire mutation locks. Exact constructor identity
         is read from persisted evidence, not reconstructed from an instance path.
         An open physical provider set refuses premature queued settlement.
+        A canceled retry origin also retires its saved completion continuations in
+        the same transaction, preserving prior physical attempts, responses, spend
+        and claim outcomes. Shared physical-turn decoding consumes each exact
+        attempt's immutable authority evidence for normal and selected agents;
+        it never replaces selected authority with a normal lifecycle token.
+        Ordinary selected response-loss recovery settles physical evidence before
+        its selected owner terminalizes outstanding deliveries. That failed
+        predecessor does not regain executable delivery-settlement authority.
         The committed lifecycle result carries exact canceled snapshots for owned
         post-commit continuation release. Rolled-back stage/node settlement cannot
         leave cancellation evidence or grant this release.

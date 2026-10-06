@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -163,6 +164,11 @@ func selectedMutationFenceGrant(t *testing.T, ctx context.Context, fixture selec
 	if err != nil {
 		t.Fatal(err)
 	}
+	return selectedFixtureGrantForAuthority(t, ctx, fixture, issued, authority)
+}
+
+func selectedFixtureGrantForAuthority(t *testing.T, ctx context.Context, fixture selectedCompletionFixture, issued runfork.SelectedContractRuntimeExecution, authority runtimeeffects.Authority) startupownership.GenerationGrant {
+	t.Helper()
 	bound, err := fixture.store.(interface {
 		RequireRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, error)
 	}).RequireRunForkSelectedContractBinding(ctx, fixture.forkRun)
@@ -180,9 +186,7 @@ func selectedMutationFenceGrant(t *testing.T, ctx context.Context, fixture selec
 		ActorCensusFingerprint: issued.ActorCensusFingerprint, EffectiveConfigFingerprint: issued.EffectiveConfigFingerprint,
 		DeclarationPlanFingerprint: issued.DeclarationPlanFingerprint, PreparationFingerprint: issued.PreparationFingerprint,
 	}}
-	if err := fixture.db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.forkRun).Scan(&req.BundleHash); err != nil {
-		t.Fatal(err)
-	}
+	req.BundleHash = fixture.request.DeclarationPlan.BundleHash
 	grant, err := fixture.process.IssueSelectedForkGenerationGrant(ctx, req)
 	if err != nil {
 		t.Fatal(err)

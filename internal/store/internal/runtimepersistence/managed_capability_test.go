@@ -147,6 +147,9 @@ func beginManagedCompletionForTest(t testing.TB, ctx context.Context, adapter st
 	if causal, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
 		event = causal
 	}
+	if source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
+		return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managedCompletionTestFrameForSource(t, authority, adapter, event, source.BundleHash()), nil)
+	}
 	return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managedCompletionTestFrameWithEvent(t, authority, adapter, event), nil)
 }
 
@@ -450,13 +453,17 @@ func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authori
 		generation = authority.SelectedFork.Generation
 		runID = authority.SelectedFork.ForkRunID
 	}
+	bundleHash := sourceartifactfixture.BundleHash
+	if source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
+		bundleHash = source.BundleHash()
+	}
 	admission, err := managedexecution.New(
 		kind,
 		executionAuthorityID,
 		generation,
 		runID,
 		"store-test-completion-actors",
-		sourceartifactfixture.BundleHash,
+		bundleHash,
 		nil,
 	)
 	if err != nil {

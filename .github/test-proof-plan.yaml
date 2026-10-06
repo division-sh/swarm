@@ -961,7 +961,7 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[P-Q].*$
     required_children:
-      TestQueuedTurnTerminationBothStores: [pending/sqlite, pending/postgres, retry/sqlite, retry/postgres, rollback/sqlite, rollback/postgres, isolated/sqlite, isolated/postgres, root/sqlite, root/postgres]
+      TestQueuedTurnTerminationBothStores: [pending/sqlite, pending/postgres, retry/sqlite, retry/postgres, rollback/sqlite, rollback/postgres, isolated/sqlite, isolated/postgres, root/sqlite, root/postgres, retained_settled/sqlite, retained_settled/postgres, retained_open/sqlite, retained_open/postgres]
       TestQueuedDirectiveTerminationBothStores: [pending/sqlite, pending/postgres, rollback/sqlite, rollback/postgres, admission_wins/sqlite, admission_wins/postgres, isolated/sqlite, isolated/postgres, root/sqlite, root/postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -991,6 +991,7 @@ units:
       TestUnstartedClaimedTurnTerminationBothStores: [waiting/sqlite, waiting/postgres, waiting_restart/sqlite, waiting_restart/postgres, rollback/sqlite, rollback/postgres, authorization_wins/sqlite, authorization_wins/postgres]
       TestUnstartedDirectiveTurnRecoveryBothStores: [root/restart/sqlite, root/restart/postgres, root/rollback/sqlite, root/rollback/postgres, completion/restart/sqlite, completion/restart/postgres, completion/rollback/sqlite, completion/rollback/postgres]
       TestSelectedProviderTurnRetainsActualBusinessOriginBothStores: [sqlite, postgres]
+      TestSelectedTurnTerminationPreservesExactOriginBothStores: [sqlite, postgres]
       TestWorkflowPublicationAcceptanceStageBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
       TestWorkflowEmitFeedbackBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
       TestWorkflowEmitBusReadbackBothStores: [sqlite, postgres]

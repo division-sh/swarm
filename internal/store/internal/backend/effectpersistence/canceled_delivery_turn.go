@@ -45,11 +45,15 @@ func deactivateCanceledDeliveryContinuationsTx(ctx context.Context, tx *sql.Tx, 
 	if origin.Kind != runtimeeffects.CompletionOriginDelivery {
 		return nil
 	}
+	return deactivateCanceledDeliveryContinuationsForDeliveryTx(ctx, tx, postgres, origin.Delivery.DeliveryID())
+}
+
+func deactivateCanceledDeliveryContinuationsForDeliveryTx(ctx context.Context, tx *sql.Tx, postgres bool, deliveryID string) error {
 	query := `UPDATE runtime_external_effect_attempts SET completion_continuation_active=FALSE WHERE origin_delivery_id=$1::uuid AND completion_continuation_active=TRUE`
 	if !postgres {
 		query = `UPDATE runtime_external_effect_attempts SET completion_continuation_active=0 WHERE origin_delivery_id=? AND completion_continuation_active=1`
 	}
-	_, err := tx.ExecContext(ctx, query, origin.Delivery.DeliveryID())
+	_, err := tx.ExecContext(ctx, query, deliveryID)
 	return err
 }
 

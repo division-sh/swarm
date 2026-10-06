@@ -54,7 +54,7 @@ func TestCompletionBudgetAdmissionLinearizableAcrossAuthorities(t *testing.T) {
 				left := fixture.normal.authority
 				left.Target.ID = uuid.NewString()
 				left.BudgetScopes = append([]runtimeeffects.BudgetAdmissionScope(nil), tc.scopes...)
-				right := completionBudgetRaceAuthority(t, fixture, tc.rightKind)
+				right, rightCtx := completionBudgetRaceAuthority(t, fixture, tc.rightKind)
 				right.BudgetScopes = append([]runtimeeffects.BudgetAdmissionScope(nil), tc.scopes...)
 				for _, scope := range tc.scopes {
 					if scope.Kind == "entity" {
@@ -62,7 +62,7 @@ func TestCompletionBudgetAdmissionLinearizableAcrossAuthorities(t *testing.T) {
 						right.Target.EntityID = scope.Key
 					}
 				}
-				proveCompletionBudgetAdmissionRace(t, fixture, left, right, tc.want, len(tc.scopes))
+				proveCompletionBudgetAdmissionRace(t, fixture, left, right, rightCtx, tc.want, len(tc.scopes))
 			})
 		}
 	}
@@ -126,7 +126,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 	}
 }
 
-func proveCompletionBudgetAdmissionRace(t *testing.T, fixture completionBudgetRaceFixture, left, right runtimeeffects.Authority, wantSuccesses, wantReservations int) {
+func proveCompletionBudgetAdmissionRace(t *testing.T, fixture completionBudgetRaceFixture, left, right runtimeeffects.Authority, rightCtx context.Context, wantSuccesses, wantReservations int) {
 	t.Helper()
 	type result struct {
 		handle *runtimeeffects.Handle
@@ -147,9 +147,10 @@ func proveCompletionBudgetAdmissionRace(t *testing.T, fixture completionBudgetRa
 			defer wg.Done()
 			<-start
 			ctx := fixture.normal.contextFor(candidate.authority)
-			if candidate.store != fixture.primary {
-				ctx = runtimeeffects.WithController(ctx, newCompletionControllerForTest(candidate.store))
+			if i == 1 {
+				ctx = runtimeeffects.WithAuthority(rightCtx, candidate.authority)
 			}
+			ctx = runtimeeffects.WithController(ctx, newCompletionControllerForTest(candidate.store))
 			if candidate.authority.Target.Kind == runtimeeffects.UsageTargetAgentTurn {
 				ctx = withManagedCompletionTestSurface(t, ctx, candidate.authority, "openai_responses")
 			}
@@ -216,13 +217,13 @@ func newCompletionBudgetRaceFixture(t *testing.T, sqlite bool) completionBudgetR
 	return completionBudgetRaceFixture{primary: primary, secondary: secondary, db: db, normal: normal}
 }
 
-func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFixture, kind runtimeeffects.AuthorityKind) runtimeeffects.Authority {
+func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFixture, kind runtimeeffects.AuthorityKind) (runtimeeffects.Authority, context.Context) {
 	t.Helper()
 	switch kind {
 	case runtimeeffects.AuthorityNormalAgent:
 		authority := fixture.normal.authority
 		authority.Target.ID = uuid.NewString()
-		return authority
+		return authority, fixture.normal.contextFor(authority)
 	case runtimeeffects.AuthoritySelectedContractFork:
 		// Ordinary and selected execution share this process, not competing
 		// selected-store startup capabilities.
@@ -230,7 +231,7 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		if err != nil {
 			t.Fatal(err)
 		}
-		selected := newSelectedCompletionFixtureWithProcess(t, fixture.primary, fixture.db, fixture.sqlite, process)
+		selected := newSelectedProviderCompletionFixtureWithProcess(t, fixture.primary, fixture.db, fixture.sqlite, process)
 		issued, err := fixture.primary.IssueRunForkSelectedContractRuntimeExecution(testAuthorActivityContext(), selected.request)
 		if err != nil {
 			t.Fatalf("issue budget-race selected authority: %v", err)
@@ -239,8 +240,9 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		if err != nil {
 			t.Fatalf("claim budget-race selected authority: %v", err)
 		}
-		authority.Target = selectedAgentTurnTarget(selected.forkRun)
-		return authority
+		admitSelectedProviderFixture(t, testAuthorActivityContext(), selected, issued, authority)
+		authority.Target = selectedProviderTarget(selected)
+		return authority, selectedProviderClaimContext(t, testAuthorActivityContext(), selected, authority)
 	case runtimeeffects.AuthorityConversationForkChat:
 		now := time.Now().UTC()
 		var source conversationForkSourceFixture
@@ -263,10 +265,11 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		if err != nil {
 			t.Fatalf("prepare budget-race forkchat authority: %v", err)
 		}
-		return forkChatCompletionAuthority(prepared, 1)
+		authority := forkChatCompletionAuthority(prepared, 1)
+		return authority, fixture.normal.contextFor(authority)
 	default:
 		t.Fatalf("unsupported budget race authority kind %q", kind)
-		return runtimeeffects.Authority{}
+		return runtimeeffects.Authority{}, nil
 	}
 }
 

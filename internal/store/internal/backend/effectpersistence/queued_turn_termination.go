@@ -39,6 +39,9 @@ func cancelQueuedWorkflowTurns(ctx context.Context, tx *sql.Tx, mutation *mutati
 		if err != nil {
 			return nil, err
 		}
+		if err := deactivateCanceledDeliveryContinuationsForDeliveryTx(ctx, tx, postgres, snapshot.DeliveryID); err != nil {
+			return nil, err
+		}
 		result = append(result, canceled)
 	}
 	return result, nil

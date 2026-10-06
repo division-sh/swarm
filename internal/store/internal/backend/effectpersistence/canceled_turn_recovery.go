@@ -157,7 +157,7 @@ func loadBusinessTurnFirstAttempt(ctx context.Context, tx *sql.Tx, postgres bool
 	}
 	// This is the existing recovery decoder's complete authority projection.
 	// No current agent token or latest physical attempt can replace these facts.
-	query := `SELECT CAST(o.operation_id AS TEXT),CAST(a.attempt_id AS TEXT),o.authority_kind,o.authority_id,CAST(o.authority_evidence AS TEXT),o.agent_frame_bytes,
+	query := `SELECT CAST(o.operation_id AS TEXT),CAST(a.attempt_id AS TEXT),o.authority_kind,o.authority_id,CAST(a.authority_evidence AS TEXT),o.agent_frame_bytes,
 		o.execution_mode,a.execution_mode,a.adapter,a.transport,a.state,a.usage_target_kind,CAST(a.usage_target_id AS TEXT),COALESCE(a.target_ordinal,0),
 		COALESCE(CAST(a.capability_surface_id AS TEXT),''),COALESCE(CAST(s.surface AS TEXT),''),a.execution_owner,a.fence_generation,a.lease_expires_at,
 		COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),COALESCE(CAST(o.agent_run_id AS TEXT),''),` + lineageRun + `,
@@ -168,7 +168,7 @@ func loadBusinessTurnFirstAttempt(ctx context.Context, tx *sql.Tx, postgres bool
 		COALESCE(CAST(a.origin_directive_operation_id AS TEXT),''),COALESCE(a.origin_directive_owner_id,'')
 		FROM runtime_external_effect_operations o JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
-		WHERE a.attempt_id=$1 AND o.effect_kind='provider_turn' AND o.authority_kind='normal_agent'
+		WHERE a.attempt_id=$1 AND o.effect_kind='provider_turn' AND o.authority_kind IN ('normal_agent','selected_contract_fork')
 		  AND ((a.origin_kind='delivery' AND a.origin_subscriber_type='agent') OR a.origin_kind='directive')`
 	rows, err := tx.QueryContext(ctx, query, first)
 	if err != nil {
@@ -187,7 +187,7 @@ func loadBusinessTurnFirstAttempt(ctx context.Context, tx *sql.Tx, postgres bool
 		return runtimeeffects.Attempt{}, "", fmt.Errorf("business turn has an invalid physical state")
 	}
 	attempt, _, err := completionRecoverySettlement(recovered[0], runtimeeffects.StateOutcomeUncertain, nil, now)
-	if err == nil && (!attempt.Authority.Normal.Valid() || attempt.Authority.ExecutionOwner == "" || attempt.Authority.FenceGeneration == 0) {
+	if err == nil && (!attempt.Authority.Valid() || !attempt.Authority.HasBusinessTurnOrigin() || attempt.Authority.ExecutionOwner == "" || attempt.Authority.FenceGeneration == 0) {
 		return runtimeeffects.Attempt{}, "", fmt.Errorf("business turn has incomplete original execution authority")
 	}
 	return attempt, runtimeeffects.State(recovered[0].State), err

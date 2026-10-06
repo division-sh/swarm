@@ -67,9 +67,16 @@ type completionRecoveryAttempt struct {
 type CompletionRecoveryAttempt = completionRecoveryAttempt
 
 type completionRecoveryAuthorityEvidence struct {
-	ActorTokenID  string `json:"actor_token_id"`
-	ExecutionMode string `json:"execution_mode"`
-	UsageTarget   struct {
+	ExecutionID                string `json:"execution_id"`
+	ForkRunID                  string `json:"fork_run_id"`
+	Generation                 uint64 `json:"generation"`
+	AdmissionFingerprint       string `json:"admission_fingerprint"`
+	ContainerPlanFingerprint   string `json:"container_plan_fingerprint"`
+	ActorCensusFingerprint     string `json:"actor_census_fingerprint"`
+	EffectiveConfigFingerprint string `json:"effective_config_fingerprint"`
+	ActorTokenID               string `json:"actor_token_id"`
+	ExecutionMode              string `json:"execution_mode"`
+	UsageTarget                struct {
 		Kind          string                 `json:"kind"`
 		ID            string                 `json:"id"`
 		Ordinal       int                    `json:"ordinal"`
@@ -87,7 +94,7 @@ type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
 func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,o.authority_evidence::text,o.agent_frame_bytes,
+		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,a.authority_evidence::text,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id::text,COALESCE(a.target_ordinal,0),
 		       COALESCE(a.capability_surface_id::text,''),COALESCE(s.surface::text,''),
@@ -144,7 +151,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 
 func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,o.authority_evidence,o.agent_frame_bytes,
+		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,a.authority_evidence,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id,COALESCE(a.target_ordinal,0),
 		       COALESCE(a.capability_surface_id,''),COALESCE(s.surface,''),
@@ -333,6 +340,8 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}
+		// Selected recovery owns whole-run terminalization after effect settlement;
+		// its fenced predecessor cannot use executable delivery settlement rights.
 		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
 			if resolution.Kind == completionSettlementDrained {
 				if _, err := settleProviderDrainRecovery(ctx, tx, mutation, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery, directives); err != nil {
@@ -407,6 +416,17 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		authority.LeaseExpiresAt = recovered.LeaseExpiresAt.UTC()
 		authority.FenceGeneration = uint64(recovered.FenceGeneration)
 	}
+	if authority.Kind == runtimeeffects.AuthoritySelectedContractFork {
+		authority.SelectedFork = runtimeeffects.SelectedContractForkAuthority{
+			ExecutionID: evidence.ExecutionID, ForkRunID: evidence.ForkRunID, Generation: evidence.Generation,
+			AdmissionFingerprint: evidence.AdmissionFingerprint, ContainerPlanFingerprint: evidence.ContainerPlanFingerprint,
+			ActorCensusFingerprint: evidence.ActorCensusFingerprint, EffectiveConfigFingerprint: evidence.EffectiveConfigFingerprint,
+		}
+		authority.ExecutionOwner, authority.FenceGeneration, authority.LeaseExpiresAt = recovered.ExecutionOwner, uint64(recovered.FenceGeneration), recovered.LeaseExpiresAt.UTC()
+		if !authority.Valid() || authority.ID != evidence.ExecutionID || evidence.ForkRunID != target.RunID || recovered.LineageRunID != target.RunID || recovered.AgentRunID != "" {
+			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery selected authority contradicts its immutable execution for attempt %s", recovered.AttemptID)
+		}
+	}
 	if target.Kind == runtimeeffects.UsageTargetConversationForkCompletion {
 		authority.ForkChat.ForkTurnID = target.ID
 	}
@@ -415,12 +435,12 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		Kind: runtimeeffects.KindProviderTurn, Adapter: recovered.Adapter, Transport: recovered.Transport,
 		SessionGrantID: recovered.SessionGrantID, SessionLockOwner: recovered.SessionLockOwner,
 	}
-	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
+	if authority.HasBusinessTurnOrigin() {
 		origin, err := decodeCompletionOrigin(recovered.OriginKind, recovered.OriginDeliveryID, recovered.OriginRunID, recovered.OriginRouteIdentity, recovered.OriginClaimToken, recovered.OriginClaimVersion, recovered.OriginSubscriber, recovered.OriginDirectiveID, recovered.OriginDirectiveOwner)
 		if err != nil {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery origin claim for attempt %s: %w", recovered.AttemptID, err)
 		}
-		if origin.Kind == runtimeeffects.CompletionOriginDelivery && (origin.Delivery.RunID() != target.RunID || origin.Delivery.SubscriberID() != authority.Normal.AgentID) {
+		if origin.Kind == runtimeeffects.CompletionOriginDelivery && (origin.Delivery.RunID() != target.RunID || origin.Delivery.SubscriberID() != target.AgentID) {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery origin claim conflicts for attempt %s", recovered.AttemptID)
 		}
 		attempt.Origin = origin
