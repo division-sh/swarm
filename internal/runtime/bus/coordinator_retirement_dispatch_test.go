@@ -173,6 +173,7 @@ func TestCoordinatorRetirementRealEventBusDispatch(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("real EventBus did not reach exact acquisition barrier")
 				}
+				c.BeginRetirement()
 				waitCtx, cancelWait := context.WithCancel(context.Background())
 				cancelWait()
 				if err := c.Retire(waitCtx); !errors.Is(err, context.Canceled) {

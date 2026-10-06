@@ -8,9 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
@@ -316,6 +321,41 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	dispatcher := &shutdownBlockedDispatcher{entered: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{})}
+	defer func() {
+		select {
+		case <-dispatcher.release:
+		default:
+			close(dispatcher.release)
+		}
+	}()
+	event := eventtest.RunCreatingRootIngress(eventtest.UUID("sibling-shutdown-event"), "beta.requested", "", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("beta"), AgentIdentity: agentidentitytest.RootRuntime(t, "beta", "sibling-shutdown")}
+	id, err := runtimedelivery.DeliveryID(event.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := second.Runtime.Bus.DeliveryAuthority()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := &shutdownContinuationPage{item: runtimedelivery.ContinuationItem{
+		DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimAcquired,
+		Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Status: runtimedelivery.StatusPending, Authority: authority},
+	}}
+	coordinator, err := deliverycontinuation.New(page, startupRecoveryDispositionMap{}, authority, second.WorkOwner, dispatcher, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.Runtime.deliveryContinuations = coordinator
+	if err := coordinator.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-dispatcher.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sibling continuation did not reach held dispatch")
+	}
 	active, release, admitted := first.Runtime.shutdownGate.BeginContext(testAuthorActivityContext(context.Background()))
 	if !admitted {
 		t.Fatal("first admission rejected")
@@ -335,6 +375,9 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 	if !second.Runtime.shutdownAdmissionClosed() || manager.LookupBundleHashStatus(runtimeContextTestHashB).Loaded() {
 		t.Fatal("later context remains executable while predecessor is draining")
 	}
+	if !errors.Is(dispatcher.ctx.Err(), context.Canceled) {
+		t.Fatal("sibling continuation admission survives whole-set withdrawal until its individual join")
+	}
 	use, lookup, err := manager.AcquireBundleHash(context.Background(), runtimeContextTestHashB)
 	if use != nil {
 		_ = use.Done()
@@ -348,6 +391,7 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 	default:
 	}
 	release()
+	close(dispatcher.release)
 	results := <-done
 	if len(results) != 2 || results[0].ShutdownErr == nil || results[1].ShutdownErr != nil {
 		t.Fatalf("unexpected drain results: %+v", results)

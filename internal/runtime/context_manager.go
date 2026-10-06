@@ -568,6 +568,9 @@ func (m *RuntimeContextManager) BeginStandingRunRecovery(
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if m.resetExecutionFenced {
 		return nil, worklifetime.ErrAdmissionFenced
 	}
@@ -2798,14 +2801,15 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 	}
 	if entry.context != nil {
 		runtimeToShutdown = entry.runtime
+		if runtimeToShutdown != nil {
+			runtimeToShutdown.CloseAdmission()
+			runtimeToShutdown.deliveryContinuations.BeginRetirement()
+		}
 		for _, occurrence := range entry.standing {
 			occurrence.Retire()
 			standingToRetire = append(standingToRetire, occurrence)
 		}
 		entry.standing = nil
-		if runtimeToShutdown != nil {
-			runtimeToShutdown.CloseAdmission()
-		}
 	}
 	m.mu.Unlock()
 	if releasePreparation != nil {
@@ -2888,6 +2892,7 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 		}
 		if entry.runtime != nil {
 			entry.runtime.CloseAdmission()
+			entry.runtime.deliveryContinuations.BeginRetirement()
 		}
 		for _, occurrence := range entry.standing {
 			occurrence.Retire()

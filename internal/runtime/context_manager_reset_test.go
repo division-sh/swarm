@@ -12,6 +12,37 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
+func TestStandingRecoveryCancellationWinsWithdrawnOwnerLookup(t *testing.T) {
+	origin, err := runlifecycle.StandingGenerationRunOrigin("retiring-clock", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fenced := range []bool{false, true} {
+		t.Run(fmt.Sprint(fenced), func(t *testing.T) {
+			manager := &RuntimeContextManager{resetExecutionFenced: fenced}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			manager.mu.Lock()
+			entered := make(chan struct{})
+			returned := make(chan error, 1)
+			go func() {
+				close(entered)
+				lease, err := manager.BeginStandingRunRecovery(ctx, "retiring-run", origin)
+				if lease != nil {
+					err = errors.Join(err, lease.Done(), errors.New("retired recovery acquired new authority"))
+				}
+				returned <- err
+			}()
+			<-entered
+			cancel()
+			manager.mu.Unlock()
+			if err := <-returned; !errors.Is(err, context.Canceled) || errors.Is(err, worklifetime.ErrAdmissionFenced) {
+				t.Fatalf("cancelled admitted carrier was reclassified by owner withdrawal: %v", err)
+			}
+		})
+	}
+}
+
 func TestResetStandingPreparationFailureDoesNotRetainPrecedingOccurrence(t *testing.T) {
 	owner := runtimeTestOccurrence(t, runtimeContextTestHashA)
 	manager := newRuntimeContextManagerState(nil)
