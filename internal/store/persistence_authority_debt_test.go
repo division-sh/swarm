@@ -28,6 +28,9 @@ import (
 const debtBaselinePath = "internal/store/testdata/persistence_authority_debt_baseline.tsv"
 const debtRefreshEnv = "SWARM_REFRESH_PERSISTENCE_AUTHORITY_DEBT"
 
+// The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
+const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"
+
 type authorityDebtSite struct {
 	Kind, File, Declaration, Operation, Resolved, Family, Replacement string
 	Multiplicity                                                      int
@@ -53,6 +56,9 @@ func authorityDebtOperation(member string) string {
 
 func authorityDebtRoute(finding authorityFinding) (string, string) {
 	path, operation := finding.File, finding.Member
+	if finding.Kind == "unresolved-excluded-source" {
+		return "excluded-source-uncertainty", "existing canonical owner or narrow source-evidenced classification; never a file exemption or baseline increase"
+	}
 	if finding.Kind == "selected-boundary" {
 		return "selected-construction", "selected construction/work-lifetime owner; do not recover a concrete store"
 	}
@@ -89,7 +95,7 @@ func authorityDebtRoute(finding authorityFinding) (string, string) {
 func authorityDebtSites(findings []authorityFinding) map[string]authorityDebtSite {
 	sites := map[string]authorityDebtSite{}
 	for _, finding := range findings {
-		if finding.Kind != "selected-boundary" && finding.Kind != "selected-store-construction" && finding.Kind != "forbidden-test-consumption" && finding.Kind != "inactive-test-consumption" && (!finding.RawSQL || debtRawSQLDispositionAllowed(finding, "fixture-2151")) {
+		if finding.Kind != "unresolved-excluded-source" && finding.Kind != "selected-boundary" && finding.Kind != "selected-store-construction" && finding.Kind != "forbidden-test-consumption" && finding.Kind != "inactive-test-consumption" && (!finding.RawSQL || debtRawSQLDispositionAllowed(finding, "fixture-2151")) {
 			continue
 		}
 		family, replacement := authorityDebtRoute(finding)
@@ -116,7 +122,7 @@ func authorityDebtSubset(actual, allowed map[string]authorityDebtSite, label str
 	for key, site := range actual {
 		limit := allowed[key].Multiplicity
 		if site.Multiplicity > limit {
-			failures = append(failures, fmt.Sprintf("%s new/increased site: %s declaration=%s operation=%s kind=%s old=%d new=%d owner=%s", label, site.File, site.Declaration, site.Operation, site.Kind, limit, site.Multiplicity, site.Replacement))
+			failures = append(failures, fmt.Sprintf("%s new/increased site: %s declaration=%s operation=%s kind=%s family=%s old=%d new=%d owner=%s", label, site.File, site.Declaration, site.Operation, site.Kind, site.Family, limit, site.Multiplicity, site.Replacement))
 		}
 	}
 	sort.Strings(failures)
@@ -420,6 +426,20 @@ func materializeDebtBase(t *testing.T, root, sha string) string {
 	return directory
 }
 
+func debtCheckBootstrapAncestry(root, origin, integrationBase string) error {
+	if !authorityDebtHex(origin, 40) {
+		return fmt.Errorf("invalid bootstrap origin")
+	}
+	base, err := debtGit(root, "merge-base", origin, integrationBase)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(base)) != origin {
+		return fmt.Errorf("bootstrap origin is not an ancestor of the trusted integration base")
+	}
+	return nil
+}
+
 func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	base, err := debtTrustedBase(root)
@@ -458,7 +478,17 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	}
 	var trusted, head authorityDebtBaseline
 	if bootstrap {
-		trusted = authorityDebtBaseline{BootstrapSource: base, Collector: collector, Sites: baseActual}
+		if err := debtCheckBootstrapAncestry(root, debtBootstrapSource, base); err != nil {
+			t.Fatal(err)
+		}
+		originActual := baseActual
+		if base != debtBootstrapSource {
+			originRoot := materializeDebtBase(t, root, debtBootstrapSource)
+			originFindings := debtLoadPersistenceAuthorityFindings(t, originRoot)
+			originFindings = append(originFindings, debtSelectedBoundaryFindings(t, originRoot)...)
+			originActual = authorityDebtSites(originFindings)
+		}
+		trusted = authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: collector, Sites: originActual}
 		if headErr != nil {
 			if !os.IsNotExist(headErr) || refresh != "downward" {
 				t.Fatalf("initial debt baseline missing: %v; explicit downward bootstrap required", headErr)
@@ -496,7 +526,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if head.BootstrapSource != trusted.BootstrapSource || head.Collector != trusted.Collector {
 		t.Fatal("debt baseline was reseeded or changed collector identity")
 	}
-	if bootstrap && !debtSitesEqual(head.Sites, baseActual) {
+	if bootstrap && !debtSitesEqual(head.Sites, trusted.Sites) {
 		t.Fatal("bootstrap baseline must equal actual extraction-base debt exactly")
 	}
 	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
@@ -524,7 +554,16 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 			rawSites++
 		}
 	}
-	t.Logf("debt source=%s collector=%s total-findings=%d raw-operation-sites=%d debt=%d inherited-baseline=%d", base, collector, len(headFindings), rawSites, authorityDebtCount(actual), authorityDebtCount(head.Sites))
+	unresolved := 0
+	confirmedRaw := 0
+	for _, site := range actual {
+		if site.Kind == "unresolved-excluded-source" {
+			unresolved += site.Multiplicity
+		} else if site.Kind == "raw-operation" {
+			confirmedRaw += site.Multiplicity
+		}
+	}
+	t.Logf("debt source=%s collector=%s total-findings=%d raw-operation-sites=%d debt=%d inherited-baseline=%d confirmed-raw-operation-debt=%d unresolved-excluded-occurrences=%d", base, collector, len(headFindings), rawSites, authorityDebtCount(actual), authorityDebtCount(head.Sites), confirmedRaw, unresolved)
 }
 
 func debtSortedKeys(sites map[string]authorityDebtSite) []string {
