@@ -3766,6 +3766,17 @@ state_machine_authority:
       Stage IDs are scoped to the flow that declares them. Nested/statechart
       hierarchy is not part of this slice. Flow composition owns hierarchy
       between parent and child flow instances.
+    entry_and_final_authority: |
+      Entry is the first effective node-backed stages declaration, never a
+      sorted map or a mutable projection. Optional final: true is the explicit
+      end choice; omission or false is non-final. No handler executes and no
+      new timer arms there. Explicit loop and join source restrictions cannot
+      widen this eligibility: an authored final source is rejected during
+      verification and is excluded from executable topology. Final entry alone
+      cancels no accepted work, revokes no acknowledged writes, and creates no
+      resource-cleanup authority. No-final flows are valid services that never
+      complete; finite run.start rejects their selected constructor/route
+      closure before creation, including independently selected feed receivers.
     not_field_presence_authority: |
       A lifecycle state name alone does not assign a field or synthesize
       its value. Definite-assignment analysis consumes the existing compiled
@@ -18915,14 +18926,14 @@ platform_tables:
           and preserve its next-expiry wake coordinate. It neither constructs a partial public summary nor establishes
           terminal eligibility: successful completion still requires every owner's strict full summary in the same
           operation. This is operation-local short-circuit evaluation, not a cache, scheduler, or alternate owner;
-          full public summary and snapshot reads remain strict. The entity projection consumes the admitted terminal
-          catalog; a missing, malformed, or nonterminal entity is never guessed terminal. Once those blocking
+          full public summary and snapshot reads remain strict. The entity projection consumes the admitted final-stage
+          catalog; a missing, malformed, or non-final entity is never guessed final. Once those blocking
           predicates clear, the executor must again consume every owner's full summary before completion.
           Decision-card ownership validates exact continuation outcome events and strict typed gate activations, including
           bucket identity and terminal evidence. External-effect ownership starts from exact run-bound logical operations
           and validates prepared operations, latest-attempt coherence, terminal retry history, usage-target identity, and
-          subordinate reservation ownership. Entity ownership resolves exact terminal descriptors through the admitted
-          terminal catalog. Constructed headers use the exact authored template '.', including a fieldless root;
+          subordinate reservation ownership. Entity ownership resolves exact final-stage descriptors through the admitted
+          final-stage catalog. Constructed headers use the exact authored template '.', including a fieldless root;
           its concrete instance is the run scope, not another stage-catalog key. The compiled catalog indexes that
           root explicitly and rejects a contradictory root graph or known instance graph. Lifecycle completion SQL
           is forbidden from naming or classifying those owners' tables or
@@ -23080,10 +23091,13 @@ static_analyzer:
         rule: Effective WorkflowJoinPlan timeout outcomes with advances_to contribute possible edges.
     source_state_derivation:
       ordinary_handlers:
-        rule: Handlers source from all non-terminal declared states of their already-constructed instance;
+        rule: Handlers source from all non-final declared stages of their already-constructed instance;
           retired create_entity flags do not restrict or authorize a source state.
-      terminal_states:
-        rule: terminal states are sinks in this slice.
+      final_stages:
+        rule: Optional authored final stages admit no handler execution or exit. Their membership
+          is not inferred from outdegree; a no-final service is structurally valid. Explicit loop
+          sources and arrival-join outcome sources cannot override final exclusion and must reject
+          on authored final-source presence rather than silently removing the offending declaration.
     rule: Reject an unreachable declared stage in the compiled lifecycle model as hard-invalid because `stages:` is
       the canonical lifecycle node authoring owner. Keep undeclared advances_to targets on hard-invalid
       state_machine_coherence. Retired lifecycle authoring does not retain a warning-only compatibility path.
@@ -36660,7 +36674,10 @@ api_specification:
 
         Before either atomic creation owner, require an explicit final stage for the selected root,
         eagerly constructed keyless descendants, and possible compiled routing receivers/templates and
-        their constructor children. Unknown or contradictory catalog evidence fails closed. Do not
+        their constructor children. Independently selected nested imports and pins seed this closure
+        with the exact receivers matched by their already-admitted declaration/routing evidence;
+        they do not instantiate the source producer or select its unrelated output routes.
+        Unknown or contradictory catalog evidence fails closed. Do not
         infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or
         treat stateless instances as exempt containers. A no-final service is structurally valid but
         refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow. Committed
