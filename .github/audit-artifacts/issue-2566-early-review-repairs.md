@@ -92,6 +92,10 @@ The combined four-test reporter race/count-three run hit its unchanged 180-secon
 package deadline without a reported assertion failure; it is not a green receipt.
 The new both-store closure test passes separately at race/count-three. Original
 reporter assertions are being qualified separately without changed limits.
+The first replacement core at `324bf0454` stopped before execution: the newly
+added closure proof had no primary full-plan owner. It is now explicitly selected
+by the existing local reporter and full served-late units, with both store
+children required. Existing selection, count modes, budgets and soaks are intact.
 The failed f60 core receipt remains unqualified. Lifecycle and
 named supplements, hosted full, ten-family completion, and composed A/E supported
 proof remain outstanding. No CI/PR was opened for these repairs.
