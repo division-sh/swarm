@@ -1,16 +1,20 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/backendselection"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
@@ -19,13 +23,22 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			root := canonicalrouting.CopyReceiverMixedAgent(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			var db *sql.DB
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 			if backend == "sqlite" {
 				unsetStoreSelectorEnv(t)
 				opts.ConfigPath = writeMockAgentRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "receiver.sqlite"))
-				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 			} else {
-				_, selected, _ := installServeRuntimeEmptyPostgresTestStores(t, nil)
-				db = selected
+				dsn := testutil.StartEmptyPostgresDSN(t)
+				previous := buildStoresForServe
+				buildStoresForServe = func(ctx context.Context, selection backendselection.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+					if selection.Backend != backendselection.BackendPostgres {
+						t.Fatal("mixed receiver fixture selected another backend")
+					}
+					return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
+						Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg),
+					})
+				}
+				t.Cleanup(func() { buildStoresForServe = previous })
 				opts.ConfigPath = writeMockAgentRuntimeConfig(t, "postgres", "")
 				opts.StoreMode, opts.StoreModeSet = backendselection.BackendPostgres.String(), true
 			}
