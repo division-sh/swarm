@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,8 +28,11 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if _, ok := api.Components.Schemas["ChannelCapabilityVector"]; !ok {
 		t.Fatal("ChannelCapabilityVector missing from schema catalog")
 	}
-	if report.ErrorCodeCount != 68 {
-		t.Fatalf("error code count = %d, want 68", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 69 {
+		t.Fatalf("error code count = %d, want 69", report.ErrorCodeCount)
+	}
+	if _, ok := api.Components.Errors["RUN_NEVER_COMPLETES"]; !ok || !slices.Contains(api.MethodCatalog["run.start"].Errors, "RUN_NEVER_COMPLETES") {
+		t.Fatal("finite-start refusal must be declared and bound to run.start")
 	}
 	if report.MutatingMethodCount != 30 {
 		t.Fatalf("mutating method count = %d, want 30", report.MutatingMethodCount)
@@ -139,14 +143,22 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Components.Schemas) != 246 {
 		t.Fatalf("generated OpenRPC schemas = %d, want 246", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 68 {
-		t.Fatalf("generated OpenRPC errors = %d, want 68", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 69 {
+		t.Fatalf("generated OpenRPC errors = %d, want 69", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)
 	methods := map[string]OpenRPCMethod{}
 	for _, method := range doc.Methods {
 		methods[method.Name] = method
+	}
+	finiteError, present := doc.Components.Errors["RUN_NEVER_COMPLETES"]
+	bound := false
+	for _, applicationError := range methods["run.start"].Errors {
+		bound = bound || (present && applicationError.Code == finiteError.Code && applicationError.Message == "Application error: RUN_NEVER_COMPLETES")
+	}
+	if !bound {
+		t.Fatal("generated run.start omits its canonical finite-start refusal")
 	}
 	if _, ok := methods["event.publish"]; !ok {
 		t.Fatal("generated OpenRPC missing event.publish")

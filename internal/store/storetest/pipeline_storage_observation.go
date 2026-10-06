@@ -10,6 +10,11 @@ import (
 )
 
 type ReplyReturnStorageEvidence = private.ReplyReturnStorageEvidence
+type FiniteRunStartStorageCounts = private.FiniteRunStartStorageCounts
+
+func ReadFiniteRunStartStorageCounts(ctx context.Context, selected any) (FiniteRunStartStorageCounts, error) {
+	return private.ReadFiniteRunStartStorageCountsForTest(ctx, selected)
+}
 
 func ReadPinnedAuthoredMutationStorage(ctx context.Context, selected any, source fanoutobligation.SourceRef) (json.RawMessage, error) {
 	return private.ReadPinnedAuthoredMutationStorageForTest(ctx, selected, source)

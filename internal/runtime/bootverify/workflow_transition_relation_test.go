@@ -273,10 +273,13 @@ func loadTransitionRelationFixture(t *testing.T, family string, reordered bool) 
 				var reverseMappings func(*yaml.Node)
 				reverseMappings = func(node *yaml.Node) {
 					for i, child := range node.Content {
-						// Rule order is executable policy, unlike sibling/map
-						// declaration presentation; keep that policy unchanged.
-						if node.Kind == yaml.MappingNode && i%2 == 1 && node.Content[i-1].Value == "rules" {
-							continue
+						// Rules select policy and stages select entry; neither
+						// is presentation-only mapping order.
+						if node.Kind == yaml.MappingNode && i%2 == 1 {
+							key := node.Content[i-1].Value
+							if key == "rules" || key == "stages" {
+								continue
+							}
 						}
 						reverseMappings(child)
 					}
