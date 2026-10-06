@@ -2,7 +2,6 @@ package mcp_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -53,11 +52,9 @@ type gatewayStoryStore interface {
 }
 
 type gatewayStorySelectedStore struct {
-	backend  gatewayStoryStore
-	db       *sql.DB
-	postgres bool
-	close    func() error
-	reopen   func() gatewayStorySelectedStore
+	backend gatewayStoryStore
+	close   func() error
+	reopen  func() gatewayStorySelectedStore
 }
 
 func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
@@ -69,9 +66,9 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			name: "sqlite",
 			start: func(t *testing.T) gatewayStorySelectedStore {
 				backend, reopen := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
-				return gatewayStorySelectedStore{backend: backend, db: storetest.Database(backend), close: backend.Close, reopen: func() gatewayStorySelectedStore {
+				return gatewayStorySelectedStore{backend: backend, close: backend.Close, reopen: func() gatewayStorySelectedStore {
 					next := reopen()
-					return gatewayStorySelectedStore{backend: next, db: storetest.Database(next), close: next.Close}
+					return gatewayStorySelectedStore{backend: next, close: next.Close}
 				}}
 			},
 		},
@@ -79,9 +76,9 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			name: "postgres",
 			start: func(t *testing.T) gatewayStorySelectedStore {
 				backend, reopen := storetest.StartPostgresRuntimeStoreWithReopen(t)
-				return gatewayStorySelectedStore{backend: backend, db: storetest.Database(backend), postgres: true, close: backend.Close, reopen: func() gatewayStorySelectedStore {
+				return gatewayStorySelectedStore{backend: backend, close: backend.Close, reopen: func() gatewayStorySelectedStore {
 					next := reopen()
-					return gatewayStorySelectedStore{backend: next, db: storetest.Database(next), postgres: true, close: next.Close}
+					return gatewayStorySelectedStore{backend: next, close: next.Close}
 				}}
 			},
 		},
@@ -491,29 +488,16 @@ func assertGatewayStoryDurableReplayRefusal(t *testing.T, result map[string]any)
 
 func assertGatewayStoryEffectAndOccurrence(t *testing.T, selected gatewayStorySelectedStore, scope runtimeauthoractivity.Scope, want int) {
 	t.Helper()
-	query := `SELECT o.bundle_hash, o.execution_mode, a.execution_mode FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.adapter = ? AND a.state = 'settled'`
-	if selected.postgres {
-		query = `SELECT o.bundle_hash, o.execution_mode, a.execution_mode FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.adapter = $1 AND a.state = 'settled'`
-	}
-	rows, err := selected.db.QueryContext(context.Background(), query, "authored_http_tool")
+	rows, err := storetest.ReadAuthoredHTTPToolEffectStorage(context.Background(), selected.backend)
 	if err != nil {
 		t.Fatalf("read authored HTTP effects: %v", err)
 	}
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		var bundleHash, operationMode, attemptMode string
-		if err := rows.Scan(&bundleHash, &operationMode, &attemptMode); err != nil {
-			t.Fatalf("scan authored HTTP effect: %v", err)
+	for _, row := range rows {
+		if row.BundleHash != scope.BundleHash || row.OperationMode != string(runtimeeffects.ExecutionModeLive) || row.AttemptMode != string(runtimeeffects.ExecutionModeLive) {
+			t.Fatalf("authored HTTP effect semantics = bundle:%q operation_mode:%q attempt_mode:%q, want %q/live/live", row.BundleHash, row.OperationMode, row.AttemptMode, scope.BundleHash)
 		}
-		if bundleHash != scope.BundleHash || operationMode != string(runtimeeffects.ExecutionModeLive) || attemptMode != string(runtimeeffects.ExecutionModeLive) {
-			t.Fatalf("authored HTTP effect semantics = bundle:%q operation_mode:%q attempt_mode:%q, want %q/live/live", bundleHash, operationMode, attemptMode, scope.BundleHash)
-		}
-		count++
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate authored HTTP effects: %v", err)
-	}
+	count := len(rows)
 	if count != want {
 		t.Fatalf("settled authored HTTP effects = %d, want %d", count, want)
 	}

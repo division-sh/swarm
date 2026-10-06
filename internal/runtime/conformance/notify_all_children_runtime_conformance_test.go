@@ -1630,14 +1630,14 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 					if _, err := runtime.manager.ResolveAgentConfig(runID, nameCase.agentID, blocked); err != nil {
 						t.Fatalf("blocked sibling agent disappeared after another instance terminated: %v", err)
 					}
-					waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, nameCase.agentID, blocked, "in_progress")
+					waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, runID, nameCase.agentID, blocked, "in_progress")
 
 					gate.release(blocked)
 					waitNotifyAllChildrenRuntime(t, runtime, runID)
 					for _, accountID := range accountIDs {
 						instancePath := descriptors[accountID].FlowInstance
 						waitNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath, "completed")
-						waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, nameCase.agentID, instancePath, "delivered")
+						waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, runID, nameCase.agentID, instancePath, "delivered")
 						assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t, ctx, db, tc.name, runID, nameCase.agentID, instancePath)
 						waitNotifyAllChildrenAgentAbsent(t, runtime.manager, runID, nameCase.agentID, instancePath)
 					}
@@ -2533,42 +2533,19 @@ func waitNotifyAllChildrenAgentDeliveryStatus(
 	t testing.TB,
 	ctx context.Context,
 	backend notifyAllChildrenStore,
-	db *sql.DB,
 	runID string,
 	agentID string,
 	flowInstance string,
 	want string,
 ) {
 	t.Helper()
-	query := `
-		SELECT status
-		FROM event_deliveries
-		WHERE run_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
-		  AND agent_flow_instance_path = $3
-		ORDER BY created_at DESC, delivery_id DESC
-		LIMIT 1
-	`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `
-			SELECT status
-			FROM event_deliveries
-			WHERE run_id = ?
-			  AND subscriber_type = 'agent'
-			  AND subscriber_id = ?
-			  AND agent_flow_instance_path = ?
-			ORDER BY created_at DESC, delivery_id DESC
-			LIMIT 1
-		`
-	}
 	deadline := time.Now().Add(15 * time.Second)
 	var (
 		got     string
 		lastErr error
 	)
 	for time.Now().Before(deadline) {
-		lastErr = db.QueryRowContext(ctx, query, runID, agentID, flowInstance).Scan(&got)
+		got, lastErr = storetest.ReadNotifyAgentDeliveryStatus(ctx, backend, runID, agentID, flowInstance)
 		if lastErr == nil && strings.TrimSpace(got) == want {
 			return
 		}
