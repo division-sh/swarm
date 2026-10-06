@@ -3778,6 +3778,9 @@ handler_specification:
       positively acknowledged result remains committed despite later cancellation, panic or cleanup failure; those
       diagnostics do not authorize rollback, plan release or handler retry. Provider calls, asynchronous waits,
       descendant execution and postcommit dispatch run under neither the handler SQL transaction nor its entity lock.
+      Ordinary handler or stage-timer entry into a terminal stage does not prepare operational flow retirement or
+      transfer a retirement callback. Explicit flow termination retains its own acknowledged state mutation and
+      postcommit route cleanup, releasing the entity lock before acquiring or joining retirement authority.
       After acknowledgement, publication and lifecycle finalizers attempt every independent committed consequence;
       one diagnostic does not abandon sibling handoffs. A publication with failed activation or receiver-readiness
       prerequisites retains an exact recovery disposition and cannot be dispatched directly. A diagnostic-only
@@ -6296,7 +6299,7 @@ engine:
         and decision history for post-mortem analysis.
       behavior:
       - Entity stops accepting new events (handlers reject events for terminal entities)
-      - Stage changes, including entry to a sink, do not cancel accepted agent work or discard late results. A stage deadline only advances the stage.
+      - Stage changes, including entry to a terminal stage, do not cancel accepted agent work or discard late results. A stage deadline only advances the stage.
       - Stage transitions cannot declare operational flow retirement. Authored cancellation and work-derived resource cleanup are separate from graph terminality.
       - All persisted state remains in the database
       - Entity remains queryable through explicit read/query surfaces; for normal agents this means generated current-entity
