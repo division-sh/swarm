@@ -6775,6 +6775,9 @@ engine:
             owner: internal/store/persistence_authority_debt_test.go
             snapshot: internal/store/testdata/persistence_authority_debt_baseline.tsv
             authorized_by: '#2542'
+            execution_owner: persistence-authority-debt-census
+            execution_tiers: [core, lifecycle, full]
+            retained_controls_owner: store-admission-full
             purpose: Temporary inherited-debt evidence, never a disposition registry or authority grant.
             canonical_active_view: Linux/amd64, CGO enabled, amd64.v1, default Go experiments; ambient GOOS/GOARCH/CGO/GOFLAGS/GOWORK selection cannot change the census.
             excluded_source_accounting: Every other checkout-owned Go file is parsed and enumerated. Available canonical type facts may confirm operations but do not validate a foreign-platform type universe. Unresolved declarations retain normalized AST fingerprints of body, initializer and signature, relative file, import/build-constraint context and multiplicity. Benign classification is limited to literal-only source or exact forwarding of a same-file typed constant refusal with no raw signature, side-effecting argument, callback dispatch or additional work; never a file exemption. Unknown is not harmless and is reported separately from confirmed raw SQL.

@@ -153,7 +153,7 @@ payment, duplicates, raised/reseeded snapshots, stale resurrection, corrupted
 data, aliases/embedding/callbacks/opaque construction, inactive imports, role
 relabeling, failed/missing census, unchanged legacy debt, actual deletion, benign
 line movement and earlier-ordinal removal. A named membership proof requires the
-ratchet to remain selected by existing `store-admission-full` at core, lifecycle
+ratchet to remain selected by dedicated `persistence-authority-debt-census` at core, lifecycle
 and full; no planner or shard change is introduced.
 
 Review regression controls additionally cover scalar/closure/context initializers,
@@ -193,3 +193,29 @@ qualification and integrated full remain final obligations. Existing watchlist
 mapping and approved owners remain sufficient; no new tracker or framework.
 Remaining uncertainty must be explicitly classified at final closure; it cannot
 be counted as proven safe or silently removed to fabricate zero debt.
+
+## Dedicated Census Execution Owner
+
+Binding delta ruling: #2569 comment 6008148891. Run 37403048513 measured the
+unsplit admission primary command at 538s, above its 312s ceiling, with all proof
+jobs passing. The census root itself took 446.06s; summed concurrent package work
+(551.912s) is not the enforced command latency. The local/hosted discrepancy is
+retained, not claimed optimized.
+
+Only the complete census root moves to `persistence-authority-debt-census`,
+selected at core/lifecycle/full in both local and hosted plans. Count remains one;
+existing root/package/receipt/skip validation and every census assertion remain.
+Admission's positive complement excludes exactly that root while retaining every
+other store control/guard and every native testpostgres root. No skip permission
+or planner algorithm is added. Generated-plan partition proof requires every
+native root to have exactly one owner in the unchanged union and requires the
+census to execute, not be deferred.
+
+The new unit alone receives a reviewed 480s command baseline / 624s buffered
+ceiling with the exact one-line measured justification. Admission remains
+240s/312s; global/sibling budgets, evaluator, Go timeouts, source census,
+snapshot/digest and migration boundaries are unchanged. Prefix/extension,
+omission, duplicate, selection, count, skip, timeout and tier negative controls
+cover the extraction. First isolated command and whole-unit intervals are
+reported separately; no invented hosted isolated measurement or performance
+improvement is claimed.

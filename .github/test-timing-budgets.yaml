@@ -12,6 +12,9 @@ hard:
     limit_seconds: 540
     justification: Existing ceiling for the required 20-journey served lifecycle matrix; the 492s primary baseline remains measured without an automatic confirmation pass.
   unit_command_seconds:
+    persistence-authority-debt-census:
+      limit_seconds: 480
+      justification: 'PR2569/run37403048513 measured the full source-bound debt census at446.06s inside a538s primary command; isolate this mandatory all-tier proof with a480s baseline, retaining the fixed30% buffer and unchanged sibling budgets.'
     broad-03:
       limit_seconds: 300
       justification: 'Lead authorized up to30% timing allowances on 2026-10-02; CI36960543887 measured this exact generated unit at324s against312s, with all tests passing. The unit-only 240s ->300s baseline and312s ->390s ceiling increase25%; the fixed evaluator buffer and every sibling budget remain unchanged.'
