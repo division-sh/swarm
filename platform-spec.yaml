@@ -39338,7 +39338,16 @@ durable_pipeline_processing_obligation_authority:
       handoff through the existing settlement owner before its independent private session retires and asynchronous
       publication returns. Only the short database handoff is joined, not downstream node/child/provider execution;
       deferring this handoff itself would retain the same unbounded already-acknowledged session backlog. Pipeline
-      acknowledgement means durable handoff, never recipient success; pending deliveries retain their own completion
+      publication retains its ordinary initial asynchronous node attempt through the same current-generation
+      delivery-continuation owner and configured dispatcher used by recovery; unrelated recovery work is not a
+      prerequisite for launching that attempt. Initial dispatch and recovery compete at the same exact continuation
+      election and acquire fresh store claims before execution, with one shared dispatch-result interpretation.
+      Only the current settlement invocation's acknowledged result permits its initial dispatch. A spent or stale
+      claim returns no new handoff authority; an earlier acknowledgement is not reusable process admission.
+      A published diagnostic may finish after asynchronous return only in the original admitted receiver occurrence:
+      retain exact source/run/event projection, join it during quiescence and retirement, and never retain the SQL
+      publication claim for diagnostic persistence. This does not authorize an unowned logging tail or a second queue.
+      Pipeline acknowledgement means durable handoff, never recipient success; pending deliveries retain their own completion
       blockers and acquire fresh exact delivery claims before execution. No new queue, pool enlargement, arbitrary
       session group or recursive global permit is introduced. The existing fan-out group consumes the same exact
       coverage decision without changing its finite membership/session contract. Synchronous dispatch and bounded
