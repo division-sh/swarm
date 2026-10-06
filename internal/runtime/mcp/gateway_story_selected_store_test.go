@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
@@ -50,6 +48,7 @@ const gatewayStoryAuthToken = "gateway-story-token"
 type gatewayStoryStore interface {
 	runtimeeffects.Store
 	storetest.AgentFixtureStore
+	storetest.RunFixtureStore
 	ListAuthorActivity(context.Context, runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error)
 }
 
@@ -406,11 +405,10 @@ func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, r
 	t.Helper()
 	now := time.Now().UTC()
 	bundleHash := source.BundleHash()
-	if selected.postgres {
-		runlifecyclefixture.RequirePostgres(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, Artifact: artifact})
-	} else {
-		runlifecyclefixture.RequireSQLite(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, Artifact: artifact})
-	}
+	storetest.RequireRun(t, context.Background(), selected.backend, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now,
+		BundleHash: bundleHash, Artifact: artifact,
+	})
 	if err := storetest.UpsertStaticAgentFixtureForSource(t, context.Background(), selected.backend, runtimemanager.PersistedAgent{
 		Config: actor, Status: "active", StartedAt: now,
 		LifecycleEpoch: 7, LifecycleGeneration: 3,
