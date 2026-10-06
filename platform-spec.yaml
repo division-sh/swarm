@@ -19423,7 +19423,10 @@ run_model:
       A receiver's business fields come from the exact fixed-revision entity-state mutation history, not a second
       configuration envelope. They are not reconstructed from a path leaf, hashed instance ID, current flow row,
       selected-source defaults or the triggering event payload. Runtime header controls are admitted independently
-      while recorded business fields retain their selected value and numeric kinds. The sealed readiness binding
+      while recorded business fields retain their selected value and numeric kinds. The canonical fixed-history
+      mutation projection preserves integer and double transport kinds, including nested values, before state
+      reconstruction; an ordinary JSON float-only decode or a test-owned historical reconstruction is invalid.
+      The sealed readiness binding
       includes the complete entity snapshot and header evidence; missing or contradictory evidence refuses before
       fork mutation. Old selected stores are unsupported, with no migration or compatibility reader.
       Runtime preparation and persistence consume one complete admitted receiver relation, bound to the fixed snapshot,

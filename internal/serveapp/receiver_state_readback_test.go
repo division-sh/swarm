@@ -2,16 +2,45 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type receiverProofStateReader interface {
 	pipeline.WorkflowTargetPersistenceReader
 	ListWorkflowInstances(context.Context, string) ([]pipeline.WorkflowInstance, error)
+}
+
+func requireReceiverApplicationSnapshot(t testing.TB, reader receiverProofStateReader) map[string][]string {
+	t.Helper()
+	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make(map[string][]string, 2*len(snapshot))
+	for table, evidence := range snapshot {
+		columns, err := json.Marshal(evidence.Columns)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[table] = evidence.Rows
+		out[table+"/columns"] = []string{string(columns)}
+	}
+	return out
+}
+
+func requireReceiverEventIdempotencyCardinality(t testing.TB, reader receiverProofStateReader, key string) int {
+	t.Helper()
+	count, err := storetest.ReadEventIdempotencyCardinality(context.Background(), reader, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return count
 }
 
 func requireReceiverProofStateReader(t testing.TB, selected any) receiverProofStateReader {

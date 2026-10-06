@@ -30,12 +30,12 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 		t.Run("missing_required_"+missing, func(t *testing.T) {
 			params := receiverInitializationPublishParams(rt, "missing-"+missing, "missing-"+missing, `{}`)
 			delete(params["payload"].(map[string]any), missing)
-			before := receiverIngressApplicationSnapshot(t, rt)
+			before := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)
 			refusal := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
 			if refusal.Data["code"] != apiv1.PayloadValidationFailedCode {
 				t.Fatalf("required message refusal=%+v", refusal)
 			}
-			after := receiverIngressApplicationSnapshot(t, rt)
+			after := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)
 			requireReceiverIngressRejectionDiagnostic(t, before, after, "work.requested")
 			for table, rows := range after {
 				if !reflect.DeepEqual(before[table], rows) {
@@ -43,7 +43,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 				}
 			}
 			key := params["idempotency_key"].(string)
-			if count := servedEventPublishEventCountByIdempotencyKey(t, rt.DB, rt.Backend, key); count != 0 {
+			if count := requireReceiverEventIdempotencyCardinality(t, rt.ReceiverStateReader, key); count != 0 {
 				t.Fatalf("rejected message persisted %d events", count)
 			}
 		})
@@ -106,7 +106,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			t.Fatalf("wrong integer admission error=%+v", err)
 		}
 		key := params["idempotency_key"].(string)
-		if count := servedEventPublishEventCountByIdempotencyKey(t, rt.DB, rt.Backend, key); count != 0 {
+		if count := requireReceiverEventIdempotencyCardinality(t, rt.ReceiverStateReader, key); count != 0 {
 			t.Fatalf("invalid ingress persisted %d events", count)
 		}
 		if count := servedEventPublishAPIIdempotencyCount(t, rt.DB, rt.Backend, "event.publish", key); count != 0 {

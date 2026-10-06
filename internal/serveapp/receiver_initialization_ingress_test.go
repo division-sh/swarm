@@ -61,12 +61,12 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 		{"wrong_provider_integer", input, apiv1.PayloadValidationFailedCode, map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": "7", "text": "invalid"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			before := receiverIngressApplicationSnapshot(t, rt)
+			before := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)
 			err := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{"bundle_hash": rt.BundleHash, "event_name": tc.event, "payload": tc.payload, "idempotency_key": tc.name})
 			if err.Data["code"] != tc.code {
 				t.Fatalf("scope/type refusal=%+v, want %s", err, tc.code)
 			}
-			after := receiverIngressApplicationSnapshot(t, rt)
+			after := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)
 			if tc.code == apiv1.PayloadValidationFailedCode {
 				requireReceiverIngressRejectionDiagnostic(t, before, after, input)
 			}
@@ -158,12 +158,12 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	before := receiverIngressApplicationSnapshot(t, rt)
+	before := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)
 	duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 	if duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID {
 		t.Fatalf("duplicate direct input changed publication identity: first=%+v duplicate=%+v", seed, duplicate)
 	}
-	after := receiverIngressApplicationSnapshot(t, rt)
+	after := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)
 	for table, rows := range before {
 		if !reflect.DeepEqual(rows, after[table]) {
 			t.Fatalf("duplicate direct input changed %s: before=%v after=%v", table, rows, after[table])
@@ -171,9 +171,9 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 	}
 }
 
-func receiverIngressApplicationSnapshot(t *testing.T, rt servedControlProofRuntime) map[string][]string {
+func receiverIngressApplicationSnapshot(t *testing.T, reader receiverProofStateReader) map[string][]string {
 	t.Helper()
-	all, out := snapshotForkReceiverApplication(t, rt), map[string][]string{}
+	all, out := requireReceiverApplicationSnapshot(t, reader), map[string][]string{}
 	for _, table := range []string{
 		"runs", "events", "flow_instances", "flow_instance_runtime_readiness", "entity_state", "entity_mutations", "routing_rules",
 		"event_deliveries", "event_delivery_attempts", "event_receipts", "committed_replay_scopes", "api_idempotency",

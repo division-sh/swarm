@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"reflect"
 	"sort"
@@ -12,9 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // H: real HTTP/native stores through the retained in-process mock lifecycle.
@@ -102,26 +103,8 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, consumed).Scan(&claims); err != nil || claims != 1 {
 				t.Fatalf("config consumer claims=%d err=%v", claims, err)
 			}
-			var initialRaw string
-			if err := rt.DB.QueryRow(`SELECT CAST(projection AS TEXT) FROM workflow_instance_initial_materializations WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, seed.RunID, entityID, path).Scan(&initialRaw); err != nil {
-				t.Fatal(err)
-			}
 			owner := flowidentity.RunScopedFlowInstance{RunID: seed.RunID, Route: flowidentity.StoredRoute("account", "ti-138096d2b56ac1568ac40ea7", path)}
-			if err := pipeline.ValidateFlowConstructionPublication([]byte(initialRaw), owner, entityID, creating); err != nil {
-				t.Fatalf("exact creating publication/materialization receipt: %v", err)
-			}
-			var initial map[string]any
-			if err := canonicaljson.DecodePreservingNumberLexemes([]byte(initialRaw), &initial); err != nil {
-				t.Fatal(err)
-			}
-			persisted, ok := initial["persisted"].(map[string]any)
-			if !ok {
-				t.Fatalf("constructor receipt has no persisted state: %#v", initial)
-			}
-			if _, found := persisted["config"]; found {
-				t.Fatal("constructor receipt retains a parallel business configuration")
-			}
-			initialFields, err := canonicaljson.CloneRuntimeValue(persisted["fields"])
+			initialFields, err := storetest.ReadReceiverConstructionPublicationFields(context.Background(), rt.ReceiverStateReader, owner, entityID, creating)
 			if err != nil || !reflect.DeepEqual(initialFields, want) {
 				t.Fatalf("all nine business fields must exist at construction, not be initialized by the automatic consumer: %#v err=%v", initialFields, err)
 			}
@@ -143,9 +126,9 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			before := snapshotForkReceiverApplication(t, rt)
+			before := requireReceiverApplicationSnapshot(t, rt.ReceiverStateReader)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-			if after := snapshotForkReceiverApplication(t, rt); duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, after) {
+			if after := requireReceiverApplicationSnapshot(t, rt.ReceiverStateReader); duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, after) {
 				t.Fatalf("source duplicate changed initialization or execution: run=%s event=%s changed_tables=%v", duplicate.RunID, duplicate.EventID, forkReceiverChangedTables(before, after))
 			}
 			for _, frontier := range []struct{ name, eventID string }{{"creating_delivery", creating}, {"settled_consumer", consumed}} {
@@ -161,7 +144,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 						if string(failure.Class) != "platform.dependency_unavailable" || failure.Detail.Code != "selected_contract_deferred_work_owner_unavailable" || failure.Component != "selected-contract-run-fork" || failure.Operation != "admit-deferred-work-ownership" || !failure.Retryable || failure.Deterministic || marshalErr != nil || string(capabilities) != `["dynamic_flow_instance_creation"]` {
 							t.Fatalf("wrong exact #642 refusal: %+v capabilities=%s err=%v", failure, capabilities, marshalErr)
 						}
-						if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+						if after := requireReceiverApplicationSnapshot(t, rt.ReceiverStateReader); !reflect.DeepEqual(before, after) {
 							t.Fatalf("refused dynamic fork mutated application/story/revision facts: changed_tables=%v", forkReceiverChangedTables(before, after))
 						}
 					}

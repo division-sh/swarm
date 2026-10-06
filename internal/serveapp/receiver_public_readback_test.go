@@ -1,7 +1,7 @@
 package serveapp
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
@@ -14,39 +14,34 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/gorilla/websocket"
 )
 
 func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRuntime, runID, instance, template, entityID, entityType, state, parent, wantPhase string, wantRevision int, fields map[string]any) {
 	t.Helper()
-	var gotEntity, gotTemplate, gotState string
-	var gotType sql.NullString
-	var revision int
-	var createdAt, updatedAt string
-	var orderedClocks bool
-	if err := rt.DB.QueryRow(`SELECT entity_id,flow_template,entity_type,current_state,revision,CAST(created_at AS TEXT),CAST(updated_at AS TEXT),updated_at>=created_at FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, instance).
-		Scan(&gotEntity, &gotTemplate, &gotType, &gotState, &revision, &createdAt, &updatedAt, &orderedClocks); err != nil {
+	physical, err := storetest.ReadReceiverConstructionStorage(context.Background(), rt.ReceiverStateReader, runID, instance, entityID, entityType)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if gotEntity != entityID || gotTemplate != template || gotState != state || gotType.String != entityType || gotType.Valid != (entityType != "") || revision != wantRevision || createdAt == "" || updatedAt == "" || !orderedClocks {
-		t.Fatalf("constructed receiver mismatch: run=%s instance=%s entity=%s template=%s type=%+v state=%s revision=%d", runID, instance, gotEntity, gotTemplate, gotType, gotState, revision)
+	if physical.EntityID != entityID || physical.Template != template || physical.State != state || physical.EntityType != entityType || physical.EntityTypePresent != (entityType != "") || physical.Revision != wantRevision || physical.CreatedAt == "" || physical.UpdatedAt == "" || !physical.OrderedClocks {
+		t.Fatalf("constructed receiver mismatch: run=%s instance=%s physical=%+v", runID, instance, physical)
 	}
 	// Historical source-only fork headers preserve their recorded clocks.
-	if wantRevision == 1 && wantPhase != "" && updatedAt != createdAt {
+	if wantRevision == 1 && wantPhase != "" && physical.UpdatedAt != physical.CreatedAt {
 		t.Fatal("delivery-only settlement changed the construction header clock")
 	}
-	var phase, planHash, rawPlan string
-	err := rt.DB.QueryRow(`SELECT phase,plan_hash,CAST(plan AS TEXT) FROM flow_instance_runtime_readiness WHERE run_id=$1 AND instance_path=$2`, runID, instance).Scan(&phase, &planHash, &rawPlan)
+	phase, planHash := physical.Phase, physical.PlanHash
 	if wantPhase == "" {
 		// A historical, fieldless source-only root is inventoried, not attached.
-		if err != sql.ErrNoRows || template != "." || entityType != "" || parent != "" {
+		if physical.ReadinessPresent || template != "." || entityType != "" || parent != "" {
 			t.Fatalf("historical source-only projection acquired attachment: phase=%s err=%v", phase, err)
 		}
 	} else {
-		if err != nil || phase != wantPhase || planHash == "" {
+		if !physical.ReadinessPresent || phase != wantPhase || planHash == "" {
 			t.Fatalf("receiver lacks exact canonical attachment: %s/%s phase=%s hash=%s err=%v", runID, instance, phase, planHash, err)
 		}
-		plan, err := pipeline.DecodeFlowReadinessPlan([]byte(rawPlan), planHash)
+		plan, err := pipeline.DecodeFlowReadinessPlan(physical.Plan, planHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,10 +57,7 @@ func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRunti
 			t.Fatalf("receiver attachment lost exact construction/source identity: %+v", plan)
 		}
 	}
-	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, instance).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
+	count := physical.FieldRows
 	if entityType == "" {
 		if count != 0 {
 			t.Fatalf("fieldless receiver acquired a field companion: %d", count)
@@ -75,12 +67,9 @@ func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRunti
 	if count != 1 {
 		t.Fatalf("declared receiver lacks its unique field companion: %d", count)
 	}
-	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance=$2 AND entity_id=$3 AND entity_type=$4`, runID, instance, entityID, entityType).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	raw := physical.Fields
 	var gotFields map[string]any
-	if err := json.Unmarshal([]byte(raw), &gotFields); err != nil {
+	if err := json.Unmarshal(raw, &gotFields); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(gotFields, fields) {
