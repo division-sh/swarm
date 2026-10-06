@@ -1095,8 +1095,8 @@ func beginCompletion(ctx context.Context, adapter string, request []byte, frame 
 			return nil, err
 		}
 		capabilitySurface = &surface
-		if authority.Kind == AuthorityNormalAgent {
-			origin, err = NormalCompletionOriginFromContext(ctx, authority.Normal.AgentID, authority.Target.RunID, strings.TrimSpace(adapter))
+		if authority.HasBusinessTurnOrigin() {
+			origin, err = AgentCompletionOriginFromContext(ctx, authority.Target.AgentID, authority.Target.RunID, strings.TrimSpace(adapter))
 			if err != nil {
 				return nil, err
 			}
@@ -1506,12 +1506,12 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 					"adapter": req.Adapter, "validation_error": err.Error(),
 				})
 			}
-			if authority.Kind == AuthorityNormalAgent {
+			if authority.HasBusinessTurnOrigin() {
 				if err := req.Origin.Validate(); err != nil {
 					return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_missing_or_ambiguous", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
 				}
 				if req.Origin.Kind == CompletionOriginDelivery && (req.Origin.Delivery.SubscriberClass() != runtimedelivery.SubscriberAgent ||
-					req.Origin.Delivery.SubscriberID() != authority.Normal.AgentID || req.Origin.Delivery.RunID() != authority.Target.RunID) {
+					req.Origin.Delivery.SubscriberID() != authority.Target.AgentID || req.Origin.Delivery.RunID() != authority.Target.RunID) {
 					return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "delivery_id": req.Origin.Delivery.DeliveryID()})
 				}
 			} else if req.Origin.Validate() == nil {

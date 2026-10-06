@@ -12,7 +12,7 @@ import (
 )
 
 func settleCanceledDeliveryTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, attempt runtimeeffects.Attempt) (deliverylifecycle.Snapshot, error) {
-	if delivery == nil || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent ||
+	if delivery == nil || !attempt.Authority.HasBusinessTurnOrigin() ||
 		attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Origin.Kind != runtimeeffects.CompletionOriginDelivery || attempt.Origin.Validate() != nil {
 		return deliverylifecycle.Snapshot{}, fmt.Errorf("canceled delivery turn requires its exact admitted provider origin")
 	}

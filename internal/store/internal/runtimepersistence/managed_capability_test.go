@@ -73,6 +73,10 @@ func managedCompletionTestFrame(t testing.TB, authority runtimeeffects.Authority
 }
 
 func managedCompletionTestFrameWithEvent(t testing.TB, authority runtimeeffects.Authority, adapter string, event events.Event) agentframe.Frame {
+	return managedCompletionTestFrameForSource(t, authority, adapter, event, sourceartifactfixture.BundleHash)
+}
+
+func managedCompletionTestFrameForSource(t testing.TB, authority runtimeeffects.Authority, adapter string, event events.Event, bundleHash string) agentframe.Frame {
 	t.Helper()
 	surface := managedCompletionTestSurface(t, authority, adapter)
 	intent, err := agentintent.Resolve(
@@ -103,7 +107,7 @@ func managedCompletionTestFrameWithEvent(t testing.TB, authority runtimeeffects.
 		ModelAlias:     "regular",
 		Model:          "store-test-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash: sourceartifactfixture.BundleHash,
+		BundleHash: bundleHash,
 		Surface:    surface,
 	})
 	if err != nil {

@@ -82,6 +82,10 @@ func (t UsageTarget) Valid() bool {
 	}
 }
 
+func (a Authority) HasBusinessTurnOrigin() bool {
+	return a.Kind == AuthorityNormalAgent || a.Kind == AuthoritySelectedContractFork && a.Target.Kind == UsageTargetAgentTurn
+}
+
 // BusinessTurnCoordinates projects the constructed instance without rewriting the
 // actor's root declaration or the immutable usage target. It grants no execution.
 func (a Authority) BusinessTurnCoordinates() (scope, instance, path string, err error) {

@@ -57,7 +57,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 			} else {
 				outcome.disposition = runtimeeffects.CompletionSettlementCurrent
 			}
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				// Timeout admission locks origin before physical attempt. Keep
 				// that order while retaining the lifecycle permit above.
 				if _, err := providerTurnPendingTx(txctx, tx, attempt, s.delivery, s.directives); err != nil {
@@ -111,7 +111,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 			if err != nil {
 				return err
 			}
-			if permit.Kind != completionSettlementDrained && attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if permit.Kind != completionSettlementDrained && attempt.Authority.HasBusinessTurnOrigin() {
 				cancellation, err := observeCanceledProviderOrigin(txctx, tx, true, attempt, s.delivery, s.directives)
 				if err != nil {
 					return err
@@ -207,7 +207,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 			} else {
 				outcome.disposition = runtimeeffects.CompletionSettlementCurrent
 			}
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				if _, err := providerTurnPendingTx(txctx, tx, attempt, s.delivery, s.directives); err != nil {
 					return err
 				}
@@ -259,7 +259,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 			if err != nil {
 				return err
 			}
-			if permit.Kind != completionSettlementDrained && attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if permit.Kind != completionSettlementDrained && attempt.Authority.HasBusinessTurnOrigin() {
 				cancellation, err := observeCanceledProviderOrigin(txctx, tx, false, attempt, s.delivery, s.directives)
 				if err != nil {
 					return err

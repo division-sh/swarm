@@ -273,8 +273,8 @@ func loadProviderAttemptOriginSQLite(ctx context.Context, tx *sql.Tx, attempt ru
 }
 
 func loadProviderAttemptOrigin(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres bool) (runtimeeffects.CompletionOrigin, error) {
-	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
-		return runtimeeffects.CompletionOrigin{}, fmt.Errorf("provider attempt origin requires normal-agent authority")
+	if !attempt.Authority.HasBusinessTurnOrigin() {
+		return runtimeeffects.CompletionOrigin{}, fmt.Errorf("provider attempt origin requires exact agent-turn authority")
 	}
 	var originKind, deliveryID, runID, routeIdentity, claimToken, subscriberType, subscriberID, directiveID, directiveOwner string
 	var claimVersion int64

@@ -54,7 +54,7 @@ func (s *EffectSQLiteOwner) RequestTurnTimeout(ctx context.Context, attempt runt
 }
 
 func requestTurnTimeoutTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, now time.Time, pending bool) (runtimeeffects.TurnCancellation, error) {
-	if attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
+	if attempt.Kind != runtimeeffects.KindProviderTurn || !attempt.Authority.HasBusinessTurnOrigin() {
 		return runtimeeffects.TurnCancellation{}, fmt.Errorf("turn timeout requires an admitted business provider turn")
 	}
 	if err := requireExactLaunchAttempt(ctx, tx, postgres, attempt); err != nil {
@@ -141,7 +141,7 @@ func requestTurnTimeoutTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 }
 
 func providerTurnPendingTx(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner) (bool, error) {
-	if attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || attempt.Origin.Validate() != nil {
+	if attempt.Kind != runtimeeffects.KindProviderTurn || !attempt.Authority.HasBusinessTurnOrigin() || attempt.Origin.Validate() != nil {
 		return false, fmt.Errorf("turn timeout requires an admitted business provider origin")
 	}
 	switch attempt.Origin.Kind {
@@ -154,7 +154,7 @@ func providerTurnPendingTx(ctx context.Context, tx *sql.Tx, attempt runtimeeffec
 		if directives == nil {
 			return false, fmt.Errorf("turn lifetime directive owner is not bound")
 		}
-		return directives.ProviderDirectiveOriginPendingTx(ctx, tx, attempt.Origin.Directive, attempt.Authority.Target.RunID, attempt.Authority.Normal.Identity)
+		return directives.ProviderDirectiveOriginPendingTx(ctx, tx, attempt.Origin.Directive, attempt.Authority.Target.RunID, attempt.Authority.Target.AgentIdentity)
 	default:
 		return false, fmt.Errorf("turn timeout has invalid origin")
 	}

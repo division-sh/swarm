@@ -23,7 +23,7 @@ func commitCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt,
 		return commitUnstartedCanceledTurn(ctx, mutation, postgres, delivery, directives, command.Origin)
 	}
 	attempt := *command.Attempt
-	if attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || attempt.Origin.Validate() != nil {
+	if attempt.Kind != runtimeeffects.KindProviderTurn || !attempt.Authority.HasBusinessTurnOrigin() || attempt.Origin.Validate() != nil {
 		return runtimeeffects.CanceledTurnCommit{}, fmt.Errorf("canceled turn requires its exact admitted business origin")
 	}
 	result := runtimeeffects.CanceledTurnCommit{Origin: attempt.Origin}

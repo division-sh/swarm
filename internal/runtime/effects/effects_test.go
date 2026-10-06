@@ -840,7 +840,7 @@ func managedFrameBindingContext(t testing.TB, origin, admissionHash, frameHash s
 		ctx = correlation.WithInboundEvent(ctx, event)
 	}
 	switch origin {
-	case "delivery":
+	case "delivery", "selected":
 		claim, err := deliverylifecycle.AdmitPersistedClaim(uuid.NewString(), runID, "binding-route", uuid.NewString(), 1, deliverylifecycle.SubscriberAgent, target.AgentID)
 		if err != nil {
 			t.Fatalf("build binding delivery claim: %v", err)
@@ -848,7 +848,6 @@ func managedFrameBindingContext(t testing.TB, origin, admissionHash, frameHash s
 		ctx = deliverylifecycle.WithClaim(ctx, claim)
 	case "directive":
 		ctx = WithDirectiveCompletionOrigin(ctx, agentcontrol.DirectiveExecutionOrigin{OperationID: uuid.NewString(), ExecutionOwnerID: uuid.NewString()})
-	case "selected":
 	default:
 		t.Fatalf("unknown binding origin %q", origin)
 	}

@@ -11,12 +11,12 @@ import (
 )
 
 func settleCanceledDirectiveTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, directives providerDrainDirectiveOwner, attempt runtimeeffects.Attempt) (agentcontrol.DirectiveOperation, error) {
-	if directives == nil || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Origin.Kind != runtimeeffects.CompletionOriginDirective || attempt.Origin.Validate() != nil {
+	if directives == nil || !attempt.Authority.HasBusinessTurnOrigin() || attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Origin.Kind != runtimeeffects.CompletionOriginDirective || attempt.Origin.Validate() != nil {
 		return agentcontrol.DirectiveOperation{}, fmt.Errorf("canceled directive turn requires its exact admitted provider origin")
 	}
 	var op agentcontrol.DirectiveOperation
 	err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := directives.ProviderDirectiveOriginPendingTx(ctx, tx, attempt.Origin.Directive, attempt.Authority.Target.RunID, attempt.Authority.Normal.Identity); err != nil {
+		if _, err := directives.ProviderDirectiveOriginPendingTx(ctx, tx, attempt.Origin.Directive, attempt.Authority.Target.RunID, attempt.Authority.Target.AgentIdentity); err != nil {
 			return err
 		}
 		facts, err := prepareCanceledTurnSettlementTx(ctx, tx, postgres, attempt)

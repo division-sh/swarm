@@ -658,43 +658,11 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 }
 
 func (s *EffectPostgresOwner) validateProviderOrigin(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) error {
-	if authority.Kind != runtimeeffects.AuthorityNormalAgent || req.Kind != runtimeeffects.KindProviderTurn {
-		return nil
-	}
-	switch req.Origin.Kind {
-	case runtimeeffects.CompletionOriginDelivery:
-		if s.delivery == nil {
-			return fmt.Errorf("provider-drain PostgreSQL delivery owner is not bound")
-		}
-		return s.delivery.ValidateProviderOriginTx(ctx, tx, req.Origin.Delivery)
-	case runtimeeffects.CompletionOriginDirective:
-		if s.directives == nil {
-			return fmt.Errorf("provider-drain PostgreSQL directive owner is not bound")
-		}
-		return s.directives.ValidateProviderDirectiveOriginTx(ctx, tx, req.Origin.Directive, authority.Target.RunID, authority.Normal.Identity)
-	default:
-		return fmt.Errorf("normal provider origin kind %q is invalid", req.Origin.Kind)
-	}
+	return validateProviderWorkOrigin(ctx, tx, authority, req, s.delivery, s.directives)
 }
 
 func (s *EffectSQLiteOwner) validateProviderOrigin(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) error {
-	if authority.Kind != runtimeeffects.AuthorityNormalAgent || req.Kind != runtimeeffects.KindProviderTurn {
-		return nil
-	}
-	switch req.Origin.Kind {
-	case runtimeeffects.CompletionOriginDelivery:
-		if s.delivery == nil {
-			return fmt.Errorf("provider-drain SQLite delivery owner is not bound")
-		}
-		return s.delivery.ValidateProviderOriginTx(ctx, tx, req.Origin.Delivery)
-	case runtimeeffects.CompletionOriginDirective:
-		if s.directives == nil {
-			return fmt.Errorf("provider-drain SQLite directive owner is not bound")
-		}
-		return s.directives.ValidateProviderDirectiveOriginTx(ctx, tx, req.Origin.Directive, authority.Target.RunID, authority.Normal.Identity)
-	default:
-		return fmt.Errorf("normal provider origin kind %q is invalid", req.Origin.Kind)
-	}
+	return validateProviderWorkOrigin(ctx, tx, authority, req, s.delivery, s.directives)
 }
 
 func bindExternalEffectRunLineage(ctx context.Context, authority runtimeeffects.Authority, lineage map[string]string) (map[string]string, error) {
@@ -1835,7 +1803,7 @@ func (s *EffectPostgresOwner) HeartbeatCompletionAttempt(ctx context.Context, at
 				return err
 			}
 			var origin runtimeeffects.CompletionOrigin
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				origin, err = loadProviderAttemptOriginPostgres(txctx, tx, attempt)
 				if err != nil {
 					return err
@@ -1855,7 +1823,7 @@ func (s *EffectPostgresOwner) HeartbeatCompletionAttempt(ctx context.Context, at
 			if err := requireExternalAttemptTransition(res, err); err != nil {
 				return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
 			}
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				if err := s.renewProviderOriginTx(txctx, mutation, origin, now, lease); err != nil {
 					return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
 				}
@@ -1886,7 +1854,7 @@ func (s *EffectSQLiteOwner) HeartbeatCompletionAttempt(ctx context.Context, atte
 				return err
 			}
 			var origin runtimeeffects.CompletionOrigin
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				origin, err = loadProviderAttemptOriginSQLite(txctx, tx, attempt)
 				if err != nil {
 					return err
@@ -1906,7 +1874,7 @@ func (s *EffectSQLiteOwner) HeartbeatCompletionAttempt(ctx context.Context, atte
 			if err := requireExternalAttemptTransition(res, err); err != nil {
 				return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
 			}
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				if err := s.renewProviderOriginTx(txctx, mutation, origin, now, lease); err != nil {
 					return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
 				}

@@ -30,6 +30,7 @@ type schemaQueryer interface {
 }
 
 type providerDrainDeliveryOwner interface {
+	ValidateSelectedProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeagentidentity.Identity, runtimedelivery.ExecutionAuthority) error
 	ClaimedAgentFlowOriginsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]storedelivery.ClaimedFlowTurn, error)
 	ValidateUnstartedClaimOwnerTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeflowidentity.RunScopedFlowInstance, string) error
 	QueuedAgentFlowSnapshotsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimedelivery.Snapshot, error)

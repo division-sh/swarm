@@ -43,7 +43,7 @@ func businessTurnID(kind runtimeeffects.CompletionOriginKind, id string) (string
 }
 
 func prepareBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) error {
-	if authority.Kind != runtimeeffects.AuthorityNormalAgent || req.Kind != runtimeeffects.KindProviderTurn {
+	if !authority.HasBusinessTurnOrigin() || req.Kind != runtimeeffects.KindProviderTurn {
 		if req.TurnTimeout != nil {
 			return fmt.Errorf("turn_timeout requires an admitted business completion origin")
 		}
@@ -103,7 +103,7 @@ func prepareBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, autho
 }
 
 func launchBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, launchedAt time.Time) (*runtimeeffects.LogicalTurnClock, error) {
-	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || attempt.Kind != runtimeeffects.KindProviderTurn {
+	if !attempt.Authority.HasBusinessTurnOrigin() || attempt.Kind != runtimeeffects.KindProviderTurn {
 		return nil, nil
 	}
 	turnID, _, err := businessTurnIdentity(attempt.Origin)
@@ -190,7 +190,7 @@ func requireExactLaunchAttempt(ctx context.Context, tx *sql.Tx, postgres bool, a
 	if kind != string(attempt.Kind) || authority != string(attempt.Authority.Kind) {
 		return fmt.Errorf("launch attempt contradicts its admitted effect owner")
 	}
-	if attempt.Kind == runtimeeffects.KindProviderTurn && attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+	if attempt.Kind == runtimeeffects.KindProviderTurn && attempt.Authority.HasBusinessTurnOrigin() {
 		_, err := loadProviderAttemptOrigin(ctx, tx, attempt, postgres)
 		return err
 	}
