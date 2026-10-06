@@ -33,8 +33,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testsql"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/gorilla/websocket"
 
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -554,6 +556,30 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 
 	var db *sql.DB
 	var configPath string
+	var postgresDSN string
+	if backend == servedparity.BackendExplicitPostgres {
+		postgresDSN = testutil.StartEmptyPostgresDSN(t)
+	}
+	oldBuildStores := buildStoresForServe
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		var stores *selectedStoreOwner
+		var err error
+		if backend == servedparity.BackendExplicitPostgres {
+			if selection.Backend != storebackend.BackendPostgres {
+				t.Fatal("public mock approval fixture selected another backend")
+			}
+			stores, err = storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
+				Selection: selection, PostgresDSN: postgresDSN, SessionLockTTL: runtimeSessionLockTTL(cfg),
+			})
+		} else {
+			stores, err = oldBuildStores(ctx, selection, cfg)
+		}
+		if err == nil {
+			db = selectedStoreDatabaseForTest(t, stores)
+		}
+		return stores, err
+	}
+	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 	opts := cliapp.ServeOptions{
 		SourceRoot:              sourceRoot,
 		PlatformSpecPath:        defaultPlatformSpecPath,
@@ -566,18 +592,8 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		sqlitePath := filepath.Join(t.TempDir(), "public-mock-approval.sqlite")
-		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			stores, err := oldBuildStores(ctx, selection, cfg)
-			if err == nil {
-				db = selectedStoreDatabaseForTest(t, stores)
-			}
-			return stores, err
-		}
-		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 	case servedparity.BackendExplicitPostgres:
-		_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, nil)
 		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		opts.StoreMode = storebackend.BackendPostgres.String()
 		opts.StoreModeSet = true
