@@ -72,6 +72,7 @@ func observeWorkspaceInvocation(ctx context.Context, root string, output *json.E
 	}()
 	var session string
 	var lastError error
+	var lastDiagnostic time.Time
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -121,8 +122,43 @@ func observeWorkspaceInvocation(ctx context.Context, root string, output *json.E
 					return workspaceObserverResult{}, err
 				}
 			}
+			if path := os.Getenv("SWARM_TEST_WORKSPACE_OBSERVER_DIAGNOSTICS"); path != "" && time.Since(lastDiagnostic) >= time.Second {
+				diagnosticCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				err := writeWorkspaceObserverSnapshot(diagnosticCtx, inspection, path)
+				cancel()
+				if err != nil {
+					return workspaceObserverResult{}, err
+				}
+				lastDiagnostic = time.Now()
+			}
 		}
 	}
+}
+
+// Preserve exact native rows before the private command deletes its store. Only
+// the latest bounded snapshot is kept, and the parent prints it only on failure.
+func writeWorkspaceObserverSnapshot(ctx context.Context, inspection storetest.ReleaseProcessReadOnlyInspection, path string) error {
+	if !filepath.IsAbs(path) {
+		return errors.New("workspace observer diagnostics require an absolute path")
+	}
+	snapshot, err := readReleaseInspectionStorageSnapshot(ctx, inspection)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(struct {
+		At     time.Time                                             `json:"at"`
+		Tables map[string]storetest.SelectedForkStorageTableSnapshot `json:"tables"`
+	}{time.Now().UTC(), snapshot})
+	if err != nil {
+		return err
+	}
+	if len(data) > 1<<20 {
+		return errors.New("workspace observer diagnostic snapshot exceeds 1 MiB")
+	}
+	if err := os.WriteFile(path+".partial", data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(path+".partial", path)
 }
 
 func readWorkspaceInvocationSnapshot(ctx context.Context, inspection storetest.ReleaseProcessReadOnlyInspection) (storetest.WorkspaceMockInvocationStorage, error) {

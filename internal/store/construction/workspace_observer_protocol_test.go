@@ -53,6 +53,8 @@ func TestWorkspaceObserverActualSnapshotJoinsAndDoesNotMutate(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	path := filepath.Join(root, "swarm-test-session-owned", "state.db")
+	diagnosticPath := filepath.Join(root, "snapshot.json")
+	t.Setenv("SWARM_TEST_WORKSPACE_OBSERVER_DIAGNOSTICS", diagnosticPath)
 	writer, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx, path)
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
 	if err != nil {
@@ -84,6 +86,16 @@ func TestWorkspaceObserverActualSnapshotJoinsAndDoesNotMutate(t *testing.T) {
 	stop()
 	if got, err := <-result, <-failure; err != nil || got != first {
 		t.Fatalf("observer failed to join with its real snapshot: %+v %v", got, err)
+	}
+	data, err := os.ReadFile(diagnosticPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diagnostic struct {
+		Tables map[string]storetest.SelectedForkStorageTableSnapshot
+	}
+	if err := json.Unmarshal(data, &diagnostic); err != nil || !reflect.DeepEqual(before, diagnostic.Tables) {
+		t.Fatalf("observer lost exact diagnostics before any agent delivery: %v", err)
 	}
 	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
 	if err != nil || !reflect.DeepEqual(before, after) {
@@ -156,5 +168,54 @@ func TestWorkspaceObserverCompiledChildProtocol(t *testing.T) {
 				t.Fatalf("compiled observer join: observed=%v exit=%v context=%v", observed, err, ctx.Err())
 			}
 		})
+	}
+}
+
+func TestWorkspaceObserverDiagnosticsRetainExactNativeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	writer, location, _ := releaseInspectionWriter(t, "sqlite")
+	want, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer, err := storetest.OpenReleaseProcessReadOnlyInspection("sqlite", location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := observer.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := writeWorkspaceObserverSnapshot(ctx, observer, path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		At     time.Time
+		Tables map[string]storetest.SelectedForkStorageTableSnapshot
+	}
+	if err := json.Unmarshal(data, &got); err != nil || got.At.IsZero() || !reflect.DeepEqual(want, got.Tables) {
+		t.Fatalf("diagnostics lost original native rows/columns: %v", err)
+	}
+	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
+	if err != nil || !reflect.DeepEqual(want, after) {
+		t.Fatalf("diagnostics changed the writer's store: %v", err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := writeWorkspaceObserverSnapshot(cancelled, observer, path); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled diagnostics fabricated evidence: %v", err)
+	}
+	unchanged, err := os.ReadFile(path)
+	if err != nil || !reflect.DeepEqual(data, unchanged) {
+		t.Fatalf("failed capture overwrote committed evidence: %v", err)
+	}
+	if err := writeWorkspaceObserverSnapshot(ctx, observer, "relative"); err == nil {
+		t.Fatal("relative evidence location accepted")
 	}
 }
