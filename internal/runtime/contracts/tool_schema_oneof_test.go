@@ -87,7 +87,7 @@ func TestToolInputSchemaOneOfRejectsMalformedAndMultipleMatches(t *testing.T) {
 		}
 	}
 	if _, err := NewToolInputSchema(ToolSchemaObject, ToolSchemaOneOf()); err == nil {
-		t.Fatal("empty oneOf builder admitted")
+		t.Fatal("empty oneOf schema admitted")
 	}
 	ambiguous := MustToolInputSchema(ToolSchemaString, ToolSchemaOneOf(MustToolInputSchema(ToolSchemaString), MustToolInputSchema(ToolSchemaString)))
 	if err := ambiguous.Validate("both"); err == nil || !strings.Contains(err.Error(), "matched 2") {
