@@ -1,10 +1,18 @@
 package storetest
 
 import (
+	"context"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
+	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
+
+type SelectedForkStorageTableSnapshot = private.SelectedForkStorageTableSnapshot
+
+func ReadSelectedForkApplicationStorageSnapshot(ctx context.Context, selected any) (map[string]SelectedForkStorageTableSnapshot, error) {
+	return private.ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
+}
 
 // RequireRunForkReplayResumeBlocker inspects the store's typed refusal without
 // turning its private error representation into a production API.
