@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -500,92 +499,32 @@ func waitForMicrosoftGraphTerminalActivityAttempt(t *testing.T, backend slackMan
 }
 
 func tryLoadMicrosoftGraphActivityAttempt(backend slackManagedConnectorBackend, sourceEventID string) (runtimepipeline.ActivityAttemptRecord, bool, error) {
-	var requestEventID string
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT request_event_id
-			FROM activity_attempts
-			WHERE run_id = ?
-			  AND tool = 'microsoft_graph.send_mail'
-			  AND source_event_id = ?
-			ORDER BY started_at ASC
-			LIMIT 1
-		`, backend.runID, sourceEventID).Scan(&requestEventID)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT request_event_id::text
-			FROM activity_attempts
-			WHERE run_id = $1::uuid
-			  AND tool = 'microsoft_graph.send_mail'
-			  AND source_event_id = $2::uuid
-			ORDER BY started_at ASC
-			LIMIT 1
-		`, backend.runID, sourceEventID).Scan(&requestEventID)
+	rows, err := runtimeConnectorActivityRowsForSource(backend.ctx, backend.eventStore, backend.runID, "microsoft_graph.send_mail", sourceEventID)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	if err == sql.ErrNoRows {
+	if len(rows) == 0 {
 		return runtimepipeline.ActivityAttemptRecord{}, false, nil
 	}
-	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, false, err
-	}
-	rec, ok, err := backend.activityAttempts.LoadActivityAttempt(backend.ctx, requestEventID)
-	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, false, err
-	}
-	return rec, ok, nil
+	return backend.activityAttempts.LoadActivityAttempt(backend.ctx, rows[0].RequestEventID)
 }
 
 func countMicrosoftGraphActivityAttempts(t *testing.T, backend slackManagedConnectorBackend) int {
 	t.Helper()
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = ?
-			  AND tool = 'microsoft_graph.send_mail'
-		`, backend.runID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = $1::uuid
-			  AND tool = 'microsoft_graph.send_mail'
-		`, backend.runID).Scan(&count)
-	}
+	rows, err := runtimeConnectorActivityRows(backend.ctx, backend.eventStore, backend.runID, "microsoft_graph.send_mail")
 	if err != nil {
-		t.Fatalf("%s count activity attempts: %v", backend.name, err)
+		t.Fatalf("%s read exact activity storage: %v", backend.name, err)
 	}
-	return count
+	return len(rows)
 }
 
 func countMicrosoftGraphActivityAttemptsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = ?
-			  AND tool = 'microsoft_graph.send_mail'
-			  AND source_event_id = ?
-		`, backend.runID, sourceEventID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = $1::uuid
-			  AND tool = 'microsoft_graph.send_mail'
-			  AND source_event_id = $2::uuid
-		`, backend.runID, sourceEventID).Scan(&count)
-	}
+	rows, err := runtimeConnectorActivityRowsForSource(backend.ctx, backend.eventStore, backend.runID, "microsoft_graph.send_mail", sourceEventID)
 	if err != nil {
-		t.Fatalf("%s count activity attempts for source event %s: %v", backend.name, sourceEventID, err)
+		t.Fatalf("%s read exact activity storage: %v", backend.name, err)
 	}
-	return count
+	return len(rows)
 }
 
 func countMicrosoftGraphFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {

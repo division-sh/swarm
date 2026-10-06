@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -239,8 +240,11 @@ func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *test
 				}
 			}
 			reloaded, err := selected.events.LoadReplyContext(ctx, record.ID)
-			if err != nil || !reflect.DeepEqual(reloaded, terminal) || count("SELECT COUNT(*) FROM reply_contexts WHERE run_id=$1") != 1 ||
-				count("SELECT COUNT(*) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE e.run_id=$1") != 0 {
+			returnStorage, storageErr := storetest.ReadReplyReturnStorage(ctx, selected.events, runID)
+			if storageErr != nil {
+				t.Fatal(storageErr)
+			}
+			if err != nil || !reflect.DeepEqual(reloaded, terminal) || returnStorage.Contexts != 1 || returnStorage.EventLinkedDeadLetters != 0 {
 				t.Fatalf("fieldless replay rewrote return context or created a refusal: record=%#v err=%v", reloaded, err)
 			}
 			deliveryAfter, deliveryErr := deliveries.Snapshot(ctx, deliveryID)

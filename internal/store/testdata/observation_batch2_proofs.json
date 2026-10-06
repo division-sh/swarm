@@ -1,0 +1,274 @@
+[
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestActivityAttemptStorageUsesOriginalSnapshotAndPhysicalInventoryBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestActivityAttemptStorageRejectsForeignOwnersAndUnavailableStorage",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestConnectorCredentialLeakStoragePreservesOriginalSnapshotAndCardinalityBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestConnectorCredentialLeakStorageRejectsForeignOwnersAndPartialEvidence",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestFanOutCompositeStoragePreservesTriggerKeySourceAndPhysicalCapsuleBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestFanOutCompositeStorageRejectsInvalidOwnersOriginsAndPartialEvidenceBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestFanOutPublishedOutcomeStoragePreservesOutcomeRunOrdinalAndPhysicalPayloadBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestFanOutPublishedOutcomeStorageRejectsInvalidOwnersAndUnavailableEvidenceBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestFanOutRunProgressStoragePreservesAllIntentsAndOutcomeHistoryBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestFanOutRunProgressStorageRejectsInvalidOwnersAndPartialEvidenceBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestHandlerSelectionStoragePreservesExactColumnsAndScopesBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestHandlerSelectionStorageRejectsUnavailableAndInvalidOwners",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestReplyReturnStoragePreservesHistoryDuplicateAndEventRunScopesBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestReplyReturnStorageRefusesInvalidOwnersAndUnavailableEvidenceBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestPinnedAuthoredMutationStoragePreservesExactSourceAndPhysicalBytesBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+    "root": "TestPinnedAuthoredMutationStorageRejectsInvalidAuthorityAndUnavailableEvidenceBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "root": "TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "root": "TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "root": "TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "root": "TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJournal",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "root": "TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "root": "TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "root": "TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestA2MapFanOutCompositeLifecycleOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestA2MapFanOutCompiledExecutionImmutableSourceOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestA2MapFanOutCompiledWhitespaceKeysPreservedOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestA2MapFanOutRawBusinessSourceReaderRefusesOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestSelectionRetryAfterRealCASConflictBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/pipeline",
+    "root": "TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnBothStores",
+    "backends": [
+      "sqlite",
+      "postgres"
+    ]
+  }
+]
