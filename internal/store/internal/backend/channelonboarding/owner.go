@@ -389,16 +389,14 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 		if err != nil {
 			return err
 		}
-		if !found {
+		switch {
+		case !found:
 			return domain.ErrNotFound
-		}
-		if op.Revision != req.ExpectedRevision {
+		case op.Revision != req.ExpectedRevision:
 			return domain.ErrRevisionConflict
-		}
-		if op.Phase != domain.PhasePublishingActivation {
+		case op.Phase != domain.PhasePublishingActivation:
 			return domain.ErrConflict
-		}
-		if !principalFound || principal != op.PrincipalID {
+		case !principalFound || principal != op.PrincipalID:
 			return domain.ErrConflict
 		}
 		now := canonicalTime(req.Now)
