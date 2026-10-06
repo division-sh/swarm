@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 )
@@ -249,10 +250,14 @@ func seedReceiverJoinedInventoryStorage(t *testing.T, fixture authorActivityRece
 			VALUES($1,$2,'inventory/foreign','queued','inventory','static','active','{}',TRUE,'{}','{}','{}',1,$3,$3,$3)`, sibling, entity, now); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE runs SET status='completed' WHERE run_id=$1`, runID)
-		return err
+		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+	parity := runLifecycleCandidateParityFixture{store: fixture.store.(runLifecycleCandidateParityStore), db: fixture.db, postgres: fixture.dialect == "postgres"}
+	snapshot, disposition, err := completeRunLifecycleCandidateParity(parity, ctx, runID, now)
+	if err != nil || snapshot.State != runtimerunlifecycle.StateCompleted || disposition != runtimerunlifecycle.MutationApplied {
+		t.Fatalf("canonical inventory completion: %+v %s %v", snapshot, disposition, err)
 	}
 	return runID, sibling
 }
