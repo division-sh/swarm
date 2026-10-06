@@ -3,6 +3,8 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
 func ReadVersionOneDeliveredSettlementCountForTest(ctx context.Context, selected any, deliveryID string) (int, error) {
@@ -14,8 +16,9 @@ func ReadVersionOneDeliveredSettlementCountForTest(ctx context.Context, selected
 	}
 	var count int
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts
-			WHERE closure_kind='settled' AND delivery_id=$1 AND claim_version=1 AND outcome='delivered'`, deliveryID).Scan(&count)
+		var err error
+		count, err = delivery.ReadVersionOneDeliveredSettlementCount(ctx, tx, deliveryID)
+		return err
 	})
 	if err != nil {
 		return 0, err
