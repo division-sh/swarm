@@ -61,6 +61,8 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/llm/provider_admission.go", "A11,A12,A18,A25", "P09,P10,P15,P21"},
 	{"internal/runtime/llm/cli_runtime_boot.go", "A12,A18,A25", "P09,P10,P15,P21"},
 	{"internal/runtime/llm/provider_contract.go", "A11,A25", "P09,P15,P21"},
+	// A12 includes the runtime-local cache wrapper. Its three API consumers are
+	// pinned by the credential-cache finite-consumer and failure/retry proofs.
 	{"internal/runtime/llm/provider_credentials.go", "A12", "P10,P21"},
 	{"internal/runtime/tools/native_tools_admission.go", "A13", "P09,P11"},
 	{"internal/store/selected/admission.go", "A10,A19,A20,A22,A23,A24,A27", "P08,P18,P19,P20,P21"},
