@@ -46,6 +46,276 @@ func ReadReceiverDeliveryStorage(ctx context.Context, q queryer, runID string) (
 	return out, nil
 }
 
+func ReadLatestNamedAgentDeliveryStatus(ctx context.Context, q queryer, runID, agentID, instance string) (string, error) {
+	var status string
+	err := q.QueryRowContext(ctx, `SELECT status FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND subscriber_id=$2 AND agent_flow_instance_path=$3 ORDER BY created_at DESC,delivery_id DESC LIMIT 1`, runID, agentID, instance).Scan(&status)
+	return status, err
+}
+
+func ReadVersionOneDeliveredSettlementCount(ctx context.Context, q queryer, deliveryID string) (int, error) {
+	var count int
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts
+		WHERE closure_kind='settled' AND delivery_id=$1 AND claim_version=1 AND outcome='delivered'`, deliveryID).Scan(&count)
+	return count, err
+}
+
+func ReadIncompletePipelineHandoffCount(ctx context.Context, q queryer, runID string) (int, error) {
+	var count int
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
+		(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
+		(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&count)
+	return count, err
+}
+
+// Preserve the historical conjunction, exact lookup values and optional
+// subscriber-type semantics. This is evidence, never a work selector.
+func ReadServedDeliveryStatusCount(ctx context.Context, q queryer, postgres bool, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {
+	where, args := []string{}, []any{}
+	add := func(column, value string) {
+		predicate := column + " = ?"
+		if postgres {
+			predicate = fmt.Sprintf("%s = $%d", column, len(args)+1)
+			if column == "event_id" {
+				predicate += "::uuid"
+			}
+		}
+		where, args = append(where, predicate), append(args, value)
+	}
+	add("event_id", eventID)
+	if strings.TrimSpace(subscriberType) != "" {
+		add("subscriber_type", subscriberType)
+	}
+	add("subscriber_id", subscriberID)
+	for _, status := range statuses {
+		if strings.TrimSpace(status) != "" {
+			add("status", status)
+		}
+	}
+	var count int
+	err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM event_deliveries WHERE "+strings.Join(where, " AND "), args...).Scan(&count)
+	return count, err
+}
+
+type ManagedDeliveryFailureStorage struct {
+	DeliveryID, EventID string
+	Failure             json.RawMessage
+}
+
+type ManagedDeliveryStorage struct {
+	AgentDeliveries, Delivered int
+	Failures                   []ManagedDeliveryFailureStorage
+}
+
+func ReadManagedDeliveryStorage(ctx context.Context, q queryer, runID, agentID string) (ManagedDeliveryStorage, error) {
+	var out ManagedDeliveryStorage
+	where, args := `d.run_id=$1 AND d.subscriber_type='agent'`, []any{runID}
+	if agentID != "" {
+		where += ` AND d.subscriber_id=$2`
+		args = append(args, agentID)
+	}
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN d.status='delivered' THEN 1 ELSE 0 END),0) FROM event_deliveries d WHERE `+where, args...).Scan(&out.AgentDeliveries, &out.Delivered); err != nil {
+		return ManagedDeliveryStorage{}, err
+	}
+	rows, err := q.QueryContext(ctx, `SELECT d.delivery_id,d.event_id,a.failure FROM event_deliveries d JOIN event_delivery_attempts a
+		ON a.delivery_id=d.delivery_id AND a.claim_version=d.claim_version AND a.closure_kind='settled'
+		WHERE `+where+` AND d.status='dead_letter' ORDER BY d.created_at,d.delivery_id`, args...)
+	if err != nil {
+		return ManagedDeliveryStorage{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row ManagedDeliveryFailureStorage
+		var failure []byte
+		if err := rows.Scan(&row.DeliveryID, &row.EventID, &failure); err != nil {
+			return ManagedDeliveryStorage{}, err
+		}
+		row.Failure = failure
+		out.Failures = append(out.Failures, row)
+	}
+	if err := rows.Err(); err != nil {
+		return ManagedDeliveryStorage{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return ManagedDeliveryStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadWorkspaceInvocationStorageCounts(ctx context.Context, q queryer) (agent, delivered, emitted int, err error) {
+	err = q.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type='agent'),
+		(SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type='agent' AND status='delivered'),
+		(SELECT COUNT(*) FROM events WHERE event_name='work.completed')`).Scan(&agent, &delivered, &emitted)
+	return
+}
+
+func ReadSemanticEventSettledAttemptCount(ctx context.Context, q queryer, eventID string) (int, error) {
+	var count int
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a
+		JOIN event_deliveries d ON d.delivery_id=a.delivery_id
+		WHERE d.event_id=$1 AND a.closure_kind='settled'`, eventID).Scan(&count)
+	return count, err
+}
+
+func ReadSemanticEventDeliveryStorage(ctx context.Context, q queryer, eventID string) (map[string][18]string, map[string]string, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT delivery_id, status, route_identity, subscriber_type, subscriber_id,
+			agent_name_owner, agent_name_source, agent_route_presence,
+			agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
+			CAST(delivery_target_route AS TEXT), CAST(delivery_context AS TEXT),
+			CAST(delivery_payload_projection AS TEXT), CAST(connect_execution_claim AS TEXT),
+			CAST(receiver_materialization_plan AS TEXT), execution_authority_kind,
+			authority_bundle_hash, execution_authority_id, CAST(execution_authority_generation AS TEXT)
+		FROM event_deliveries WHERE event_id=$1`, eventID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	projections, statuses := map[string][18]string{}, map[string]string{}
+	for rows.Next() {
+		var deliveryID, status string
+		var projection [18]string
+		args := []any{&deliveryID, &status}
+		for index := range projection {
+			args = append(args, &projection[index])
+		}
+		if err := rows.Scan(args...); err != nil {
+			return nil, nil, err
+		}
+		projections[deliveryID], statuses[deliveryID] = projection, status
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, err
+	}
+	return projections, statuses, nil
+}
+
+type SourceDeliveryStorageTable struct {
+	Columns []string
+	Rows    [][]any
+}
+
+// The table set and predicates are fixed. No table/query selector or live SQL
+// rows cross this boundary; the shared snapshot owner still normalizes values.
+func ReadSourceDeliveryStorageTables(ctx context.Context, q queryer, runID string) (map[string]SourceDeliveryStorageTable, error) {
+	queries := map[string]string{
+		"event_deliveries":                       `SELECT * FROM event_deliveries WHERE run_id=$1`,
+		"event_delivery_attempts":                `SELECT * FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1)`,
+		"event_delivery_handler_rule_selections": `SELECT * FROM event_delivery_handler_rule_selections WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1)`,
+	}
+	out := make(map[string]SourceDeliveryStorageTable, len(queries))
+	for table, query := range queries {
+		evidence, err := readSourceDeliveryStorageTable(ctx, q, query, runID)
+		if err != nil {
+			return nil, err
+		}
+		out[table] = evidence
+	}
+	return out, nil
+}
+
+func readSourceDeliveryStorageTable(ctx context.Context, q queryer, query, runID string) (SourceDeliveryStorageTable, error) {
+	rows, err := q.QueryContext(ctx, query, runID)
+	if err != nil {
+		return SourceDeliveryStorageTable{}, err
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return SourceDeliveryStorageTable{}, err
+	}
+	out := SourceDeliveryStorageTable{Columns: append([]string(nil), columns...), Rows: [][]any{}}
+	for rows.Next() {
+		values, pointers := make([]any, len(columns)), make([]any, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+		if err := rows.Scan(pointers...); err != nil {
+			return SourceDeliveryStorageTable{}, err
+		}
+		for i, value := range values {
+			if raw, ok := value.([]byte); ok {
+				values[i] = append([]byte(nil), raw...)
+			}
+		}
+		out.Rows = append(out.Rows, values)
+	}
+	if err := rows.Err(); err != nil {
+		return SourceDeliveryStorageTable{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return SourceDeliveryStorageTable{}, err
+	}
+	return out, nil
+}
+
+func ReadRunDeliveryDebugSection(ctx context.Context, q queryer, postgres bool, scope, runID string) ([]string, string, error) {
+	query := runDeliveryDebugQuery(postgres, scope)
+	if query == "" {
+		return nil, "", fmt.Errorf("unsupported delivery diagnostic section")
+	}
+	rows, err := q.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, " columns", err
+	}
+	out := []string{}
+	for rows.Next() {
+		values := make([]sql.NullString, len(columns))
+		scan := make([]any, len(values))
+		for i := range values {
+			scan[i] = &values[i]
+		}
+		if err := rows.Scan(scan...); err != nil {
+			return nil, " scan", err
+		}
+		cols := make([]string, len(values))
+		for i, value := range values {
+			if value.Valid {
+				cols[i] = value.String
+			}
+		}
+		out = append(out, fmt.Sprintf("%v", cols))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, " rows", err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, "", err
+	}
+	return out, "", nil
+}
+
+func runDeliveryDebugQuery(postgres bool, scope string) string {
+	if postgres {
+		switch scope {
+		case "event_deliveries":
+			return `SELECT delivery_id::text, event_id::text, subscriber_type, subscriber_id, status, claim_version, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id=$1::uuid ORDER BY created_at,event_id LIMIT 8`
+		case "settled_delivery_attempts":
+			return `SELECT o.delivery_id::text, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id=o.delivery_id WHERE d.run_id=$1::uuid ORDER BY o.settled_at,o.delivery_id LIMIT 8`
+		case "delivery_agents":
+			return `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id=d.subscriber_id AND a.agent_name_owner=d.agent_name_owner AND a.agent_name_source=d.agent_name_source AND a.agent_route_presence=d.agent_route_presence AND a.flow_scope_key=d.agent_flow_scope_key AND a.flow_instance_id=d.agent_flow_instance_id AND a.flow_instance=d.agent_flow_instance_path WHERE d.run_id=$1::uuid ORDER BY d.created_at LIMIT 8`
+		}
+	} else {
+		switch scope {
+		case "event_deliveries":
+			return `SELECT delivery_id, event_id, subscriber_type, subscriber_id, status, claim_version, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id=? ORDER BY created_at,event_id LIMIT 8`
+		case "settled_delivery_attempts":
+			return `SELECT o.delivery_id, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id=o.delivery_id WHERE d.run_id=? ORDER BY o.settled_at,o.delivery_id LIMIT 8`
+		case "delivery_agents":
+			return `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id=d.subscriber_id AND a.agent_name_owner=d.agent_name_owner AND a.agent_name_source=d.agent_name_source AND a.agent_route_presence=d.agent_route_presence AND a.flow_scope_key=d.agent_flow_scope_key AND a.flow_instance_id=d.agent_flow_instance_id AND a.flow_instance=d.agent_flow_instance_path WHERE d.run_id=? ORDER BY d.created_at LIMIT 8`
+		}
+	}
+	return ""
+}
+
 const (
 	postgresAgentPendingEligibility = `(
 		d.status = 'pending'
