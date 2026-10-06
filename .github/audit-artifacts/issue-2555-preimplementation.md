@@ -1,5 +1,11 @@
 # Pre-Implementation Coverage Audit: #2555
 
+Early review2555/6016636495 adds the three bounded post-call manifestations
+PC49-PC51, preserving every original48 row and its proof. See
+issue-2555-early-review-postcall.md for exact decoder/projection/continuation
+owners, discriminating counterexamples, host/Docker/store venues and limits.
+No new server2 qualification or class closure is claimed by this amendment.
+
 Current qualification amendment supersedes the historical full/full and
 E-merge-pending statements below:
 https://github.com/division-sh/swarm/issues/2555#issuecomment-6007289769.
