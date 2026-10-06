@@ -356,22 +356,11 @@ func (eb *EventBus) canTransferFanOutDelivery(operation pendingOutboxOperation, 
 	if operation.outcome != EventAppendInserted || len(operation.deliveryHandoffs) == 0 {
 		return false
 	}
-	routes := plan.DeliveryRoutes()
-	if !plan.TargetFailure.Empty() || len(routes) != len(operation.deliveryHandoffs) {
-		return false
-	}
-	if !nodeRoutesCoverLiveRecipients(plan.LiveRecipients, routes) {
-		return false
-	}
-	eventInterceptors, _ := splitDeliveryRouteInterceptors(eb.interceptorsSnapshot())
-	return len(eventInterceptors) == 0
+	return eb.canTransferNodeDeliveries(operation.intent.Event, plan, operation.deliveryHandoffs)
 }
 
 func nodeRoutesCoverLiveRecipients(recipients []RoutePlanLiveRecipient, routes []events.DeliveryRoute) bool {
 	for _, recipient := range recipients {
-		if recipient.PersistAsDelivery {
-			continue
-		}
 		if recipient.Recipient.IsAgent() {
 			return false
 		}

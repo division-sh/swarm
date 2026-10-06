@@ -336,6 +336,7 @@ func (eb *EventBus) finalizeCommittedPublicationConsequences(ctx context.Context
 		return result, result.prerequisiteErr
 	}
 	result.ready = true
+	result.prepared.durableHandoffReady = committed.Acknowledged
 	if eb.testLifecycleProbe != nil && !result.prepared.exactDuplicate {
 		eb.notifyTestPublishPersisted(ctx, result.prepared.Event, result.prepared.plan)
 	}

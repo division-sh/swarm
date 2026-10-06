@@ -39326,6 +39326,24 @@ durable_pipeline_processing_obligation_authority:
       exact current publication-purpose claim inside the event and initial-side-effect transaction. Missing, foreign,
       wrong-purpose, stale, or released claims reject the whole operation before commit. Closed diagnostic-direct
       named operations are non-executable and are the only claim-free event commits.
+    asynchronous_delivery_handoff: >
+      A normal-runtime asynchronous publication may transfer downstream node execution to the existing persisted
+      delivery-continuation owner after acknowledged event commit and complete receiver activation/readiness.
+      The shared committed-node handoff decision requires nonempty node-only routes, one exact store-issued proof
+      per event/route delivery identity under the current execution generation, coverage of every live executable
+      recipient, and no event-wide interceptor. Runtime control/diagnostic and selected-replay events retain their
+      coordination contract; node routes alone do not authorize skipping timer, decision or activity work.
+      The selected-store current publication claim atomically commits its pipeline receipt and executable delivery
+      handoff through the existing settlement owner before its independent private session retires. Pipeline
+      acknowledgement means durable handoff, never recipient success; pending deliveries retain their own completion
+      blockers and acquire fresh exact delivery claims before execution. No new queue, pool enlargement, arbitrary
+      session group or recursive global permit is introduced. The existing fan-out group consumes the same exact
+      coverage decision without changing its finite membership/session contract. Synchronous dispatch and bounded
+      delivery-tree joins retain their completion/error semantics, as do direct publication, channel execution leases,
+      selected execution, mixed recipients and unfinished event-wide coordination. Missing proofs or failed receiver
+      finalization cannot transfer execution. A crash before transfer leaves canonical pipeline recovery; a crash after
+      acknowledged transfer leaves canonical delivery recovery. A committed handoff survives cleanup errors and request
+      cancellation; neither a successful callback nor a missing connection substitutes for durable acknowledgement.
     publication_group:
       owner: internal/runtime/pipelineobligation.Store through the selected pipelinepersistence owner
       admission: >
