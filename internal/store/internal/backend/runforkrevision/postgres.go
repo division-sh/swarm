@@ -81,3 +81,15 @@ func (a *postgresAdapter) allocate(ctx context.Context, runID string) (int64, er
 func (a *postgresAdapter) insertFacts(ctx context.Context, runID string, revision int64, facts []revisionFactInsert) error {
 	return insertRevisionFacts(ctx, a.tx, true, runID, revision, facts)
 }
+
+// Physical cardinality is not historical payload admission. This portable read
+// uses the caller's original selected transaction on either native backend.
+func CountNotifyFanOutRevisionStorageForTest(ctx context.Context, tx *sql.Tx, runID string) (revisions, facts int64, err error) {
+	err = tx.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1),
+		(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1)`, runID).Scan(&revisions, &facts)
+	if err != nil {
+		return 0, 0, err
+	}
+	return revisions, facts, nil
+}
