@@ -190,14 +190,22 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 func seedForkedFlowInstance(t *testing.T, fixture *forkedConsumerTestBackend, instancePath string) {
 	t.Helper()
-	query := `INSERT INTO flow_instances (run_id, instance_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
-		SELECT run_id, 'domain', flow_instance, entity_id, entity_type, 'freeze', 'template', '{}', 'active', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1 FROM entity_state WHERE run_id = ? AND flow_instance = ?`
+	header, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(runtimeflowidentity.StoredRoute("freeze", "domain", instancePath), fixture.sourceBundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
+		SELECT run_id, flow_instance, entity_id, entity_type, 'freeze', 'template', ?, 'active', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1 FROM entity_state WHERE run_id = ? AND flow_instance = ?`
 	if fixture.postgres != nil {
-		query = `INSERT INTO flow_instances (run_id, instance_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
-			SELECT run_id, 'domain', flow_instance, entity_id, entity_type, 'freeze', 'template', '{}'::jsonb, 'active', TRUE, 'active', $1, $2, $3, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1 FROM entity_state WHERE run_id = $4::uuid AND flow_instance = $5`
+		query = `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision)
+			SELECT run_id, flow_instance, entity_id, entity_type, 'freeze', 'template', $1::jsonb, 'active', TRUE, 'active', $2, $3, $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1 FROM entity_state WHERE run_id = $5::uuid AND flow_instance = $6`
 	}
 	at := fixture.forkedAt.Add(-time.Minute)
-	result, err := fixture.db.ExecContext(context.Background(), query, at, at, at, fixture.sourceRun, instancePath)
+	result, err := fixture.db.ExecContext(context.Background(), query, string(config), at, at, at, fixture.sourceRun, instancePath)
 	if err != nil {
 		t.Fatal(err)
 	}
