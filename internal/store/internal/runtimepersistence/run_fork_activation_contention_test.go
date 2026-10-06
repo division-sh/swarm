@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -866,7 +867,14 @@ type forkContentionTx struct {
 	conn *forkContentionConn
 }
 
-func (b *forkContentionBarrier) observeSQLiteStore(t *testing.T, original *SQLiteRuntimeStore, path string) *SQLiteRuntimeStore {
+type forkContentionWorkflowStore interface {
+	snapshotOwnershipStore
+	agentFixtureFlowStore
+	testAuthorActivityCatalogRegistrar
+	runtimebus.CommitPublicationOwner
+}
+
+func (b *forkContentionBarrier) observeSQLiteStore(t *testing.T, original *SQLiteRuntimeStore, path string) forkContentionWorkflowStore {
 	t.Helper()
 	name := b.name + "_driver"
 	sql.Register(name, &forkContentionDriver{Driver: original.backend.ConstructionHandle().Driver(), barrier: b})

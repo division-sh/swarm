@@ -146,9 +146,23 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			}
 			assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")
 			assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")
-			var payload []byte
-			if err := selected.db.QueryRow(`SELECT payload FROM events WHERE run_id=$1 AND event_name='ack'`, runID).Scan(&payload); err != nil {
+			reader := selected.events.(interface {
+				LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
+			})
+			report, err := reader.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{EventLimit: 100})
+			if err != nil {
 				t.Fatal(err)
+			}
+			var payload []byte
+			count = 0
+			for _, row := range report.Events {
+				if row.EventName == "ack" {
+					payload = row.Payload
+					count++
+				}
+			}
+			if count != 1 {
+				t.Fatalf("final effect events=%d, want 1", count)
 			}
 			var value map[string]any
 			if err := json.Unmarshal(payload, &value); err != nil || value["marker"] != "second" {
@@ -157,9 +171,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			if err := bus.PublishAcknowledged(ctx, event); err != nil {
 				t.Fatal(err)
 			}
-			report, err := selected.events.(interface {
-				LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
-			}).LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
+			report, err = reader.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
