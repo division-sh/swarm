@@ -11,10 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -428,11 +426,7 @@ func TestSelectedCanceledOriginRecoveryCommitsReactionBothStores(t *testing.T) {
 			if err != nil || len(pending.PendingCancellations) != 1 {
 				t.Fatalf("physical recovery: %+v %v", pending, err)
 			}
-			admission, ok := managedexecution.FromContext(ctx)
-			if !ok {
-				t.Fatal("missing original admission")
-			}
-			receiver, err := eventreceiver.SelectedContractForkExecution(authority, admission, controller, correlation.RuntimeLineage{})
+			receiver, err := eventreceiver.SelectedRecoveryPublication(authority)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -457,7 +451,7 @@ func TestSelectedCanceledOriginRecoveryCommitsReactionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer catalog.Release()
-			plan, err := publication.PrepareTurnTimeoutReaction(ctx, pending.PendingCancellations[0])
+			plan, err := publication.PrepareRecoveredTurnTimeoutReaction(ctx, pending.PendingCancellations[0])
 			if err != nil {
 				t.Fatal(err)
 			}
