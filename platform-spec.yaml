@@ -8436,6 +8436,19 @@ engine:
         reloadable activation, retires and releases the original exact wakeup. A malformed row retaining mandatory join-family
         evidence, or whose family cannot be proven non-join, fails preparation without mutation or wakeup retirement.
         Retirement/release failure retries from that exact wakeup and never reconstructs it from absent state.
+      execution_owner_recovery: >
+        Instance-clock admission and active wakeup projection require the exact standing work occurrence for the
+        command's run, including its admitted generation. They acquire a finite lease before durable admission or
+        wakeup claiming; a missing, wrong-run, runtime-only, fenced or retired owner refuses execution. Occurrence
+        publication preserves its already accepted exact owner rather than requiring fresh admission for cleanup.
+        The existing coalesced projection recovery retains the opaque occurrence from the initiating context and
+        acquires its own accounted lease before launching, so completion of the initiating operation does not abandon
+        acknowledged durable work. Recovery is cancelled and joined by both its exact occurrence and the lifecycle;
+        it releases its lease before either join can complete. Coalescing cannot substitute a runtime or successor
+        occurrence, including another process occurrence for the same standing identity. Owner fencing or retirement
+        terminates projection retries without registration or authority fallback. Distinct control families retain
+        their existing lifecycle-owned recovery when no contextual occurrence exists. Exact terminal wakeup cleanup
+        remains with its existing retirement owner and does not acquire fresh execution after retirement.
       occurrence: >
         Occurrence event identity is deterministic from activation identity plus persisted due coordinate. The selected
         store stamps occurrence admission once and retries/restarts preserve event identity, admitted_at, and due_at exactly.

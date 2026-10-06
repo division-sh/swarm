@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -167,7 +168,7 @@ type Lifecycle struct {
 	cancel context.CancelFunc
 	mu     sync.Mutex
 	wg     sync.WaitGroup
-	retry  map[string]struct{}
+	retry  map[string]worklifetime.Occurrence
 	stop   bool
 }
 
@@ -181,7 +182,7 @@ func NewLifecycle(store Store, scheduler Scheduler, planner PublicationPlanner, 
 	ctx, cancel := context.WithCancel(context.Background())
 	lifecycle := &Lifecycle{
 		store: store, scheduler: scheduler, planner: planner, dispatcher: dispatcher, logger: logger, posture: posture,
-		ctx: ctx, cancel: cancel, retry: make(map[string]struct{}),
+		ctx: ctx, cancel: cancel, retry: make(map[string]worklifetime.Occurrence),
 	}
 	if err := scheduler.BindGenericScheduleLifecycle(lifecycle.handleWakeup); err != nil {
 		cancel()
@@ -190,12 +191,20 @@ func NewLifecycle(store Store, scheduler Scheduler, planner PublicationPlanner, 
 	return lifecycle, nil
 }
 
-func (l *Lifecycle) Admit(ctx context.Context, command AdmissionCommand) (AdmissionResult, error) {
+func (l *Lifecycle) Admit(ctx context.Context, command AdmissionCommand) (admitted AdmissionResult, outcomeErr error) {
 	if l == nil {
 		return AdmissionResult{}, errors.New("generic schedule lifecycle is required")
 	}
 	if err := l.posture.Admit(command.ExecutionMode, "generic schedule admission"); err != nil {
 		return AdmissionResult{}, err
+	}
+	lease, err := instanceExecutionLease(ctx, command)
+	if err != nil {
+		return AdmissionResult{}, err
+	}
+	if lease != nil {
+		ctx = lease.Context()
+		defer func() { outcomeErr = errors.Join(outcomeErr, lease.Done()) }()
 	}
 	commit, commitErr := l.store.AdmitGenericScheduleOutcome(ctx, command)
 	if !commit.Acknowledged {
@@ -210,7 +219,9 @@ func (l *Lifecycle) Admit(ctx context.Context, command AdmissionCommand) (Admiss
 	}
 	if err := l.reconcileImmediately(context.WithoutCancel(ctx), result.Activation.ID); err != nil {
 		l.log(ctx, "reconcile_after_admission", result.Activation.ID, err)
-		l.startRecovery(result.Activation.ID)
+		if queued, recoveryErr := l.queueProjectionRecovery(ctx, result.Activation.ID, err); !queued {
+			return result, errors.Join(commitErr, recoveryErr)
+		}
 	}
 	return result, commitErr
 }
@@ -228,9 +239,11 @@ func (l *Lifecycle) Cancel(ctx context.Context, command CancelCommand) (CancelRe
 	}
 	result := commit.Result
 	if result.Activation.ID != "" {
-		if err := l.ReconcileWakeup(context.WithoutCancel(ctx), result.Activation.ID); err != nil {
-			l.log(ctx, "reconcile_after_cancel", result.Activation.ID, err)
-			l.startRecovery(result.Activation.ID)
+		if reconcileErr := l.ReconcileWakeup(context.WithoutCancel(ctx), result.Activation.ID); reconcileErr != nil {
+			l.log(ctx, "reconcile_after_cancel", result.Activation.ID, reconcileErr)
+			if queued, recoveryErr := l.queueProjectionRecovery(ctx, result.Activation.ID, reconcileErr); !queued {
+				return result, errors.Join(err, recoveryErr)
+			}
 		}
 	}
 	return result, err
@@ -299,7 +312,7 @@ func catchupDepth(activation Activation, now time.Time) (int, error) {
 	}
 }
 
-func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) error {
+func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) (outcomeErr error) {
 	if l == nil {
 		return nil
 	}
@@ -327,6 +340,14 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) er
 	if err := l.posture.Admit(activation.Command.ExecutionMode, "generic schedule wakeup claim"); err != nil {
 		return err
 	}
+	lease, err := instanceExecutionLease(ctx, activation.Command)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		ctx = lease.Context()
+		defer func() { outcomeErr = errors.Join(outcomeErr, lease.Done()) }()
+	}
 	wakeup, err := activation.Wakeup()
 	if err != nil {
 		return err
@@ -336,8 +357,7 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) er
 		return err
 	}
 	if err := l.scheduler.RegisterGenericScheduleWakeup(ctx, wakeup); err != nil {
-		_ = l.store.ReleaseGenericScheduleWakeup(context.WithoutCancel(ctx), wakeup)
-		return err
+		return errors.Join(err, l.store.ReleaseGenericScheduleWakeup(context.WithoutCancel(ctx), wakeup))
 	}
 	return nil
 }
@@ -355,6 +375,9 @@ func (l *Lifecycle) reconcileImmediately(ctx context.Context, activationID strin
 			}
 		}
 		if err := l.ReconcileWakeup(ctx, activationID); err != nil {
+			if recoveryOwnerRefused(err) {
+				return err
+			}
 			last = err
 			continue
 		}
@@ -371,7 +394,9 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 		l.log(callbackCtx, "fire", wakeup.ActivationID(), err)
 	}
 	if result.Outcome == CommitRetry {
-		l.startRecovery(wakeup.ActivationID())
+		if queued, recoveryErr := l.queueProjectionRecovery(callbackCtx, wakeup.ActivationID(), err); !queued {
+			l.log(callbackCtx, "recovery_refused", wakeup.ActivationID(), recoveryErr)
+		}
 		return
 	}
 	if result.Validate() != nil {
@@ -384,7 +409,9 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 	if result.Next.ID != "" {
 		if reconcileErr := l.ReconcileWakeup(context.WithoutCancel(callbackCtx), result.Next.ID); reconcileErr != nil {
 			l.log(callbackCtx, "reconcile_after_fire", result.Next.ID, reconcileErr)
-			l.startRecovery(result.Next.ID)
+			if queued, recoveryErr := l.queueProjectionRecovery(callbackCtx, result.Next.ID, reconcileErr); !queued {
+				l.log(callbackCtx, "recovery_refused", result.Next.ID, recoveryErr)
+			}
 		}
 		return
 	}
@@ -415,6 +442,11 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 		if postureErr := l.posture.Admit(activation.Command.ExecutionMode, "generic schedule occurrence preparation"); postureErr != nil {
 			return CommitResult{Outcome: CommitRetry}, postureErr
 		}
+		if found {
+			if err := validateInstanceExecutionOwner(ctx, activation.Command); err != nil {
+				return CommitResult{Outcome: CommitRetry}, err
+			}
+		}
 	}
 	commit, prepareErr := l.store.PrepareGenericScheduleOccurrence(ctx, wakeup)
 	if !commit.Acknowledged {
@@ -438,6 +470,9 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 	}
 	activation = prepared.Activation
 	occurrence := prepared.Occurrence
+	if err := validateInstanceExecutionOwner(ctx, activation.Command); err != nil {
+		return CommitResult{Outcome: CommitRetry}, err
+	}
 	projected, err := workflowexpr.ProjectSemanticValue(activation.Command.Payload)
 	if err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
@@ -512,29 +547,44 @@ func occurrenceEvent(activation Activation, occurrence Occurrence, payload []byt
 // on failure, enters the lifecycle's existing coalesced recovery loop.
 func (l *Lifecycle) ReconcileWakeupWithRecovery(ctx context.Context, activationID string) (bool, error) {
 	if err := l.ReconcileWakeup(ctx, activationID); err != nil {
-		return l.startRecovery(activationID), err
+		return l.queueProjectionRecovery(ctx, activationID, err)
 	}
 	return false, nil
 }
 
-func (l *Lifecycle) startRecovery(activationID string) bool {
+func (l *Lifecycle) startRecovery(ctx context.Context, activationID string) (bool, error) {
 	if l == nil {
-		return false
+		return false, errors.New("generic schedule lifecycle is required")
 	}
 	activationID = stringsTrim(activationID)
 	if activationID == "" {
-		return false
+		return false, errors.New("generic schedule recovery requires activation_id")
 	}
+	owner, _ := worklifetime.OccurrenceFromContext(ctx)
 	l.mu.Lock()
 	if l.stop {
 		l.mu.Unlock()
-		return false
+		return false, errors.New("generic schedule lifecycle is stopped")
 	}
-	if _, exists := l.retry[activationID]; exists {
+	if existing, exists := l.retry[activationID]; exists {
 		l.mu.Unlock()
-		return true
+		if existing != owner {
+			return false, errInstanceExecutionOwner
+		}
+		return true, nil
 	}
-	l.retry[activationID] = struct{}{}
+	recoveryCtx := l.ctx
+	var lease *worklifetime.Lease
+	if owner != nil {
+		var err error
+		lease, err = owner.Begin(l.ctx)
+		if err != nil {
+			l.mu.Unlock()
+			return false, err
+		}
+		recoveryCtx = lease.Context()
+	}
+	l.retry[activationID] = owner
 	l.wg.Add(1)
 	l.mu.Unlock()
 	go func() {
@@ -544,24 +594,12 @@ func (l *Lifecycle) startRecovery(activationID string) bool {
 			delete(l.retry, activationID)
 			l.mu.Unlock()
 		}()
-		delay := 50 * time.Millisecond
-		for {
-			select {
-			case <-l.ctx.Done():
-				return
-			case <-time.After(delay):
-			}
-			if err := l.ReconcileWakeup(l.ctx, activationID); err == nil {
-				return
-			} else {
-				l.log(l.ctx, "recovery", activationID, err)
-			}
-			if delay < time.Second {
-				delay *= 2
-			}
+		if lease != nil {
+			defer func() { l.log(recoveryCtx, "recovery_owner_settlement", activationID, lease.Done()) }()
 		}
+		l.runProjectionRecovery(recoveryCtx, activationID)
 	}()
-	return true
+	return true, nil
 }
 
 func (l *Lifecycle) retireExactWakeup(ctx context.Context, wakeup Wakeup) error {
@@ -588,7 +626,7 @@ func (l *Lifecycle) startTerminalRetirementRecovery(wakeup Wakeup) {
 		l.mu.Unlock()
 		return
 	}
-	l.retry[recoveryKey] = struct{}{}
+	l.retry[recoveryKey] = nil
 	l.wg.Add(1)
 	l.mu.Unlock()
 	go func() {
