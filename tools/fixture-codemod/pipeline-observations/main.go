@@ -152,7 +152,7 @@ func rewriteFunction(path string, source []byte, row recipe) ([]byte, bool, erro
 	if err != nil {
 		return nil, false, err
 	}
-	fn, err := uniqueFunction(file, row.Function)
+	fn, err := uniqueRecipeFunction(file, row)
 	if err != nil {
 		return nil, false, fmt.Errorf("%s: %w", path, err)
 	}
@@ -176,6 +176,35 @@ func rewriteFunction(path string, source []byte, row recipe) ([]byte, bool, erro
 		return nil, false, fmt.Errorf("%s: %s differs from both reviewed snapshots; no files written", path, row.Function)
 	}
 	return bytes.Join([][]byte{source[:start], []byte(row.After), source[end:]}, nil), true, nil
+}
+
+func uniqueRecipeFunction(file *ast.File, row recipe) (*ast.FuncDecl, error) {
+	parsed, err := parser.ParseFile(token.NewFileSet(), "after.go", "package probe\n"+row.After, parser.AllErrors)
+	if err != nil {
+		return nil, err
+	}
+	if len(parsed.Decls) != 1 {
+		return nil, fmt.Errorf("recipe must contain exactly one replacement function")
+	}
+	after, ok := parsed.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		return nil, fmt.Errorf("replacement is not a function")
+	}
+	var found *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || (fn.Name.Name != row.Function && fn.Name.Name != after.Name.Name) {
+			continue
+		}
+		if found != nil {
+			return nil, fmt.Errorf("ambiguous original/replacement function %s", row.Function)
+		}
+		found = fn
+	}
+	if found == nil {
+		return nil, fmt.Errorf("missing original/replacement function %s", row.Function)
+	}
+	return found, nil
 }
 
 func uniqueFunction(file *ast.File, name string) (*ast.FuncDecl, error) {
