@@ -2,10 +2,12 @@ package serveapp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -19,8 +21,54 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
+
+func TestIssue2564ServedH3WriterOrderingCorpora(t *testing.T) {
+	for _, corpus := range []struct {
+		name     string
+		deadline bool
+		checksum string
+	}{
+		{"h3", false, "4748f09fa5770936dd6dbd5590f0ac0317d0bd563290fc176768c67a14381854"},
+		{"m33", true, "1da338e342d2d6ee6efaabe102b81fc5873919757b2301e9e241dade8563c573"},
+	} {
+		t.Run(corpus.name, func(t *testing.T) {
+			root := writeIssue2564Fixture(t, corpus.deadline)
+			var paths []string
+			if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+				if err != nil || entry.IsDir() {
+					return err
+				}
+				relative, err := filepath.Rel(root, path)
+				if err != nil {
+					return err
+				}
+				paths = append(paths, filepath.ToSlash(relative))
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			slices.Sort(paths)
+			manifest := sha256.New()
+			for _, path := range paths {
+				contents, err := os.ReadFile(filepath.Join(root, path))
+				if err != nil {
+					t.Fatal(err)
+				}
+				checksum := sha256.Sum256(contents)
+				fmt.Fprintf(manifest, "%x  %s\n", checksum, path)
+				t.Logf("ISSUE2564_%s_SHA256 %x  %s", corpus.name, checksum, path)
+			}
+			checksum := fmt.Sprintf("%x", manifest.Sum(nil))
+			if len(paths) != 7 || checksum != corpus.checksum {
+				t.Fatalf("%s corpus drift: files=%d sha256=%s pinned=%s", corpus.name, len(paths), checksum, corpus.checksum)
+			}
+			t.Logf("ISSUE2564_%s_CORPUS_SHA256 %s admitted_bundle=%s", corpus.name, checksum, servedEventPublishFixtureBundleHash(t, root))
+		})
+	}
+}
 
 // These are NEW served H3/M33 fixtures, not the unavailable archived H1/H2
 // workloads. All writes use generated tools on real managed provider turns.
@@ -595,83 +643,8 @@ func requireIssue2564TimerReceipt(t *testing.T, rt issue2564ServedFixture, runID
 
 func writeIssue2564Fixture(t *testing.T, deadline bool) string {
 	t.Helper()
-	root := t.TempDir()
-	stages := "  idle: {initial: true}\n  working: {}\n  closed: {terminal: true}\n"
 	if deadline {
-		stages = "  idle: {initial: true}\n  working:\n    timers:\n      - {id: deadline, after: 5s, advances_to: review}\n  review: {}\n  closed: {terminal: true}\n"
+		return canonicalrouting.CopyIssue2564M33NonterminalDeadline(t)
 	}
-	files := map[string]string{
-		"schema.yaml": `name: issue2564-proof
-pins:
-  inputs: [hub.start, hub.begin, hub.close]
-connect:
-  - {event: hub.start, from: ., to: hub, resolution: select-or-create}
-  - {event: hub.begin, from: ., to: hub, resolution: select}
-  - {event: hub.close, from: ., to: hub, resolution: select}
-`,
-		"events.yaml":     "hub.start: {key: hub_id, hub_id: text}\nhub.begin: {key: hub_id, hub_id: text}\nhub.close: {key: hub_id, hub_id: text}\n",
-		"hub/schema.yaml": "name: hub\ninstance: hub_id\nstages:\n" + stages + "pins:\n  inputs: [hub.start, hub.begin, hub.close]\n",
-		"hub/entities.yaml": `hub:
-  hub_id: text
-  items: list<text>
-  labels: map[text]text
-  positions: list<text>
-  marker: text
-  result: text
-  result_stage: text
-  results: integer
-`,
-		"hub/events.yaml": "hub.work: {hub_id: text}\nhub.result: {hub_id: text, value: text}\n",
-		"hub/nodes.yaml": `hub-node:
-  execution_type: system_node
-  subscribes_to: [hub.start, hub.begin, hub.close, hub.result]
-  event_handlers:
-    hub.start:
-      data_accumulation:
-        writes:
-          - {source_field: hub_id, target_field: hub_id}
-          - {target_field: items, value: []}
-          - {target_field: labels, value: {}}
-          - {target_field: positions, value: ["initial-0", "initial-1"]}
-          - {target_field: marker, value: "initial"}
-          - {target_field: results, value: 0}
-    hub.begin:
-      advances_to: working
-      emit: {event: hub.work, fields: {hub_id: payload.hub_id}}
-    hub.close: {advances_to: closed}
-    hub.result:
-      guard: {id: retained_in_new_stage, check: _entity.current_state == 'review'}
-      data_accumulation:
-        writes:
-          - {target_field: result, value: payload.value}
-          - {target_field: result_stage, value: _entity.current_state}
-          - target_field: results
-            value: |-
-              has(entity.results) ? entity.results + 1 : 1
-`,
-	}
-	actors := []string{"a", "b"}
-	if deadline {
-		actors = actors[:1]
-	} else {
-		files["hub/nodes.yaml"] = strings.Split(files["hub/nodes.yaml"], "    hub.result:\n")[0]
-		files["hub/nodes.yaml"] = strings.Replace(files["hub/nodes.yaml"], "[hub.start, hub.begin, hub.close, hub.result]", "[hub.start, hub.begin, hub.close]", 1)
-		files["hub/events.yaml"] = "hub.work: {hub_id: text}\n"
-		files["hub/entities.yaml"] = strings.Replace(files["hub/entities.yaml"], "  result: text\n  result_stage: text\n", "", 1)
-	}
-	var agents strings.Builder
-	writable := "items, labels, positions, marker"
-	emit := ""
-	if deadline {
-		writable = "marker"
-		emit = "  emit_events: [hub.result]\n"
-	}
-	for _, actor := range actors {
-		fmt.Fprintf(&agents, "writer-%s:\n  role: writer_%s\n  intent: {inline: 'ISSUE2564_%s: retain every assigned operation. Use hub_id and value for any authored retained result.'}\n  model: regular\n  subscriptions: [hub.work]\n  entity_writes: {hub: {save: [%s]}}\n%s", actor, actor, actor, writable, emit)
-	}
-	files["hub/agents.yaml"] = agents.String()
-	for path, contents := range files {
-		writeWorkflowValidationFixtureFile(t, filepath.Join(root, path), contents)
-	}
-	return root
+	return canonicalrouting.CopyIssue2564H3CollectionOperations(t)
 }

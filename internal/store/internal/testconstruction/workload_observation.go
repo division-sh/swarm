@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
@@ -21,9 +21,9 @@ func OpenIssue2564WorkloadObservationForTest(ctx context.Context, backend, locat
 	case "postgres":
 		// H2 retains a sampler connection beside independent snapshot reads;
 		// the one-connection, snapshot-scoped inspection transport cannot do both.
-		selected, err = construction.NewPostgres(location)
+		selected, err = store.NewPostgresStore(location)
 	case "sqlite":
-		selected, err = construction.OpenSQLiteRuntimeReadOnly(location)
+		selected, err = store.NewSQLiteRuntimeStore(location)
 	default:
 		return nil, fmt.Errorf("unknown issue2564 observation backend %q", backend)
 	}

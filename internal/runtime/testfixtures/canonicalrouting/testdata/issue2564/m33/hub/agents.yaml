@@ -1,0 +1,7 @@
+writer-a:
+  role: writer_a
+  intent: {inline: 'ISSUE2564_a: retain every assigned operation. Use hub_id and value for any authored retained result.'}
+  model: regular
+  subscriptions: [hub.work]
+  entity_writes: {hub: {save: [marker]}}
+  emit_events: [hub.result]

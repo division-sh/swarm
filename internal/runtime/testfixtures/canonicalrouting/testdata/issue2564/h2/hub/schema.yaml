@@ -1,0 +1,10 @@
+name: hub
+instance: hub_id
+stages:
+  s1:
+    initial: true
+    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]
+  s2:
+    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]
+  closed: {terminal: true}
+pins: {inputs: [hub.start, hub.bump, hub.close]}

@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
@@ -39,6 +40,13 @@ import (
 // and counter initialization are preserved; actual admission rates are separate.
 // Deterministic old-head H2a/H2b/H2c mechanism witnesses remain separate proofs.
 const issue2564H2ChildEnv = "SWARM_TEST_ISSUE2564_H2_CHILD"
+
+const issue2564H2CorpusSHA = "14927d4bad9d6c7242a0f8112fe18d7d4fb25562d8f9147178320bd627518a54"
+
+func TestIssue2564H2EquivalentCorpus(t *testing.T) {
+	root := issue2564H2Source(t)
+	t.Logf("reconstructed equivalent H2 admitted bundle=%s", servedEventPublishFixtureBundleHash(t, root))
+}
 
 type issue2564H2Child struct {
 	Source, Config, Backend string
@@ -113,68 +121,24 @@ func TestIssue2564H2ServeProcessHelper(t *testing.T) {
 
 func issue2564H2Source(t *testing.T) string {
 	t.Helper()
-	files := map[string]string{
-		"schema.yaml": `name: lu-h2-equivalent
-pins: {inputs: [hub.start, hub.bump, hub.close]}
-connect:
-  - {event: hub.start, from: ., to: hub, resolution: select-or-create}
-  - {event: hub.bump, from: ., to: hub, resolution: select}
-  - {event: hub.close, from: ., to: hub, resolution: select}
-`,
-		"events.yaml": "hub.start: {key: hub_id, hub_id: text}\nhub.bump: {key: hub_id, hub_id: text, n: integer}\nhub.close: {key: hub_id, hub_id: text}\n",
-		"hub/schema.yaml": `name: hub
-instance: hub_id
-stages:
-  s1:
-    initial: true
-    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]
-  s2:
-    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]
-  closed: {terminal: true}
-pins: {inputs: [hub.start, hub.bump, hub.close]}
-`,
-		"hub/entities.yaml": `hub:
-  hub_id: text
-  count: {type: integer, initial: 0}
-  c1: {type: integer, initial: 0}
-  c2: {type: integer, initial: 0}
-`,
-		"hub/nodes.yaml": `hub-node:
-  execution_type: system_node
-  subscribes_to: [hub.start, hub.bump, hub.close]
-  event_handlers:
-    hub.start:
-      data_accumulation:
-        writes:
-          - {source_field: hub_id, target_field: hub_id}
-          - {target_field: count, value: 0}
-          - {target_field: c1, value: 0}
-          - {target_field: c2, value: 0}
-    hub.bump:
-      data_accumulation:
-        writes: [{target_field: count, value: entity.count + 1}]
-      rules:
-        - id: in_s1
-          when: _entity.current_state == 's1'
-          data_accumulation:
-            writes: [{target_field: c1, value: entity.c1 + 1}]
-        - id: in_s2
-          else: true
-          data_accumulation:
-            writes: [{target_field: c2, value: entity.c2 + 1}]
-    hub.close: {advances_to: closed}
-`,
-	}
-	root := t.TempDir()
-	paths := make([]string, 0, len(files))
-	for path := range files {
-		paths = append(paths, path)
-	}
+	root := canonicalrouting.CopyIssue2564H2Equivalent(t)
+	paths := []string{"schema.yaml", "events.yaml", "hub/schema.yaml", "hub/entities.yaml", "hub/nodes.yaml"}
 	slices.Sort(paths)
+	manifest := sha256.New()
 	for _, path := range paths {
-		writeWorkflowValidationFixtureFile(t, filepath.Join(root, path), files[path])
-		t.Logf("reconstructed_equivalent_H2 source=%s sha256=%x", path, sha256.Sum256([]byte(files[path])))
+		contents, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		checksum := sha256.Sum256(contents)
+		fmt.Fprintf(manifest, "%x  %s\n", checksum, path)
+		t.Logf("reconstructed_equivalent_H2 source=%s sha256=%x", path, checksum)
 	}
+	checksum := fmt.Sprintf("%x", manifest.Sum(nil))
+	if checksum != issue2564H2CorpusSHA {
+		t.Fatalf("reconstructed equivalent H2 corpus drift: sha256=%s pinned=%s", checksum, issue2564H2CorpusSHA)
+	}
+	t.Logf("H2_EQUIVALENT_CORPUS_SHA256 %s", checksum)
 	t.Log("equivalence_authority=https://github.com/division-sh/swarm/issues/2564#issuecomment-6001398406; archive_identity=NOT_UNCHANGED; bounded HTTP transport; independent submission rates are not durable admission rates; six keyed children in one root run; system-node handler writes; explicit hub.start counter initialization; two alternating nonterminal 1s stage timers; close is explicit")
 	return root
 }
