@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
@@ -382,14 +383,18 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 		if err != nil {
 			return err
 		}
-		if !found {
+		switch {
+		case !found:
 			return domain.ErrNotFound
-		}
-		if op.Revision != req.ExpectedRevision {
+		case op.Revision != req.ExpectedRevision:
 			return domain.ErrRevisionConflict
-		}
-		if op.Phase != domain.PhasePublishingActivation {
+		case op.Phase != domain.PhasePublishingActivation:
 			return domain.ErrConflict
+		}
+		// Keep binding confirmation's parent-before-principal order, then use
+		// delivery's principal-before-activation fence, including INSERT FK locks.
+		if err := channeldelivery.LockPrincipalTx(txctx, tx, op.PrincipalID, r.dialect() == dialectPostgres); err != nil {
+			return err
 		}
 		now := canonicalTime(req.Now)
 		if op.Verb == domain.VerbRebind {
