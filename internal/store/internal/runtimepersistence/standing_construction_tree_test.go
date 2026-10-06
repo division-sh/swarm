@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -36,7 +37,7 @@ func TestStandingKeyedAncestryRefusesBeforeMutationBothStores(t *testing.T) {
 				}
 				serviceID := flowidentity.StandingServiceID("parent/service")
 				instance := flowidentity.StandingForService(source, "parent/service", serviceID)
-				req := pipeline.StandingTargetMutationRequest{ObservedAt: f.request("unused", "unused", "unused").OccurredAt, Targets: []pipeline.StandingTargetMutation{{
+				req := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), Targets: []pipeline.StandingTargetMutation{{
 					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: "parent/service", InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact},
 					Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance},
 				}}}
@@ -79,7 +80,7 @@ func TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores(t *te
 			if !found {
 				t.Fatal("source authority is missing")
 			}
-			req := pipeline.StandingTargetMutationRequest{ObservedAt: f.request("unused", "unused", "unused").OccurredAt}
+			req := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)}
 			for _, flowID := range []string{"alpha", "beta"} {
 				serviceID := flowidentity.StandingServiceID(flowID)
 				instance := flowidentity.StandingForService(source, flowID, serviceID)
@@ -115,7 +116,7 @@ func TestDormantStandingPreparationDoesNotConstructBothStores(t *testing.T) {
 			}
 			serviceID := flowidentity.StandingServiceID("service")
 			instance := flowidentity.StandingForService(source, "service", serviceID)
-			request := pipeline.StandingTargetMutationRequest{ObservedAt: f.request("unused", "unused", "unused").OccurredAt, Targets: []pipeline.StandingTargetMutation{{
+			request := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), Targets: []pipeline.StandingTargetMutation{{
 				Candidate: pipeline.StandingServiceCandidate{BindingEnabled: false, BindingBlockReason: runlifecycle.StandingBindingCredentialsAbsent,
 					ServiceID: serviceID, FlowPath: "service", InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact},
 				Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance},

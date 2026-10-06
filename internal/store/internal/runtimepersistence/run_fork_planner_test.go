@@ -156,8 +156,8 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 	if got.Gates["ready"] != true {
 		t.Fatalf("gate ready = %#v, want true", got.Gates["ready"])
 	}
-	if got.Accumulator["score"] != float64(7) {
-		t.Fatalf("accumulator score = %#v, want 7", got.Accumulator["score"])
+	if got.Accumulator["score"] != int64(7) {
+		t.Fatalf("accumulator score = %#v (%T), want int64(7)", got.Accumulator["score"], got.Accumulator["score"])
 	}
 }
 

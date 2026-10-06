@@ -80,6 +80,7 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"internal/runtime/destructivereset/coordinator_test.go":                        true,
 		"internal/runtime/manager/runtime_reset_test.go":                               true,
 		"internal/store/internal/runtimepersistence/postgres_store_additional_test.go": true,
+		"internal/store/persistence_authority_debt_test.go":                            true,
 	}
 	classificationMarkers := []string{
 		"retir", "legacy", "removed", "historical", "fail-closed", "must not",

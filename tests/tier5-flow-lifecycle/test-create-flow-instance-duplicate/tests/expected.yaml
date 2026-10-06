@@ -25,7 +25,7 @@ expected:
   flow_instance_created:
     template: worker-flow
     instance_id: ti-bc9c6acffc914a7ed5a2793b
-    config:
+    fields:
       worker_id: worker-dup
     auto_emitted: worker-flow/ti-bc9c6acffc914a7ed5a2793b/worker.ready
 

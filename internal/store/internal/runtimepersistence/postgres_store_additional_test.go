@@ -2583,14 +2583,14 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	`, rec.Config.ID).Scan(&configRaw, &runtimeDescriptorRaw); err != nil {
 		t.Fatalf("query persisted agent row: %v", err)
 	}
-	var envelope map[string]json.RawMessage
-	if err := json.Unmarshal(configRaw, &envelope); err != nil {
+	var persisted map[string]json.RawMessage
+	if err := json.Unmarshal(configRaw, &persisted); err != nil {
 		t.Fatal(err)
 	}
-	if len(envelope) != 2 || string(envelope["receiver_config"]) != "null" {
-		t.Fatalf("persisted config envelope = %s, want opaque config and absent receiver", configRaw)
+	if len(persisted) != 1 || string(persisted["custom_label"]) != `"x"` {
+		t.Fatalf("persisted opaque config = %s, want only custom_label=x", configRaw)
 	}
-	if err := validateOpaqueAgentConfig(envelope["config"]); err != nil {
+	if err := validateOpaqueAgentConfig(configRaw); err != nil {
 		t.Fatalf("validateOpaqueAgentConfig: %v", err)
 	}
 	desc, err := decodePersistedAgentRuntimeDescriptor(runtimeDescriptorRaw)
@@ -2696,7 +2696,7 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 	}); err != nil {
 		t.Fatalf("seed canonical agent row: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1::jsonb WHERE agent_id=$2`, `{"config":{"system_prompt":"x","subscriptions":["wrong"]},"receiver_config":null}`, identity.AgentID()); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1::jsonb WHERE agent_id=$2`, `{"subscriptions":["wrong"]}`, identity.AgentID()); err != nil {
 		t.Fatalf("inject invalid opaque config: %v", err)
 	}
 
@@ -2892,7 +2892,7 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 	}); err != nil {
 		t.Fatalf("seed canonical agent row: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1::jsonb WHERE agent_id=$2`, `{"config":{"type":"sonnet","mode":"worker","session_scope":"global","system_prompt":"x"},"receiver_config":null}`, identity.AgentID()); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1::jsonb WHERE agent_id=$2`, `{"type":"sonnet","mode":"worker","session_scope":"global"}`, identity.AgentID()); err != nil {
 		t.Fatalf("inject legacy runtime metadata: %v", err)
 	}
 	_, err := pg.LoadAgents(ctx)
