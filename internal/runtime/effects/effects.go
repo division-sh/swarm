@@ -1253,6 +1253,9 @@ func (h *Handle) MarkLaunched(ctx context.Context) error {
 		}
 		clock := cloneLogicalTurnClock(*launch.Turn)
 		h.turnClock.Store(&clock)
+		if ownerErr := observeTurnLaunch(ctx, h, clock); ownerErr != nil {
+			return errors.Join(reportPostCommitMutation(err), ownerErr)
+		}
 	}
 	return reportPostCommitMutation(err)
 }
@@ -1350,10 +1353,19 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	if result.Committed && !result.Disposition.Valid() {
 		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_settlement_disposition_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": h.attempt.AttemptID, "disposition": result.Disposition})
 	}
+	if result.Committed && result.Cancellation != nil {
+		validationErr := result.Cancellation.ValidateIntent()
+		if !result.Cancellation.Origin.Same(h.attempt.Origin) || result.Cancellation.OriginSettled != result.OriginSettled {
+			validationErr = errors.Join(validationErr, fmt.Errorf("completion cancellation contradicts its exact origin settlement"))
+		}
+		if validationErr != nil {
+			return result, errors.Join(reportPostCommitMutation(err), validationErr)
+		}
+	}
 	if result.Committed {
 		recordCompletionSettlementObservation(ctx, CompletionSettlementObservation{
 			AttemptID: result.AttemptID, Disposition: result.Disposition, Origin: result.Origin,
-			OriginSettled: result.OriginSettled, Finalization: result.Finalization,
+			OriginSettled: result.OriginSettled, Cancellation: result.Cancellation, Finalization: result.Finalization,
 		})
 	}
 	if result.Committed && result.SpendRecorded && h.controller.completionSpendProjector != nil {

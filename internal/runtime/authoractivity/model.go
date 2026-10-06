@@ -297,12 +297,12 @@ var kindContracts = map[Kind]kindContract{
 		Actions: map[string]string{"registered": "registered", "running": "running", "terminated": "terminated", "failed": "failed"},
 	},
 	KindDirectiveLifecycle: {
-		Transitions: set("received", "in_flight", "completed", "failed", "outcome_uncertain"), SourceOwner: "agent_directive_operations", SourceIdentityRequired: true,
-		AllowedProjectionFields:  set("subject_type", "subject_id", "method", "source"),
+		Transitions: set("received", "in_flight", "completed", "failed", "outcome_uncertain", "canceled"), SourceOwner: "agent_directive_operations", SourceIdentityRequired: true,
+		AllowedProjectionFields:  set("subject_type", "subject_id", "method", "source", "reason_code"),
 		RequiredProjectionFields: set("subject_type", "subject_id"), FailureTransitions: set("failed", "outcome_uncertain"),
 		SubjectStrategy: subjectTypedIdentity, SubjectTypes: set("agent"),
-		ScopeByTransition: scopeAll(ScopeBundle, "received", "in_flight", "completed", "failed", "outcome_uncertain"), HumanVisibleTransitions: set("completed", "failed", "outcome_uncertain"),
-		Actions: map[string]string{"received": "directive received", "in_flight": "directive in flight", "completed": "directive completed", "failed": "directive failed", "outcome_uncertain": "directive outcome uncertain"},
+		ScopeByTransition: scopeAll(ScopeBundle, "received", "in_flight", "completed", "failed", "outcome_uncertain", "canceled"), HumanVisibleTransitions: set("completed", "failed", "outcome_uncertain", "canceled"),
+		Actions: map[string]string{"received": "directive received", "in_flight": "directive in flight", "completed": "directive completed", "failed": "directive failed", "outcome_uncertain": "directive outcome uncertain", "canceled": "directive canceled"},
 	},
 	KindRunLifecycle: {
 		Transitions: set("started", "fork_prepared", "paused", "resumed", "fork_started", "completed", "failed", "cancelled", "forked"), SourceOwner: "runs", SourceIdentityRequired: true,

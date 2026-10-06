@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 )
 
 type canceledTurnTestStore interface {
@@ -105,6 +106,7 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		if err != nil || len(page.Snapshots) != 1 || page.Snapshots[0].Status != deliverylifecycle.StatusCanceled {
 			t.Fatalf("canceled diagnostic page: %+v err=%v", page, err)
 		}
+		proveCanceledDeliveryFanOutFold(t, ctx, selected, fixture, settled.Snapshot)
 		requireExternalAttemptState(t, selected.db, !selected.postgres, first.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 		requireCompletionSettlementRows(t, fixture, first.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateOutcomeUncertain, 1, 0)
 		var response string
@@ -115,6 +117,21 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 			t.Fatalf("canceled settlement changed observed response: %s", response)
 		}
 	})
+}
+
+func proveCanceledDeliveryFanOutFold(t *testing.T, ctx context.Context, selected exactFactStore, completion completionSettlementFixture, snapshot deliverylifecycle.Snapshot) {
+	t.Helper()
+	parent := fanOutOwnerFixture{runID: snapshot.RunID, flowPath: ".", plan: fanOutOwnerTypedPlanFixture(t)}
+	if err := selected.db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, snapshot.RunID).Scan(&parent.bundleHash); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	fixture := seedFanOutOwnerChildFixture(t, ctx, selected.db, completion.store, selected.postgres, parent, 1, at)
+	handle := seedFanOutDeliveryBarrier(t, ctx, selected.db, fixture, at)
+	seedFanOutBarrierOutcomes(t, ctx, selected.db, fixture, []string{snapshot.EventID}, false, at)
+	advanceFanOutBarriersForTest(t, ctx, completion.store.(storeTestDurableEventBusStore), selected.db, fixture.runID, at.Add(time.Second))
+	want := fanoutbarrier.Summary{Total: 1, Canceled: 1}
+	assertFanOutBarrierState(t, ctx, selected.db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 }
 
 func TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores(t *testing.T) {

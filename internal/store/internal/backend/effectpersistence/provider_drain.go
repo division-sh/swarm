@@ -465,6 +465,12 @@ func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 	return permit, true, nil
 }
 
+type providerDrainSettlementOutcome struct {
+	finalization  *runtimeeffects.ProviderDrainFinalization
+	originSettled bool
+	cancellation  *runtimeeffects.TurnCancellation
+}
+
 func (s *EffectPostgresOwner) settleProviderDrainTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -472,15 +478,24 @@ func (s *EffectPostgresOwner) settleProviderDrainTx(
 	attempt runtimeeffects.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
-) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOrigin(ctx, mutation, settlement, permit.Origin, s.delivery, s.directives); err != nil {
-		return nil, err
+) (providerDrainSettlementOutcome, error) {
+	cancellation, err := settleCanceledProviderDrainOrigin(ctx, tx, mutation, true, attempt, s.delivery, s.directives)
+	if err != nil {
+		return providerDrainSettlementOutcome{}, err
+	}
+	outcome := providerDrainSettlementOutcome{cancellation: cancellation.intent, originSettled: cancellation.disposition == providerOriginCancelSettled}
+	if cancellation.disposition == providerOriginNotCanceled {
+		if err := settleProviderDrainOrigin(ctx, mutation, settlement, permit.Origin, s.delivery, s.directives); err != nil {
+			return providerDrainSettlementOutcome{}, err
+		}
+		outcome.originSettled = true
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state='settled', settled_at=$2 WHERE drain_id=$1::uuid AND state='pending'`, permit.DrainID, settlement.Now.UTC())
 	if err := requireExternalAttemptTransition(res, err); err != nil {
-		return nil, err
+		return providerDrainSettlementOutcome{}, err
 	}
-	return finalizeProviderDrainPostgres(ctx, tx, attempt, permit)
+	outcome.finalization, err = finalizeProviderDrainPostgres(ctx, tx, attempt, permit)
+	return outcome, err
 }
 
 func (s *EffectSQLiteOwner) settleProviderDrainTx(
@@ -490,15 +505,24 @@ func (s *EffectSQLiteOwner) settleProviderDrainTx(
 	attempt runtimeeffects.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
-) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOrigin(ctx, mutation, settlement, permit.Origin, s.delivery, s.directives); err != nil {
-		return nil, err
+) (providerDrainSettlementOutcome, error) {
+	cancellation, err := settleCanceledProviderDrainOrigin(ctx, tx, mutation, false, attempt, s.delivery, s.directives)
+	if err != nil {
+		return providerDrainSettlementOutcome{}, err
+	}
+	outcome := providerDrainSettlementOutcome{cancellation: cancellation.intent, originSettled: cancellation.disposition == providerOriginCancelSettled}
+	if cancellation.disposition == providerOriginNotCanceled {
+		if err := settleProviderDrainOrigin(ctx, mutation, settlement, permit.Origin, s.delivery, s.directives); err != nil {
+			return providerDrainSettlementOutcome{}, err
+		}
+		outcome.originSettled = true
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state='settled', settled_at=? WHERE drain_id=? AND state='pending'`, settlement.Now.UTC(), permit.DrainID)
 	if err := requireExternalAttemptTransition(res, err); err != nil {
-		return nil, err
+		return providerDrainSettlementOutcome{}, err
 	}
-	return finalizeProviderDrainSQLite(ctx, tx, attempt, permit)
+	outcome.finalization, err = finalizeProviderDrainSQLite(ctx, tx, attempt, permit)
+	return outcome, err
 }
 
 func settleProviderDrainRecovery(
@@ -513,8 +537,14 @@ func settleProviderDrainRecovery(
 	delivery providerDrainDeliveryOwner,
 	directives providerDrainDirectiveOwner,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, permit.Origin, delivery, directives); err != nil {
+	cancellation, err := settleCanceledProviderDrainOrigin(ctx, tx, mutation, postgres, attempt, delivery, directives)
+	if err != nil {
 		return nil, err
+	}
+	if cancellation.disposition == providerOriginNotCanceled {
+		if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, permit.Origin, delivery, directives); err != nil {
+			return nil, err
+		}
 	}
 	state := "settled"
 	var failure any
@@ -527,7 +557,6 @@ func settleProviderDrainRecovery(
 		failure = string(raw)
 	}
 	var result sql.Result
-	var err error
 	if postgres {
 		result, err = tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state=$2,failure=$3::jsonb,settled_at=$4 WHERE drain_id=$1::uuid AND state='pending'`, permit.DrainID, state, failure, settlement.Now.UTC())
 	} else {

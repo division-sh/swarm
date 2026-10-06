@@ -60,6 +60,7 @@ type CompletionSettlementObservation struct {
 	Disposition   CompletionSettlementDisposition
 	Origin        CompletionOrigin
 	OriginSettled bool
+	Cancellation  *TurnCancellation
 	Finalization  *ProviderDrainFinalization
 }
 
@@ -73,7 +74,7 @@ func CompletionSettlementObservationFromContext(ctx context.Context) CompletionS
 	}
 	observer.mu.Lock()
 	defer observer.mu.Unlock()
-	return observer.observation
+	return cloneCompletionSettlementObservation(observer.observation)
 }
 
 type completionSettlementObserver struct {
@@ -91,7 +92,7 @@ func WithCompletionSettlementObserver(ctx context.Context) (context.Context, fun
 	return context.WithValue(ctx, completionSettlementObserverKey{}, observer), func() CompletionSettlementObservation {
 		observer.mu.Lock()
 		defer observer.mu.Unlock()
-		return observer.observation
+		return cloneCompletionSettlementObservation(observer.observation)
 	}
 }
 
@@ -104,6 +105,18 @@ func recordCompletionSettlementObservation(ctx context.Context, observation Comp
 		return
 	}
 	observer.mu.Lock()
-	observer.observation = observation
+	observer.observation = cloneCompletionSettlementObservation(observation)
 	observer.mu.Unlock()
+}
+
+func cloneCompletionSettlementObservation(observation CompletionSettlementObservation) CompletionSettlementObservation {
+	if observation.Cancellation != nil {
+		intent := *observation.Cancellation
+		observation.Cancellation = &intent
+	}
+	if observation.Finalization != nil {
+		finalization := *observation.Finalization
+		observation.Finalization = &finalization
+	}
+	return observation
 }

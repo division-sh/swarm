@@ -1,0 +1,88 @@
+package effectpersistence
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+)
+
+// A captured physical tail still records its immutable effects when authored
+// cancellation owns the origin. Only the final physical tail may settle it.
+type providerOriginCancellationDisposition uint8
+
+const (
+	providerOriginNotCanceled providerOriginCancellationDisposition = iota
+	providerOriginCancelPending
+	providerOriginCancelSettled
+)
+
+type providerOriginCancellation struct {
+	disposition providerOriginCancellationDisposition
+	intent      *runtimeeffects.TurnCancellation
+}
+
+func settleCanceledProviderDrainOrigin(ctx context.Context, tx *sql.Tx, mutation *mutationprotocol.Attempt, postgres bool, attempt runtimeeffects.Attempt, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner) (providerOriginCancellation, error) {
+	pending, err := providerTurnPendingTx(ctx, tx, attempt, delivery, directives)
+	if err != nil {
+		return providerOriginCancellation{}, err
+	}
+	turnID, _, err := businessTurnIdentity(attempt.Origin)
+	if err != nil {
+		return providerOriginCancellation{}, err
+	}
+	query := `SELECT cancel_reason,cancel_cause_event_id::text,cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid FOR UPDATE`
+	if !postgres {
+		query = `SELECT cancel_reason,cancel_cause_event_id,cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=?`
+	}
+	var reason sql.NullString
+	var cause sql.NullString
+	var requested any
+	if err := tx.QueryRowContext(ctx, query, turnID).Scan(&reason, &cause, &requested); err != nil {
+		return providerOriginCancellation{}, fmt.Errorf("read captured provider turn lifetime: %w", err)
+	}
+	if !reason.Valid {
+		return providerOriginCancellation{disposition: providerOriginNotCanceled}, nil
+	}
+	at, valid, err := sqliteTimeValue(requested)
+	if err != nil || !valid || !cause.Valid {
+		return providerOriginCancellation{}, fmt.Errorf("captured turn cancellation has incomplete intent")
+	}
+	intent := runtimeeffects.TurnCancellation{Committed: true, Requested: true, Origin: attempt.Origin, Reason: deliverylifecycle.CancellationReason(reason.String), CauseEvent: cause.String, RequestedAt: at}
+	if err := intent.ValidateIntent(); err != nil {
+		return providerOriginCancellation{}, err
+	}
+	// Only the outer mutation acknowledgment stamps the returned evidence.
+	intent.Committed = false
+	result := providerOriginCancellation{disposition: providerOriginCancelPending, intent: &intent}
+	if !pending {
+		result.disposition = providerOriginCancelSettled
+		intent.OriginSettled = true
+		return result, nil
+	}
+	_, err = prepareCanceledTurnSettlementTx(ctx, tx, postgres, attempt)
+	if err != nil {
+		var remaining *pendingCanceledTurnEffects
+		if errors.As(err, &remaining) {
+			return result, nil
+		}
+		return result, err
+	}
+	switch attempt.Origin.Kind {
+	case runtimeeffects.CompletionOriginDelivery:
+		_, err = settleCanceledDeliveryTurn(ctx, mutation, postgres, delivery, attempt)
+	case runtimeeffects.CompletionOriginDirective:
+		_, err = settleCanceledDirectiveTurn(ctx, mutation, postgres, directives, attempt)
+	default:
+		err = fmt.Errorf("captured canceled turn origin %q is invalid", attempt.Origin.Kind)
+	}
+	if err == nil {
+		result.disposition = providerOriginCancelSettled
+		intent.OriginSettled = true
+	}
+	return result, err
+}

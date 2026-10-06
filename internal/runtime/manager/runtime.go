@@ -518,7 +518,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 		}
 		if ok {
 			now := time.Now().UTC()
-			if (existing.State == runtimeagentcontrol.DirectiveOperationSucceeded || existing.State == runtimeagentcontrol.DirectiveOperationFailed) && !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(now) {
+			if (existing.State == runtimeagentcontrol.DirectiveOperationSucceeded || existing.State == runtimeagentcontrol.DirectiveOperationFailed || existing.State == runtimeagentcontrol.DirectiveOperationCanceled) && !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(now) {
 				existing, ok, err = operationStore.ReconcileDirectiveOperation(ctx, existing.OperationID, now, directiveOperationTTL)
 				if err != nil {
 					return runtimeagentcontrol.SendDirectiveResult{}, err
@@ -636,7 +636,7 @@ func (am *AgentManager) continueDirectiveOperation(ctx context.Context, store ru
 			am.logDirectivePostcommitError(ctx, "directive_success_finalization_post_commit_failure", finalized.OperationID, err)
 		}
 		return directiveResultFromOperation(finalized)
-	case runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate:
+	case runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate, runtimeagentcontrol.DirectiveOperationCanceled:
 		return runtimeagentcontrol.SendDirectiveResult{}, runtimeagentcontrol.ErrorForDirectiveOperation(op)
 	case runtimeagentcontrol.DirectiveOperationPrepared:
 		return am.executePreparedDirectiveOperation(ctx, store, op)
@@ -786,7 +786,7 @@ func consumeProviderSettledDirective(ctx context.Context, store runtimeagentcont
 		return true, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "directive_completion_execution_owner_mismatch", "agent-manager", "execute_directive", map[string]any{"operation_id": admitted.OperationID})
 	}
 	switch persisted.State {
-	case runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate:
+	case runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate, runtimeagentcontrol.DirectiveOperationCanceled:
 		return true, runtimeagentcontrol.ErrorForDirectiveOperation(persisted)
 	default:
 		if observation.OriginSettled {

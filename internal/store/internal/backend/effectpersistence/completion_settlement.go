@@ -34,6 +34,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 		providerHeadErr error
 		spendRecorded   bool
 		originSettled   bool
+		cancellation    *runtimeeffects.TurnCancellation
 		finalization    *runtimeeffects.ProviderDrainFinalization
 		disposition     runtimeeffects.CompletionSettlementDisposition
 		continuation    *runtimeeffects.Attempt
@@ -111,11 +112,12 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 				outcome.continuation = &admitted
 			}
 			if permit.Kind == completionSettlementDrained {
-				outcome.finalization, err = s.settleProviderDrainTx(txctx, tx, mutation, attempt, attemptSettlement, permit.Drain)
+				drain, drainErr := s.settleProviderDrainTx(txctx, tx, mutation, attempt, attemptSettlement, permit.Drain)
+				err = drainErr
 				if err != nil {
 					return err
 				}
-				outcome.originSettled = true
+				outcome.finalization, outcome.originSettled, outcome.cancellation = drain.finalization, drain.originSettled, drain.cancellation
 			}
 			if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
 				terminal, err := externalEffectRunTerminal(txctx, tx, true, attempt.Authority.Target.RunID)
@@ -141,7 +143,10 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 	}
 	result := runtimeeffects.CompletionSettlementResult{
 		Committed: true, Disposition: outcome.disposition, SpendRecorded: outcome.spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
-		Origin: attempt.Origin, OriginSettled: outcome.originSettled, Finalization: outcome.finalization,
+		Origin: attempt.Origin, OriginSettled: outcome.originSettled, Cancellation: outcome.cancellation, Finalization: outcome.finalization,
+	}
+	if result.Cancellation != nil {
+		result.Cancellation.Committed = true
 	}
 	err := commit.Err()
 	if outcome.continuation != nil {
@@ -160,6 +165,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 		providerHeadErr error
 		spendRecorded   bool
 		originSettled   bool
+		cancellation    *runtimeeffects.TurnCancellation
 		finalization    *runtimeeffects.ProviderDrainFinalization
 		disposition     runtimeeffects.CompletionSettlementDisposition
 		continuation    *runtimeeffects.Attempt
@@ -237,11 +243,12 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 				outcome.continuation = &admitted
 			}
 			if permit.Kind == completionSettlementDrained {
-				outcome.finalization, err = s.settleProviderDrainTx(txctx, tx, mutation, attempt, attemptSettlement, permit.Drain)
+				drain, drainErr := s.settleProviderDrainTx(txctx, tx, mutation, attempt, attemptSettlement, permit.Drain)
+				err = drainErr
 				if err != nil {
 					return err
 				}
-				outcome.originSettled = true
+				outcome.finalization, outcome.originSettled, outcome.cancellation = drain.finalization, drain.originSettled, drain.cancellation
 			}
 			if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
 				terminal, err := externalEffectRunTerminal(txctx, tx, false, attempt.Authority.Target.RunID)
@@ -267,7 +274,10 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 	}
 	result := runtimeeffects.CompletionSettlementResult{
 		Committed: true, Disposition: outcome.disposition, SpendRecorded: outcome.spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
-		Origin: attempt.Origin, OriginSettled: outcome.originSettled, Finalization: outcome.finalization,
+		Origin: attempt.Origin, OriginSettled: outcome.originSettled, Cancellation: outcome.cancellation, Finalization: outcome.finalization,
+	}
+	if result.Cancellation != nil {
+		result.Cancellation.Committed = true
 	}
 	err := commit.Err()
 	if outcome.continuation != nil {

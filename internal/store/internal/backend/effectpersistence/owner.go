@@ -41,6 +41,7 @@ type providerDrainDirectiveOwner interface {
 	ValidateProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, string, runtimeagentidentity.Identity) error
 	RenewProviderDirectiveOriginTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, time.Time, time.Duration) error
 	SettleProviderDirectiveOriginTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperationState, runtimefailures.Envelope, time.Time) error
+	SettleProviderCanceledDirectiveTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, runtimedelivery.CancellationReason, time.Time) (runtimeagentcontrol.DirectiveOperation, error)
 }
 
 type EffectPostgresOwner struct {

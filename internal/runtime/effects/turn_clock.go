@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
@@ -71,6 +72,10 @@ type TurnLifetimeStore interface {
 
 type CanceledDeliveryTurnStore interface {
 	SettleCanceledDeliveryTurn(context.Context, Attempt) (deliverylifecycle.ClaimCommit, error)
+}
+
+type CanceledDirectiveTurnStore interface {
+	SettleCanceledDirectiveTurn(context.Context, Attempt) (agentcontrol.DirectiveOperation, error)
 }
 
 type turnTimeoutContextKey struct{}

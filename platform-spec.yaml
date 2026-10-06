@@ -4782,7 +4782,8 @@ handler_specification:
           Once enumeration is closed, each direct ordinal contributes exactly one disposition: succeeded when every
           concrete route delivered; dead_lettered when every concrete route is terminal and at least one dead-lettered;
           no_route when canonical route settlement created no deliveries; semantic_rejected from the durable ordinal
-          outcome; or canceled for the unissued suffix terminalized by cancellation. Pending, in-progress, and retryable
+          outcome; or canceled for the unissued suffix terminalized by cancellation or a fully terminal routed member
+          containing an authored canceled delivery and no dead-letter outcome. Pending, in-progress, and retryable
           routes keep the barrier armed. The five counts must be nonnegative and sum exactly to the intent cardinality.
           Descendant fan-outs and unrelated intents never contribute.
         completion: >-
@@ -16520,6 +16521,11 @@ platform_tables:
         settlement, the keyed API completion projection, and recovery. api_idempotency is
         a success projection only for this method. Event existence never proves execution
         or success. Transactions and locks must not span BoardStep.
+        Authored cancellation settles this existing operation as canceled with
+        an exact terminate or turn_timeout reason, without fabricating a delivery
+        or a successful API projection. Immutable accepted provider effects still
+        settle. Canceled operations retain their exact owner, no response/failure,
+        and closed execution lease; retry returns the same terminal evidence.
       ddl: |
         CREATE TABLE agent_directive_operations (
             operation_id               UUID PRIMARY KEY,
@@ -16541,7 +16547,8 @@ platform_tables:
             source                     TEXT NOT NULL,
             operator_id                TEXT,
             directive_event_id         UUID NOT NULL UNIQUE REFERENCES events(event_id),
-            state                      TEXT NOT NULL CHECK (state IN ('prepared', 'executing', 'executed', 'succeeded', 'failed', 'indeterminate')),
+            state                      TEXT NOT NULL CHECK (state IN ('prepared', 'executing', 'executed', 'succeeded', 'failed', 'indeterminate', 'canceled')),
+            cancellation_reason        TEXT CHECK (cancellation_reason IS NULL OR cancellation_reason IN ('terminate', 'turn_timeout')),
             execution_owner_id         TEXT,
             execution_lease_expires_at TIMESTAMPTZ,
             response                   JSONB,
@@ -16556,6 +16563,7 @@ platform_tables:
             CHECK (requested_run_id = resolved_run_id),
             CHECK ((state IN ('executed', 'succeeded')) = (response IS NOT NULL)),
             CHECK ((state IN ('failed', 'indeterminate')) = (failure IS NOT NULL)),
+            CHECK ((state = 'canceled' AND cancellation_reason IS NOT NULL AND execution_lease_expires_at IS NULL AND completed_at IS NOT NULL AND executed_at IS NULL) OR (state <> 'canceled' AND cancellation_reason IS NULL)),
             FOREIGN KEY (resolved_run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE INDEX idx_agent_directive_operations_active_key (method, actor_token_id, idempotency_key) WHERE idempotency_key IS NOT NULL,
             INDEX idx_agent_directive_operations_recovery (state, execution_lease_expires_at, updated_at),
@@ -16818,6 +16826,17 @@ platform_tables:
         does not become retry or dead-letter failure. Lost acknowledgment retries
         return the exact existing outcome. Canceled source history is lineage only,
         never executable fork replay and never a successful delivery.
+        Each process-local logical carrier owns one joinable timeout timer,
+        armed from acknowledged first-launch evidence, never authorization or a
+        later tool round. Only acknowledged exact authored intent cancels its
+        execution context; shutdown, stale authority and unrelated context
+        cancellation retain their distinct meanings. Finishing the carrier stops
+        and joins any in-flight timeout mutation before origin settlement.
+        Captured lifecycle provider tails and startup reconciliation consume the
+        same canceled-origin owner. An earlier physical tail cannot settle the
+        origin while another remains open, and retirement finalization retains
+        the complete captured set. Completion results preserve typed cancellation
+        evidence separately from the actual origin-settled acknowledgment.
       ddl: |
         CREATE TABLE runtime_agent_turn_lifetimes (
             turn_id UUID PRIMARY KEY,

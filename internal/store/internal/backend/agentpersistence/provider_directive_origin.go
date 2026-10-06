@@ -52,7 +52,7 @@ func providerDirectiveOriginPending(op runtimeagentcontrol.DirectiveOperation, o
 	switch op.State {
 	case runtimeagentcontrol.DirectiveOperationExecuting:
 		return true, nil
-	case runtimeagentcontrol.DirectiveOperationExecuted, runtimeagentcontrol.DirectiveOperationSucceeded, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate:
+	case runtimeagentcontrol.DirectiveOperationExecuted, runtimeagentcontrol.DirectiveOperationSucceeded, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate, runtimeagentcontrol.DirectiveOperationCanceled:
 		return false, nil
 	default:
 		return false, fmt.Errorf("directive turn origin has invalid state %q", op.State)
@@ -110,6 +110,9 @@ func (s *AgentPostgresOwner) SettleProviderDirectiveOriginTx(ctx context.Context
 		if op.State == state {
 			return nil
 		}
+		if err := requireDirectiveTurnUncanceled(ctx, tx, true, origin.OperationID); err != nil {
+			return err
+		}
 		if err := s.pipeline.TerminalizePipelineObligationTx(ctx, attempt, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 			return err
 		}
@@ -148,6 +151,9 @@ func (s *AgentSQLiteOwner) SettleProviderDirectiveOriginTx(ctx context.Context, 
 		}
 		if op.State == state {
 			return nil
+		}
+		if err := requireDirectiveTurnUncanceled(ctx, tx, false, origin.OperationID); err != nil {
+			return err
 		}
 		if err := s.pipeline.TerminalizePipelineObligationTx(ctx, attempt, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 			return err
