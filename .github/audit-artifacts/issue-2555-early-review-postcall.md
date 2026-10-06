@@ -23,8 +23,9 @@ compatibility behavior, driver fork or provider invocation is added.
 1. The existing conversation owns the response tool-call loop and its frozen
    fork dispatch, not the HTTP request. Registration preserves that authority.
 2. The target-native mock worker sends one authenticated tools/call through
-   `toolgateway.HTTPObservation`. `consumeRPCResponse` is the sole decoder and
-   response-attribution owner; `rpcResponseFailure` interprets only an exact-ID
+   `toolgateway.HTTPObservation`. `consumeRPCResponse` and its private
+   `decodeRPCResponse` step are the sole decoder and response-attribution owner;
+   `rpcResponseFailure` interprets only an exact-ID
    unambiguous error as a possible known pre-execution refusal. Discovery cannot
    execute an effect and may receive null-ID boot authentication refusal.
 3. MCP `executorForContext` selects the existing ordinary or fork snapshot/stub
@@ -97,3 +98,18 @@ with post-success projection uncertainty, selected sandbox projection ownership
 and response attribution. No new issue/node/POTENTIAL_ISSUES entry or broader
 framework is warranted. Final focused receipts and immutable source head are
 bound in the issue thread and swarm-docs evidence, not invented in this plan.
+
+## Complexity And Confinement Preservation
+
+The early-review correction does not waive the existing complexity ratchet.
+Private same-owner steps separate RPC decoding, container creation and exact
+stale-identity replacement. The transferred semantic-event observer keeps its
+one original selected-store read transaction, exact SQL order, predicates,
+failure admission and no-partial-evidence return while separating record facts
+from pipeline-receipt decoding. The served debug observer's fixed SQL selection
+is private; its query bytes, bounds, stage errors and presentation are unchanged.
+No public query/transaction callback or generic fixture capability is introduced.
+The descriptive authority registry records these exact private implementation
+findings; neither the debt baseline nor its collector or classifier is changed.
+Failed intermediate complexity/confinement receipts remain diagnostic evidence,
+not qualification credit. Only the final committed-head green checks count.
