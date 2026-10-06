@@ -22,6 +22,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 )
 
 type GatewayHooks struct {
@@ -361,14 +362,13 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		if toolIsKindInContext(ctx, toolName, toolcapabilities.KindEmit) {
 			if token := ContextTokenFromRequest(r); token != "" && g.hooks.MarkEmitKeyUsed != nil && g.hooks.MarkEmitKeyUsed(token, emitTurnDedupeKey(toolName, req.Params["arguments"])) {
+				duplicate := map[string]any{"ok": false, "reason": "duplicate emit already executed this turn"}
 				WriteRPCResult(w, req.ID, map[string]any{
 					"content": []map[string]any{{
 						"type": "text",
-						"text": ToolResultText(map[string]any{
-							"ok":     false,
-							"reason": "duplicate emit already executed this turn",
-						}),
+						"text": ToolResultText(duplicate),
 					}},
+					"_meta":   map[string]any{toolgateway.ProjectedResultMetaKey: duplicate},
 					"isError": false,
 				})
 				return
@@ -378,7 +378,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		var execErr error
 		if call, settled := llm.ToolOutputCallFromContext(ctx); settled {
 			identity, identityErr := call.Authorize(toolName, req.Params["arguments"], occurrence)
-			output, dedicated := g.executor.(llm.ToolOutputEventExecutor)
+			output, dedicated := g.executorForContext(ctx).(llm.ToolOutputEventExecutor)
 			if identityErr != nil || !dedicated {
 				execErr = g.newGatewayError(ErrCodeToolNotAllowed, "mcp.tools.call.output_authority", identityErr, nil)
 			} else {
@@ -419,7 +419,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		if g.hooks.AfterToolSuccess != nil {
 			g.hooks.AfterToolSuccess(ctx, r, toolName)
 		}
-		resultText, err := projectToolCallSuccessText(ctx, g.executorForContext(ctx), toolName, req.Params["arguments"], out)
+		projected, err := projectToolCallSuccessValue(ctx, g.executorForContext(ctx), toolName, req.Params["arguments"], out)
 		if err != nil {
 			// Execution already succeeded. Another round could replace a call
 			// whose effect committed even though its result could not be delivered.
@@ -439,7 +439,8 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result := map[string]any{
-			"content": []map[string]any{{"type": "text", "text": resultText}},
+			"content": []map[string]any{{"type": "text", "text": ToolResultText(projected)}},
+			"_meta":   map[string]any{toolgateway.ProjectedResultMetaKey: projected},
 			"isError": false,
 		}
 		if startupProbe != nil {
@@ -456,37 +457,37 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func projectToolCallSuccessText(ctx context.Context, executor runtimeGatewayExecutor, toolName string, input any, out any) (string, error) {
+func projectToolCallSuccessValue(ctx context.Context, executor runtimeGatewayExecutor, toolName string, input any, out any) (any, error) {
 	if out == nil {
-		return ToolResultText(nil), nil
+		return nil, nil
 	}
 	raw, err := json.Marshal(out)
 	if err != nil {
 		if toolIsRoleScopedTypedReadInContext(ctx, toolName) {
-			return "", toolresultpolicy.NewTypedReadResultMarshalError("mcp-gateway", "mcp.tools.call.result_project", toolName, err)
+			return nil, toolresultpolicy.NewTypedReadResultMarshalError("mcp-gateway", "mcp.tools.call.result_project", toolName, err)
 		}
-		return ToolResultText(out), nil
+		return nil, err
 	}
 	if toolIsRoleScopedTypedReadInContext(ctx, toolName) {
 		if len(raw) > toolresultpolicy.MaxCompleteTypedReadResultBytes {
-			return "", toolresultpolicy.NewTypedReadResultTooLargeError("mcp-gateway", "mcp.tools.call.result_project", toolName, len(raw))
+			return nil, toolresultpolicy.NewTypedReadResultTooLargeError("mcp-gateway", "mcp.tools.call.result_project", toolName, len(raw))
 		}
-		return ToolResultText(out), nil
+		return out, nil
 	}
 	if len(raw) <= toolCallRelayResultLimit(toolName, input) {
-		return ToolResultText(out), nil
+		return out, nil
 	}
 	writer, canRelay := executor.(OversizedToolResultRelayWriter)
 	if !runtimeReadFileFollowUpAllowedInContext(ctx) || !canRelay {
-		return ToolResultText(map[string]any{
+		return map[string]any{
 			"truncated": true,
 			"bytes":     len(raw),
 			"preview":   clampRunes(string(raw), maxToolResultPreviewRunes),
-		}), nil
+		}, nil
 	}
 	relay, err := writer.PersistOversizedToolResultRelay(ctx, toolName, raw)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	followUp := map[string]any{
 		"kind":        "runtime_read_file",
@@ -502,12 +503,12 @@ func projectToolCallSuccessText(ctx context.Context, executor runtimeGatewayExec
 	} else {
 		followUp["path"] = relay.Path
 	}
-	return ToolResultText(map[string]any{
+	return map[string]any{
 		"truncated": true,
 		"bytes":     len(raw),
 		"preview":   clampRunes(string(raw), maxToolResultPreviewRunes),
 		"follow_up": followUp,
-	}), nil
+	}, nil
 }
 
 func toolIsRoleScopedTypedReadInContext(ctx context.Context, name string) bool {
@@ -1054,7 +1055,7 @@ func mcpToolCallLogicalIdentitySegment(ctx context.Context, req RPCRequest) (str
 func mcpToolCallOccurrenceCoordinate(ctx context.Context, req RPCRequest) (string, error) {
 	_, lifecycleManaged := runtimeeffects.LifecycleTokenFromContext(ctx)
 	authority, authorityManaged := runtimeeffects.AuthorityFromContext(ctx)
-	if !lifecycleManaged && (!authorityManaged || (authority.Kind != runtimeeffects.AuthorityNormalAgent && authority.Kind != runtimeeffects.AuthoritySelectedContractFork && authority.Kind != runtimeeffects.AuthorityStartupProbe)) {
+	if !lifecycleManaged && (!authorityManaged || (authority.Kind != runtimeeffects.AuthorityNormalAgent && authority.Kind != runtimeeffects.AuthoritySelectedContractFork && authority.Kind != runtimeeffects.AuthorityStartupProbe && authority.Kind != runtimeeffects.AuthorityConversationForkChat)) {
 		return "", nil
 	}
 	meta, ok := req.Params["_meta"].(map[string]any)

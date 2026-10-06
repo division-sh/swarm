@@ -76,6 +76,24 @@ func (d *ForkChatToolDispatch) Execute(ctx context.Context, name string, input a
 	return nil, fmt.Errorf("forkchat tool %q is absent from the frozen sandbox", name)
 }
 
+func (d *ForkChatToolDispatch) ExecuteOutputEvent(ctx context.Context, name string, input any, identity ToolOutputEventIdentity) (any, error) {
+	if err := d.Validate(ctx); err != nil {
+		return nil, err
+	}
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+	for _, def := range d.ToolDefinitionsForActor(models.AgentConfig{}) {
+		if def.Name == name {
+			if output, ok := d.executor.(ToolOutputEventExecutor); ok {
+				return output.ExecuteOutputEvent(ctx, name, input, identity)
+			}
+			return nil, fmt.Errorf("frozen forkchat executor has no terminal-output boundary")
+		}
+	}
+	return nil, fmt.Errorf("forkchat output tool %q is absent from the frozen sandbox", name)
+}
+
 func (d *ForkChatToolDispatch) ToolDefinitionsForActor(models.AgentConfig) []ToolDefinition {
 	var tools []ToolDefinition
 	_ = canonicaljson.DecodePreservingNumberLexemes(d.definitions, &tools)

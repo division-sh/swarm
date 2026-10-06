@@ -59,14 +59,6 @@ func ReadVersionOneDeliveredSettlementCount(ctx context.Context, q queryer, deli
 	return count, err
 }
 
-func ReadIncompletePipelineHandoffCount(ctx context.Context, q queryer, runID string) (int, error) {
-	var count int
-	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
-		(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
-		(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&count)
-	return count, err
-}
-
 // Preserve the historical conjunction, exact lookup values and optional
 // subscriber-type semantics. This is evidence, never a work selector.
 func ReadServedDeliveryStatusCount(ctx context.Context, q queryer, postgres bool, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {

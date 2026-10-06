@@ -119,7 +119,7 @@ func TestServedDeliveryStatusCountRefusesRawCancelledClosedAndUnavailableOwnersB
 	}
 }
 
-	// Frozen pre-migration oracle; independent of the new reader and its query assembly.
+// Frozen pre-migration oracle; independent of the new reader and its query assembly.
 func servedDeliveryStatusCountOracle(ctx context.Context, db *sql.DB, backend, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {
 	where, args := []string{}, []any{}
 	switch backend {

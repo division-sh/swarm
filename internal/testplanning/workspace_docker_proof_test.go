@@ -35,6 +35,13 @@ func TestWorkspaceDockerProofsHaveProvisionedHostedOwner(t *testing.T) {
 			}
 		})
 	}
+	public := "go test ./internal/releasee2e -run '^TestWorkspaceMCPCompiledDocker(Conformance|DoctorAndLiveBootRefusal)$' -count=1 -timeout=4m -v"
+	worker := "go test ./internal/runtime/workspace -run '^TestWorkerRealDocker' -count=1 -timeout=2m -v"
+	changed := strings.Replace(string(raw), public, worker, 1)
+	changed = strings.Replace(changed, worker+"\n          "+worker, worker+"\n          "+public, 1)
+	if changed == string(raw) || validateWorkspaceDockerHostedProof([]byte(changed)) == nil {
+		t.Fatal("worker fixtures before default-topology public proof were accepted")
+	}
 }
 
 func validateWorkspaceDockerHostedProof(raw []byte) error {
@@ -56,7 +63,7 @@ func validateWorkspaceDockerHostedProof(raw []byte) error {
 		return fmt.Errorf("missing native Ubuntu workspace proof job")
 	}
 	command := regexp.MustCompile(`go test ./([a-z0-9/]+) -run '([^']+)' -count=1`)
-	imageBuilt, rootsChecked := false, 0
+	imageBuilt, publicChecked, rootsChecked := false, false, 0
 	for _, step := range job.Steps {
 		if step.If != "" {
 			continue
@@ -68,6 +75,9 @@ func validateWorkspaceDockerHostedProof(raw []byte) error {
 			continue
 		}
 		for _, match := range command.FindAllStringSubmatch(step.Run, -1) {
+			if match[1] == "internal/runtime/workspace" && !publicChecked {
+				return fmt.Errorf("worker fixture runs before public default-topology Docker proof")
+			}
 			selection, err := regexp.Compile(match[2])
 			if err != nil {
 				return err
@@ -76,6 +86,9 @@ func validateWorkspaceDockerHostedProof(raw []byte) error {
 				if strings.HasPrefix(reason, "real Docker proof required separately by the workspace-image CI job;") && selection.MatchString(root) {
 					rootsChecked++
 				}
+			}
+			if match[1] == "internal/releasee2e" && selection.MatchString("TestWorkspaceMCPCompiledDockerConformance") && selection.MatchString("TestWorkspaceMCPCompiledDockerDoctorAndLiveBootRefusal") {
+				publicChecked = true
 			}
 		}
 	}

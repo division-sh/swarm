@@ -1222,3 +1222,44 @@ Those supplements are not a local full or lifecycle pass. New core remains
 subject to the observer ruling's preceding real Docker proof. A firewall-
 blocked local probe or skip earns no transport credit; hosted Ubuntu default-
 network acceptance and exact-head CI/full remain mandatory before closure.
+
+## Cycle-1 Closure Amendment
+
+Reviewer-g2580 comments6024594677/6024600979 bind these additional rows to
+the existing class; no separate owner, compatibility path or follow-up slice.
+
+| ID | Manifestation | Canonical owner and required proof |
+| --- | --- | --- |
+| PC52 | Valid text/nil results are rejected and JSON-looking strings change type after execution. | The existing MCP result projector publishes an explicit typed projected value, separate from display text. The native mock consumer never infers type from text. Actual gateway/worker/conversation string, nil, JSON-looking string and structured-value controls; malformed/missing envelopes and projection failures stay uncertain. |
+| PC53 | Fork registration drops settled terminal-output identity. | Server-side turn registration carries the exact settled output call. Gateway authorizes name/arguments/occurrence and selects only the frozen fork dispatch/output executor. Public both-store terminal emit/replay/recovery/noninterference plus nonterminal snapshot and wrong-call controls. No live executor fallback. |
+| PC54 | Incomplete handoff and fixture pipeline reads bypass canonical SQL ownership. | Move the whole three-arm handoff read into the existing pipeline-persistence owner, avoiding its delivery dependency cycle. Fixture scope/receipt reads consume canonical typed reads in the same selected snapshot. Pipeline-obligation and existing five guards, both-store exact/count/missing/late-error/no-write proofs. |
+| PC55 | Hosted worker fixtures omit declared network prerequisites before Q01. | Each fixture consumes existing workspace EnsurePrereqs. Public default-topology Q01 runs first on clean Ubuntu before any fixture-created network. Minimal CI setup/order correction, negative ownership checks and actual hosted receipt; no network override or deadline/assertion change. |
+| PC56 | Hosted mock-frame call cancels at5s without attribution. | Retain red evidence; exact focused base/head controls and failure evidence classify or reproduce it. No budget waiver or passing-focused-as-fix claim. |
+
+PC53 also audits the existing occurrence reader: it excluded fork-chat
+authority and erased the transmitted occurrence before settled-call validation.
+The same reader now requires the exact fork call coordinate. The existing
+fork snapshot/stub capability owner classifies only emit_event as terminal;
+other sandbox side effects and reads remain nonterminal. A dedicated retained
+restart supplement preserves all original public sandbox/source-continuation
+assertions and adds exact output replay; fresh boot owns separate run/event
+facts, so replay noninterference is fenced after that boot completes.
+
+PC56 classification: unchanged focused master and candidate controls each
+pass10/10, but do not explain the red by themselves. A held-target fixture
+waits for the real session heartbeat, without sleeps/retries, and the original
+one-second lease fails renewal with ErrSessionLeased and cancels before model
+dispatch at5s in3/3 runs. A renewable lease succeeds3/3 with canonical frame
+and settlement. The original frame root now uses the same valid minute lease
+as native mock siblings; no test deadline or runtime heartbeat/cancellation
+policy changes. Exact original host-load circumstances are not recoverable.
+The controlled race run also exposed the same mock heartbeat diagnostic
+closure reading a context variable while prepareCompletionContext replaces
+it. Its callback now captures the already-admitted heartbeat context once;
+no authority, cancellation, heartbeat interval or outcome policy changes.
+
+Rebase onto merged06018d2e1 preserves B's test-only owner/census/fixture
+cutover, paid debt and specification notes. Duplicate revision counter is
+identical upstream; only attribution comment conflicted. New production
+repairs above require fresh core at the final head; the user's test-only
+rebase fast path no longer applies. No server2 run before allocation.

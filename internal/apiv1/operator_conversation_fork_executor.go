@@ -206,6 +206,26 @@ func (e *conversationForkChatToolExecutor) Execute(ctx context.Context, name str
 	}
 }
 
+func (e *conversationForkChatToolExecutor) ExecuteOutputEvent(ctx context.Context, name string, input any, identity runtimellm.ToolOutputEventIdentity) (any, error) {
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	canonical := conversationForkChatCanonicalToolName(strings.TrimSpace(name))
+	if !conversationForkChatIsSideEffectTool(e.prepared.SandboxPolicy, canonical) {
+		return nil, fmt.Errorf("forkchat output tool %q is not in the frozen side-effect policy", name)
+	}
+	return e.record(name, input, map[string]any{
+		"status": "stubbed", "owner": e.prepared.SandboxPolicy.Owner,
+		"write_policy":   e.prepared.SandboxPolicy.WritePolicy,
+		"requested_tool": canonical, "requested_tool_name": strings.TrimSpace(name),
+		"live_mutation": false, "reason": "forkchat sandbox records side-effecting tools as fork-local facts only",
+		"event_id": identity.EventID(), "created_at": identity.CreatedAt(),
+	})
+}
+
 func (e *conversationForkChatToolExecutor) ToolCapabilitiesForActor(_ runtimeactors.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	for _, name := range names {
@@ -213,7 +233,11 @@ func (e *conversationForkChatToolExecutor) ToolCapabilitiesForActor(_ runtimeact
 		if name == "" {
 			continue
 		}
-		caps = append(caps, toolcapabilities.Capability{Name: name, Kind: toolcapabilities.KindStandard, Visible: true, Callable: true})
+		kind := toolcapabilities.KindStandard
+		if conversationForkChatCanonicalToolName(name) == "emit_event" {
+			kind = toolcapabilities.KindEmit
+		}
+		caps = append(caps, toolcapabilities.Capability{Name: name, Kind: kind, Visible: true, Callable: true})
 	}
 	return toolcapabilities.NewSet(caps)
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -62,7 +63,8 @@ func (r *MockRuntime) executeTransportTool(ctx context.Context, session *Session
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
-		IsError      bool `json:"isError"`
+		IsError      bool                       `json:"isError"`
+		Meta         map[string]json.RawMessage `json:"_meta"`
 		RuntimeError *struct {
 			Failure *failures.Envelope `json:"failure"`
 		} `json:"runtimeError"`
@@ -77,7 +79,7 @@ func (r *MockRuntime) executeTransportTool(ctx context.Context, session *Session
 		return nil, failures.New(failures.ClassInternalFailure, "mock_mcp_tool_failed", "mock-python-adapter", "execute_tool", map[string]any{"tool": call.Name})
 	}
 	var value any
-	if err := json.Unmarshal([]byte(wire.Content[0].Text), &value); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(wire.Meta[toolgateway.ProjectedResultMetaKey], &value); err != nil {
 		return nil, failures.New(failures.ClassOutcomeUncertain, "workspace_tool_outcome_uncertain", "mock-python-adapter", "execute_tool", map[string]any{"tool": call.Name, "status": "result_value_invalid"})
 	}
 	return value, nil

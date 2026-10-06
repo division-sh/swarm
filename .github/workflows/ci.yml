@@ -277,8 +277,8 @@ jobs:
         env:
           SWARM_TEST_WORKSPACE_MCP_DOCKER: "1"
         run: |
-          go test ./internal/runtime/workspace -run '^TestWorkerRealDocker' -count=1 -timeout=2m -v
           go test ./internal/releasee2e -run '^TestWorkspaceMCPCompiledDocker(Conformance|DoctorAndLiveBootRefusal)$' -count=1 -timeout=4m -v
+          go test ./internal/runtime/workspace -run '^TestWorkerRealDocker' -count=1 -timeout=2m -v
       - name: Prove no-selector SQLite local run
         run: |
           payload=$(mktemp)

@@ -28,6 +28,45 @@ import (
 
 const pipelineReplayClaimNamespace = "swarm:pipeline-replay:"
 
+// This is a fixed handoff witness, not continuation eligibility or transfer.
+func ReadIncompletePipelineHandoffCount(ctx context.Context, q rowQueryer, runID string) (int, error) {
+	var count int
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
+		(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
+		(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&count)
+	return count, err
+}
+
+type PipelineReceiptStorage struct {
+	Count           int
+	Outcome, Reason string
+	Failure         *runtimefailures.Envelope
+}
+
+func ReadPipelineReceiptStorage(ctx context.Context, q rowQueryer, eventID string) (PipelineReceiptStorage, error) {
+	var out PipelineReceiptStorage
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts
+		WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, eventID).Scan(&out.Count); err != nil {
+		return PipelineReceiptStorage{}, err
+	}
+	if out.Count == 0 {
+		return out, nil
+	}
+	var failure sql.NullString
+	if err := q.QueryRowContext(ctx, `SELECT outcome, COALESCE(reason_code, ''), CAST(failure AS TEXT) FROM event_receipts
+		WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, eventID).Scan(&out.Outcome, &out.Reason, &failure); err != nil {
+		return PipelineReceiptStorage{}, err
+	}
+	if failure.Valid {
+		var err error
+		out.Failure, err = decodeStoredFailure(failure.String)
+		if err != nil {
+			return PipelineReceiptStorage{}, err
+		}
+	}
+	return out, nil
+}
+
 func pipelineObligationMutationError[T any](result mutationprotocol.Result[T]) error {
 	if err := result.Err(); err != nil {
 		return err

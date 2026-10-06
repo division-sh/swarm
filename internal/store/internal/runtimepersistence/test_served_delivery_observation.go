@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
 // Transferred from B70ab4d333 /888cb4958 under6010346696. The three OR arms
@@ -21,7 +22,7 @@ func ReadServedIncompletePipelineHandoffCountForTest(ctx context.Context, select
 	var count int
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		count, err = delivery.ReadIncompletePipelineHandoffCount(ctx, tx, runID)
+		count, err = pipelinepersistence.ReadIncompletePipelineHandoffCount(ctx, tx, runID)
 		return err
 	})
 	if err != nil {

@@ -23,7 +23,7 @@ func TestMockConversationTransportUncertaintyCannotBecomeToolFeedback(t *testing
 	}{
 		{"committed_call_lost_response", "", true, 0},
 		{"committed_call_malformed_result", `{"jsonrpc":"2.0","id":1,"result":{"content":null}}`, true, 0},
-		{"committed_call_malformed_value", `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"not JSON"}]}}`, true, 0},
+		{"committed_call_missing_typed_value", `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"valid text"}]}}`, true, 0},
 		{"committed_call_foreign_error", `{"jsonrpc":"2.0","id":2,"error":{"code":-32001}}`, true, 0},
 		{"committed_call_http_refusal", `{"jsonrpc":"2.0","id":1,"error":{"code":-32001}}`, true, http.StatusUnauthorized},
 		{"committed_call_projection_failure", projectedUncertainReply(t), true, 0},

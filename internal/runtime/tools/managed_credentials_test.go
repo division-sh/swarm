@@ -305,8 +305,8 @@ func TestExecutorHTTPToolManagedCredentialServedAndMCPTransportsUseSameOwner(t *
 	actor := managedCredentialActor()
 	actor.Identity = agentidentitytest.RuntimeForRun(t, "33333333-3333-4333-8333-333333333333", actor.ID, "managed-credential-gateway", "worker", "instance-1", actor.FlowPath)
 	gateway := runtimemcp.NewGateway(exec, "gateway-token", runtimemcp.GatewayHooks{
-		WithActor:        models.WithActor,
-		ActorFromContext: models.ActorFromContext,
+		WithActor:          models.WithActor,
+		ActorFromContext:   models.ActorFromContext,
 		ResolveTurnContext: fixedTurnContextResolver(t, actor),
 	})
 

@@ -194,11 +194,13 @@ func (r *TurnContextRegistry) RegisterConversationForkSandboxTurnContext(ctx con
 	logicalIdentity, hasLogicalIdentity := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
 	source, hasSource := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	inbound, hasInbound := runtimebus.InboundEventFromContext(ctx)
+	outputCall, hasOutputCall := llm.ToolOutputCallFromContext(ctx)
 	r.put(token, TurnContext{
 		Presentation: channelactivation.BindPresentation(ctx, now.Add(ttl)), RunID: runtimecorrelation.RunIDFromContext(ctx),
 		SourceArtifactFact: source, HasSourceArtifactFact: hasSource, Inbound: inbound, HasInbound: hasInbound,
 		Actor: actor, EffectController: controller, EffectAuthority: authority, HasEffectAuthority: true,
 		LogicalIdentity: logicalIdentity, HasLogicalIdentity: hasLogicalIdentity,
+		ToolOutputCall: outputCall, HasToolOutputCall: hasOutputCall,
 		ForkSandboxAllowed: normalizeForkSandboxTools(allowedTools), ForkSandboxDispatch: dispatch, CreatedAt: now, ExpiresAt: now.Add(ttl),
 	})
 	return token
