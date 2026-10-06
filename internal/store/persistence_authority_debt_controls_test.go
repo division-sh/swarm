@@ -88,11 +88,12 @@ func TestPersistenceAuthorityDebtBaselineRejectsCorruptionAndDuplicateRows(t *te
 
 func TestPersistenceAuthorityDebtCensusRetainsAliasesCallbacksAndOpaqueConstruction(t *testing.T) {
 	for name, source := range map[string]string{
-		"alias":              `package probe;import "database/sql";type Alias=sql.DB;func legacy(db *Alias){db.QueryRow("one")}`,
-		"embedding":          `package probe;import "database/sql";type Carrier struct{*sql.DB};func legacy(db Carrier){db.QueryRow("one")}`,
-		"named-callback":     `package probe;import("context";"database/sql");type Callback func(context.Context,*sql.Tx)error;func legacy(cb Callback){_ = cb}`,
-		"context-protocol":   `package probe;import("context";"database/sql");func legacy(ctx context.Context,tx *sql.Tx){_ = context.WithValue(ctx,"tx",tx)}`,
-		"opaque-constructor": `package probe;type SQLiteRuntimeStore struct{};func replacement()*SQLiteRuntimeStore{return nil};func RequireRun(){factory:=replacement;_ = factory()}`,
+		"alias":                 `package probe;import "database/sql";type Alias=sql.DB;func legacy(db *Alias){db.QueryRow("one")}`,
+		"embedding":             `package probe;import "database/sql";type Carrier struct{*sql.DB};func legacy(db Carrier){db.QueryRow("one")}`,
+		"named-callback":        `package probe;import("context";"database/sql");type Callback func(context.Context,*sql.Tx)error;func legacy(cb Callback){_ = cb}`,
+		"context-protocol":      `package probe;import("context";"database/sql");func legacy(ctx context.Context,tx *sql.Tx){_ = context.WithValue(ctx,"tx",tx)}`,
+		"opaque-constructor":    `package probe;type SQLiteRuntimeStore struct{};func replacement()*SQLiteRuntimeStore{return nil};func RequireRun(){factory:=replacement;_ = factory()}`,
+		"raw-input-composition": `package probe;import "database/sql";type SQLiteRuntimeStore struct{};func compose(schema,backend *sql.DB)*SQLiteRuntimeStore{return nil};func legacy(schema,backend *sql.DB){_ = compose(schema,backend)}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := "internal/runtime/legacy_test.go"
