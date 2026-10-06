@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -44,6 +45,10 @@ type providerDrainDirectiveOwner interface {
 	SettleProviderCanceledDirectiveTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, runtimedelivery.CancellationReason, time.Time) (runtimeagentcontrol.DirectiveOperation, error)
 }
 
+type canceledTurnPublicationOwner interface {
+	CommitPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
+}
+
 type EffectPostgresOwner struct {
 	backend        *postgresbackend.Backend
 	requireCurrent func() error
@@ -52,6 +57,7 @@ type EffectPostgresOwner struct {
 	llm            *storellm.LLMPostgresOwner
 	delivery       providerDrainDeliveryOwner
 	directives     providerDrainDirectiveOwner
+	publications   canceledTurnPublicationOwner
 }
 
 type EffectSQLiteOwner struct {
@@ -62,6 +68,23 @@ type EffectSQLiteOwner struct {
 	llm            *storellm.LLMSQLiteOwner
 	delivery       providerDrainDeliveryOwner
 	directives     providerDrainDirectiveOwner
+	publications   canceledTurnPublicationOwner
+}
+
+func (s *EffectPostgresOwner) BindCanceledTurnPublication(owner canceledTurnPublicationOwner) error {
+	if s == nil || owner == nil || s.publications != nil {
+		return errors.New("canceled-turn PostgreSQL publication owner must be bound exactly once")
+	}
+	s.publications = owner
+	return nil
+}
+
+func (s *EffectSQLiteOwner) BindCanceledTurnPublication(owner canceledTurnPublicationOwner) error {
+	if s == nil || owner == nil || s.publications != nil {
+		return errors.New("canceled-turn SQLite publication owner must be bound exactly once")
+	}
+	s.publications = owner
+	return nil
 }
 
 func (s *EffectPostgresOwner) BindProviderDrainDirectives(owner providerDrainDirectiveOwner) error {

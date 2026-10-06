@@ -16822,6 +16822,14 @@ platform_tables:
         all origin-bound provider attempts have recorded terminal physical facts.
         It commits the delivery's canceled outcome and logical-turn settlement
         together. Ordinary success/failure cannot bypass an acknowledged intent.
+        The named CommitCanceledTurn operation consumes an already-admitted
+        timeout reaction publication plan and commits its event, routing and
+        pipeline obligations in that same origin-settlement transaction. The
+        reaction must match the persisted declaration, cause identity and run.
+        Missing or foreign reaction evidence refuses the entire mutation. Its
+        acknowledged result carries the original canceled origin and exact
+        committed publication for owned post-commit dispatch; known rollback
+        carries neither, and exact retry cannot append a second reaction.
         Immutable response, spend and uncertainty evidence survive; cancellation
         does not become retry or dead-letter failure. Lost acknowledgment retries
         return the exact existing outcome. Canceled source history is lineage only,

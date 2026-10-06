@@ -70,6 +70,7 @@ func settleCanceledDeliveryTurn(ctx context.Context, mutation *mutationprotocol.
 
 type canceledTurnSettlementFacts struct {
 	turnID   string
+	intent   runtimeeffects.TurnCancellation
 	reason   deliverylifecycle.CancellationReason
 	now      time.Time
 	duration time.Duration
@@ -141,7 +142,7 @@ func prepareCanceledTurnSettlementTx(ctx context.Context, tx *sql.Tx, postgres b
 	if err != nil || !valid {
 		return canceledTurnSettlementFacts{}, fmt.Errorf("canceled turn settlement has no database time")
 	}
-	facts := canceledTurnSettlementFacts{turnID: turnID, reason: cancellation, now: now}
+	facts := canceledTurnSettlementFacts{turnID: turnID, intent: intent, reason: cancellation, now: now}
 	if first, valid, err := sqliteTimeValue(launched); err != nil {
 		return canceledTurnSettlementFacts{}, err
 	} else if valid && now.After(first) {

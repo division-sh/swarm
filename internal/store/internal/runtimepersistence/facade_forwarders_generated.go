@@ -194,6 +194,10 @@ func (s *PostgresStore) CommitAPIEventPublication(ctx context.Context, command b
 	return s.eventPostgresOwner.CommitAPIEventPublication(ctx, command)
 }
 
+func (s *PostgresStore) CommitCanceledTurn(ctx context.Context, command effects.CanceledTurnCommand) (effects.CanceledTurnCommit, error) {
+	return s.effectPostgresOwner.CommitCanceledTurn(ctx, command)
+}
+
 func (s *PostgresStore) CommitFlowInstanceActivation(ctx context.Context, command bus.FlowInstanceActivationCommand) (pipeline.CommittedFlowInstanceActivation, error) {
 	return s.pipelinePostgresOwner.CommitFlowInstanceActivation(ctx, command)
 }
@@ -1448,6 +1452,10 @@ func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx co
 
 func (s *SQLiteRuntimeStore) CommitAPIEventPublication(ctx context.Context, command bus.APIEventPublicationCommand) (bus.CommittedAPIEventPublication, error) {
 	return s.eventSQLiteOwner.CommitAPIEventPublication(ctx, command)
+}
+
+func (s *SQLiteRuntimeStore) CommitCanceledTurn(ctx context.Context, command effects.CanceledTurnCommand) (effects.CanceledTurnCommit, error) {
+	return s.effectSQLiteOwner.CommitCanceledTurn(ctx, command)
 }
 
 func (s *SQLiteRuntimeStore) CommitFlowInstanceActivation(ctx context.Context, command bus.FlowInstanceActivationCommand) (pipeline.CommittedFlowInstanceActivation, error) {
