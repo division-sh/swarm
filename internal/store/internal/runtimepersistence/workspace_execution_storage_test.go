@@ -51,6 +51,15 @@ func TestWorkspaceExecutionObserversRefuseNonOwnersCancelledAndClosedBothStores(
 		{"source-domain", func(ctx context.Context, owner any, id string) (any, error) {
 			return ReadSelectedForkSourceDomainForTest(ctx, owner, id)
 		}, map[string]SelectedForkStorageTableSnapshot(nil)},
+		{"authored-mutation", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedForkAuthoredMutationForTest(ctx, owner, id, id, id)
+		}, ""},
+		{"version-one-settlement", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadVersionOneDeliveredSettlementCountForTest(ctx, owner, id)
+		}, 0},
+		{"effect-failures", func(ctx context.Context, owner any, _ string) (any, error) {
+			return ReadWorkspaceEffectFailuresForTest(ctx, owner)
+		}, []WorkspaceEffectFailureStorage(nil)},
 	}
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
