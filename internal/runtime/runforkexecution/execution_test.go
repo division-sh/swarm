@@ -2195,7 +2195,7 @@ fi
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002303, 0).UTC()
-	seedSelectedClaudeExecutionSource(t, ctx, backend, db, selected, loaded, sourceRunID, sourceEventID, at)
+	seedSelectedClaudeExecutionSource(t, ctx, selected, loaded, sourceRunID, sourceEventID, at)
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
 		Owner: owner, SourceLoader: loader,

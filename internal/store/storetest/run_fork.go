@@ -14,6 +14,17 @@ func ReadSelectedForkApplicationStorageSnapshot(ctx context.Context, selected an
 	return private.ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
 }
 
+func ReadSelectedForkRunBundleHash(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadSelectedForkRunBundleHashForTest(ctx, selected, runID)
+}
+
+func CaptureRunForkSnapshot(t testing.TB, ctx context.Context, selected any, runID string) {
+	t.Helper()
+	if err := private.CaptureRunForkSnapshotForTest(ctx, selected, runID); err != nil {
+		t.Fatalf("capture canonical run-fork snapshot: %v", err)
+	}
+}
+
 // RequireRunForkReplayResumeBlocker inspects the store's typed refusal without
 // turning its private error representation into a production API.
 func RequireRunForkReplayResumeBlocker(t testing.TB, err error, code, fact string) {

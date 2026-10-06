@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -49,32 +49,29 @@ func (l nativeSelectedCrashLoader) LoadRunForkSelectedContractSourceForRequest(c
 func TestSelectedForkNativeEmitProcessDeathBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var db *sql.DB
 			var selected startupownership.Store
 			var construct func() SelectedContractExecutionOwner
 			var dsn string
 			if backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStore(t)
-				db, selected = storetest.Database(s), s
-				var sequence int
-				var name string
-				if err := db.QueryRow(`PRAGMA database_list`).Scan(&sequence, &name, &dsn); err != nil {
-					t.Fatal(err)
-				}
+				selected, dsn = s, s.Path()
 				construct = func() SelectedContractExecutionOwner { return newSelectedContractSQLiteExecutionOwnerForTest(t, s) }
 			} else {
-				dsn, db, _ = testutil.StartPostgres(t)
-				s := storetest.AdmitPostgresRuntimeStore(t, db)
+				dsn = testutil.StartPostgresDSN(t)
+				s, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
 				selected = s
 				construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 			}
 			checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, "native_before_activation")
-			requireNativeSelectedForkEmit(t, db, checkpoint.ForkRun)
-			var state, status string
-			if err := db.QueryRow(`SELECT e.state,r.status FROM run_fork_selected_contract_runtime_executions e JOIN runs r ON r.run_id=e.fork_run_id WHERE r.run_id=$1`, checkpoint.ForkRun).Scan(&state, &status); err != nil || state != "quiesced" || status != "paused" {
-				t.Fatalf("crash did not retain the unactivated selected execution: state=%s status=%s err=%v", state, status, err)
+			requireNativeSelectedForkEmit(t, selected, checkpoint.ForkRun)
+			state, err := storetest.ReadSelectedExecutionStorage(context.Background(), selected, checkpoint.ForkRun)
+			if err != nil || state.State != "quiesced" || state.RunStatus != "paused" {
+				t.Fatalf("crash did not retain the unactivated selected execution: state=%+v err=%v", state, err)
 			}
-			before := selectedPreparationDatabaseSnapshot(t, db, backend)
+			before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), selected)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for i := 0; i < 2; i++ {
 				t.Run("restart-"+strconv.Itoa(i+1), func(t *testing.T) {
 					ctx := runForkTestContext(t)
@@ -88,8 +85,11 @@ func TestSelectedForkNativeEmitProcessDeathBothStores(t *testing.T) {
 					if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
 						t.Fatalf("native selected recovery: %+v err=%v", recovered, err)
 					}
-					requireNativeSelectedForkEmit(t, db, checkpoint.ForkRun)
-					after := selectedPreparationDatabaseSnapshot(t, db, backend)
+					requireNativeSelectedForkEmit(t, selected, checkpoint.ForkRun)
+					after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+					if err != nil {
+						t.Fatal(err)
+					}
 					for _, table := range []string{"events", "entity_state", "entity_mutations", "run_fork_selected_contract_executions"} {
 						if !reflect.DeepEqual(before[table], after[table]) {
 							t.Errorf("native selected recovery repeated business work in %s", table)
@@ -100,53 +100,64 @@ func TestSelectedForkNativeEmitProcessDeathBothStores(t *testing.T) {
 					}
 				})
 			}
-			var generations int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, checkpoint.ForkRun).Scan(&generations); err != nil || generations != 1 {
-				t.Fatalf("native selected recovery reissued execution: count=%d err=%v", generations, err)
-			}
-			if err := db.QueryRow(`SELECT e.state,r.status FROM run_fork_selected_contract_runtime_executions e JOIN runs r ON r.run_id=e.fork_run_id WHERE r.run_id=$1`, checkpoint.ForkRun).Scan(&state, &status); err != nil || state != "quiesced" || status != "paused" {
-				t.Fatalf("native selected recovery did not withdraw executable authority: state=%s status=%s err=%v", state, status, err)
+			state, err = storetest.ReadSelectedExecutionStorage(context.Background(), selected, checkpoint.ForkRun)
+			if err != nil || state.Occurrences != 1 || state.State != "quiesced" || state.RunStatus != "paused" {
+				t.Fatalf("native selected recovery reissued execution or retained executable authority: state=%+v err=%v", state, err)
 			}
 		})
 	}
 }
 
-func requireNativeSelectedForkEmit(t *testing.T, db *sql.DB, runID string) {
+func requireNativeSelectedForkEmit(t *testing.T, selected startupownership.Store, runID string) {
 	t.Helper()
-	var emitted, turns, settled, projected, delivered int
-	for _, query := range []struct {
-		text string
-		into *int
-	}{
-		{`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='worker/task.completed'`, &emitted},
-		{`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND agent_id='test-agent' AND execution_mode='mock'`, &turns},
-		{`SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id WHERE t.run_id=$1 AND t.agent_id='test-agent' AND a.state='settled'`, &settled},
-		{`SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id WHERE t.run_id=$1 AND a.completion_projection_phase IS NOT NULL`, &projected},
-		{`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND subscriber_id='test-agent' AND status='delivered'`, &delivered},
-	} {
-		if err := db.QueryRow(query.text, runID).Scan(query.into); err != nil {
-			t.Fatal(err)
+	ctx := context.Background()
+	emitted, err := storetest.ReadLifecycleEventCardinality(ctx, selected, runID, "worker/task.completed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnRows, err := storetest.ReadManagedAgentTurnStorage(ctx, selected, runID, "test-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var turns []storetest.ManagedAgentTurnStorageRow
+	for _, row := range turnRows {
+		if row.ExecutionMode == "mock" {
+			turns = append(turns, row)
 		}
+	}
+	completion, err := storetest.ReadManagedTurnEffectStorage(ctx, selected, runID, "test-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := storetest.ReadManagedDeliveryStorage(ctx, selected, runID, "test-agent")
+	if err != nil {
+		t.Fatal(err)
 	}
 	// A terminal emit ends this turn. Selected-fork completion does not acquire
 	// the normal-delivery response-continuation projection owner.
-	if emitted != 1 || turns != 1 || settled != 1 || projected != 0 || delivered != 1 {
-		t.Fatalf("native selected transport cardinality emit=%d turns=%d settled=%d projected=%d delivered=%d", emitted, turns, settled, projected, delivered)
+	if emitted != 1 || len(turns) != 1 || completion.Settled != 1 || completion.Projected != 0 || delivery.Delivered != 1 {
+		t.Fatalf("native selected transport cardinality emit=%d turns=%d settled=%d projected=%d delivered=%d", emitted, len(turns), completion.Settled, completion.Projected, delivery.Delivered)
 	}
-	var payloadRaw, callsRaw []byte
-	var sessionID string
-	if err := db.QueryRow(`SELECT e.payload FROM events e JOIN events p ON p.event_id=e.source_event_id WHERE e.run_id=$1 AND p.run_id=$1 AND e.event_name='worker/task.completed' AND p.event_name='task.assigned'`, runID).Scan(&payloadRaw); err != nil {
-		t.Fatalf("native selected emit lost its exact fork-local cause: %v", err)
+	reader := selected.(interface {
+		ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
+	})
+	page, err := reader.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runID, EventName: "worker/task.completed"}, Limit: 2})
+	if err != nil || len(page.Events) != 1 || page.NextCursor != "" {
+		t.Fatalf("native selected emit lost its exact cardinality: %+v %v", page, err)
 	}
+	event := storetest.LoadCanonicalEventRecord(t, ctx, selected, page.Events[0].EventID)
+	parent := storetest.LoadCanonicalEventRecord(t, ctx, selected, event.ParentEventID())
+	if event.RunID() != runID || parent.RunID() != runID || parent.Type() != "task.assigned" || parent.ID() != turns[0].TriggerEventID {
+		t.Fatalf("native selected emit lost its exact fork-local cause: event=%+v parent=%+v err=%v", event, parent, err)
+	}
+	payloadRaw := event.Payload()
 	var payload struct {
 		Result string `json:"fork_result"`
 	}
 	if err := json.Unmarshal(payloadRaw, &payload); err != nil || payload.Result != "selected-native-once" {
 		t.Fatalf("native selected emission is not the exact tool output: %s, %v", payloadRaw, err)
 	}
-	if err := db.QueryRow(`SELECT tool_calls,session_id FROM agent_turns WHERE run_id=$1 AND agent_id='test-agent' AND execution_mode='mock'`, runID).Scan(&callsRaw, &sessionID); err != nil {
-		t.Fatal(err)
-	}
+	callsRaw, sessionID := turns[0].ToolCalls, turns[0].SessionID
 	var calls []llm.ToolCall
 	if err := json.Unmarshal(callsRaw, &calls); err != nil || len(calls) != 1 || calls[0].Name != "emit_task_completed" || sessionID == "" {
 		t.Fatalf("native selected completion lost its exact call/session: %s, %q, %v", callsRaw, sessionID, err)

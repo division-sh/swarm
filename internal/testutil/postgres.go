@@ -42,6 +42,13 @@ func StartEmptyPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	return startPostgresDatabase(t, false)
 }
 
+// StartEmptyPostgresDSN preserves empty-store admission without exporting its pool.
+func StartEmptyPostgresDSN(t *testing.T) string {
+	t.Helper()
+	dsn, _, _ := startPostgresDatabase(t, false)
+	return dsn
+}
+
 func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, func()) {
 	t.Helper()
 	connection, err := testpostgres.ConnectionFromEnvironment()

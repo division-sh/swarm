@@ -91,7 +91,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			// Observe the exact parent deliveries before asserting their barrier.
 			descriptors := notifyAllChildrenAccountDescriptors(t, ctx, rt.selected)
 			for _, parent := range parents {
-				waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, rt.selected, db, runID, "account-worker", descriptors[parent.AccountID].FlowInstance, "delivered")
+				waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, rt.selected, runID, "account-worker", descriptors[parent.AccountID].FlowInstance, "delivered")
 			}
 			reader := nestedPublicReader(t, rt.selected)
 			deadline := time.Now().Add(5 * time.Second)
