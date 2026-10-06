@@ -46,10 +46,10 @@ type selectedForkGatewayFault struct {
 	container       string
 }
 
-func startSelectedForkTransportProofRuntime(t *testing.T, backend servedparity.Backend, root string, options selectedForkProofOptions) (servedControlProofRuntime, *selectedForkGatewayFault) {
+func startSelectedForkTransportProofRuntime(t *testing.T, backend servedparity.Backend, root string, options selectedForkProofOptions) (servedWorkspaceProofRuntime, *selectedForkGatewayFault) {
 	t.Helper()
 	if !options.docker {
-		return startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, root, true), nil
+		return startWorkspaceGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0"), nil
 	}
 	fault := &selectedForkGatewayFault{armed: options.gatewayLoss}
 	factory := func(projection *sourceartifact.RuntimeProjection, source semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error) {
@@ -63,7 +63,7 @@ func startSelectedForkTransportProofRuntime(t *testing.T, backend servedparity.B
 		manager.SetSemanticSource(source)
 		return &selectedForkGatewayWorkspace{DockerManager: manager, fault: fault, network: cfg.WorkspaceNetwork}, nil
 	}
-	return startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t, backend, root, true, workspace.BackendDocker, factory, "0.0.0.0:0"), fault
+	return startWorkspaceGatewayProofRuntime(t, backend, root, workspace.BackendDocker, factory, "0.0.0.0:0"), fault
 }
 
 // The fault changes only the exact isolated target, after its successful startup
