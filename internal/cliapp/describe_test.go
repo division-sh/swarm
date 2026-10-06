@@ -466,14 +466,14 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	if !graph.Nodes[0].Initial || graph.Nodes[0].ID != "waiting" {
 		t.Fatalf("first graph node = %#v, want waiting initial", graph.Nodes[0])
 	}
-	var terminalReview bool
+	var finalReview bool
 	for _, node := range graph.Nodes {
 		if node.ID == "review" && node.Final {
-			terminalReview = true
+			finalReview = true
 		}
 	}
-	if !terminalReview {
-		t.Fatalf("graph nodes = %#v, want terminal review", graph.Nodes)
+	if !finalReview {
+		t.Fatalf("graph nodes = %#v, want final review", graph.Nodes)
 	}
 	if len(graph.Edges) == 0 {
 		t.Fatalf("graph edges missing: %#v", graph)
@@ -534,7 +534,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"stage graph:",
 		"flow support (support):",
 		"waiting [initial]",
-		"review [terminal]",
+		"review [final]",
 		fmt.Sprintf("handler.advances_to %s on ticket.opened", supportNodeID),
 		fmt.Sprintf("handler.join.on_complete %s on ticket.closed", supportNodeID),
 		fmt.Sprintf("handler.join.on_deadline %s on platform.join_timeout after 1h timer active", supportNodeID),
@@ -546,6 +546,9 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("describe --graph output missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "[terminal]") {
+		t.Fatalf("describe still exposes the retired end marker:\n%s", text)
 	}
 }
 
