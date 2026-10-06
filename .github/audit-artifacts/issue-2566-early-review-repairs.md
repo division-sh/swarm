@@ -43,7 +43,7 @@ Post-Implementation Proof Audit, a core qualification receipt, or merge readines
 | Missing non-disk permanent entry oracles | `TestRewrite2566EntryGoldenMatchesTypedCorpus`, `TestRewrite2566EntryGoldenInventoryCoversEveryReviewedSite`; 553 independently reviewed selectors, including catalog fixture/spec embeddings |
 | Generated versus lexer-only evidence | `TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens`, `TestWorkflowEntryGoldensProtectMovedGateAndJoinGeneratedSources`; actual generated/loaded output, race/count-three pass |
 | Sorted, still-reachable source silently selects another entry | `TestRewrite2566EntryGoldenRejectsSortedDumpWithoutStranding`; retained hostile control |
-| Retained source order/finals lost on new store reader or selected fork load | `TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores`; independent accepted SQLite pool/PostgreSQL facade and actual selected-fork source loader, both stores race/count-three pass |
+| Retained source order/finals lost on new store reader or selected fork load | `TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores`; canonical store construction/reopen from the original path/DSN, closed predecessor, hostile changed live source and actual selected-fork source loader; both stores race/count-three pass |
 | Materialized selected fork source changes its stage catalog | `assertRetainedStageCatalogsForFork` in `stageForkContentionFixtureAt`; `TestSelectedBranchPointActivationAtomicityBothStores`, event/deployment-revision and running/cancelled cases, both stores race/count-three pass |
 | Exact retained catalog survives either writer/activation ordering | `TestSelectedRunForkActivationFrontierContentionBothStores/(sqlite\|postgres)/(writer\|activation)/commit`; all four cases, race/count-three pass (156.767s aggregate) |
 | Two test interfaces fail to compile | Exact managed `core-structural-owner-guards` unit: all four packages pass |
@@ -129,6 +129,55 @@ and lifecycle/supplements did not start. The next core needs a fresh handoff.
 The failed f60 core receipt remains unqualified. Lifecycle and
 named supplements, hosted full, ten-family completion, and composed A/E supported
 proof remain outstanding. No CI/PR was opened for these repairs.
+
+## Complete cbaa Core Disposition And Local Repair
+
+Core at `cbaa3127e` completed red; it is not qualified. The full receipt contains
+three failure families, not only the first visible API assertion:
+
+| Manifestation | Repair / separate execution proof |
+| --- | --- |
+| API/OpenRPC counts still expect 68 errors after `RUN_NEVER_COMPLETES` becomes error 69 | `TestPlatformAPISpecValidationCoverage`, `TestGeneratedOpenRPCArtifactMatchesPlatformSpec`, `TestGeneratedOpenRPCApplicationErrorCodesAreUnique`; race/count-three pass. Exact counts, named code/message, run.start binding and byte equality are retained. |
+| Relation reorder control treats stage declaration order as presentation | `TestCompiledTransitionSourceAuthoredExactRelation`; race/count-three pass. The existing helper keeps stages and rules ordered, still reverses presentation-only declarations, and retains exact multiset/carrier/provenance assertions. The hostile sorted-entry control is unchanged. |
+| New finite-refusal fixtures read raw pools | `TestFiniteRunStartRefusesServiceBeforeMutationBothStores`, `TestReviewer2566FeedOnlyRejectsNestedServiceBothStores`; both stores race/count-three pass. All 13 before/after durable counts move into the existing private selected-storage readback owner and its typed storetest facade; no caller SQL, table selection, callback or pool escapes. |
+| New final-timer proof obtains a raw coordinator/database | `TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores`; both stores race/count-three pass (42.374s). Uses existing native timer construction/reopen fixtures, lifecycle commit/attachment owners, timer persistence and bounded storage observation. Final/non-final, two generations, run-wide and entity-local schedule counts, activation counts, scheduler active/draining and joined stop assertions remain. |
+| New reporter closure proof carries a raw-pool served harness | `TestIssue2566ReporterFiniteFixtureCanCloseBothStores`; both stores race/count-three pass through the existing public serve process owner, original-DSN config and public run.diagnose. Opening delivery failure/quiescence/receipt settlement and declared close-to-completed are still checked. |
+| New retained-source proof reconstructs a Postgres facade from its running pool | `TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores`; external component proof now constructs/reopens native selected stores from the original location via existing storetest owners. Exact order, typed initial/final facts and selected-fork source survive a changed live directory. |
+| One partial native timer generator still emits `initial: %v` | The same committed rewrite script captures its exact deletion; ready remains first for transition starts and waiting first for initial/event starts. `TestWorkflowTimerCauseReplayEngineConsumersOnBothStores` passes race/count-three separately for sqlite (119.800s) and postgres (45.683s), covering every initial/event/transition cause and all five replay statuses, including later-cause assertions. |
+
+No debt baseline or ceiling increases. The exact authority registry adds only
+three classified operations inside the already-existing private runtime adapter;
+no new raw call remains in the API, pipeline or served proof. The actual
+`TestPersistenceAuthorityDebtRatchet` passes through the managed wrapper (56.029s).
+The full managed `core-structural-owner-guards` unit passes all 78 required roots.
+Every Census/Inventory/Registry test in all 40 touched executable packages passes
+through the managed wrapper. The source specimen under pipeline/testdata is not
+an executable package; store's TSV owner is explicitly included. The separate
+canonical decoder census also checks monotonicity against `af250de63`.
+Complexity passes with independently measured unchanged 561/192 cognitive and
+261/58 cyclomatic hotspot counts and unchanged policy/maxima.
+
+The first broad inventory command incorrectly exported the conformance-only
+baseline environment variable into CLI/serve tests. Those tests correctly
+rejected the unknown runtime setting. Its red receipt is retained; the corrected
+complete run has no such export, and the monotonicity variable is scoped only
+to its conformance package. No admission exception was added.
+The combined native timer/generator race/count-three run hit its unchanged
+180-second aggregate deadline during the third repetition, with the current
+Postgres event/cancelled case running for one second and no assertion failure.
+It earns no whole-command pass credit; generation/backend cases are being
+qualified separately with the same assertions, repetitions and deadlines.
+Those separate commands now pass for both databases, as does the final-timer
+run-wide control. The complete rewrite/entry-golden package also passes
+race/count-three (21.730s); the script still reproduces 417 files and retains all
+553 independently reviewed entry/end decisions.
+
+These are local working-tree receipts, not a replacement exact-head core tier
+or merge approval. Server2 was released to E; D waits for the user's handoff
+after E/C/A before running core on the committed repaired head. Lifecycle,
+supplements, composed A/E proof and hosted full remain due. The scope and gate
+are unchanged; no new issue, compatibility path or persistence authority owner
+was introduced.
 
 Existing watchlist mappings remain
 `canonical_authored_grammar_effective_semantics_ownership` and
