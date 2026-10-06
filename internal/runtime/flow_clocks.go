@@ -24,6 +24,9 @@ func (rt *Runtime) ArmDeclaredFlowClocks(ctx context.Context, activations []Stan
 	if rt == nil || rt.Options.WorkflowModule == nil {
 		return fmt.Errorf("clock deployment requires its runtime source")
 	}
+	if !rt.Options.EnableDeclaredClockBinding {
+		return nil
+	}
 	source := rt.Options.WorkflowModule.SemanticSource()
 	for _, activation := range activations {
 		if !activation.RestartDisposition.Executable() {
@@ -39,6 +42,25 @@ func (rt *Runtime) ArmDeclaredFlowClocks(ctx context.Context, activations []Stan
 		}
 	}
 	return nil
+}
+
+// A local finite host may use the serve bootstrap, but it is not a deployment.
+// Existing authored standing declarations remain independent of clock binding.
+func selectStandingClockBindings(declarations []StandingTargetDeclaration, enabled bool) []StandingTargetDeclaration {
+	if enabled {
+		return declarations
+	}
+	selected := make([]StandingTargetDeclaration, 0, len(declarations))
+	for _, declaration := range declarations {
+		if len(declaration.Clocks) != 0 {
+			if !declaration.AuthoredStanding {
+				continue
+			}
+			declaration.Clocks = nil
+		}
+		selected = append(selected, declaration)
+	}
+	return selected
 }
 
 func (rt *Runtime) armFlowClock(ctx context.Context, source semanticview.Source, activation StandingActivation, declaration semanticview.ClockSchedule, owner runtimebus.StandingRunWorkOwner) error {

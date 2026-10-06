@@ -534,6 +534,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	}
 	runtimeDeps.Options = runtime.RuntimeOptions{
 		ExecutionPosture:                 posture,
+		EnableDeclaredClockBinding:       !req.Options.LocalRun,
 		SelfCheck:                        req.Options.SelfCheck,
 		WorkflowModule:                   loaded.module,
 		WorkspaceLifecycle:               workspaces,

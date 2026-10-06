@@ -80,6 +80,7 @@ type AuthorActivityCatalogRegistrar interface {
 
 type RuntimeOptions struct {
 	ExecutionPosture                 executionposture.Posture
+	EnableDeclaredClockBinding       bool
 	SelfCheck                        bool
 	WorkspaceLifecycle               workspace.Lifecycle
 	EnableToolGateway                bool

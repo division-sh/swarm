@@ -29,11 +29,12 @@ type StandingIngressBinding struct {
 }
 
 type StandingTargetDeclaration struct {
-	SourcePath string
-	FlowPath   string
-	Alias      string
-	Ingress    []StandingIngressBinding
-	Clocks     []semanticview.ClockSchedule
+	SourcePath       string
+	FlowPath         string
+	Alias            string
+	AuthoredStanding bool
+	Ingress          []StandingIngressBinding
+	Clocks           []semanticview.ClockSchedule
 }
 
 type StandingTarget struct {
@@ -149,9 +150,10 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 			return nil, fmt.Errorf("%s standing constructor is invalid: %w", location, err)
 		}
 		decl := StandingTargetDeclaration{
-			SourcePath: location,
-			FlowPath:   strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
-			Clocks:     clocks[flowID],
+			SourcePath:       location,
+			AuthoredStanding: activation == runtimecontracts.FlowActivationStanding,
+			FlowPath:         strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
+			Clocks:           clocks[flowID],
 		}
 		if flowID == "." {
 			decl.FlowPath = "."

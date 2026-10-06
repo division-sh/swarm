@@ -14,6 +14,57 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyClockDeployment(t, nested))
+		for _, enabled := range []bool{false, true} {
+			rt := &Runtime{Options: RuntimeOptions{
+				WorkflowModule:     semanticOnlyWorkflowRuntime{source: source},
+				SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA), EnableDeclaredClockBinding: enabled,
+			}}
+			candidates, err := rt.PlanStandingServiceCandidates()
+			want := 0
+			if enabled {
+				want = 1
+			}
+			if err != nil || len(candidates) != want {
+				t.Fatalf("nested=%t enabled=%t standing candidates=%+v err=%v", nested, enabled, candidates, err)
+			}
+			if !enabled {
+				if err := rt.ArmDeclaredFlowClocks(t.Context(), []StandingActivation{{FlowPath: "."}}, nil); err != nil {
+					t.Fatalf("finite host acquired clock execution: %v", err)
+				}
+			}
+			if len(semanticview.ClockSchedules(source)) != 1 {
+				t.Fatal("deployment selection removed the compiled declaration")
+			}
+		}
+	}
+}
+
+func TestFiniteClockSelectionPreservesIndependentStandingDeclarations(t *testing.T) {
+	source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyClockDeployment(t, false))
+	declarations, err := ResolveStandingTargetDeclarations(source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := append([]StandingTargetDeclaration(nil), declarations...)
+	independent := StandingTargetDeclaration{FlowPath: "legacy-standing"}
+	selected := selectStandingClockBindings(append(declarations, independent), false)
+	if len(selected) != 1 || !reflect.DeepEqual(selected[0], independent) {
+		t.Fatalf("finite host changed an independent standing declaration: %+v", selected)
+	}
+	declarations[0].AuthoredStanding = true
+	selected = selectStandingClockBindings(declarations, false)
+	if len(selected) != 1 || len(selected[0].Clocks) != 0 || !selected[0].AuthoredStanding {
+		t.Fatalf("finite host erased independent standing authority or enabled its clocks: %+v", selected)
+	}
+	declarations[0].AuthoredStanding = false
+	if !reflect.DeepEqual(declarations, before) {
+		t.Fatal("binding selection mutated declaration ownership")
+	}
+}
+
 func TestClockDeploymentDeclarationsAndExactPublication(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		t.Run(map[bool]string{false: "root", true: "nested"}[nested], func(t *testing.T) {
