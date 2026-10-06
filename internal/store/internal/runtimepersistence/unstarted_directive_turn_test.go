@@ -27,9 +27,6 @@ func TestUnstartedDirectiveTurnRecoveryBothStores(t *testing.T) {
 				t.Run(disposition, func(t *testing.T) {
 					eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 						store := selected.selected.(completionSettlementTestStore)
-						if selected.postgres {
-							store = admitTestPostgresStore(t, selected.db)
-						}
 						fixture := newCompletionSettlementFixtureForFlow(t, store, selected.db, !selected.postgres, agentmemory.Plan{}, flow)
 						// Complete the fixture's independent event origin first. The
 						// only live work under test is the actual admitted directive.

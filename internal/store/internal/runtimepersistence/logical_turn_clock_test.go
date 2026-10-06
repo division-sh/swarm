@@ -15,9 +15,6 @@ import (
 func TestLogicalTurnClockStartsAtFirstLaunchBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		bound := &timeridentity.TurnTimeout{After: 7 * time.Minute, Emit: "investigation.aborted"}
 		authority := fixture.authority
@@ -64,9 +61,6 @@ func TestLogicalTurnClockStartsAtFirstLaunchBothStores(t *testing.T) {
 func TestLogicalTurnClockPreservesNanosecondBoundBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		authority := fixture.authority
 		authority.BudgetScopes = nil
@@ -88,9 +82,6 @@ func TestLogicalTurnClockPreservesNanosecondBoundBothStores(t *testing.T) {
 func TestLogicalTurnClockRejectsSubstitutedOriginBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		authority := fixture.authority
 		authority.BudgetScopes = nil
@@ -134,9 +125,6 @@ func TestLogicalTurnTimeoutAdmissionOrdersBothStores(t *testing.T) {
 		t.Run(order, func(t *testing.T) {
 			eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 				store := selected.selected.(completionSettlementTestStore)
-				if selected.postgres {
-					store = admitTestPostgresStore(t, selected.db)
-				}
 				lifetime := store.(runtimeeffects.TurnLifetimeStore)
 				fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 				authority := fixture.authority

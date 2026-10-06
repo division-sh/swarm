@@ -1517,8 +1517,8 @@ func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlem
 	if err != nil || !found {
 		t.Fatalf("load admitted completion agent lifecycle: found=%v err=%v", found, err)
 	}
+	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 	if sqlite {
-		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if memory.Enabled {
 			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'[]',0,?,?,?,?,'active',?,?)`,
 				sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
@@ -1528,7 +1528,6 @@ func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlem
 			}
 		}
 	} else {
-		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if memory.Enabled {
 			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'[]'::jsonb,0,$10::jsonb,$11,$12,$13,'active',$14,$14)`,
 				sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,

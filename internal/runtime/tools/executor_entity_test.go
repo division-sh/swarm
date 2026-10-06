@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -1102,7 +1103,7 @@ func TestEntityTools_ReadsRejectUndeclaredStoredFields(t *testing.T) {
 }
 
 func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
+	ctx, exec, _ := newEntityToolTestHarness(t)
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1117,29 +1118,21 @@ func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 		t.Fatalf("save_entity_field: %v", err)
 	}
 
-	var (
-		domain     string
-		field      string
-		oldValue   string
-		newValue   string
-		writerType string
-		step       string
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(domain, ''),
-			COALESCE(path, ''),
-			COALESCE(old_value::text, ''),
-			COALESCE(new_value::text, ''),
-			COALESCE(writer_type, ''),
-			COALESCE(handler_step, '')
-		FROM entity_mutations
-		WHERE entity_id = $1::uuid AND domain = 'authored_field' AND path = 'status'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, entityID).Scan(&domain, &field, &oldValue, &newValue, &writerType, &step); err != nil {
-		t.Fatalf("load entity mutation: %v", err)
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	report, err := fixture.selected.(sparseEntityToolStore).LoadRunDebugReport(ctx, entityToolTestRunID, operatorread.RunDebugQueryOptions{MutationLimit: 100})
+	if err != nil {
+		t.Fatal(err)
 	}
+	var mutation operatorread.RunDebugMutation
+	for _, candidate := range report.Mutations {
+		if candidate.EntityID == entityID && candidate.Domain == "authored_field" && candidate.Path == "status" {
+			mutation = candidate
+			break
+		}
+	}
+	domain, field := mutation.Domain, mutation.Path
+	oldValue, newValue := string(mutation.OldValue), string(mutation.NewValue)
+	writerType, step := mutation.WriterType, mutation.HandlerStep
 	if domain != "authored_field" || field != "status" {
 		t.Fatalf("mutation field = %q, want status", field)
 	}
@@ -1158,7 +1151,7 @@ func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 }
 
 func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
+	ctx, exec, _ := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "tester",
 		Role:          "operator",
@@ -1178,31 +1171,25 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 		t.Fatalf("save_entity_field nested mutation: %v", err)
 	}
 
-	var (
-		domain     string
-		field      string
-		oldValue   string
-		newValue   string
-		writerType string
-		writerID   string
-		step       string
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(domain, ''),
-			COALESCE(path, ''),
-			COALESCE(old_value::text, ''),
-			COALESCE(new_value::text, ''),
-			COALESCE(writer_type, ''),
-			COALESCE(writer_id, ''),
-			COALESCE(handler_step, '')
-		FROM entity_mutations
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'authored_field' AND path = 'metadata'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, entityToolTestRunID, entityID).Scan(&domain, &field, &oldValue, &newValue, &writerType, &writerID, &step); err != nil {
-		t.Fatalf("load nested entity mutation: %v", err)
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	report, err := fixture.selected.(sparseEntityToolStore).LoadRunDebugReport(ctx, entityToolTestRunID, operatorread.RunDebugQueryOptions{MutationLimit: 100})
+	if err != nil {
+		t.Fatal(err)
 	}
+	var mutation operatorread.RunDebugMutation
+	var count int
+	for _, candidate := range report.Mutations {
+		if candidate.EntityID == entityID && candidate.Domain == "authored_field" && candidate.Path == "metadata" && candidate.WriterType == "agent" {
+			count++
+			mutation = candidate
+		}
+	}
+	if count != 1 {
+		t.Fatalf("nested canonical mutation count=%d, want 1", count)
+	}
+	domain, field := mutation.Domain, mutation.Path
+	oldValue, newValue := string(mutation.OldValue), string(mutation.NewValue)
+	writerType, writerID, step := mutation.WriterType, mutation.WriterID, mutation.HandlerStep
 	// The canonical diff owner records the changed declared root. The retired
 	// raw save logger instead built an artificial map keyed by metadata.region.
 	if domain != "authored_field" || field != "metadata" {
@@ -1226,10 +1213,6 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 	}
 	if step != "save_entity_field" {
 		t.Fatalf("mutation handler_step = %q, want save_entity_field", step)
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'authored_field' AND path = 'metadata' AND writer_type = 'agent'`, entityToolTestRunID, entityID).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("nested canonical mutation count=%d err=%v", count, err)
 	}
 }
 

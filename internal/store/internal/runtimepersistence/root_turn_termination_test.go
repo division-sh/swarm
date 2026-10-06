@@ -22,9 +22,6 @@ func TestRootTurnTerminationUsesConstructedRunOwnerBothStores(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 				store := selected.selected.(completionSettlementTestStore)
-				if selected.postgres {
-					store = admitTestPostgresStore(t, selected.db)
-				}
 				fixture := newCompletionSettlementFixtureForFlow(t, store, selected.db, !selected.postgres, agentmemory.Plan{}, "")
 				ctx := withManagedCompletionTestSurface(t, fixture.contextFor(fixture.authority), fixture.authority, "anthropic_api")
 				handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("root-termination"))
@@ -95,9 +92,6 @@ func TestRootTurnTerminationUsesConstructedRunOwnerBothStores(t *testing.T) {
 func TestRootTurnTimeoutRecoveryKeepsExactReactionBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixtureForFlow(t, store, selected.db, !selected.postgres, agentmemory.Plan{}, "")
 		ctx := runtimeeffects.WithTurnTimeout(fixture.contextFor(fixture.authority), &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
 		ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")

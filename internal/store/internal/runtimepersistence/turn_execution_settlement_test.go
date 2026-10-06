@@ -20,9 +20,6 @@ import (
 func TestLogicalTurnExecutionCancelsAndSettlesRealDeliveryOriginBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		authority := fixture.authority
 		authority.BudgetScopes = nil

@@ -257,9 +257,10 @@ func TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores(t *testing.T) {
 			bundle := loadWave1EntityToolBundle(t, actor, "review", "case", "", "case:\n  items: list<text>\n")
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
-				selected = newSQLiteRuntimeToolStoreForTest(t)
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				selected = newPostgresHumanTaskToolStoreForTest(t)
+				pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				selected = pg
 			}
 			ctx := seedEntityToolSourceRun(t, selected, bundle)
 			fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)

@@ -20,9 +20,6 @@ type canceledTurnTestStore interface {
 func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		canceled, ok := store.(canceledTurnTestStore)
 		if !ok {
 			t.Fatal("selected store has no authored canceled-origin settlement")
@@ -139,9 +136,6 @@ func proveCanceledDeliveryFanOutFold(t *testing.T, ctx context.Context, selected
 func TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
 		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
 		authority := fixture.authority
 		authority.BudgetScopes = nil
