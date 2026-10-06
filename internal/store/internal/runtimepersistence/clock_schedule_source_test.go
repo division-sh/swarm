@@ -19,7 +19,7 @@ func TestClockScheduleSourceRoundTripOnBothStores(t *testing.T) {
 			store, db, ctx := tc.open(t)
 			root := t.TempDir()
 			files := map[string]string{
-				"schema.yaml":        "# Preserve exact source\nstages: []\nschedules:\n  poll: {every: 5m, emit: poll.tick}\n  morning: {cron: '0 9 * * *', emit: poll.tick}\npins:\n  outputs:\n    events: [poll.tick]\n",
+				"schema.yaml":        "# Preserve exact source\nstages: []\nschedules:\n  poll: {every: 5m, emit: poll.tick}\n  morning: {cron: '0 9 * * *', emit: poll.tick}\npins:\n  outputs: [poll.tick]\n",
 				"events.yaml":        "poll.tick:\n",
 				"worker/schema.yaml": "stages: []\nschedules:\n  poll: {every: 1m, emit: poll.tick}\n",
 				"worker/events.yaml": "poll.tick:\n",
