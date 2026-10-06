@@ -149,7 +149,11 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			}
 		}
 		if !compatible || (setting.State == "retired" && !readbackHash.Valid) {
-			if unresolved || setting.State == "uncertain" || setting.State == "unavailable" {
+			if unresolved {
+				return channelnative.Setting{}, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
+			}
+			switch setting.State {
+			case "uncertain", "unavailable":
 				return channelnative.Setting{}, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
 			}
 			setting, err = advanceNativeSettingGenerationTx(ctx, tx, admission, setting, postgres)
