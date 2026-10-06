@@ -71,3 +71,17 @@ lifetime and configured dispatcher. Recovery and initial dispatch consume the
 same exact election and typed result interpretation. No SQL, lease, callback or
 raw query capability escapes this port; it cannot invent durable eligibility.
 Selected/ephemeral owners explicitly reject the unsupported operation.
+
+## Closed Delivery Read Projection
+
+The unchanged executable-delivery SQL boundary also applies to fixture
+implementation files. Writer and H1/H2 storage wrappers retain their original
+selected read transactions and detached types, but their ten private physical
+read bodies now reside in the existing `delivery/read_projections.go` owner.
+Those bodies move byte-for-byte. The pipeline H1 bump-history observation
+delegates its exact delivered-event join to `FixtureH1BumpHistoryTx` inside
+the same read transaction and copies only the original four string fields.
+Predicates, ordering, NULL/error behavior and public fixtures remain unchanged.
+No guard allowance, generic query selector or raw capability is introduced.
+Existing raw findings move with those bodies; the fixed H1 projection and its
+caller are classified `private-domain-adapter`, not debt exemptions.
