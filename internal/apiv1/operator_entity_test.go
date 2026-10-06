@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -134,10 +133,7 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 
 func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T) {
 	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
 	runID := "11111111-1111-1111-1111-111111111111"
 	bundle := operatorReadbackBundle(t)
 	source := semanticview.Wrap(bundle)
@@ -146,13 +142,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	entityB := "33333333-3333-3333-3333-333333333333"
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	createOperatorReadbackEntities(t, ctx, pg, source, runID, entityA, entityB, time.Now().UTC())
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			Entities: pg,
-		}),
-	})
-
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Entities: pg})})
 	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"run_id":"11111111-1111-1111-1111-111111111111","type":"vertical","limit":10}}`)
 	if list.Error != nil {
 		t.Fatalf("entity.list error = %#v", list.Error)
@@ -166,7 +156,6 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 			t.Fatalf("entity.list entity_type = %#v, want vertical", got)
 		}
 	}
-
 	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"22222222-2222-2222-2222-222222222222","run_id":"11111111-1111-1111-1111-111111111111"}}`)
 	if get.Error != nil {
 		t.Fatalf("entity.get error = %#v", get.Error)
@@ -178,7 +167,6 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	if fields := asMap(t, getResult["fields"]); fields["vertical_name"] != "Healthcare" {
 		t.Fatalf("entity.get fields = %#v", fields)
 	}
-
 	byType := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-type","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"entity_type"}}`)
 	if byType.Error != nil {
 		t.Fatalf("entity.aggregate entity_type error = %#v", byType.Error)
@@ -187,7 +175,6 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	if typeCounts["vertical"] != float64(2) || typeCounts["default"] != nil {
 		t.Fatalf("entity_type counts = %#v", typeCounts)
 	}
-
 	typedState := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-state","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"current_state","type":"vertical"}}`)
 	if typedState.Error != nil {
 		t.Fatalf("entity.aggregate typed current_state error = %#v", typedState.Error)

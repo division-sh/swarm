@@ -21,28 +21,17 @@ func TestSelectedStoreRunReadHandlersExecuteAcrossBackends(t *testing.T) {
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T, context.Context) (RunReadStore, string)
-	}{
-		{
-			name: "sqlite",
-			open: func(t *testing.T, ctx context.Context) (RunReadStore, string) {
-				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				runID := uuid.NewString()
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
-				return selected, runID
-			},
-		},
-		{
-			name: "postgres",
-			open: func(t *testing.T, ctx context.Context) (RunReadStore, string) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				runID := uuid.NewString()
-				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
-				return selected, runID
-			},
-		},
-	} {
+	}{{name: "sqlite", open: func(t *testing.T, ctx context.Context) (RunReadStore, string) {
+		selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+		runID := uuid.NewString()
+		storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
+		return selected, runID
+	}}, {name: "postgres", open: func(t *testing.T, ctx context.Context) (RunReadStore, string) {
+		selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+		runID := uuid.NewString()
+		storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC().Add(-time.Minute)})
+		return selected, runID
+	}}} {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := context.Background()
 			selected, runID := backend.open(t, ctx)
@@ -50,11 +39,7 @@ func TestSelectedStoreRunReadHandlersExecuteAcrossBackends(t *testing.T) {
 			for _, tc := range []struct {
 				method string
 				params string
-			}{
-				{method: "run.get", params: fmt.Sprintf(`{"run_id":%q}`, runID)},
-				{method: "run.list", params: `{}`},
-				{method: "run.diagnose", params: fmt.Sprintf(`{"run_id":%q}`, runID)},
-			} {
+			}{{method: "run.get", params: fmt.Sprintf(`{"run_id":%q}`, runID)}, {method: "run.list", params: `{}`}, {method: "run.diagnose", params: fmt.Sprintf(`{"run_id":%q}`, runID)}} {
 				resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"method":%q,"params":%s}`, tc.method, tc.method, tc.params))
 				if resp.Error != nil {
 					t.Fatalf("%s %s error = %#v", backend.name, tc.method, resp.Error)
