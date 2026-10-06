@@ -226,9 +226,9 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if nativeRead {
 				completionCount = 2
 			}
-			requireSelectedForkPublicControlBoundary(t, rt, fork.ForkRunID, childEvent, true, completionCount)
+			requireSelectedForkPublicControlBoundary(t, rt, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent, true, completionCount)
 			t.Run("terminal_public_readback", func(t *testing.T) {
-				requireSelectedForkDeclaredAgentReads(t, rt, fork.ForkRunID, completionCount)
+				requireSelectedForkDeclaredAgentReads(t, rt, selected.RuntimeDeps().EventStore, fork.ForkRunID, completionCount)
 				if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
 					t.Fatal("terminal selected readback changed source domain")
 				}
