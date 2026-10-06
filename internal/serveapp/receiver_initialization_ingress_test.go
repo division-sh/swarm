@@ -86,22 +86,16 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 	waitPublicationSiteCompletion(t, rt, seed.RunID)
 	const path = "telegram-chat/ti-1531b1e4416a29704d690346"
 	entityID := flowidentity.EntityID(path)
-	var raw, fieldsRaw string
-	if err := rt.DB.QueryRow(`SELECT CAST(f.config AS TEXT),CAST(e.fields AS TEXT) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.instance_path=$2 AND f.flow_template='telegram-chat'`, seed.RunID, path).Scan(&raw, &fieldsRaw); err != nil {
-		t.Fatal(err)
-	}
+	record, receiver := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "telegram-chat", path, entityID)
+	raw := record.Lifecycle.Config
 	var descriptor map[string]any
-	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(raw), &descriptor); err != nil {
-		t.Fatal(err)
-	}
-	var persisted map[string]any
-	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(fieldsRaw), &persisted); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &descriptor); err != nil {
 		t.Fatal(err)
 	}
 	if _, exists := descriptor["config"]; exists {
 		t.Fatalf("business copy in header: %s", raw)
 	}
-	config, err := canonicaljson.CloneRuntimeValue(persisted)
+	config, err := canonicaljson.CloneRuntimeValue(receiver.Fields)
 	if err != nil {
 		t.Fatal(err)
 	}

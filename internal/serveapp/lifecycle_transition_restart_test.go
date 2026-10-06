@@ -30,9 +30,13 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	var db *sql.DB
+	var receiverReader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		db, _, _ = selectedRuntimeStoreForTest(t, p)
+		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	if backend == "sqlite" {
 		opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "lifecycle.sqlite"))
-		captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
@@ -71,7 +75,7 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 			}
 		}
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		return process, servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot)}
+		return process, servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader}
 	}
 }
 
