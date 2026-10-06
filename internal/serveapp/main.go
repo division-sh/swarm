@@ -2194,6 +2194,9 @@ func (c *serveStandingServiceController) mutateStandingService(ctx context.Conte
 	if owner == nil || owner.Pipeline == nil {
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service %s selected runtime pipeline is unavailable", strings.TrimSpace(operation.ServiceID))
 	}
+	if err := owner.ValidateStandingClockMutation(operation.ServiceID); err != nil {
+		return result, err
+	}
 	if command == "resume" || command == "reset" {
 		if err := owner.ValidateStandingIngressCredentials(ctx); err != nil {
 			return result, fmt.Errorf("standing service %s cannot use stale ingress admission: %w", operation.ServiceID, err)

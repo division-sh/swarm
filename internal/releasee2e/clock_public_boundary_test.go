@@ -19,6 +19,73 @@ type clockPublicHeader struct {
 	ClockSchedules []map[string]any `json:"clock_schedules"`
 }
 
+func TestDeclaredClockNestedBinaryDeliveryBothStores(t *testing.T) {
+	base := goldenReleaseRoot(t)
+	binary := buildReleaseBinary(t, base)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := filepath.Join(base, backend)
+			config, env := clockReleaseConfig(t, root, backend)
+			source := filepath.Join(root, "contracts")
+			for path, body := range map[string]string{
+				"schema.yaml":          "name: clock-child-public\nstages: []\nconnect:\n  - {event: poll.tick, from: clock, to: consumer}\n",
+				"clock/schema.yaml":    "stages: []\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n",
+				"clock/events.yaml":    "poll.tick:\n",
+				"consumer/schema.yaml": "stages: []\npins:\n  inputs: [poll.tick]\n",
+				"consumer/nodes.yaml":  "observer:\n  execution_type: system_node\n  subscribes_to: [poll.tick]\n  event_handlers:\n    poll.tick:\n      guard: {id: admit, check: true}\n",
+			} {
+				writeReleaseFile(t, filepath.Join(source, path), body)
+			}
+			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
+			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
+			assertFullLifecycleVerifySuccess(t, verify)
+			process := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source,
+				ConfigPath: config, Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env})
+			ctx, cancel := context.WithTimeout(t.Context(), goldenStartupTimeout)
+			defer cancel()
+			if err := process.waitReady(ctx); err != nil {
+				t.Fatalf("nested binary clock startup: %v\n%s", err, process.output.String())
+			}
+			hash := goldenServedBundleHash(t, process.rpc, "live")
+			standing := waitForFullLifecycleStandingRun(t, process.rpc, hash, "", 1, "")
+			clocks := readPublicClockRun(t, process, standing.RunID).ClockSchedules
+			if len(clocks) != 1 || clocks[0]["flow_id"] != "clock" || clocks[0]["flow_instance"] != "clock" || clocks[0]["emit"] != "clock/poll.tick" {
+				t.Fatalf("nested binary clock publication coordinate=%+v", clocks)
+			}
+			var matched goldenEvent
+			if err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
+				rows, err := listGoldenEvents(ctx, process.rpc, standing.RunID)
+				if err != nil {
+					return false, err
+				}
+				for _, event := range rows {
+					if event.EventName != "clock/poll.tick" {
+						continue
+					}
+					if len(event.DeadLetters) != 0 || event.Source != "clock" || event.ProducerType != "instance" || len(event.Payload) != 0 || len(event.Deliveries) != 1 {
+						return false, fmt.Errorf("nested binary clock lost exact publication/delivery: %+v", event)
+					}
+					delivery := event.Deliveries[0]
+					if delivery.Target.FlowID != "consumer" || delivery.Target.FlowInstance != "consumer" {
+						return false, fmt.Errorf("nested clock escaped its connect edge: %+v", delivery)
+					}
+					if delivery.Status == "delivered" && delivery.Terminal {
+						matched = event
+						return true, nil
+					}
+				}
+				return false, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			assertFullEventPayloadReadback(t, process, matched, binary, root, config, "api-token", env)
+			if err := process.stopAndWait(goldenShutdownGrace); err != nil {
+				t.Fatalf("nested binary clock shutdown: %v\n%s", err, process.output.String())
+			}
+		})
+	}
+}
+
 func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 	base := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, base)

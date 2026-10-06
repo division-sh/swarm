@@ -18,6 +18,9 @@ func TestClockStorageObservationIsClosedAndExactBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, _, ctx := tc.open(t)
+			if count, err := CountInstanceClockActivationsForTest(ctx, selected); err != nil || count != 0 {
+				t.Fatalf("empty clock observation: count=%d err=%v", count, err)
+			}
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID})
 			if err != nil {
@@ -27,6 +30,9 @@ func TestClockStorageObservationIsClosedAndExactBothStores(t *testing.T) {
 				OwnerKind: genericschedule.OwnerInstance, OwnerID: ".", EventType: "poll.tick", Payload: semanticvalue.EmptyObject(),
 				RoutingSource: source, ExecutionMode: executionmode.Live, Due: genericschedule.EveryDue(time.Minute)}
 			activation := admitGenericScheduleFixture(t, ctx, selected, command)
+			if count, err := CountInstanceClockActivationsForTest(ctx, selected); err != nil || count != 1 {
+				t.Fatalf("admitted clock observation: count=%d err=%v", count, err)
+			}
 			before, err := ReadClockStorageForTest(ctx, selected, runID, activation.ID)
 			if err != nil || before.Rows != 1 || before.Status != "active" || before.ImmutableHash != activation.ImmutableHash {
 				t.Fatalf("exact physical clock=%+v err=%v", before, err)
@@ -47,11 +53,17 @@ func TestClockStorageObservationIsClosedAndExactBothStores(t *testing.T) {
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()
 			for _, owner := range []any{struct{}{}, nil} {
+				if count, err := CountInstanceClockActivationsForTest(ctx, owner); err == nil || count != 0 {
+					t.Fatalf("count accepted an unrelated owner: count=%d err=%v", count, err)
+				}
 				if err := CorruptClockImmutableHashForTest(ctx, owner, runID, activation.ID); err == nil {
 					t.Fatal("fault accepted a non-native owner")
 				}
 			}
 			out, err := ReadClockStorageForTest(cancelled, selected, runID, activation.ID)
+			if count, err := CountInstanceClockActivationsForTest(cancelled, selected); err == nil || count != 0 {
+				t.Fatalf("cancelled count leaked evidence: count=%d err=%v", count, err)
+			}
 			if err == nil || !reflect.DeepEqual(out, ClockStorageObservation{}) {
 				t.Fatalf("cancelled read leaked evidence=%+v err=%v", out, err)
 			}
