@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -56,6 +57,31 @@ func TestManagerTerminationDispatchIncludesOwnedRetiringExecutions(t *testing.T)
 			}
 			if otherCtx.Err() != nil || len(execution.leases) != 2 {
 				t.Fatal("termination canceled sibling work or released cleanup ownership")
+			}
+		})
+	}
+}
+
+func TestManagerQueuedCancellationReleasesOnlyCommittedOrigin(t *testing.T) {
+	for _, mode := range []string{"healthy", "cleanup_error", "wrong_reason", "pending"} {
+		t.Run(mode, func(t *testing.T) {
+			bus := &receiptOutcomeBus{}
+			fault := errors.New("continuation release failed")
+			if mode == "cleanup_error" {
+				bus.failure = fault
+			}
+			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
+			snapshot := deliverylifecycle.Snapshot{DeliveryID: uuid.NewString(), RunID: uuid.NewString(), SubscriberID: "queued-agent", SubscriberClass: deliverylifecycle.SubscriberAgent, Status: deliverylifecycle.StatusCanceled, ReasonCode: "terminate", SettledAt: time.Now().UTC()}
+			if mode == "wrong_reason" {
+				snapshot.ReasonCode = "shutdown"
+			}
+			if mode == "pending" {
+				snapshot.Status = deliverylifecycle.StatusPending
+			}
+			err := am.ApplyCommittedQueuedCancellations(context.Background(), []deliverylifecycle.Snapshot{snapshot})
+			wantRelease := mode == "healthy" || mode == "cleanup_error"
+			if (len(bus.released) == 1) != wantRelease || wantRelease && bus.released[0] != snapshot.DeliveryID || (err != nil) != (mode != "healthy") || mode == "cleanup_error" && !errors.Is(err, fault) {
+				t.Fatalf("queued continuation release: %+v err=%v", bus.released, err)
 			}
 		})
 	}

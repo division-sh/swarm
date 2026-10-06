@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -77,7 +78,7 @@ func emptyCommittedWorkflowLifecycleMutation(committed CommittedWorkflowLifecycl
 		len(committed.Cancellations) == 0 &&
 		len(committed.GenericScheduleActivations) == 0 &&
 		len(committed.GenericScheduleCancellations) == 0 &&
-		len(committed.TurnCancellations) == 0
+		len(committed.TurnCancellations) == 0 && len(committed.QueuedCancellations) == 0
 }
 
 type WorkflowScheduleMutationKind string
@@ -232,7 +233,8 @@ func (p WorkflowLifecycleMutationPlan) ValidateState(record WorkflowEngineStateR
 }
 
 type CommittedWorkflowLifecycleMutation struct {
-	TurnCancellations []runtimeeffects.TurnCancellation
+	TurnCancellations   []runtimeeffects.TurnCancellation
+	QueuedCancellations []runtimedelivery.Snapshot
 	// Committed distinguishes an acknowledged empty mutation from refusal.
 	Committed                    bool
 	Wakeups                      []timeridentity.WorkflowTimerActivationRef
@@ -242,6 +244,14 @@ type CommittedWorkflowLifecycleMutation struct {
 }
 
 func (r CommittedWorkflowLifecycleMutation) Validate() error {
+	for _, snapshot := range r.QueuedCancellations {
+		if snapshot.Status != runtimedelivery.StatusCanceled || snapshot.SubscriberClass != runtimedelivery.SubscriberAgent || snapshot.ReasonCode != "terminate" {
+			return fmt.Errorf("queued cancellation requires exact canceled-agent evidence")
+		}
+		if err := runtimedelivery.ValidateCanceledSnapshot(snapshot); err != nil {
+			return err
+		}
+	}
 	for _, intent := range r.TurnCancellations {
 		if err := intent.ValidateFacts(); err != nil {
 			return err
@@ -280,6 +290,7 @@ func (r CommittedWorkflowLifecycleMutation) Validate() error {
 func (r CommittedWorkflowLifecycleMutation) WithCommitAcknowledgment() CommittedWorkflowLifecycleMutation {
 	r.Committed = true
 	r.TurnCancellations = append([]runtimeeffects.TurnCancellation(nil), r.TurnCancellations...)
+	r.QueuedCancellations = append([]runtimedelivery.Snapshot(nil), r.QueuedCancellations...)
 	for i := range r.TurnCancellations {
 		r.TurnCancellations[i].Committed = true
 	}
@@ -851,13 +862,19 @@ func (pc *PipelineCoordinator) finalizeWorkflowLifecycleMutation(ctx context.Con
 	if err := committed.Validate(); err != nil {
 		return err
 	}
-	if len(committed.Wakeups)+len(committed.Cancellations)+len(committed.GenericScheduleActivations)+len(committed.GenericScheduleCancellations)+len(committed.TurnCancellations) == 0 {
+	if len(committed.Wakeups)+len(committed.Cancellations)+len(committed.GenericScheduleActivations)+len(committed.GenericScheduleCancellations)+len(committed.TurnCancellations)+len(committed.QueuedCancellations) == 0 {
 		return nil
 	}
 	if pc == nil {
 		return fmt.Errorf("committed workflow lifecycle evidence requires the pipeline coordinator")
 	}
 	var result error
+	if len(committed.QueuedCancellations) > 0 {
+		if !committed.Committed {
+			return fmt.Errorf("queued cancellation requires an acknowledged lifecycle commit")
+		}
+		result = errors.Join(result, pc.dispatchCommittedQueuedCancellations(ctx, committed.QueuedCancellations))
+	}
 	if len(committed.TurnCancellations) > 0 {
 		if !committed.Committed {
 			return fmt.Errorf("turn cancellation requires an acknowledged lifecycle commit")

@@ -19,11 +19,18 @@ func businessTurnIdentity(origin runtimeeffects.CompletionOrigin) (string, strin
 	if origin.Kind == runtimeeffects.CompletionOriginDelivery {
 		id = origin.Delivery.DeliveryID()
 	}
-	if _, err := uuid.Parse(id); err != nil {
-		return "", "", fmt.Errorf("business turn origin: %w", err)
+	turn, err := businessTurnID(origin.Kind, id)
+	return turn, id, err
+}
+
+func businessTurnID(kind runtimeeffects.CompletionOriginKind, id string) (string, error) {
+	if kind != runtimeeffects.CompletionOriginDelivery && kind != runtimeeffects.CompletionOriginDirective {
+		return "", fmt.Errorf("business turn requires an exact work origin kind")
 	}
-	turn := uuid.NewSHA1(uuid.NameSpaceOID, []byte("agent-business-turn:"+string(origin.Kind)+":"+id))
-	return turn.String(), id, nil
+	if _, err := uuid.Parse(id); err != nil {
+		return "", fmt.Errorf("business turn origin: %w", err)
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("agent-business-turn:"+string(kind)+":"+id)).String(), nil
 }
 
 func prepareBusinessTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) error {

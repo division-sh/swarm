@@ -57,6 +57,12 @@ type TurnTimeoutReactionOwner interface {
 
 type TurnCancellationDispatcher interface {
 	ApplyCommittedTurnCancellations(context.Context, []TurnCancellation) error
+	ApplyCommittedQueuedCancellations(context.Context, []deliverylifecycle.Snapshot) error
+}
+
+type WorkflowTurnTerminationResult struct {
+	Active []TurnCancellation
+	Queued []deliverylifecycle.Snapshot
 }
 
 func (c CanceledTurnCommit) Validate() error {

@@ -959,6 +959,8 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[P-Q].*$
+    required_children:
+      TestQueuedTurnTerminationBothStores: [pending/sqlite, pending/postgres, retry/sqlite, retry/postgres, rollback/sqlite, rollback/postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

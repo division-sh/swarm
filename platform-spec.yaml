@@ -16930,6 +16930,17 @@ platform_tables:
         owning carrier still closes its authorized physical work and joins cleanup
         before CommitCanceledTurn settles the business origin. Startup consumes
         that same authorization anchor without manufacturing a launch clock.
+        An unclaimed pending or retry delivery can instead be canceled in the
+        guarded terminate transaction through the existing delivery owner. It
+        preserves claim/retry versions and prior attempt evidence, never creates
+        a provider or execution attempt, and consumes the recipient's exact
+        persisted run/flow identity rather than its target's entity. The logical
+        row records the real delivery ID and terminal cause; its authorization
+        anchor may be absent only for this already-settled, unlaunched terminate
+        case. An open physical provider set refuses premature queued settlement.
+        The committed lifecycle result carries exact canceled snapshots for owned
+        post-commit continuation release. Rolled-back stage/node settlement cannot
+        leave cancellation evidence or grant this release.
       ddl: |
         CREATE TABLE runtime_agent_turn_lifetimes (
             turn_id UUID PRIMARY KEY,
@@ -16940,7 +16951,7 @@ platform_tables:
             flow_instance TEXT NOT NULL,
             bound_ns BIGINT CHECK (bound_ns > 0),
             bound_emit TEXT CHECK (bound_emit IS NULL OR NULLIF(TRIM(bound_emit), '') IS NOT NULL),
-            admitted_attempt_id UUID NOT NULL,
+            admitted_attempt_id UUID,
             first_attempt_id UUID,
             first_launched_at TIMESTAMPTZ,
             timeout_event_id UUID,
@@ -16950,6 +16961,7 @@ platform_tables:
             settled_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL,
             UNIQUE (origin_kind, origin_id),
+            CHECK (admitted_attempt_id IS NOT NULL OR (origin_kind = 'delivery' AND cancel_reason IS NOT NULL AND cancel_reason = 'terminate' AND settled_at IS NOT NULL AND first_attempt_id IS NULL AND first_launched_at IS NULL AND bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL)),
             CHECK ((bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL) OR (bound_ns IS NOT NULL AND bound_emit IS NOT NULL AND timeout_event_id IS NOT NULL)),
             CHECK ((first_attempt_id IS NULL AND first_launched_at IS NULL) OR (first_attempt_id IS NOT NULL AND first_launched_at IS NOT NULL)),
             CHECK ((cancel_reason IS NULL AND cancel_cause_event_id IS NULL AND cancel_requested_at IS NULL) OR (cancel_reason IS NOT NULL AND cancel_cause_event_id IS NOT NULL AND cancel_requested_at IS NOT NULL)),

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 )
 
@@ -20,6 +21,26 @@ func (am *AgentManager) attachLogicalTurn(ctx context.Context, turn *effects.Tur
 	}
 	lease.turn = turn
 	return nil
+}
+
+func (am *AgentManager) ApplyCommittedQueuedCancellations(ctx context.Context, snapshots []deliverylifecycle.Snapshot) error {
+	for _, snapshot := range snapshots {
+		if snapshot.Status != deliverylifecycle.StatusCanceled || snapshot.SubscriberClass != deliverylifecycle.SubscriberAgent || snapshot.ReasonCode != "terminate" {
+			return fmt.Errorf("queued cancellation requires exact terminal agent evidence")
+		}
+		if err := deliverylifecycle.ValidateCanceledSnapshot(snapshot); err != nil {
+			return err
+		}
+	}
+	if len(snapshots) > 0 && am.roles.DeliveryRuntime == nil {
+		return fmt.Errorf("queued cancellation requires its exact continuation owner")
+	}
+	var result error
+	for _, snapshot := range snapshots {
+		result = errors.Join(result, am.roles.DeliveryRuntime.ReleaseDeliveryContinuation(snapshot.DeliveryID))
+		am.logDeliveryLifecycle(ctx, snapshot)
+	}
+	return result
 }
 
 func (am *AgentManager) ApplyCommittedTurnCancellations(_ context.Context, intents []effects.TurnCancellation) error {

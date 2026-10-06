@@ -28,7 +28,7 @@ func commitWorkflowEngineLifecycle(
 		if err != nil {
 			return result, err
 		}
-		result.TurnCancellations = intents
+		result.TurnCancellations, result.QueuedCancellations = intents.Active, intents.Queued
 	}
 	for index, mutation := range plan.Timers {
 		ref, changed, err := commitWorkflowEngineTimerMutation(ctx, attempt, postgres, mutation)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 )
 
@@ -18,6 +19,21 @@ func (pc *PipelineCoordinator) BindTurnCancellationDispatcher(owner effects.Turn
 	}
 	pc.turnCancellations = owner
 	return nil
+}
+
+func (pc *PipelineCoordinator) dispatchCommittedQueuedCancellations(ctx context.Context, snapshots []deliverylifecycle.Snapshot) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("dispatch committed queued cancellation panic: %v", recovered)
+		}
+	}()
+	pc.turnCancellationMu.Lock()
+	owner := pc.turnCancellations
+	pc.turnCancellationMu.Unlock()
+	if owner == nil {
+		return fmt.Errorf("committed queued termination lacks its runtime dispatcher")
+	}
+	return owner.ApplyCommittedQueuedCancellations(ctx, snapshots)
 }
 
 func (pc *PipelineCoordinator) dispatchCommittedTurnCancellations(ctx context.Context, intents []effects.TurnCancellation) (err error) {

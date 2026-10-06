@@ -13,9 +13,58 @@ import (
 )
 
 type committedTurnCancellationProbe struct {
-	calls int
-	fault error
-	panic bool
+	calls       int
+	queuedCalls int
+	fault       error
+	panic       bool
+}
+
+func (p *committedTurnCancellationProbe) ApplyCommittedQueuedCancellations(_ context.Context, snapshots []deliverylifecycle.Snapshot) error {
+	p.queuedCalls++
+	if len(snapshots) != 1 || snapshots[0].Status != deliverylifecycle.StatusCanceled || snapshots[0].ReasonCode != "terminate" {
+		return errors.New("missing exact queued cancellation")
+	}
+	if p.panic {
+		panic("owned queued dispatch fault")
+	}
+	return p.fault
+}
+
+func TestCommittedQueuedCancellationDispatchRequiresAcknowledgment(t *testing.T) {
+	for _, mode := range []string{"healthy", "unacknowledged", "missing_owner", "cleanup_error", "panic"} {
+		t.Run(mode, func(t *testing.T) {
+			fault := errors.New("continuation cleanup failed")
+			probe := &committedTurnCancellationProbe{panic: mode == "panic"}
+			if mode == "cleanup_error" {
+				probe.fault = fault
+			}
+			pc := &PipelineCoordinator{}
+			if mode != "missing_owner" {
+				if err := pc.BindTurnCancellationDispatcher(probe); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pending := CommittedWorkflowLifecycleMutation{QueuedCancellations: []deliverylifecycle.Snapshot{{
+				DeliveryID: uuid.NewString(), RunID: uuid.NewString(), SubscriberID: "queued-agent", SubscriberClass: deliverylifecycle.SubscriberAgent,
+				Status: deliverylifecycle.StatusCanceled, ReasonCode: "terminate", SettledAt: time.Now().UTC(),
+			}}}
+			committed := pending
+			if mode != "unacknowledged" {
+				committed = pending.WithCommitAcknowledgment()
+			}
+			err := pc.finalizeWorkflowLifecycleMutation(context.Background(), committed)
+			wantCalls := 1
+			if mode == "missing_owner" || mode == "unacknowledged" {
+				wantCalls = 0
+			}
+			if probe.queuedCalls != wantCalls || (err != nil) != (mode != "healthy") || mode == "cleanup_error" && !errors.Is(err, fault) {
+				t.Fatalf("queued post-commit dispatch: calls=%d err=%v", probe.queuedCalls, err)
+			}
+			if pending.Committed {
+				t.Fatal("acknowledgment changed uncommitted evidence")
+			}
+		})
+	}
 }
 
 func (p *committedTurnCancellationProbe) ApplyCommittedTurnCancellations(_ context.Context, intents []effects.TurnCancellation) error {

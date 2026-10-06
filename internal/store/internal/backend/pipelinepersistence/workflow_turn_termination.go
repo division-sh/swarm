@@ -10,7 +10,7 @@ import (
 )
 
 type WorkflowTurnTerminationTxOwner interface {
-	RequestWorkflowTurnTerminationTx(context.Context, *mutationprotocol.Attempt, workflowlifecycle.TurnTermination) ([]effects.TurnCancellation, error)
+	RequestWorkflowTurnTerminationTx(context.Context, *mutationprotocol.Attempt, workflowlifecycle.TurnTermination) (effects.WorkflowTurnTerminationResult, error)
 }
 
 func (s *PipelinePostgresOwner) BindWorkflowTurnTermination(owner WorkflowTurnTerminationTxOwner) error {

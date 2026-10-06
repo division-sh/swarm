@@ -11,13 +11,13 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, command workflowlifecycle.TurnTermination) ([]runtimeeffects.TurnCancellation, error) {
+func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, command workflowlifecycle.TurnTermination) (runtimeeffects.WorkflowTurnTerminationResult, error) {
 	if err := command.Validate(); err != nil {
-		return nil, err
+		return runtimeeffects.WorkflowTurnTerminationResult{}, err
 	}
 	owner, cause := command.Owner(), command.Cause()
 	transition, _ := cause.Transition()
-	var intents []runtimeeffects.TurnCancellation
+	var result runtimeeffects.WorkflowTurnTerminationResult
 	err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var eventRun, eventType string
 		if err := tx.QueryRowContext(ctx, `SELECT CAST(run_id AS TEXT),event_name FROM events WHERE event_id=$1`, cause.EventID()).Scan(&eventRun, &eventType); err != nil {
@@ -37,6 +37,11 @@ func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationproto
 		}
 		if entity != cause.EntityID().String() || stage != transition.To() || status != "active" || terminated != nil {
 			return fmt.Errorf("authored termination disagrees with its guarded constructed header")
+		}
+		var err error
+		result.Queued, err = cancelQueuedWorkflowTurns(ctx, tx, mutation, postgres, delivery, command)
+		if err != nil {
+			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT CAST(turn_id AS TEXT),CAST(admitted_attempt_id AS TEXT) FROM runtime_agent_turn_lifetimes WHERE run_id=$1 AND flow_instance=$2 AND settled_at IS NULL ORDER BY origin_kind,origin_id`, owner.RunID, owner.Route.InstancePath)
 		if err != nil {
@@ -119,26 +124,26 @@ func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationproto
 			if err := intent.ValidateFacts(); err != nil {
 				return err
 			}
-			intents = append(intents, intent)
+			result.Active = append(result.Active, intent)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return runtimeeffects.WorkflowTurnTerminationResult{}, err
 	}
-	return intents, nil
+	return result, nil
 }
 
-func (s *EffectPostgresOwner) RequestWorkflowTurnTerminationTx(ctx context.Context, mutation *mutationprotocol.Attempt, command workflowlifecycle.TurnTermination) ([]runtimeeffects.TurnCancellation, error) {
+func (s *EffectPostgresOwner) RequestWorkflowTurnTerminationTx(ctx context.Context, mutation *mutationprotocol.Attempt, command workflowlifecycle.TurnTermination) (runtimeeffects.WorkflowTurnTerminationResult, error) {
 	if err := s.requireCurrent(); err != nil {
-		return nil, err
+		return runtimeeffects.WorkflowTurnTerminationResult{}, err
 	}
 	return requestWorkflowTurnTermination(ctx, mutation, true, s.delivery, s.directives, command)
 }
 
-func (s *EffectSQLiteOwner) RequestWorkflowTurnTerminationTx(ctx context.Context, mutation *mutationprotocol.Attempt, command workflowlifecycle.TurnTermination) ([]runtimeeffects.TurnCancellation, error) {
+func (s *EffectSQLiteOwner) RequestWorkflowTurnTerminationTx(ctx context.Context, mutation *mutationprotocol.Attempt, command workflowlifecycle.TurnTermination) (runtimeeffects.WorkflowTurnTerminationResult, error) {
 	if err := s.requireCurrent(); err != nil {
-		return nil, err
+		return runtimeeffects.WorkflowTurnTerminationResult{}, err
 	}
 	return requestWorkflowTurnTermination(ctx, mutation, false, s.delivery, s.directives, command)
 }
