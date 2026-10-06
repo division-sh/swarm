@@ -2390,7 +2390,7 @@ func newNotifyAllChildrenRuntime(
 }
 
 func notifyAllChildrenTerminalCatalog(source semanticview.Source) runtimerunlifecycle.FinalCatalog {
-	workflow := source.FlowFinalStages("")
+	workflow := source.FlowFinalStages(semanticview.RootExecutionFlowID(source))
 	flows := make(map[string][]string)
 	for flowID := range source.FlowSchemaEntries() {
 		states := source.FlowFinalStages(flowID)

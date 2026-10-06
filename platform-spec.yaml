@@ -579,20 +579,20 @@ contract_formats:
         the independently selected rule fact and the guards actually evaluated
         accompany it into persistence. A rule-level advance retains its exact
         qualified declaration identity. Source and target membership and
-        terminal-state guards are scoped to the exact executing flow, never
+        final-stage guards are scoped to the exact executing flow, never
         borrowed from another flow with equal stage names. This does not add
         ordinary source-stage authoring: ordinary carriers retain their current
-        compiled nonterminal source set, and loop/join/timer/gate carriers their
+        compiled non-final source set, and loop/join/timer/gate carriers their
         declared source restrictions. Canonical construction establishes initial
         stage entry before delivery; it is not a handler advance carrier and
         cannot restrict an ordinary handler to the initial stage.
         Authored stage IDs are case-sensitive and exact within the selected
         source and flow. The compiled topology privately owns declared
-        membership and terminal metadata; execution, receiver admission,
+        membership and final metadata; execution, receiver admission,
         guard termination, initial entry, verification and lifecycle readers
         resolve that same flow-bound model. Equal spellings in another flow or
         source convey no authority. Public stage-name lists are projections,
-        not alternative membership or terminal-state owners. No case folding,
+        not alternative membership or final-stage owners. No case folding,
         undeclared-stage acceptance, or alternate killed-stage spelling is
         permitted. A flow with no authored stages may persist the exact
         storage posture pending; it is not an authored stage or transition
@@ -8831,7 +8831,7 @@ engine:
         post-activation path is a boot error. start_on boot state-cancel reachability is left to explicit boot-start
         scheduling semantics and is not closed by this rule.
     example: "stages:\n  awaiting_review:\n    timers:\n      - after: 48h\n        emit: review.sla_escalated\n\
-      \      - after: \"{{marginal_park_days}}d\"\n        advances_to: expired\n  expired:\n    terminal: true\n\
+      \      - after: \"{{marginal_park_days}}d\"\n        advances_to: expired\n  expired:\n    final: true\n\
       \n# Legacy/kernel timer example:\ntimers:\n  - id: daily_report\n    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\
       \n    start_on: boot\n    recurring: true"
   expression_language:
@@ -9586,8 +9586,9 @@ engine:
       scope: per-flow
       trigger: >-
         An advances_to target is not in the flow's lowered declared state list. Or the lifecycle declaration is malformed:
-        a non-empty stages mapping lacks exactly one initial stage, or a non-empty stages mapping declares no terminal
-        stage. Retired legacy lifecycle fields fail during source admission before boot.
+        the declaration-order entry is missing from its compiled catalog, or final-stage gate/exit restrictions
+        are violated. No-final flows are valid services; finite completion admission belongs to run.start.
+        Retired lifecycle fields fail during source admission before boot.
       when: boot-only
     - id: required_agents_match
       severity: error
@@ -35785,6 +35786,14 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           current_status:
             $ref: '#/components/schemas/RunStatus'
+      RUN_NEVER_COMPLETES:
+        type: object
+        additionalProperties: false
+        required: [flow_id, detail]
+        properties:
+          flow_id: {type: string}
+          detail: {type: string}
+        description: Finite run.start requires an explicit final stage in every instance-bearing flow of its canonical constructor/routing closure. A no-final service remains valid for serve.
       RUN_NOT_PAUSED:
         type: object
         additionalProperties: false
@@ -36572,6 +36581,16 @@ api_specification:
         identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext;
         an existing run cannot acquire new run-creation data.
 
+        Before either atomic creation owner, require an explicit final stage for the selected root,
+        eagerly constructed keyless descendants, and possible compiled routing receivers/templates and
+        their constructor children. Unknown or contradictory catalog evidence fails closed. Do not
+        infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or
+        treat stateless instances as exempt containers. A no-final service is structurally valid but
+        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow. Committed
+        idempotency replay/conflicts retain their existing owners; existing-run event.publish and
+        standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,
+        resource, feed and permanent-receipt effects.
+
         '
       scope:
         required:
@@ -36644,6 +36663,7 @@ api_specification:
       - RUN_DATA_REJECTED
       - RUN_DATA_HEAD_CONFLICT
       - DATA_INTEGRITY_ERROR
+      - RUN_NEVER_COMPLETES
     run.fork:
       tier: should_have
       description: >-

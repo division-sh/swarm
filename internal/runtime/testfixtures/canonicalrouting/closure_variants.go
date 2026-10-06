@@ -312,11 +312,11 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\nticket.closed:\n  entity_id: string\n")
 	reviewMetadata := "{}"
 	if settings.treatReviewAsTerminalActivation {
-		reviewMetadata = "{terminal: true}"
+		reviewMetadata = "{final: true}"
 	}
-	waiting := "  waiting:\n    initial: true\n"
+	waiting := "  waiting: {}\n"
 	if settings.includeGlobalDonePath || settings.includeGlobalReviewPath {
-		waiting += "    timers:\n"
+		waiting = "  waiting:\n    timers:\n"
 		if settings.includeGlobalDonePath {
 			waiting += "      - {id: global_done, after: 1h, advances_to: done}\n"
 		}
@@ -324,7 +324,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 			waiting += "      - {id: global_review, after: 1h, advances_to: review}\n"
 		}
 	}
-	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n"+waiting+"  active: {}\n  review: "+reviewMetadata+"\n  done: {terminal: true}\npins:\n  inputs: ["+pinList+"]\n")
+	writeClosedVariantFile(t, root, "support/schema.yaml", "name: support\nstages:\n"+waiting+"  active: {}\n  review: "+reviewMetadata+"\n  done: {final: true}\npins:\n  inputs: ["+pinList+"]\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "timer.reminder:\n")
 	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {

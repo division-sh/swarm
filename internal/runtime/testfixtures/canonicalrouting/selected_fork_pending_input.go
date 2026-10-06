@@ -42,7 +42,7 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 	}
 	for _, scope := range scopes {
 		files := map[string]string{
-			"schema.yaml":   "name: fork-input\nstages:\n  ready: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - work.seeded\n    - " + eventName + "\n",
+			"schema.yaml":   "name: fork-input\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.seeded\n    - " + eventName + "\n",
 			"events.yaml":   "work.seeded:\n  seed: boolean\n" + eventName + ":\n  token: " + tokenType + "\n",
 			"entities.yaml": "work: {}\n",
 			"nodes.yaml":    "controller:\n  execution_type: system_node\n  subscribes_to: [work.seeded, " + eventName + "]\n  event_handlers:\n    work.seeded:\n      advances_to: ready\n    " + eventName + ":\n      advances_to: done\n",
@@ -56,7 +56,7 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 			case PendingInputDuplicateEndpoint:
 				files["schema.yaml"] += "    - work.first\n"
 			case PendingInputMixedCompletion:
-				files["schema.yaml"] = strings.ReplaceAll(files["schema.yaml"], "done: {terminal: true}", "archived: {terminal: true}") + "    - work.marked\n"
+				files["schema.yaml"] = strings.ReplaceAll(files["schema.yaml"], "done: {final: true}", "archived: {final: true}") + "    - work.marked\n"
 				files["events.yaml"] += "work.marked:\n  token: text\n"
 				files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "subscribes_to: [work.seeded, work.first]", "subscribes_to: [work.seeded]", 1)
 				files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "    work.first:\n      advances_to: done\n", "", 1)

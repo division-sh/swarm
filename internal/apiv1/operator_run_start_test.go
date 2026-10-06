@@ -374,6 +374,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		const eventName = "scan.unroutable_requested"
 		bundle := runStartTestBundle(eventName)
+		bundle.Nodes, bundle.FlowTree.Root.Nodes = nil, nil
 		bundle.FlowTree.Root.Children[0].Events = map[string]runtimecontracts.EventCatalogEntry{"scan.other_requested": {}}
 		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
 			SubscribesTo: []string{"scan.other_requested"},
@@ -879,6 +880,7 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
 		Path:  "discovery",
 		Schema: runtimecontracts.FlowSchemaDocument{
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready"}, {ID: "done", Final: true}}},
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
 			},
@@ -887,7 +889,7 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 			"scan-orchestrator": {
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{eventName},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {}},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {AdvancesTo: "done"}},
 			},
 		},
 	}
@@ -895,6 +897,7 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Path:  ".",
 		Schema: runtimecontracts.FlowSchemaDocument{
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready"}, {ID: "done", Final: true}}},
 			Pins: runtimecontracts.FlowPins{
 				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: eventName}}},
@@ -904,6 +907,9 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		Events: map[string]runtimecontracts.EventCatalogEntry{eventName: {Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}},
 		}}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"run-owner": {ExecutionType: "system_node", SubscribesTo: []string{eventName}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {AdvancesTo: "done"}}},
+		},
 		Children: []runtimecontracts.FlowContractView{flow},
 	}
 	root.Children[0].Parent = &root

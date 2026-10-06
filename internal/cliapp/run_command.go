@@ -1233,6 +1233,7 @@ func runCommandErrorExitCode(err error) int {
 			"EVENT_PUBLISH_FAILED",
 			"PAYLOAD_VALIDATION_FAILED",
 			"IDEMPOTENCY_CONFLICT",
+			"RUN_NEVER_COMPLETES",
 		},
 	})
 }

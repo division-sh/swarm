@@ -1730,13 +1730,12 @@ func loadGateRecoveryContractBundle(t *testing.T, terminal bool) *runtimecontrac
 	root := t.TempDir()
 	outcome := "          advances_to: operating\n          emit: launch.approved\n  operating: {}\n"
 	if terminal {
-		outcome = "          advances_to: completed\n  completed: {terminal: true}\n"
+		outcome = "          advances_to: completed\n  completed: {final: true}\n"
 	}
 	files := map[string]string{
 		"schema.yaml": `name: launch
 stages:
   awaiting_review:
-    initial: true
     gate:
       decision: launch_review
       outcomes:

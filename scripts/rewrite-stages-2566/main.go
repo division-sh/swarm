@@ -24,6 +24,7 @@ type change struct {
 	AfterHash   string        `json:"after_hash"`
 	Edits       []edit        `json:"edits"`
 	Equivalence []equivalence `json:"equivalence"`
+	Review      string        `json:"review,omitempty"`
 }
 
 type edit struct {
@@ -48,10 +49,39 @@ func main() {
 	ledger := flag.String("ledger", "scripts/rewrite-stages-2566/intent.json", "finite reviewed ledger")
 	write := flag.Bool("write", false, "apply the complete prepared plan (only after the gate)")
 	check := flag.Bool("check", false, "require reviewed outputs already present")
+	prove := flag.Bool("prove", false, "one-time exact corpus replay from the recorded git baseline, including byte idempotence")
 	typed := flag.Bool("prepare-typed", false, "prepare the inventoried typed Go stage fixture field cut")
+	literals := flag.Bool("prepare-literals", false, "prepare stage-owned fields in complete Go YAML literals; fragments remain explicitly reviewed")
+	entries := flag.Bool("prepare-entry-golden", false, "extract permanent disk entry/end goldens from the independently reviewed baseline ledger")
+	baseline := flag.String("refresh-baseline", "", "record exact corpus edits against this reviewed git baseline; does not apply a rewrite")
+	reviewedRevision := flag.String("reviewed-plan-revision", "", "original independently reviewed ledger revision for a post-rebase capture")
 	flag.Parse()
 	var err error
-	if *typed {
+	if *prove {
+		if *typed || *literals || *entries || *write || *check || *baseline != "" {
+			err = fmt.Errorf("corpus proof is separate from preparation/application")
+		} else {
+			err = provePlan(*root, *ledger)
+		}
+	} else if *baseline != "" {
+		if *typed || *literals || *entries || *write || *check {
+			err = fmt.Errorf("ledger capture is separate from plan application")
+		} else {
+			err = refreshLedger(*root, *ledger, *baseline, *reviewedRevision)
+		}
+	} else if *entries {
+		if *typed || *literals || *write || *check {
+			err = fmt.Errorf("entry golden extraction is separate from plan application")
+		} else {
+			err = prepareEntryGoldens(*root, *ledger)
+		}
+	} else if *literals {
+		if *typed || *write || *check {
+			err = fmt.Errorf("literal preparation is separate from finite plan application")
+		} else {
+			err = prepareLiterals(*root)
+		}
+	} else if *typed {
 		if *write || *check {
 			err = fmt.Errorf("typed preparation is separate from finite plan application")
 		} else {
@@ -121,7 +151,7 @@ func apply(root, ledger string, write, check bool) error {
 		if _, duplicate := outputs[c.File]; duplicate {
 			return fmt.Errorf("duplicate ledger file %s", c.File)
 		}
-		if len(c.Equivalence) == 0 || len(c.Edits) == 0 || c.BeforeHash == c.AfterHash {
+		if (len(c.Equivalence) == 0 && c.Review == "") || len(c.Edits) == 0 || c.BeforeHash == c.AfterHash {
 			return fmt.Errorf("%s: missing edit/equivalence decision", c.File)
 		}
 		body, err := os.ReadFile(filepath.Join(root, c.File))

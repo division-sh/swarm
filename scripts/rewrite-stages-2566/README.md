@@ -1,7 +1,8 @@
-# #2566 Corpus Rewrite Preparation
+# #2566 Finite Corpus Rewrite
 
-`intent.json` freezes exact byte edits and entry/end equivalence for the reviewed
-positive sources on its named baseline. The command defaults to a **dry run**:
+`intent.json` records exact edits against the integration baseline, retaining
+the independently reviewed positive entry/end decisions and explicitly marking
+generated/partial source and negative-oracle edits. The default is a **dry run**:
 
 ```sh
 go run ./scripts/rewrite-stages-2566 -root .
@@ -11,41 +12,42 @@ No production or corpus source is changed by that command. The script is a
 finite applier, not a YAML dumper, another runtime reader, or a store migration.
 It validates every file hash and edit anchor before writing anything. Unknown
 input fails; reviewed output is accepted unchanged on a second application.
-After the coverage gate and completion of the remaining dispositions, the
-implementation can apply the ledger with `-write` and assert it with `-check`.
+Apply with `-write`, check with `-check`, or obtain the one-time exact replay
+receipt with `-prove`. The latter reads the recorded Git inputs, compares every
+output byte with the reviewed tree, and proves second-application idempotence.
+It is a qualification command, not a recurring freeze on future fixture bytes.
 
-The preparation test uses the existing `yamlsource` and typed schema owners to
-identify positive stage declarations. It removes only stage-owned `initial`
+Preparation uses the existing `yamlsource` and typed schema owners to
+identify stage declarations. It removes only stage-owned `initial`
 and renames only stage-owned `terminal` to `final`. Business data, stage IDs,
 expression quoting, comments outside removed fields, timers, gates and stage
 metadata remain unchanged. Two explicitly reviewed fixtures move their old
 entry declaration to the front before removing `initial`; the script does not
 sort any mappings or infer an entry from a stage name.
 
-Preparation proof: old marked entry equals the new first declaration, old
-terminal booleans equal the new final booleans, and the complete typed schema
-with only initial removed is otherwise equivalent (apart from those two ordered
-declaration moves). Final spelling is parsed as source only at this checkpoint:
-the production final grammar has not been implemented and is not claimed proven.
+The retained baseline decisions state that old marked entry equals the new first
+declaration and old terminal choices equal new final choices. Full generated
+branches also retain their original assertions: entry-selection variants now
+move exact declarations instead of setting markers. No generic YAML re-dump is
+used, and preparing a non-first marked entry fails for explicit review.
 
-This ledger is **not yet the full migration output**. The census separately
-classifies partial generators/replacement anchors, negative oracles, typed Go
-fixtures, semantic/spec prose and historical ledgers. They need exact reviewed
-edits in the same implementation PR; they are not silently skipped as closed.
-Embedded spec examples also await their authoritative semantic rewrite. Current
-production code and the actual corpus stay untouched while Gate D reviews.
+`entries.json` permanently checks 204 baseline-reviewed disk source/flow/entry
+tuples against current typed admission. A sorted-but-still-reachable hostile
+fixture proves reachability cannot replace this guard. Later intentional entry
+changes must update the affected golden explicitly; this does not freeze other
+fixture bytes or require maintaining the historical rewrite hashes forever.
 
-Regenerate the historical positive preparation on local commit `61dcdda4d`
-against its named baseline (the diagnostic test is deliberately not retained as
-a legacy reader after the final-grammar cut):
+The original preparation was independently reviewed before the grammar cut.
+Post-rebase capture preserves those decisions instead of deriving intent from
+the new parser. To refresh exact integration edits after a reviewed repair:
 
 ```sh
-ISSUE2566_PLAN_OUTPUT=scripts/rewrite-stages-2566/intent.json \
-  go test ./internal/runtime/contracts -run '^TestIssue2566PrepareCorpusPlan$' -count=1
+go run ./scripts/rewrite-stages-2566 -refresh-baseline af250de63 \
+  -reviewed-plan-revision bd43e4a8d
+go run ./scripts/rewrite-stages-2566 -prove
 go test ./scripts/rewrite-stages-2566 -race -count=3
 ```
 
-The plan records source-site identities for this one-time equivalence proof.
-The implementation still owes the permanent corpus/describe entry golden,
-strict retired-key rejection, final catalog handoff, finite-start and execution
-proofs. This historical plan must not freeze future corpus changes.
+The corpus receipt and permanent entry tests are not runtime closure by
+themselves. Finite initiation, catalog consumers, timer applicability,
+construction/restart/fork and completion require the separate execution proofs.
