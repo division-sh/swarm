@@ -1,0 +1,17 @@
+worker:
+  execution_type: system_node
+  subscribes_to: [overlap.start, overlap.arm, overlap.finish]
+  event_handlers:
+    overlap.start:
+      data_accumulation:
+        writes:
+          - {source_field: case_id, target_field: case_id}
+          - {target_field: acknowledgments, value: 0}
+    overlap.arm:
+      advances_to: timed
+      data_accumulation:
+        writes: [{target_field: acknowledgments, value: entity.acknowledgments + 1}]
+    overlap.finish:
+      advances_to: done
+      data_accumulation:
+        writes: [{target_field: acknowledgments, value: entity.acknowledgments + 1}]
