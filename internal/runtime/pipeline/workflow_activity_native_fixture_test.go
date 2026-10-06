@@ -16,4 +16,5 @@ type WorkflowActivityNativeFixtureForTest struct {
 
 type WorkflowJournalStorageForTest struct {
 	StoryCount, StoryHead, RunForkRevisions int64
+	MockAttemptStories, Attempts            int64
 }
