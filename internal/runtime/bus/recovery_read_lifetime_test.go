@@ -236,3 +236,71 @@ func TestRecoveryMetadataReadAdmissionAndIsolation(t *testing.T) {
 		})
 	}
 }
+
+func TestContinuationStandingSuppressionRetainsCarrierAndIndependentErrors(t *testing.T) {
+	independent := errors.New("independent standing admission failure")
+	for _, failure := range []error{ErrStandingRestartParked, independent, errors.Join(ErrStandingRestartParked, independent), worklifetime.ErrAdmissionFenced} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			owner := newRecoveryControlOwner(t)
+			eb, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{WorkOwner: owner})
+			if err != nil {
+				t.Fatal(err)
+			}
+			origin, err := runlifecycle.StandingGenerationRunOrigin(uuid.NewString(), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			probe := &recoveryReadProbe{phase: "authorization", origin: origin, failure: failure, entered: make(chan context.Context, 1), release: make(chan struct{})}
+			close(probe.release)
+			eb.durable.RunOrigins, eb.durable.StandingRestarts = probe, probe
+			eb.SetStandingRunWorkOwner(probe)
+			authority, err := eb.DeliveryAuthority()
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinator, err := deliverycontinuation.New(struct{ runtimedelivery.Store }{}, unexpectedDurableTestRoles{}, authority, eb.workOwner, eb, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := eb.SetDeliveryContinuationOwner(coordinator); err != nil {
+				t.Fatal(err)
+			}
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "custom.election", "test", "", []byte(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
+			route := nodeOnlyDeliveryPlan(t, event, "parked-node").DeliveryRoutes()[0]
+			id, err := runtimedelivery.DeliveryID(event.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := route.Identity()
+			if err != nil {
+				t.Fatal(err)
+			}
+			handoff, err := runtimedelivery.AdmitDurableHandoffProof(id, event.ID(), events.EncodeDeliveryRouteIdentity(identity), authority)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := coordinator.AcceptCommitted([]runtimedelivery.DurableHandoffProof{handoff}); err != nil {
+				t.Fatal(err)
+			}
+			result := eb.DispatchDeliveryContinuation(context.Background(), event, route)
+			if failure == ErrStandingRestartParked {
+				if result.Validate() != nil || result.Disposition() != deliverycontinuation.DispatchDeferred || result.WakeAuthority() != deliverycontinuation.DispatchWakeRunContinue {
+					t.Fatalf("known standing transition lost its progress owner: %+v", result)
+				}
+			} else if result.Disposition() != deliverycontinuation.DispatchFatal || !errors.Is(result.Failure(), failure) {
+				t.Fatalf("independent/untracked admission failure was suppressed: result=%+v want=%v", result, failure)
+			}
+			acquisition, err := coordinator.Acquire(id)
+			carrier, acquired := acquisition.Acquired()
+			if err != nil || !acquired {
+				t.Fatalf("exact carrier was not returned: acquired=%t err=%v", acquired, err)
+			}
+			if _, err := carrier.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil {
+				t.Fatal(err)
+			}
+			if owner.ActiveCount() != 0 {
+				t.Fatal("standing deferral retained process work")
+			}
+		})
+	}
+}
