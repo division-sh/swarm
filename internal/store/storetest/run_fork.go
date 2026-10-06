@@ -9,6 +9,11 @@ import (
 )
 
 type SelectedForkStorageTableSnapshot = private.SelectedForkStorageTableSnapshot
+type SelectedForkControlStorage = private.SelectedForkControlStorage
+
+func ReadSelectedForkControlStorage(ctx context.Context, selected any, runID, loadedBundleHash, agentID string) (SelectedForkControlStorage, error) {
+	return private.ReadSelectedForkControlStorageForTest(ctx, selected, runID, loadedBundleHash, agentID)
+}
 
 func ReadSelectedForkApplicationStorageSnapshot(ctx context.Context, selected any) (map[string]SelectedForkStorageTableSnapshot, error) {
 	return private.ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
