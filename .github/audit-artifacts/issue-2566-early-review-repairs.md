@@ -44,7 +44,9 @@ Post-Implementation Proof Audit, a core qualification receipt, or merge readines
 | Sorted, still-reachable source silently selects another entry | `TestRewrite2566EntryGoldenRejectsSortedDumpWithoutStranding`; retained hostile control |
 | Retained source order/finals lost on new store reader or selected fork load | `TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores`; independent accepted SQLite pool/PostgreSQL facade and actual selected-fork source loader, both stores race/count-three pass |
 | Materialized selected fork source changes its stage catalog | `assertRetainedStageCatalogsForFork` in `stageForkContentionFixtureAt`; `TestSelectedBranchPointActivationAtomicityBothStores`, event/deployment-revision and running/cancelled cases, both stores race/count-three pass |
+| Exact retained catalog survives either writer/activation ordering | `TestSelectedRunForkActivationFrontierContentionBothStores/(sqlite\|postgres)/(writer\|activation)/commit`; all four cases, race/count-three pass (156.767s aggregate) |
 | Two test interfaces fail to compile | Exact managed `core-structural-owner-guards` unit: all four packages pass |
+| Public final projection still agrees with join settlement | `TestA2JoinPublicProjectionAgreementBothStores`; race/count-three pass (76.371s) |
 | Rewrite/runtime complexity introduces hotspots | Independent base/head measurement at `4c53d2712`: cognitive >=30 561/561, >=50 192/192; cyclomatic >=30 261/261, >=50 58/58; unchanged maxima/policy |
 
 Whole-corpus replay remains 417 exact files / 553 decisions / byte-idempotent.
@@ -58,7 +60,8 @@ limit in the pre-existing contention matrix. It also exposed a test setup error:
 a freshly rebuilt store facade had not passed canonical schema acceptance. The
 fixture now uses existing canonical bootstrap owners; independent accepted
 reload/source tests and branch-point materialization pass separately. The isolated
-SQLite activation-first commit contention control passes without a timeout change.
+SQLite activation-first commit control and the four-cell both-store/writer-order
+commit matrix pass without a timeout change.
 The full combined contention command is not reported green or waived. Its complete
 qualification remains due under the reviewer-bound tier.
 
