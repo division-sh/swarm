@@ -7,7 +7,7 @@ whose production declarations/calls were deleted; it does not exempt a surface.
 
 | Added finding | Disposition and owning boundary |
 | --- | --- |
-| `engine.CommittedFlowDeactivation.FinalizeFlowDeactivation` | `typed-process-local`: named consumption of the already acknowledged terminal result after the entity gate is released; no SQL handle or arbitrary callback. |
+| `engine.CommittedFlowDeactivation.FinalizeFlowDeactivation` | Introduced as `typed-process-local`, then deleted by the approved E-attributed D1 composition: ordinary final entry is not retirement authority. The callback/result and normal/selected injections no longer exist. Explicit termination retains its separate typed command and cleanup owner. |
 | `engine.EvaluatedStateProjection.EvaluationRevision` | `typed-process-local`: reads the immutable R1 carrier's revision; does not reread state or acquire write authority. |
 | `pipeline.EntityFieldMutationWriter.ApplyEntityFieldMutation` | `typed-process-local`: tools submit one admitted captured operation to the existing coordinator gate, evaluation carrier and commit owner; no raw-store fallback. |
 | `eventCommitTxStore.RequireActiveSourceTx` in `commitWorkflowEngineMutation` | `private-backend`: fresh source authority inside the already-owned canonical mutation transaction, before domain mutation. No raw capability escapes. |
@@ -22,10 +22,18 @@ The read projections remain supported. The new tools mutation port consumes
 CommitWorkflowEngineMutation/mutationprotocol rather than another SQL protocol.
 
 Execution witnesses include the native R1 stale-draft refusal, operation CAS
-reapplication, run-stop both-order/rollback, terminal post-unlock, attributed
+reapplication, run-stop both-order/rollback, explicit termination post-unlock, attributed
 writer evidence/rollback/fork and acknowledged no-repeat response tests. The
 restored-bypass guards still reject raw Save SQL, substituted R2 and unlocked
 writer paths. The registry itself proves exact confinement, not these outcomes.
+
+The bounded D1 removal additionally retires six source findings: the engine
+callback interface method, coordinator field/options injection, preparer type,
+and both selected-pipeline constructor parameters. The shared explicit
+termination postcommit record remains. Ordinary stage-retirement refusal uses
+the canonical command admission and selected workflow reader; it adds no raw
+SQL test site or debt-baseline exception. Final registry refresh follows the
+master rebase and must be verified with update mode disabled.
 
 Normal qualification must run without
 `SWARM_UPDATE_PERSISTENCE_AUTHORITY_REGISTRY`; retain
