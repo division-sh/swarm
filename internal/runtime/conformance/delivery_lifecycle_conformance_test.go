@@ -1810,14 +1810,9 @@ func assertDeliveryHandlerRuleSelectionMissing(t testing.TB, ctx context.Context
 
 func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "event_deliveries",
-		"delivery_id", "event_id", "route_identity", "subscriber_type", "subscriber_id",
-		"status", "retry_count", "max_retries", "claim_version", "current_attempt_version",
-		"current_attempt_open", "settled_at")
-	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "event_delivery_attempts",
-		"delivery_id", "claim_version", "claim_token", "started_at", "lease_expires_at", "current_delivery_id",
-		"active_session_id", "session_delivery_id", "session_run_id", "session_subscriber_type", "session_agent_id", "open_marker", "closure_kind", "outcome", "side_effects", "duration_ms", "completed_at")
+	if err := storetest.CheckDeliveryLifecycleStorageColumns(ctx, pg); err != nil {
+		t.Fatal(err)
+	}
 }
 
 var (

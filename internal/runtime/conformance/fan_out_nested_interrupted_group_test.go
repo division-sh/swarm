@@ -30,7 +30,7 @@ func TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores(t *testing.T) {
 				for _, entry := range rt.diagnostics.snapshot() {
 					t.Logf("interrupted group diagnostic: %+v", entry)
 				}
-				dumpNotifyAllChildrenRuntimeState(t, context.Background(), rt.selected, db)
+				dumpNotifyAllChildrenRuntimeState(t, context.Background(), rt.selected)
 			})
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), rt.sourceArtifactFact), runID)
@@ -44,7 +44,7 @@ func TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores(t *testing.T) {
 			probe.armPostCommitHold(t)
 			notifyID := publishNotifyAllChildrenEventAsync(t, ctx, rt, source, runID, "portfolio.notify.requested", map[string]any{"portfolio_id": "portfolio-main", "command": "interrupted-group"})
 			held := waitNestedServingPostCommit(t, probe)
-			parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, db, runID, notifyID)
+			parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, runID, notifyID)
 			assertNotifyAllChildrenItemSequence(t, parents, accounts)
 			if held.ParentEvent != notifyID || held.Publications != 3 || len(parents) != 3 {
 				t.Fatalf("interrupted group requires real exact three-member commit: %+v parents=%+v", held, parents)
@@ -101,7 +101,7 @@ func TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores(t *testing.T) {
 			assertNestedSiblingTaskEffects(t, ctx, rt.selected, db, runID, "account.task.requested", "account.task.completed", parents)
 			assertNestedExactBarrier(t, ctx, db, held.Key, "fired", fanoutbarrier.Summary{Total: 3, Succeeded: 3})
 			assertNestedInterruptedFinalState(t, ctx, db, rt, runID, parents)
-			finalParents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, db, runID, notifyID)
+			finalParents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, runID, notifyID)
 			assertNotifyAllChildrenItemSequence(t, finalParents, accounts)
 			for i := range parents {
 				if finalParents[i].ID != parents[i].ID {

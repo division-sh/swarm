@@ -52,7 +52,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("B17 serving counters: %+v", probe.snapshot())
-					dumpNotifyAllChildrenRuntimeState(t, context.Background(), rt.selected, db)
+					dumpNotifyAllChildrenRuntimeState(t, context.Background(), rt.selected)
 					for _, entry := range rt.diagnostics.snapshot() {
 						t.Logf("B17 diagnostic: %+v", entry)
 					}
@@ -75,7 +75,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			if held.ParentEvent != notifyID || held.Publications != len(accounts) {
 				t.Fatalf("wrong parent turn: %+v", held)
 			}
-			parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, db, runID, notifyID)
+			parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, runID, notifyID)
 			assertNotifyAllChildrenItemSequence(t, parents, accounts)
 			probe.releaseHeld()
 			signal := childGate.wait(t)

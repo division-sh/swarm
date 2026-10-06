@@ -68,7 +68,7 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	t.Cleanup(func() {
 		if t.Failed() {
 			t.Logf("nested serving failure counters: %+v", probe.snapshot())
-			dumpNotifyAllChildrenRuntimeState(t, context.Background(), rt.selected, db)
+			dumpNotifyAllChildrenRuntimeState(t, context.Background(), rt.selected)
 			for _, entry := range rt.diagnostics.snapshot() {
 				t.Logf("nested runtime diagnostic: %+v", entry)
 				if entry.Failure != nil {
@@ -101,7 +101,7 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	if counts.Started != before.Started+1 || counts.Returned != before.Returned {
 		t.Fatalf("capacity-one postcommit permit escaped: before=%+v held=%+v", before, counts)
 	}
-	parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, db, runID, notifyID)
+	parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, runID, notifyID)
 	assertNotifyAllChildrenItemSequence(t, parents, accounts)
 	childEntryDeadline := time.Now().Add(childEntryTimeout)
 	probe.releaseHeld()

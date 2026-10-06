@@ -118,7 +118,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
 			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
-			runtime := newFanInBarrierRuntime(t, backend, db, source)
+			runtime := newFanInBarrierRuntime(t, backend, source)
 			const periodID = "2026-Q3"
 			const portfolioID = "portfolio-one"
 			const memberA = "op-a"
@@ -177,7 +177,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			if err := runtime.grant.Retire(ctx); err != nil {
 				t.Fatalf("retire predecessor fan-in grant: %v", err)
 			}
-			runtime = newFanInBarrierRuntime(t, backend, db, source, 2)
+			runtime = newFanInBarrierRuntime(t, backend, source, 2)
 			publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "ingress", "operating.report.requested", map[string]any{
 				"operating_id": memberA,
 				"portfolio_id": portfolioID,
@@ -285,7 +285,7 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
 			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
-			runtime := newFanInBarrierRuntime(t, backend, db, source)
+			runtime := newFanInBarrierRuntime(t, backend, source)
 			constructionCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 			construction, err := runtime.manager.PrepareFlowInstanceActivation(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
@@ -437,7 +437,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			selectedTarget := events.RouteIdentity{
 				FlowID: "portfolio", FlowInstance: "portfolio/selected-period", EntityID: selectedOwner,
 			}.Normalized()
-			seedRuntime := newFanInBarrierRuntime(t, backend, db, source)
+			seedRuntime := newFanInBarrierRuntime(t, backend, source)
 			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.bus, seedRuntime.manager, source, selectedOwner)
 			requireSelectedRunTargetOwner(t, ctx, backend, runID, "portfolio/selected-period", selectedOwner)
 
@@ -760,16 +760,16 @@ func requireSelectedRunTargetOwner(t *testing.T, ctx context.Context, backend fa
 	}
 }
 
-func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, db *sql.DB, source semanticview.Source, generation ...uint64) fanInBarrierRuntime {
+func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, source semanticview.Source, generation ...uint64) fanInBarrierRuntime {
 	t.Helper()
 	runtimeGeneration := uint64(1)
 	if len(generation) > 0 {
 		runtimeGeneration = generation[0]
 	}
-	return newFanInBarrierRuntimeForSource(t, backend, db, source, conformanceSourceArtifactFact(t, source), runtimeGeneration)
+	return newFanInBarrierRuntimeForSource(t, backend, source, conformanceSourceArtifactFact(t, source), runtimeGeneration)
 }
 
-func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConformanceStore, db *sql.DB, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeGeneration uint64) fanInBarrierRuntime {
+func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConformanceStore, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeGeneration uint64) fanInBarrierRuntime {
 	t.Helper()
 	baseCtx := testAuthorActivityContextForBundle(context.Background(), fact)
 	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
