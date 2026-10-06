@@ -78,6 +78,31 @@ func TestIssue2564WorkloadsRemainRequiredCompleteRoots(t *testing.T) {
 	}
 }
 
+func TestIssue2564H2SubprocessHelperRegistryIsNonCredit(t *testing.T) {
+	const pkg = "github.com/division-sh/swarm/internal/serveapp"
+	for _, profile := range []string{ProfileLifecycle, ProfileFull} {
+		t.Run(profile, func(t *testing.T) {
+			unit := ProofUnit{WorkloadProfile: profile}
+			build := BuildContext{GOOS: "linux", GOARCH: "amd64"}
+			reason, replacement := deferredRootReason(unit, TestRoot{Package: pkg, Name: "TestIssue2564H2ServeProcessHelper"}, build)
+			if reason != "subprocess entry point, not a standalone proof" || replacement {
+				t.Fatalf("parent-owned H2 entry point must not require standalone PASS: reason=%q replacement=%t", reason, replacement)
+			}
+			for _, name := range []string{
+				"TestIssue2564ReconstructedEquivalentH2BothStores",
+				"TestIssue2564H2EquivalentCorpus",
+				"TestIssue2564H2WorkloadObservationPortsBothStores",
+				"TestIssue2564H2WorkloadObservationsRejectOtherOwner",
+				"TestIssue2564H2ServeProcessHelperExtra",
+			} {
+				if reason, replacement := deferredRootReason(unit, TestRoot{Package: pkg, Name: name}, build); reason != "" || replacement {
+					t.Fatalf("required H2 root %s borrowed subprocess deferral: %q/%t", name, reason, replacement)
+				}
+			}
+		})
+	}
+}
+
 func TestIssue2564WorkloadPartitionRejectsLostProof(t *testing.T) {
 	for _, id := range []string{"serveapp-2564-h1", "serveapp-2564-h2"} {
 		for _, change := range []struct {
