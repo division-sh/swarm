@@ -773,3 +773,244 @@ func FixtureNotifyAllChildrenDiagnosticTx(ctx context.Context, tx *sql.Tx) (sect
 	}
 	return section, rows.Err()
 }
+
+type FixtureH1BumpHistory struct {
+	Entity string
+	Event  string
+	Before string
+	After  string
+}
+
+func FixtureH1BumpHistoryTx(ctx context.Context, tx *sql.Tx, runID string) ([]FixtureH1BumpHistory, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT m.entity_id,m.caused_by_event,CAST(m.old_value AS TEXT),CAST(m.new_value AS TEXT) FROM entity_mutations m JOIN events e ON e.event_id=m.caused_by_event JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=m.run_id AND d.subscriber_type='node' WHERE m.run_id=$1 AND m.domain='authored_field' AND m.path='count' AND e.event_name='hub.bump' AND d.status='delivered'`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FixtureH1BumpHistory
+	for rows.Next() {
+		var row FixtureH1BumpHistory
+		if err := rows.Scan(&row.Entity, &row.Event, &row.Before, &row.After); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		out = append(out, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func observeWriterRun(ctx context.Context, tx *sql.Tx, runID string, out *WriterRunDeliveryEvidence) error {
+	if _, err := uuid.Parse(runID); err != nil {
+		return err
+	}
+	return tx.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1),
+		(SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND status='delivered'),
+		(SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'),
+		(SELECT COALESCE(SUM(retry_count),0) FROM event_deliveries WHERE run_id=$1),
+		(SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND (a.claim_version<>1 OR (a.closure_kind='settled' AND a.outcome<>'delivered'))),
+		(SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND a.closure_kind='settled' AND a.outcome='delivered')`, runID).Scan(&out.Total, &out.DeliveredAgents, &out.DeadLetters, &out.Retries, &out.BadClaims, &out.SettledDelivered)
+}
+
+func observeDeliveryEventEvidence(ctx context.Context, tx *sql.Tx, eventID string) (DeliveryEventEvidence, error) {
+	var out DeliveryEventEvidence
+	if _, err := uuid.Parse(eventID); err != nil {
+		return out, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT delivery_id,run_id,event_id,subscriber_type,subscriber_id,status,retry_count,claim_version,continuation_handoff_at,
+		(SELECT COUNT(*) FROM event_delivery_handler_rule_selections s WHERE s.delivery_id=d.delivery_id)
+		FROM event_deliveries d WHERE event_id=$1 ORDER BY delivery_id`, eventID)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var row DeliveryRowEvidence
+		var handed any
+		if err := rows.Scan(&row.DeliveryID, &row.RunID, &row.EventID, &row.SubscriberType, &row.SubscriberID, &row.Status, &row.RetryCount, &row.ClaimVersion, &handed, &row.HandlerSelections); err != nil {
+			return DeliveryEventEvidence{}, errors.Join(err, rows.Close())
+		}
+		row.HandoffPresent = handed != nil
+		row.HandoffAt, _, err = parseNullableTime(handed)
+		if err != nil {
+			return DeliveryEventEvidence{}, errors.Join(err, rows.Close())
+		}
+		out.Deliveries = append(out.Deliveries, row)
+	}
+	err = errors.Join(rows.Err(), rows.Close())
+	if err != nil {
+		return DeliveryEventEvidence{}, err
+	}
+	for i := range out.Deliveries {
+		row := &out.Deliveries[i]
+		attempts, err := tx.QueryContext(ctx, `SELECT claim_version,COALESCE(closure_kind,''),COALESCE(outcome,'') FROM event_delivery_attempts WHERE delivery_id=$1 ORDER BY claim_version`, row.DeliveryID)
+		if err != nil {
+			return DeliveryEventEvidence{}, err
+		}
+		for attempts.Next() {
+			var attempt DeliveryAttemptEvidence
+			if err := attempts.Scan(&attempt.ClaimVersion, &attempt.ClosureKind, &attempt.Outcome); err != nil {
+				return DeliveryEventEvidence{}, errors.Join(err, attempts.Close())
+			}
+			row.Attempts = append(row.Attempts, attempt)
+		}
+		err = errors.Join(attempts.Err(), attempts.Close())
+		if err != nil {
+			return DeliveryEventEvidence{}, err
+		}
+	}
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letters WHERE original_event_id=$1`, eventID).Scan(&out.DeadLetters)
+	if err != nil {
+		return DeliveryEventEvidence{}, err
+	}
+	return out, nil
+}
+
+func observeH1DeliveryAccountingForTest(ctx context.Context, tx *sql.Tx, runID string, out *H1DeliveryAccountingEvidence) error {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND d.subscriber_type='node' AND e.event_name='hub.bump' AND d.status='delivered'`, runID).Scan(&out.DeliveredBumps); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND status='delivered'`, runID).Scan(&out.DeliveredAgents); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status<>'delivered'`, runID).Scan(&out.Undelivered); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(retry_count),0) FROM event_deliveries WHERE run_id=$1`, runID).Scan(&out.Retries); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letters l JOIN events e ON e.event_id=l.original_event_id WHERE e.run_id=$1`, runID).Scan(&out.DeadLetters); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND (a.claim_version<>1 OR a.closure_kind<>'settled' OR a.outcome<>'delivered')`, runID).Scan(&out.BadAttempts); err != nil {
+		return err
+	}
+	return nil
+}
+
+func observeH2DeliveryAccountingForTest(ctx context.Context, tx *sql.Tx, runID string, out *H2DeliveryAccountingEvidence) error {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, runID).Scan(&out.DeadLetters); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND (a.outcome='retry_scheduled' OR a.outcome='dead_letter')`, runID).Scan(&out.Retried); err != nil {
+		return err
+	}
+	return nil
+}
+
+func observeH2PendingAccountingForTest(ctx context.Context, tx *sql.Tx, runID string, out *H2PendingAccountingEvidence) error {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id IS NOT NULL AND status IN ('pending','in_progress')`).Scan(&out.Pending); err != nil {
+		return err
+	}
+	return nil
+}
+
+func observeH1NodeFailuresForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H1NodeFailuresEvidence, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT d.delivery_id,e.event_id,e.event_name,d.status,d.retry_count,COALESCE(d.reason_code,''),COALESCE(CAST(d.failure AS TEXT),'null')
+		FROM event_deliveries d JOIN events e ON e.event_id=d.event_id
+		WHERE d.run_id=$1 AND d.subscriber_type='node' AND (d.retry_count<>0 OR d.status='dead_letter' OR d.failure IS NOT NULL)
+		ORDER BY d.created_at,d.delivery_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []H1NodeFailuresEvidence
+	for rows.Next() {
+		var row H1NodeFailuresEvidence
+		if err := rows.Scan(&row.Delivery, &row.Event, &row.Name, &row.Status, &row.Retries, &row.Reason, &row.Failure); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		out = append(out, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func observeH1AttemptFailuresForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H1AttemptFailuresEvidence, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT d.delivery_id,e.event_id,e.event_name,a.claim_version,a.closure_kind,COALESCE(a.outcome,''),COALESCE(a.reason_code,''),COALESCE(CAST(a.failure AS TEXT),'null')
+		FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id JOIN events e ON e.event_id=d.event_id
+		WHERE d.run_id=$1 AND d.subscriber_type='node' AND (a.outcome IN ('retry_scheduled','dead_letter') OR a.failure IS NOT NULL)
+		ORDER BY d.delivery_id,a.claim_version`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []H1AttemptFailuresEvidence
+	for rows.Next() {
+		var row H1AttemptFailuresEvidence
+		if err := rows.Scan(&row.Delivery, &row.Event, &row.Name, &row.Version, &row.Closure, &row.Outcome, &row.Reason, &row.Failure); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		out = append(out, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func observeH1DeadLettersForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H1DeadLettersEvidence, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT l.dead_letter_id,e.event_id,e.event_name,COALESCE(CAST(l.delivery_id AS TEXT),''),COALESCE(l.claim_version,0),l.retry_count,COALESCE(l.handler_node,''),CAST(l.failure AS TEXT)
+		FROM dead_letters l JOIN events e ON e.event_id=l.original_event_id WHERE e.run_id=$1 ORDER BY l.created_at,l.dead_letter_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []H1DeadLettersEvidence
+	for rows.Next() {
+		var row H1DeadLettersEvidence
+		if err := rows.Scan(&row.ID, &row.Event, &row.Name, &row.Delivery, &row.Version, &row.Retries, &row.Node, &row.Failure); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		out = append(out, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func observeH2ResponseQueueForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H2ResponseQueueEvidence, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT e.event_name,d.status,COUNT(*) FROM events e LEFT JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1 GROUP BY e.event_name,d.status`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []H2ResponseQueueEvidence
+	for rows.Next() {
+		var row H2ResponseQueueEvidence
+		var status sql.NullString
+		if err := rows.Scan(&row.Name, &status, &row.Count); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		row.Status = WorkloadNullableText{String: status.String, Valid: status.Valid}
+		out = append(out, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func observeH2NodeDeliveriesForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H2NodeDeliveriesEvidence, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT d.event_id,d.status,d.retry_count,e.event_name,e.payload FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND d.subscriber_type='node'`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []H2NodeDeliveriesEvidence
+	for rows.Next() {
+		var row H2NodeDeliveriesEvidence
+		if err := rows.Scan(&row.Event, &row.Status, &row.Retries, &row.Name, &row.Payload); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		out = append(out, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
