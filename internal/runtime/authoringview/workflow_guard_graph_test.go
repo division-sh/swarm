@@ -30,7 +30,7 @@ func TestStageGraphPreservesEffectiveGuardIdentity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.guard.OnFail = "kill"
 			graph := contracts.BuildWorkflowStageTopology(".", "ready", []string{"ready", "killed"}, []string{"killed"}, []contracts.HandlerTransitionSemantic{{Node: node, EventType: "work", Guard: &tc.guard}}, nil, nil)
-			bundle := &contracts.WorkflowContractBundle{RootSchema: &contracts.FlowSchemaDocument{StageDeclarations: contracts.FlowStageDeclarations{Declared: true, Entries: []contracts.FlowStageDeclaration{{ID: "ready", Initial: true}, {ID: "killed", Terminal: true}}}}, Semantics: contracts.WorkflowSemanticView{InitialStage: "ready", StageTopologies: map[string]contracts.WorkflowStageTopology{".": graph}}}
+			bundle := &contracts.WorkflowContractBundle{RootSchema: &contracts.FlowSchemaDocument{StageDeclarations: contracts.FlowStageDeclarations{Declared: true, Entries: []contracts.FlowStageDeclaration{{ID: "ready"}, {ID: "killed", Final: true}}}}, Semantics: contracts.WorkflowSemanticView{StageTopologies: map[string]contracts.WorkflowStageTopology{".": graph}}}
 			view, err := Build(context.Background(), semanticviewtest.WrapRootAgents(bundle), BuildOptions{IncludeStageGraph: true})
 			if err != nil || len(view.StageGraphs) != 1 {
 				t.Fatalf("readback failed: %v", err)
@@ -51,7 +51,7 @@ func TestStageGraphDistinguishesGuardPossibilitiesFromAuthoredEdges(t *testing.T
 	graph := contracts.BuildWorkflowStageTopology(".", "ready", []string{"ready", "done", "killed"}, []string{"done", "killed"},
 		[]contracts.HandlerTransitionSemantic{{Node: node, EventType: "work", AdvancesTo: "done", Guard: &contracts.GuardSpec{ID: "check", Check: "false", OnFail: "kill"}}}, nil, nil)
 	bundle := &contracts.WorkflowContractBundle{RootSchema: &contracts.FlowSchemaDocument{StageDeclarations: contracts.FlowStageDeclarations{Declared: true}},
-		Semantics: contracts.WorkflowSemanticView{InitialStage: "ready", StageTopologies: map[string]contracts.WorkflowStageTopology{".": graph}}}
+		Semantics: contracts.WorkflowSemanticView{StageTopologies: map[string]contracts.WorkflowStageTopology{".": graph}}}
 	view, err := Build(context.Background(), semanticviewtest.WrapRootAgents(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil || len(view.StageGraphs) != 1 {
 		t.Fatalf("graph build: %#v %v", view, err)

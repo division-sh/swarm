@@ -308,7 +308,10 @@ func TestBuildStageGraphShowsSameLocalJoinIDAtDistinctFlowPaths(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: runtimecontracts.FlowTree{Root: &root, ByPath: map[string]*runtimecontracts.FlowContractView{"a/orders": &root.Children[0], "b/orders": &root.Children[1]}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowStates: map[string][]string{"a/orders": {"awaiting", "done"}, "b/orders": {"awaiting", "done"}},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+				"a/orders": runtimecontracts.BuildWorkflowStageTopology("a/orders", "awaiting", []string{"awaiting", "done"}, nil, nil, nil, nil),
+				"b/orders": runtimecontracts.BuildWorkflowStageTopology("b/orders", "awaiting", []string{"awaiting", "done"}, nil, nil, nil, nil),
+			},
 			Joins: []runtimecontracts.WorkflowJoinPlan{
 				{Node: second, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{ID: "second", Stage: "awaiting"}},
 				{Node: first, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{ID: "first", Stage: "awaiting"}},
@@ -515,8 +518,8 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 			StageDeclarations: runtimecontracts.FlowStageDeclarations{
 				Declared: true,
 				Entries: []runtimecontracts.FlowStageDeclaration{
-					{ID: "awaiting_review", Initial: true},
-					{ID: "expired", Terminal: true},
+					{ID: "awaiting_review"},
+					{ID: "expired", Final: true},
 				},
 			},
 		},
@@ -592,9 +595,9 @@ func TestBuildStageGraphShowsDecisionGateOutcomes(t *testing.T) {
 	}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-			{ID: "awaiting_launch_approval", Initial: true}, {ID: "operating", Terminal: true}, {ID: "building"},
+			{ID: "awaiting_launch_approval"}, {ID: "operating", Final: true}, {ID: "building"},
 		}}},
-		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "awaiting_launch_approval", Gates: gates},
+		Semantics: runtimecontracts.WorkflowSemanticView{Gates: gates},
 	}
 	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{".": runtimecontracts.BuildWorkflowStageTopology(
 		".", "awaiting_launch_approval", []string{"awaiting_launch_approval", "operating", "building"}, []string{"operating"}, nil, nil, nil, gates,
@@ -643,14 +646,12 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 			StageDeclarations: runtimecontracts.FlowStageDeclarations{
 				Declared: true,
 				Entries: []runtimecontracts.FlowStageDeclaration{
-					{ID: "waiting", Initial: true},
+					{ID: "waiting"},
 					{ID: "awaiting_line_items"},
 				},
 			},
 		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			InitialStage: "waiting",
-		},
+		Semantics: runtimecontracts.WorkflowSemanticView{},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"dispatcher": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -715,8 +716,8 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 func TestBuildStageGraphShowsJoinCompleteAndDeadlineEdges(t *testing.T) {
 	joinNode := identitytest.RootNode(t, "join-node")
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting", Initial: true}, {ID: "ready"}, {ID: "attention", Terminal: true}}}},
-		Semantics:  runtimecontracts.WorkflowSemanticView{InitialStage: "awaiting"},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention", Final: true}}}},
+		Semantics:  runtimecontracts.WorkflowSemanticView{},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &runtimecontracts.JoinSpec{
 			ID: "line_items", Stage: "awaiting",
 			OnComplete:      runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"},
@@ -764,9 +765,9 @@ func TestBuildStageGraphShowsDeliveryJoinCompletionFromHandlerScope(t *testing.T
 		[]runtimecontracts.HandlerTransitionSemantic{{Node: node, EventType: "batch.requested", Join: &join}}, nil, nil,
 	)
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active"}, {ID: "done", Final: true}}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			InitialStage: "active", Stages: []runtimecontracts.WorkflowStageContract{{ID: "active"}, {ID: "done"}},
+			Stages:          []runtimecontracts.WorkflowStageContract{{ID: "active"}, {ID: "done"}},
 			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{".": topology},
 		},
 	}
@@ -792,9 +793,9 @@ func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
 	loopNode := identitytest.RootNode(t, "loop-node")
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-			{ID: "queued", Initial: true}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated", Terminal: true},
+			{ID: "queued"}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated", Final: true},
 		}}},
-		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "queued", Loops: []runtimecontracts.WorkflowLoopPlan{{
+		Semantics: runtimecontracts.WorkflowSemanticView{Loops: []runtimecontracts.WorkflowLoopPlan{{
 			FlowID: ".", ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
 			Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"}, EntryStage: "drafting", RegionStages: []string{"drafting", "review"},
 			Operations: []runtimecontracts.WorkflowLoopOperationPlan{

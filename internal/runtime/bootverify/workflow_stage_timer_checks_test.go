@@ -89,8 +89,8 @@ func stageTimerValidationBundle(timer runtimecontracts.WorkflowTimerContract) *r
 			StageDeclarations: runtimecontracts.FlowStageDeclarations{
 				Declared: true,
 				Entries: []runtimecontracts.FlowStageDeclaration{
-					{ID: "awaiting_review", Initial: true},
-					{ID: "expired", Terminal: true},
+					{ID: "awaiting_review"},
+					{ID: "expired", Final: true},
 				},
 			},
 		},
