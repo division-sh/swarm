@@ -18,8 +18,8 @@ pins:
 	writeClosedVariantFile(t, root, "events.yaml", "root.started:\n")
 	writeClosedVariantFile(t, root, "child/schema.yaml", `name: child
 stages:
-  idle: {initial: true}
-  done: {terminal: true}
+  idle: {}
+  done: {final: true}
 `)
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `listener:
   execution_type: system_node

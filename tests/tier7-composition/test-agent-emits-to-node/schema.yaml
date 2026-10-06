@@ -1,8 +1,8 @@
 name: test-agent-emits-to-node
 stages:
-  pending: {initial: true}
+  pending: {}
   assigned: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - task.assigned

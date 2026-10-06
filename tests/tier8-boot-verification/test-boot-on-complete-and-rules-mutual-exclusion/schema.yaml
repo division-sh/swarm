@@ -1,7 +1,7 @@
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
-  routed: {terminal: true}
+  pending: {}
+  done: {final: true}
+  routed: {final: true}
 pins:
   inputs:
     - task.submitted

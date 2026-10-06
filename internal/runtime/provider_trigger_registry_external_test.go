@@ -196,7 +196,7 @@ func boundedStandingConnectorBundle(t *testing.T, bundle *runtimecontracts.Workf
 	}
 	admitted := loadRuntimeTempBundle(t, map[string]string{
 		"schema.yaml":                   "name: bounded-standing-connector\n",
-		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nstages:\n  active: {initial: true}\n",
+		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nstages:\n  active: {}\n",
 		"bounded_inbound/entities.yaml": "bounded_entity: {}\n",
 	})
 	admitted.RootSchema = bundle.RootSchema

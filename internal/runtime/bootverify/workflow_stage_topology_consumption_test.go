@@ -21,12 +21,11 @@ func TestRunAcceptsTimerOnlyReachableTerminalStage(t *testing.T) {
 name: support
 stages:
   active:
-    initial: true
     timers:
       - after: 720h
         advances_to: closed
   closed:
-    terminal: true
+    final: true
 `)
 	repoRoot := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -58,7 +57,7 @@ func TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := string(schemaRaw) + "\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n"
+	schema := string(schemaRaw) + "\nstages:\n  active: {}\n  done: {final: true}\n"
 	if schema == string(schemaRaw) {
 		t.Fatal("delivery join lifecycle fixture replacement did not apply")
 	}

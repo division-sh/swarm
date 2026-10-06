@@ -1,8 +1,8 @@
 name: child
 stages:
-  waiting: {initial: true}
+  waiting: {}
   processing: {}
-  processed: {terminal: true}
+  processed: {final: true}
 pins:
   inputs:
     - child.start

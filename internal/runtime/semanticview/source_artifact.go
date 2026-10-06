@@ -170,8 +170,8 @@ func (s bundleSource) FlowInitialStage(flowID string) string {
 	return s.bundle.FlowInitialStage(flowID)
 }
 func (s bundleSource) FlowStates(flowID string) []string { return s.bundle.FlowStates(flowID) }
-func (s bundleSource) FlowTerminalStages(flowID string) []string {
-	return s.bundle.FlowTerminalStages(flowID)
+func (s bundleSource) FlowFinalStages(flowID string) []string {
+	return s.bundle.FlowFinalStages(flowID)
 }
 func (s bundleSource) FlowScopes() []FlowScope {
 	if s.bundle == nil {

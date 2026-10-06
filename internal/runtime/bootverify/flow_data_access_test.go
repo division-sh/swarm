@@ -112,7 +112,7 @@ func writeNestedBootFlowDataAccessFixture(t *testing.T) string {
 
 	flowRoot := filepath.Join(root, "parent", "child", "support")
 
-	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {initial: true}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 worker:
   role: worker

@@ -1,7 +1,7 @@
 name: grandchild
 stages:
-  pending: {initial: true}
-  approved: {terminal: true}
+  pending: {}
+  approved: {final: true}
 pins:
   inputs:
     - grandchild.check

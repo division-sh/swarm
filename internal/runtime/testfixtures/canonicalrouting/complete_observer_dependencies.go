@@ -9,8 +9,8 @@ func CopyCompleteObserverDependencies(t testing.TB) string {
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "name: complete-observer\nversion: '1.0.0'\nplatform_version: '>=0.7.0 <0.8.0'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 connect:
   - {event: work.ready, from: producer, to: observer, resolution: select}
   - {event: other.ready, from: other, to: observer, resolution: select}
@@ -18,8 +18,8 @@ connect:
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
 instance: item_id
 stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 pins:
   outputs:
     - work.ready
@@ -27,8 +27,8 @@ pins:
 	writeLegacyInstanceFlow(t, root, "other", `name: other
 instance: item_id
 stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 pins:
   outputs:
     - other.ready
@@ -36,8 +36,8 @@ pins:
 	writeLegacyInstanceFlow(t, root, "observer", `name: observer
 instance: item_id
 stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 pins:
   inputs:
     - work.ready

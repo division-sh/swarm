@@ -1,7 +1,7 @@
 stages:
-  pending: {initial: true}
+  pending: {}
   awaiting_decision: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - review.requested

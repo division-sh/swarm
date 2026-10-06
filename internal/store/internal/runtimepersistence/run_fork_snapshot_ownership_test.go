@@ -38,7 +38,7 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 	opened := backend.open(t)
 	construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, map[string]string{
 		"schema.yaml":         "name: snapshot-ownership\n",
-		"owner/schema.yaml":   "name: owner\ninstance: subject_id\nstages:\n  active: {initial: true}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
+		"owner/schema.yaml":   "name: owner\ninstance: subject_id\nstages:\n  active: {}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
 		"owner/entities.yaml": "review_item:\n  subject_id: text\n  entity_type: {type: text, initial: authored-not-owner}\n  value: text?\n",
 		"owner/events.yaml":   "construct.requested:\n",
 	}, nil, ownStoreTestAgentManager, nil)

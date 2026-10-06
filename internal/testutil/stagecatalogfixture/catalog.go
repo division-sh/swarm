@@ -6,9 +6,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
-// NewTerminalCatalog is only for tests whose subject is not stage admission.
+// NewFinalCatalog is only for tests whose subject is not stage admission.
 // Stage identity tests must use the selected compiled topology instead.
-func NewTerminalCatalog(workflow []string, flows map[string][]string) runlifecycle.TerminalCatalog {
+func NewFinalCatalog(workflow []string, flows map[string][]string) runlifecycle.FinalCatalog {
 	owner := terminalFixture{flows: make(map[string]map[string]struct{}, len(flows))}
 	for flow, states := range flows {
 		owner.flows[flow] = makeSet(states)
@@ -16,7 +16,7 @@ func NewTerminalCatalog(workflow []string, flows map[string][]string) runlifecyc
 	if len(workflow) != 0 {
 		owner.flows["."] = makeSet(workflow)
 	}
-	catalog, err := runlifecycle.NewCompiledTerminalCatalog(owner)
+	catalog, err := runlifecycle.NewCompiledFinalCatalog(owner)
 	if err != nil {
 		panic(err)
 	}
@@ -29,7 +29,7 @@ type terminalFixture struct {
 
 func (terminalFixture) Valid() bool { return true }
 
-func (f terminalFixture) Terminal(flowTemplate, flowInstance, state string) (bool, bool) {
+func (f terminalFixture) Final(flowTemplate, flowInstance, state string) (bool, bool) {
 	state = strings.TrimSpace(state)
 	if state == "" {
 		return false, false

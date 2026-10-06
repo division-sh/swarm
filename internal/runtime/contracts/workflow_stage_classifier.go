@@ -31,7 +31,7 @@ func (c WorkflowStageClassifier) Valid() bool {
 	return c.root.FlowID == "." && c.root.ValidStageCatalog()
 }
 
-func (c WorkflowStageClassifier) Terminal(flowTemplate, flowInstance, state string) (bool, bool) {
+func (c WorkflowStageClassifier) Final(flowTemplate, flowInstance, state string) (bool, bool) {
 	if !c.Valid() {
 		return false, false
 	}
@@ -53,5 +53,5 @@ func (c WorkflowStageClassifier) Terminal(flowTemplate, flowInstance, state stri
 		}
 	}
 	ref, err := graph.ResolveStoredStage(state)
-	return err == nil && ref.IsTerminal(), err == nil
+	return err == nil && ref.IsFinal(), err == nil
 }

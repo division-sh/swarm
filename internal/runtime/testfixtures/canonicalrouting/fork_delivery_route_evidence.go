@@ -9,8 +9,8 @@ func CopyForkDeliveryRouteEvidence(t testing.TB) string {
 	root := CopyExample(t, ParentConnect)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: parent-seed-probe
 stages:
-  waiting: {initial: true}
-  active: {terminal: true}
+  waiting: {}
+  active: {final: true}
 pins:
   inputs:
     - parent.seeded
@@ -35,8 +35,8 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "producer/schema.yaml", `name: producer
 stages:
-  waiting: {initial: true}
-  active: {terminal: true}
+  waiting: {}
+  active: {final: true}
 pins:
   inputs:
     - work.requested

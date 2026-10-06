@@ -1,7 +1,7 @@
 name: test-compose-create-instance-config
 stages:
-  idle: {initial: true}
-  spawned: {terminal: true}
+  idle: {}
+  spawned: {final: true}
 pins:
   inputs:
     - spawn.requested

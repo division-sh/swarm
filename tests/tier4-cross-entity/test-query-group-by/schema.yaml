@@ -1,6 +1,6 @@
 stages:
-  idle: {initial: true}
-  compiled: {terminal: true}
+  idle: {}
+  compiled: {final: true}
 pins:
   inputs:
     - digest.requested

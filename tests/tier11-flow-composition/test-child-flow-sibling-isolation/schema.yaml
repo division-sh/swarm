@@ -1,6 +1,6 @@
 stages:
-  idle: {initial: true}
-  done: {terminal: true}
+  idle: {}
+  done: {final: true}
 pins:
   inputs:
     - run.start

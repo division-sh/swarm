@@ -1,7 +1,7 @@
 name: child
 stages:
-  idle: {initial: true}
-  finished: {terminal: true}
+  idle: {}
+  finished: {final: true}
 pins:
   inputs:
     - task.requested

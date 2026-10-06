@@ -19,7 +19,7 @@ func CopyReceiverOptionalChild(t testing.TB, existing bool) string {
 	files := map[string]string{
 		"schema.yaml": `name: receiver-composition
 stages:
-  waiting: {initial: true}
+  waiting: {}
 ` + activeStage + `  done: {terminal: true}
 pins:
   inputs:
@@ -70,8 +70,8 @@ func CopyReceiverCreatingChild(t testing.TB, existing bool) string {
 	files := map[string]string{
 		"sink/schema.yaml": `name: sink
 stages:
-  waiting: {initial: true}
-  done: {terminal: true}
+  waiting: {}
+  done: {final: true}
 pins:
   inputs:
     - work.completed
@@ -121,9 +121,9 @@ func CopyReceiverUnavailableAfterPublish(t testing.TB) string {
 	files := map[string]string{
 		"schema.yaml": `name: receiver-failure
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - work.seeded
@@ -179,8 +179,8 @@ connect:
 `,
 		"sink/tail/schema.yaml": `name: tail
 stages:
-  waiting: {initial: true}
-  done: {terminal: true}
+  waiting: {}
+  done: {final: true}
 pins:
   inputs:
     - child.finished
@@ -215,8 +215,8 @@ func CopyReceiverEntitylessLocal(t testing.TB) string {
 	writeClosedVariantFile(t, root, "sink/events.yaml", "child.finished:\n  result: text\n")
 	writeClosedVariantFile(t, root, "sink/schema.yaml", `name: sink
 stages:
-  waiting: {initial: true}
-  done: {terminal: true}
+  waiting: {}
+  done: {final: true}
 pins:
   inputs:
     - work.completed
@@ -286,9 +286,9 @@ func CopyReceiverMixedAgent(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: active\n", "      advances_to: active\n      emit:\n        event: child.seeded\n        fields: {seed: true}\n")
 	writeClosedVariantFile(t, root, "sink/schema.yaml", `name: sink
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - child.seeded

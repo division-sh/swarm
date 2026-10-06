@@ -316,10 +316,10 @@ func a2SameCommitJoinBindingFiles() map[string]string {
 	return map[string]string{
 		"schema.yaml": `name: a2-same-commit-join-binding
 stages:
-  dispatching: {initial: true}
+  dispatching: {}
   awaiting: {}
-  ready: {terminal: true}
-  attention: {terminal: true}
+  ready: {final: true}
+  attention: {final: true}
 pins:
   inputs:
     - dispatch.completed

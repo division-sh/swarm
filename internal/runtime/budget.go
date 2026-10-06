@@ -190,7 +190,7 @@ func (t *BudgetTracker) ProjectRecoveryBudgetState(ctx context.Context) error {
 			}
 			classifiers[bundleHash] = classifier
 		}
-		terminal, known := classifier.Terminal(target.FlowTemplate, target.FlowInstance, target.Stage)
+		terminal, known := classifier.Final(target.FlowTemplate, target.FlowInstance, target.Stage)
 		if !known {
 			return fmt.Errorf("budget recovery target run %q entity %q has undeclared stage %q for selected flow %q/%q", target.RunID, target.EntityID, target.Stage, target.FlowTemplate, target.FlowInstance)
 		}

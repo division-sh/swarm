@@ -13,11 +13,11 @@ func TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores(t *test
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml": `name: transition-hydration
 stages:
-  ready: {initial: true}
+  ready: {}
   waiting:
     timers:
       - {id: deadline, after: 1h, advances_to: done}
-  done: {terminal: true}
+  done: {final: true}
 `,
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "work:\n",

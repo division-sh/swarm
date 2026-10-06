@@ -79,7 +79,7 @@ type candidateAdmission struct {
 type Executor struct {
 	store            CandidateStore
 	scope            CandidateScope
-	catalog          TerminalCatalog
+	catalog          FinalCatalog
 	occurrence       *worklifetime.RuntimeOccurrence
 	clock            WakeClock
 	retry            RetryPolicy
@@ -99,7 +99,7 @@ type Executor struct {
 func NewExecutor(
 	store CandidateStore,
 	scope CandidateScope,
-	catalog TerminalCatalog,
+	catalog FinalCatalog,
 	occurrence *worklifetime.RuntimeOccurrence,
 	opts ExecutorOptions,
 ) (*Executor, error) {

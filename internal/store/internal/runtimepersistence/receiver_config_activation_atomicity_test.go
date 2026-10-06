@@ -75,7 +75,7 @@ instance_variables:
     enabled: {type: boolean, default: true}
     nested: {type: json}
 stages:
-  pending: {initial: true}
+  pending: {}
 pins:
   inputs:
     - task.started

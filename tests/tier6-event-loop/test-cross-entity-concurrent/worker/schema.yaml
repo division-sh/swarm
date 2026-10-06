@@ -1,8 +1,8 @@
 name: worker
 instance: work_id
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 pins:
   inputs:
     - task.submitted

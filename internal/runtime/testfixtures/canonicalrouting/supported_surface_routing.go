@@ -72,12 +72,11 @@ func CopyExactJoinEventBusProofWithTimeout(t testing.TB, flowID, timeout string)
 
 	joinSchema := `name: join-eventbus-proof
 stages:
-  awaiting:
-    initial: true
+  awaiting: {}
   ready:
-    terminal: true
+    final: true
   attention:
-    terminal: true
+    final: true
 pins:
   inputs:
     - item.completed
@@ -136,10 +135,9 @@ func CopyRecurringTimerCancellation(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", `name: timer-proof
 stages:
-  waiting:
-    initial: true
+  waiting: {}
   done:
-    terminal: true
+    final: true
 pins:
   inputs:
     - timer.cancel

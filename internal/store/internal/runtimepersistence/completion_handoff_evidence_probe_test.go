@@ -122,7 +122,7 @@ func TestCompletionCommittedEvidenceAfterHandoffFailureProbe(t *testing.T) {
 					})
 					observed := &pipelineCrashCandidateObserver{CandidateStore: reader, results: make(chan pipelineCrashCandidateResult, 8)}
 					executor, err := runtimerunlifecycle.NewExecutor(observed, runtimerunlifecycle.CandidateScope{BundleHash: bundleHash},
-						stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runtimerunlifecycle.ExecutorOptions{})
+						stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runtimerunlifecycle.ExecutorOptions{})
 					if err != nil {
 						t.Fatal(err)
 					}

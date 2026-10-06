@@ -57,7 +57,7 @@ func CopyPayloadNamedField(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: payload-normalizer\nstages:\n  active: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - inbound.telegram\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: payload-normalizer\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - inbound.telegram\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "chat:\n  chat_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "inbound.telegram:\n  entity_id: text\n  payload: json\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "normalizer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram]\n  event_handlers:\n    inbound.telegram:\n      data_accumulation:\n        writes:\n          - target_field: chat_id\n            value: payload.payload.message.chat.id\n      advances_to: done\n")

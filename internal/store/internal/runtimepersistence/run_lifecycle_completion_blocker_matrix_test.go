@@ -463,7 +463,7 @@ func assertCompletionBlockerExecution(
 	result, err := fixture.store.ExecuteCompletionCandidate(
 		ctx,
 		request.Candidate,
-		stagecatalogfixture.NewTerminalCatalog(
+		stagecatalogfixture.NewFinalCatalog(
 			nil,
 			map[string][]string{semanticRunFixtureFlow: {"completed"}},
 		),
@@ -506,7 +506,7 @@ func readCompletionBlockerSummaries(
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	catalog := stagecatalogfixture.NewTerminalCatalog(
+	catalog := stagecatalogfixture.NewFinalCatalog(
 		nil,
 		map[string][]string{semanticRunFixtureFlow: {"completed"}},
 	)

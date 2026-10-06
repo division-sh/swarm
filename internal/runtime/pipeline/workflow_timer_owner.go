@@ -535,6 +535,21 @@ func workflowTimerActivationForCause(
 	cause workflowTimerCause,
 	interval time.Duration,
 ) (WorkflowTimerActivation, error) {
+	// This guards new activation, not accepted fire/retry or cancellation.
+	if declaration.StageOwned {
+		flowID := declaration.OwningFlowID()
+		graph, ok := semanticview.WorkflowStageTopology(source, flowID)
+		if !ok || !graph.ValidStageCatalog() {
+			return WorkflowTimerActivation{}, fmt.Errorf("timer %s has no compiled stage catalog for flow %s", declaration.ID, flowID)
+		}
+		stage, err := graph.ResolveStage(declaration.Stage)
+		if err != nil {
+			return WorkflowTimerActivation{}, err
+		}
+		if stage.IsFinal() {
+			return WorkflowTimerActivation{}, fmt.Errorf("final stage %s in flow %s cannot arm timer %s", declaration.Stage, flowID, declaration.ID)
+		}
+	}
 	cause = cause.normalized()
 	generation = generation.Normalize()
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)

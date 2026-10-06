@@ -1034,7 +1034,7 @@ func TestStandaloneCompletionCandidatePublishesChangedGateRevisionParity(t *test
 			publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", runID)
 			beforeRevision := runForkRevisionHeadForProof(t, ctx, fixture.db, backend.name == "postgres", runID)
 
-			executeStandaloneCompletionCandidateWithCatalog(t, ctx, fixture.store, runID, stagecatalogfixture.NewTerminalCatalog(
+			executeStandaloneCompletionCandidateWithCatalog(t, ctx, fixture.store, runID, stagecatalogfixture.NewFinalCatalog(
 				nil, map[string][]string{"launch/review": {"done"}},
 			))
 			if got := loadDecisionCardGateActivation(t, fixture.db, backend.name == "postgres", runID, entityID); got.Status != gateruntime.StatusSuperseded || got.SupersededReason != "run_completed" {

@@ -18,7 +18,7 @@ func TestWorkflowGateSemanticNumericOutcomeExecutionParity(t *testing.T) {
 			root := semanticNumericIngressFixture(t)
 			schema := `name: numeric-gate
 stages:
-  waiting: {initial: true}
+  waiting: {}
   review:
     gate:
       decision: numeric_review
@@ -36,7 +36,7 @@ stages:
             fields:
               value: decision.score
   approved: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - numeric.requested

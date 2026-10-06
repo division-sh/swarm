@@ -41,7 +41,7 @@ func CopyFlowConstructorSupply(t testing.TB, fields, payload, handler, catalog s
 	}
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n  vertical_id: text\n"+payload)
 	writeClosedVariantFile(t, root, "consumer/entities.yaml", "deployment:\n  vertical_id: text\n"+fields)
-	writeClosedVariantFile(t, root, "consumer/schema.yaml", "name: consumer\ninstance: vertical_id\nstages:\n  initial: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - deploy.done\n")
+	writeClosedVariantFile(t, root, "consumer/schema.yaml", "name: consumer\ninstance: vertical_id\nstages:\n  initial: {}\n  done: {final: true}\npins:\n  inputs:\n    - deploy.done\n")
 	if handler != "" {
 		writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done:\n"+handler)
 	}
@@ -64,7 +64,7 @@ func CopyFlowConstructorCandidates(t testing.TB, mode TemplateInstanceRouteMode,
 	}
 	stages := ""
 	if staged {
-		stages = "stages:\n  initial: {initial: true}\n  done: {terminal: true}\n"
+		stages = "stages:\n  initial: {}\n  done: {final: true}\n"
 	}
 	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\npins:\n  outputs:\n    - deploy.done\n    - deploy.empty\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.done:\n  vertical_id: text\n  brief: text\ndeploy.empty:\n  vertical_id: text\n")

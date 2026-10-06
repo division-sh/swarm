@@ -10,8 +10,8 @@ run:
   topic: string
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 pins:
   inputs:
     - flow.started
@@ -30,8 +30,8 @@ root-completion:
 `)
 	writeClosedVariantFile(t, root, "discovery/schema.yaml", `name: discovery
 stages:
-  active: {initial: true}
-  done: {terminal: true}
+  active: {}
+  done: {final: true}
 pins:
   inputs:
     - flow.started

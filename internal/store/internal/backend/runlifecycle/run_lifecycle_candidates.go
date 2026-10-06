@@ -437,7 +437,7 @@ func (s *RunLifecycleSQLiteOwner) ListCompletionCandidates(
 func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 	ctx context.Context,
 	candidate runtimerunlifecycle.Candidate,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	if err := candidate.Validate(); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
@@ -465,7 +465,7 @@ func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
 	ctx context.Context,
 	candidate runtimerunlifecycle.Candidate,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	if err := candidate.Validate(); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
@@ -495,7 +495,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 	tx *sql.Tx,
 	attempt *mutationprotocol.Attempt,
 	candidate runtimerunlifecycle.Candidate,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	var (
 		state       string
@@ -640,7 +640,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 	tx *sql.Tx,
 	attempt *mutationprotocol.Attempt,
 	candidate runtimerunlifecycle.Candidate,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	var (
 		state      string

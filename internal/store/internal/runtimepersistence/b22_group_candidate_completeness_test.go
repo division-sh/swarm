@@ -53,7 +53,7 @@ func TestB22GroupMixedCandidateWakeAndRestartBothStores(t *testing.T) {
 				store := f.raw.(runLifecycleCandidateParityStore)
 				activityScope, _ := authoractivity.ScopeFromContext(f.ctx)
 				scope := runlifecycle.CandidateScope{BundleHash: activityScope.BundleHash}
-				catalog := stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
+				catalog := stagecatalogfixture.NewFinalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
 				before, err := store.ListCompletionCandidates(f.ctx, scope, runlifecycle.CandidateCursor{}, 128)
 				if err != nil || len(before.Candidates) != 1 || before.Candidates[0].RunID != f.runID {
 					t.Fatalf("coalesced prefix candidate=%+v err=%v", before, err)

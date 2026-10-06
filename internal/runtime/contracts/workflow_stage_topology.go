@@ -11,9 +11,9 @@ import (
 // StageRef is valid only for the compiled flow that resolved it. The exported
 // topology slices are projections; modifying them cannot change stage meaning.
 type StageRef struct {
-	catalog  *workflowStageCatalog
-	id       string
-	terminal bool
+	catalog *workflowStageCatalog
+	id      string
+	final   bool
 }
 
 // StoredStageRef distinguishes an authored lifecycle stage from the pending
@@ -21,40 +21,41 @@ type StageRef struct {
 type StoredStageRef struct {
 	catalog   *workflowStageCatalog
 	id        string
-	terminal  bool
+	final     bool
 	stateless bool
 }
 
 func (r StoredStageRef) ID() string               { return r.id }
-func (r StoredStageRef) IsTerminal() bool         { return r.catalog != nil && r.terminal }
+func (r StoredStageRef) IsFinal() bool            { return r.catalog != nil && r.final }
 func (r StoredStageRef) IsStatelessPosture() bool { return r.catalog != nil && r.stateless }
 
 type workflowStageCatalog struct {
-	flowID   string
-	initial  string
-	terminal map[string]bool
+	flowID  string
+	initial string
+	final   map[string]bool
+	order   []string
 }
 
-func (r StageRef) ID() string       { return r.id }
-func (r StageRef) IsTerminal() bool { return r.catalog != nil && r.terminal }
+func (r StageRef) ID() string    { return r.id }
+func (r StageRef) IsFinal() bool { return r.catalog != nil && r.final }
 
 func (t WorkflowStageTopology) ResolveStage(id string) (StageRef, error) {
 	if t.stageCatalog == nil || t.stageCatalog.flowID != t.FlowID {
 		return StageRef{}, fmt.Errorf("flow %q has no compiled stage catalog", t.FlowID)
 	}
-	terminal, ok := t.stageCatalog.terminal[id]
+	final, ok := t.stageCatalog.final[id]
 	if !ok {
 		return StageRef{}, fmt.Errorf("stage %q is not declared in flow %q", id, t.FlowID)
 	}
-	return StageRef{catalog: t.stageCatalog, id: id, terminal: terminal}, nil
+	return StageRef{catalog: t.stageCatalog, id: id, final: final}, nil
 }
 
 func (t WorkflowStageTopology) RequireStage(ref StageRef) error {
 	if !t.ValidStageCatalog() || ref.catalog == nil || ref.catalog != t.stageCatalog {
 		return fmt.Errorf("stage reference does not belong to flow %q", t.FlowID)
 	}
-	terminal, ok := t.stageCatalog.terminal[ref.id]
-	if !ok || terminal != ref.terminal {
+	final, ok := t.stageCatalog.final[ref.id]
+	if !ok || final != ref.final {
 		return fmt.Errorf("stage reference disagrees with flow %q", t.FlowID)
 	}
 	return nil
@@ -64,7 +65,7 @@ func (t WorkflowStageTopology) ResolveStoredStage(id string) (StoredStageRef, er
 	if !t.ValidStageCatalog() {
 		return StoredStageRef{}, fmt.Errorf("flow %q has no compiled stage catalog", t.FlowID)
 	}
-	if len(t.stageCatalog.terminal) == 0 {
+	if len(t.stageCatalog.final) == 0 {
 		if t.stageCatalog.initial != "" || id != "pending" {
 			return StoredStageRef{}, fmt.Errorf("storage state %q is not valid for stateless flow %q", id, t.FlowID)
 		}
@@ -74,14 +75,14 @@ func (t WorkflowStageTopology) ResolveStoredStage(id string) (StoredStageRef, er
 	if err != nil {
 		return StoredStageRef{}, err
 	}
-	return StoredStageRef{catalog: stage.catalog, id: stage.id, terminal: stage.terminal}, nil
+	return StoredStageRef{catalog: stage.catalog, id: stage.id, final: stage.final}, nil
 }
 
 func (t WorkflowStageTopology) InitialStoredStage() (StoredStageRef, error) {
 	if !t.ValidStageCatalog() {
 		return StoredStageRef{}, fmt.Errorf("flow %q has no compiled stage catalog", t.FlowID)
 	}
-	if len(t.stageCatalog.terminal) == 0 {
+	if len(t.stageCatalog.final) == 0 {
 		return t.ResolveStoredStage("pending")
 	}
 	return t.ResolveStoredStage(t.stageCatalog.initial)
@@ -91,16 +92,25 @@ func (t WorkflowStageTopology) StageCount() int {
 	if t.stageCatalog == nil {
 		return 0
 	}
-	return len(t.stageCatalog.terminal)
+	return len(t.stageCatalog.final)
 }
 
 func (t WorkflowStageTopology) StageIDs() []string {
 	if !t.ValidStageCatalog() {
 		return nil
 	}
-	ids := make([]string, 0, len(t.stageCatalog.terminal))
-	for id := range t.stageCatalog.terminal {
-		ids = append(ids, id)
+	return append([]string(nil), t.stageCatalog.order...)
+}
+
+func (t WorkflowStageTopology) FinalStageIDs() []string {
+	if !t.ValidStageCatalog() {
+		return nil
+	}
+	ids := make([]string, 0)
+	for id, final := range t.stageCatalog.final {
+		if final {
+			ids = append(ids, id)
+		}
 	}
 	sort.Strings(ids)
 	return ids
@@ -129,7 +139,7 @@ func (t WorkflowStageTopology) HasInitialStage() bool {
 // one graph owner. Callers provide timers already scoped to the requested flow.
 func BuildWorkflowStageTopology(
 	flowID, initial string,
-	stages, terminal []string,
+	stages, final []string,
 	transitions []HandlerTransitionSemantic,
 	timers []WorkflowTimerContract,
 	loops []WorkflowLoopPlan,
@@ -141,29 +151,37 @@ func BuildWorkflowStageTopology(
 	}
 	initial = strings.TrimSpace(initial)
 	stageSet := normalizedStringSet(stages)
-	terminalSet := normalizedStringSet(terminal)
-	nonTerminal := make([]string, 0, len(stageSet))
+	finalSet := normalizedStringSet(final)
+	nonFinal := make([]string, 0, len(stageSet))
 	for _, stage := range sortedStringSet(stageSet) {
-		if _, terminal := terminalSet[stage]; !terminal {
-			nonTerminal = append(nonTerminal, stage)
+		if _, final := finalSet[stage]; !final {
+			nonFinal = append(nonFinal, stage)
 		}
 	}
 	topology := WorkflowStageTopology{
-		FlowID:         flowID,
-		InitialStage:   initial,
-		Stages:         sortedStringSet(stageSet),
-		TerminalStages: sortedStringSet(terminalSet),
-		stageCatalog:   &workflowStageCatalog{flowID: flowID, initial: initial, terminal: make(map[string]bool, len(stageSet))},
+		FlowID:       flowID,
+		InitialStage: initial,
+		Stages:       sortedStringSet(stageSet),
+		FinalStages:  sortedStringSet(finalSet),
+		stageCatalog: &workflowStageCatalog{flowID: flowID, initial: initial, final: make(map[string]bool, len(stageSet))},
 	}
 	for stage := range stageSet {
-		_, isTerminal := terminalSet[stage]
-		topology.stageCatalog.terminal[stage] = isTerminal
+		_, isFinal := finalSet[stage]
+		topology.stageCatalog.final[stage] = isFinal
+	}
+	seen := map[string]bool{}
+	for _, stage := range stages {
+		stage = strings.TrimSpace(stage)
+		if stage != "" && !seen[stage] {
+			topology.stageCatalog.order = append(topology.stageCatalog.order, stage)
+			seen[stage] = true
+		}
 	}
 	for _, transition := range transitions {
 		if transition.Node.FlowPath() != flowID {
 			continue
 		}
-		handlerStages := append([]string{}, nonTerminal...)
+		handlerStages := append([]string{}, nonFinal...)
 		loopKind, loopID := LoopOperationKind(""), ""
 		if transition.Loop != nil {
 			if kind, id, err := transition.Loop.Operation(); err == nil {
@@ -180,7 +198,7 @@ func BuildWorkflowStageTopology(
 			failure, err := transition.Guard.FailureSpec()
 			if err == nil && failure.Action == GuardFailureActionKill {
 				for _, from := range normalizedStrings(handlerStages) {
-					if _, declared := stageSet[from]; !declared || topology.stageCatalog.terminal[from] {
+					if _, declared := stageSet[from]; !declared || topology.stageCatalog.final[from] {
 						continue
 					}
 					for _, check := range transition.Guard.EffectiveChecks() {

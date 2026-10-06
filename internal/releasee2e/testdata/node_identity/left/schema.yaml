@@ -1,8 +1,8 @@
 name: node-identity
 stages:
-  pending: {initial: true}
+  pending: {}
   working: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - entry.left

@@ -437,14 +437,14 @@ func selectedContractActivityDeclaredSource(t *testing.T, serverURL string, effe
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {initial: true}\n",
+		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {}\n",
 		"entities.yaml": "root: {}\n",
 		"flow_a/schema.yaml": `name: flow_a
 stages:
-  pending: {initial: true}
+  pending: {}
   review: {}
-  closed: {terminal: true}
-  exhausted: {terminal: true}
+  closed: {final: true}
+  exhausted: {final: true}
 loops:
   revision:
     revision_field: revision_id

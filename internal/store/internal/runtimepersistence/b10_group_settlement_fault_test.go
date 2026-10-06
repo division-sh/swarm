@@ -335,7 +335,7 @@ func newB10GroupFaultFixture(t *testing.T, backend string) *b10GroupFaultFixture
 	if err != nil || len(page.Candidates) != 1 || page.Candidates[0].RunID != seed.runID {
 		t.Fatalf("setup completion candidate: page=%+v err=%v", page, err)
 	}
-	result, err := candidates.ExecuteCompletionCandidate(ctx, page.Candidates[0], stagecatalogfixture.NewTerminalCatalog([]string{"completed"}, nil))
+	result, err := candidates.ExecuteCompletionCandidate(ctx, page.Candidates[0], stagecatalogfixture.NewFinalCatalog([]string{"completed"}, nil))
 	if err != nil || result.Outcome != runlifecycle.OutcomeAwaitMutation {
 		t.Fatalf("consume setup completion candidate: result=%+v err=%v", result, err)
 	}

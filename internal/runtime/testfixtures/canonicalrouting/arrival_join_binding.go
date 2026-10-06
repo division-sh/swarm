@@ -78,7 +78,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 
 func arrivalJoinPayloadDirectedFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: a2-publication-binding\nstages:\n  active: {initial: true}\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - item.completed\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n",
+		"schema.yaml":   "name: a2-publication-binding\nstages:\n  active: {}\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - item.completed\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n",
 		"entities.yaml": "root_state:\n  work_count: {type: integer, initial: 0}\n",
 		"events.yaml":   "work.requested:\n  prefix: text\n  suffix: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
 		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
@@ -99,10 +99,10 @@ func arrivalJoinPayloadDirectedFiles() map[string]string {
 		"orders/schema.yaml": `name: orders
 instance: order_id
 stages:
-  awaiting: {initial: true}
+  awaiting: {}
   dispatching: {}
-  ready: {terminal: true}
-  attention: {terminal: true}
+  ready: {final: true}
+  attention: {final: true}
 pins:
   inputs:
     - item.completed
@@ -136,10 +136,10 @@ func arrivalJoinBoundReplyFiles() map[string]string {
 		"requester/schema.yaml": `name: requester
 instance: order_id
 stages:
-  awaiting: {initial: true}
+  awaiting: {}
   dispatching: {}
-  ready: {terminal: true}
-  attention: {terminal: true}
+  ready: {final: true}
+  attention: {final: true}
 pins:
   inputs:
     - provider.replied
@@ -232,7 +232,7 @@ func arrivalJoinMultiUntilFiles() map[string]string {
 	files := arrivalJoinPayloadDirectedFiles()
 	files["schema.yaml"] = `name: a2-multi-until-binding
 stages:
-  active: {initial: true}
+  active: {}
 pins:
   inputs:
     - stop.requested

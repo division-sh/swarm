@@ -1,7 +1,7 @@
 name: child
 stages:
-  waiting: {initial: true}
-  completed: {terminal: true}
+  waiting: {}
+  completed: {final: true}
 pins:
   inputs:
     - work.begin

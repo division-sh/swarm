@@ -257,7 +257,7 @@ func (a *EntityAssignmentAnalysis) handlerStages(node identity.ExecutableNode, e
 	stages := make([]string, 0, a.topology.StageCount())
 	for _, id := range a.topology.StageIDs() {
 		stage, err := a.topology.ResolveStage(id)
-		if err == nil && !stage.IsTerminal() {
+		if err == nil && !stage.IsFinal() {
 			stages = append(stages, stage.ID())
 		}
 	}

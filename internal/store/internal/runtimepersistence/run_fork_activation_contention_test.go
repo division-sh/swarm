@@ -370,7 +370,7 @@ func newForkActivationFrontierFixture(t *testing.T, backend eventRecordContractB
 		return newForkContentionFixture(t, backend)
 	}
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend.name, false, map[string]string{
-		"schema.yaml":   "name: generic-frontier\nstages:\n  pending: {initial: true}\n  done: {}\n",
+		"schema.yaml":   "name: generic-frontier\nstages:\n  pending: {}\n  done: {}\n",
 		"entities.yaml": "subject:\n  name: {type: text, initial: 'At R'}\n",
 		"events.yaml":   "item.received:\n",
 	}, nil)

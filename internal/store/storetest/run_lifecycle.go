@@ -169,7 +169,7 @@ func MaterializeRun(
 		runner,
 		source.BundleHash(),
 		fixture.RunID,
-		runtimerunlifecycle.TerminalCatalog{},
+		runtimerunlifecycle.FinalCatalog{},
 	)
 	if err != nil {
 		return err
@@ -397,7 +397,7 @@ func ExecuteRunCompletionCandidate(
 	store runtimerunlifecycle.CandidateStore,
 	bundleHash string,
 	runID string,
-	catalog runtimerunlifecycle.TerminalCatalog,
+	catalog runtimerunlifecycle.FinalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	scope := runtimerunlifecycle.CandidateScope{BundleHash: strings.TrimSpace(bundleHash)}
 	if err := scope.Validate(); err != nil {

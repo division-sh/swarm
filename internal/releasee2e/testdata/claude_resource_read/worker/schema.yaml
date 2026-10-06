@@ -1,8 +1,8 @@
 name: worker
 stages:
-  pending: {initial: true}
+  pending: {}
   active: {}
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs:
     - task.assigned

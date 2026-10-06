@@ -1,6 +1,6 @@
 stages:
-  pending: {initial: true}
-  accepted: {terminal: true}
+  pending: {}
+  accepted: {final: true}
 pins:
   inputs:
     - check.requested

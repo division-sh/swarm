@@ -1,7 +1,7 @@
 name: tracker
 stages:
-  idle: {initial: true}
-  recorded: {terminal: true}
+  idle: {}
+  recorded: {final: true}
 pins:
   inputs:
     - task.record

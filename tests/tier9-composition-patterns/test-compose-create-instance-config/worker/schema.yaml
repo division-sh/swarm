@@ -1,8 +1,8 @@
 name: worker
 instance: worker_id
 stages:
-  ready: {initial: true}
-  done: {terminal: true}
+  ready: {}
+  done: {final: true}
 instance_variables:
   variables:
     name: text

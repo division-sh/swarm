@@ -53,7 +53,7 @@ func TestCompiledTransitionSourceAuthoredExactRelation(t *testing.T) {
 							}
 						}
 						requireTransitionRelation(t, "declared stages", graph.Stages, stages)
-						requireTransitionRelation(t, "terminal stages", graph.TerminalStages, terminal)
+						requireTransitionRelation(t, "terminal stages", graph.FinalStages, terminal)
 						if graph.InitialStage != initial {
 							t.Fatalf("initial = %q, want %q", graph.InitialStage, initial)
 						}
@@ -316,13 +316,12 @@ func transitionRelationDeclarations(family string) (schema, handlers, events str
 	case "ordinary":
 		return `stages:
   ready:
-    initial: true
     timers:
       - {id: advance, after: 1h, advances_to: working}
       - {id: notify, after: 2h, emit: tick}
   working: {}
   awaiting: {}
-  done: {terminal: true}
+  done: {final: true}
 `, `    direct: {advances_to: awaiting}
     created: {advances_to: working}
     selected:
@@ -350,11 +349,11 @@ func transitionRelationDeclarations(family string) (schema, handlers, events str
 `, "direct:\ncreated:\nselected:\ninherited:\ncompleted:\ntick:\narrived:\n  member: text\n  window: text\n  result: text\n"
 	case "loop":
 		return `stages:
-  waiting: {initial: true}
+  waiting: {}
   drafting: {}
   review: {}
-  done: {terminal: true}
-  escaped: {terminal: true}
+  done: {final: true}
+  escaped: {final: true}
 loops:
   revision:
     revision_field: revision_id
@@ -375,14 +374,14 @@ loops:
 `, "start:\nadmit: {revision_id: text}\nrepeat: {revision_id: text}\nclose: {revision_id: text}\n"
 	case "gate":
 		return `stages:
-  ready: {initial: true}
+  ready: {}
   waiting:
     gate:
       decision: review
       outcomes:
         approve: {advances_to: done}
         waive: {advances_to: done}
-  done: {terminal: true}
+  done: {final: true}
 `, "    created: {advances_to: waiting}\n", "created:\n"
 	default:
 		panic("unknown relation fixture " + family)

@@ -151,9 +151,9 @@ func writeStatelessCountJoinSingletonCoordinatorFlow(t testing.TB, root string) 
 	writeSingletonCoordinatorFile(t, root, "events.yaml", "job.received:\n  vertical_id: text\n  job: Job\n")
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", `name: coordinator
 stages:
-  active: {initial: true}
-  done: {terminal: true}
-  failed: {terminal: true}
+  active: {}
+  done: {final: true}
+  failed: {final: true}
 pins:
   inputs:
     - job.received

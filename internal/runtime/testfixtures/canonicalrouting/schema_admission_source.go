@@ -32,8 +32,7 @@ instance_variables:
 auto_emit_on_create: {event: work.started}
 stages:
   waiting:
-    initial: true
-    terminal: false
+    final: false
     timers: [{after: 1s, emit: work.expired}]
     gate:
       decision: approval
@@ -43,7 +42,7 @@ stages:
           advances_to: done
           input: {comment: {type: text, required: false, label: ''}}
           emit: {event: work.completed, fields: {record: {note: payload.note, preserved: null}}}
-  done: {terminal: true}
+  done: {final: true}
 loops:
   revision:
     revision_field: revision
@@ -55,9 +54,8 @@ const SchemaAdmissionAliasProvenance = `name: &label Example
 stages:
   waiting:
     description: *label
-    initial: true
     timers: [{after: 1s, emit: work.expired}]
-  done: {terminal: true}
+  done: {final: true}
 pins:
   inputs: [work.requested]
   outputs: [work.completed]

@@ -13,8 +13,8 @@ import (
 func TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `name: scoring
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 `, `
 vertical:
   name: text
@@ -30,8 +30,8 @@ vertical:
 func TestRun_AllowsFieldlessStagedStaticFlow(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `name: scoring
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 `, "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -45,10 +45,9 @@ func TestRun_AllowsFieldlessExpandedStages(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
 stages:
-  pending:
-    initial: true
+  pending: {}
   done:
-    terminal: true
+    final: true
 `, "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -75,7 +74,7 @@ func TestRun_RequiresPrimaryEntityForActualOperation(t *testing.T) {
 		t.Run(handler, func(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: operation-demand\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), "name: scoring\nstages:\n  pending: {initial: true}\n  done: {terminal: true}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), "name: scoring\nstages:\n  pending: {}\n  done: {final: true}\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), "work.ready:\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      "+handler+"\n")
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))

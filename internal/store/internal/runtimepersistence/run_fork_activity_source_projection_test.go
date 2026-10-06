@@ -584,7 +584,7 @@ func selectedActivityProducerSourceWithRootFields(t *testing.T, ordinaryRootLoop
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "name: activity-projection\nstages:\n  pending: {initial: true}\n",
+		"schema.yaml":   "name: activity-projection\nstages:\n  pending: {}\n",
 		"entities.yaml": "default:\n  name: text\n",
 		"events.yaml":   "ordinary.ready:\nreview.inspect:\nsupport.drafted:\n",
 		"nodes.yaml": `reader:
@@ -600,7 +600,7 @@ support:
     support.drafted:
       activity: {id: send_support_reply, tool: telegram.send_message, approval: {decision: support_reply}}
 `,
-		"flow-a/schema.yaml":   "name: flow-a\nstages:\n  pending: {initial: true}\n",
+		"flow-a/schema.yaml":   "name: flow-a\nstages:\n  pending: {}\n",
 		"flow-a/entities.yaml": "default:\n  name: text\n",
 		"flow-a/events.yaml":   "review.accepted:\nreview.inspect:\n",
 		"flow-a/nodes.yaml": `writer:

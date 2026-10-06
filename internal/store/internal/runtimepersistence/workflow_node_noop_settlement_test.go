@@ -91,7 +91,7 @@ func TestWorkflowNodeNoopSettlementAtomicBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					catalog, err := runlifecycle.NewCompiledTerminalCatalog(classifier)
+					catalog, err := runlifecycle.NewCompiledFinalCatalog(classifier)
 					if err != nil {
 						t.Fatal(err)
 					}

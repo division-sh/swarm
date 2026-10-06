@@ -222,7 +222,7 @@ func TestFanOutDeliveryBarrierCandidateReturnsExactPostCommitScheduleActivationO
 				selected.(runtimerunlifecycle.CandidateStore),
 				fixture.bundleHash,
 				fixture.runID,
-				stagecatalogfixture.NewTerminalCatalog([]string{"completed"}, nil),
+				stagecatalogfixture.NewFinalCatalog([]string{"completed"}, nil),
 			)
 			if err != nil {
 				t.Fatalf("execute barrier completion candidate: %v", err)

@@ -1,8 +1,8 @@
 name: worker
 instance: worker_id
 stages:
-  idle: {initial: true}
-  complete: {terminal: true}
+  idle: {}
+  complete: {final: true}
 instance_variables:
   variables:
     task_label: text

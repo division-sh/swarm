@@ -61,7 +61,7 @@ func copySelectedNestedConstructedAgentInput(t testing.TB, fields, observer bool
 		"schema.yaml":         "name: selected-nested-constructed-input\npins:\n  inputs:\n    - task.assigned\n    - construction.started\n  outputs:\n    - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: templ, resolution: select}\n  - {event: task.assigned, from: ., to: templ/child}\n  - {event: task.assigned, from: ., to: templ/child/leaf}\n  - {event: task.assigned, from: ., to: templ/audit}\n  - {event: task.assigned, from: ., to: templ/audit/leaf}\n",
 		"events.yaml":         "task.assigned:\n  work_id: text\nconstruction.started:\n  work_id: text\n",
 		"nodes.yaml":          "anchor:\n  execution_type: system_node\n  subscribes_to: [construction.started]\n  event_handlers:\n    construction.started: {}\n",
-		"templ/schema.yaml":   "name: templ\ninstance: work_id\nstages:\n  active: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - task.assigned\n    - construction.started\n",
+		"templ/schema.yaml":   "name: templ\ninstance: work_id\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n    - construction.started\n",
 		"templ/entities.yaml": "work:\n  work_id: text\n",
 		"templ/events.yaml":   "construction.started:\n  work_id: text\n",
 		"templ/nodes.yaml":    "bootstrap:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  produces: [construction.started]\n  event_handlers:\n    task.assigned:\n      emit:\n        event: construction.started\n        fields:\n          work_id: payload.work_id\nfinish:\n  execution_type: system_node\n  subscribes_to: [construction.started]\n  event_handlers:\n    construction.started:\n      advances_to: done\n",
@@ -73,7 +73,7 @@ func copySelectedNestedConstructedAgentInput(t testing.TB, fields, observer bool
 			for name, body := range map[string]string{
 				"events.yaml": "work.ready:\n  work_id: text\nwork.finish:\n",
 				"nodes.yaml":  "publish:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  produces: [work.ready]\n  event_handlers:\n    task.assigned:\n      emit:\n        event: work.ready\n        fields:\n          work_id: payload.work_id\nfinish:\n  execution_type: system_node\n  subscribes_to: [work.finish]\n  event_handlers:\n    work.finish:\n      advances_to: done\n",
-				"schema.yaml": "name: descendant\nstages:\n  active: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    - task.assigned\nrequired_agents:\n  - role: worker\n    subscribes_to: [work.ready]\n",
+				"schema.yaml": "name: descendant\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\nrequired_agents:\n  - role: worker\n    subscribes_to: [work.ready]\n",
 				"agents.yaml": "worker:\n  model: regular\n  intent:\n    inline: Consume the exact assigned task.\n  subscriptions: [work.ready]\n  emit_events: [work.finish]\n",
 			} {
 				if name == "agents.yaml" && observer {

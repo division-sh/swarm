@@ -843,8 +843,8 @@ fanout-node:
 auto_emit_on_create:
   event: ticket.ready
 stages:
-  idle: {initial: true}
-  done: {terminal: true}
+  idle: {}
+  done: {final: true}
 `,
 						events: "ticket.ready:\n",
 					},
@@ -2242,7 +2242,7 @@ entity-agent:
 func TestRun_AcceptsExplicitFlowAgentMemoryDeclarations(t *testing.T) {
 	root := writeAgentMemoryValidationFixture(t, "", `name: support
 stages:
-  waiting: {initial: true}
+  waiting: {}
   done: {}
 `, `
 flow-agent:
@@ -2290,7 +2290,7 @@ root-global:
 func TestRun_AcceptsPackageBackedFlowAgentMemoryDeclarations(t *testing.T) {
 	root := writePackageBackedAgentMemoryValidationFixture(t, `name: support
 stages:
-  waiting: {initial: true}
+  waiting: {}
   done: {}
 `, `
 flow-agent:
@@ -6460,7 +6460,7 @@ opco.spend_requested:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "schema.yaml"), `name: treasury
 stages:
-  active: {initial: true}
+  active: {}
 pins:
   inputs:
     - opco.spend_requested
@@ -6674,8 +6674,8 @@ item:
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), `
 name: `+flowID+`
 stages:
-  idle: {initial: true}
-  done: {terminal: true}
+  idle: {}
+  done: {final: true}
 pins:
   outputs:
     - ticket.ready
@@ -6692,8 +6692,8 @@ ticket.ready:
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), `name: consumer
 stages:
-  waiting: {initial: true}
-  done: {terminal: true}
+  waiting: {}
+  done: {final: true}
 pins:
   inputs:
     - ticket.ready
@@ -6742,10 +6742,10 @@ func writeStateReachabilityFixtureWithClosedHandler(t *testing.T, closedHandler 
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
 stages:
-  waiting: {initial: true}
+  waiting: {}
   active: {}
   review: {}
-  done: {terminal: true}
+  done: {final: true}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
 ticket: {}
@@ -6776,12 +6776,11 @@ func writeStagedReachabilityFixture(t *testing.T) string {
 	return writeStagedLifecycleFixture(t, `
 name: support
 stages:
-  waiting:
-    initial: true
+  waiting: {}
   active: {}
   review: {}
   done:
-    terminal: true
+    final: true
 `)
 }
 
@@ -6841,8 +6840,8 @@ case:
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
 stages:
-  idle: {initial: true}
-  done: {terminal: true}
+  idle: {}
+  done: {final: true}
 pins:
   inputs:
     - task.assigned
@@ -6879,8 +6878,8 @@ func writePromptWriterCoverageFixture(t *testing.T, agentsYAML, entitiesYAML, pr
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: prompt-writer-coverage\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
 stages:
-  idle: {initial: true}
-  done: {terminal: true}
+  idle: {}
+  done: {final: true}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), entitiesYAML)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), agentsYAML)
@@ -7154,7 +7153,7 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 		files := opts.flows[flowID]
 		schema := strings.TrimSpace(files.schema)
 		if schema == "" {
-			schema = "name: " + flowID + "\nstages:\n  idle: {initial: true}\n  done: {terminal: true}\n"
+			schema = "name: " + flowID + "\nstages:\n  idle: {}\n  done: {final: true}\n"
 		}
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schema+"\n")
 		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, flowID, "policy.yaml"), files.policy)

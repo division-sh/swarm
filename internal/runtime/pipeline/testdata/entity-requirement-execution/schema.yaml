@@ -1,4 +1,4 @@
 name: review
 stages:
-  active: {initial: true}
-  killed: {terminal: true}
+  active: {}
+  killed: {final: true}

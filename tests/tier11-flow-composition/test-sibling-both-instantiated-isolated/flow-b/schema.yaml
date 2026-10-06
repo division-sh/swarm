@@ -1,8 +1,8 @@
 name: flow-b
 stages:
-  new: {initial: true}
+  new: {}
   active: {}
-  finished: {terminal: true}
+  finished: {final: true}
 pins:
   inputs:
     - work.begin
