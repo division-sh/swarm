@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -19,15 +18,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 )
 
-func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time) {
+func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time) {
 	t.Helper()
-	seedSelectedAgentExecutionSource(t, ctx, backend, db, selected, loaded, runID, eventID, at, executionmode.Live)
+	seedSelectedAgentExecutionSource(t, ctx, selected, loaded, runID, eventID, at, executionmode.Live)
 }
 
-func seedSelectedAgentExecutionSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time, mode executionmode.Mode) {
+func seedSelectedAgentExecutionSource(t *testing.T, ctx context.Context, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time, mode executionmode.Mode) {
 	t.Helper()
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
 	fixture := storetest.RunFixture{
@@ -63,33 +61,10 @@ func seedSelectedAgentExecutionSource(t *testing.T, ctx context.Context, backend
 		t.Fatalf("component source tree construction: committed=%+v err=%v", committed, err)
 	}
 	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, "source_dead_letter", "run-fork-test", "seed", nil), "run-fork-test", "seed")
-	failureRaw, err := json.Marshal(failure)
-	if err != nil {
+	if err := storetest.SeedSelectedSourceOutcome(ctx, selected, storetest.SelectedSourceOutcomeFixture{
+		RunID: runID, EventID: eventID, EntityID: entityID, CreatedAt: at, Failure: failure,
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO event_receipts
-		(event_id,subscriber_type,subscriber_id,entity_id,flow_instance,outcome,reason_code,side_effects,processed_at)
-		VALUES ($1,'platform','old-source-node',$2,'flow-a/1','success','source_outcome_must_not_suppress_fork','{}',$3)`, eventID, entityID, at); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO dead_letters
-		(original_event_id,original_event,entity_id,flow_instance,failure,handler_node,created_at)
-		VALUES ($1,'item.received',$2,'flow-a/1',$3,'old-source-node',$4)`, eventID, entityID, string(failureRaw), at); err != nil {
-		t.Fatal(err)
-	}
-	if backend == "postgres" {
-		captureSelectedExecutionSourceRevision(t, db, runID)
-		return
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	if _, err := runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
+	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 }

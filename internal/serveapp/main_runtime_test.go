@@ -2547,6 +2547,7 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t *testing.T, 
 	}
 }
 
+
 func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
 	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt, "run-control-release-"+uuid.NewString())
@@ -7456,9 +7457,6 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 
 func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func() cliapp.ServeWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
-	if workspaceFactory == nil {
-		return installServeRuntimePostgresTestStoresForDatabase(t, nil, true)
-	}
 	return installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
 		return workspaceFactory()
 	})

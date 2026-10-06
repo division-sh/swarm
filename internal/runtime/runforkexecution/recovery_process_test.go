@@ -300,7 +300,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
 	if cut == "native_before_activation" {
-		seedSelectedAgentExecutionSource(t, ctx, backend, db, capabilityStore, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC(), executionmode.Mock)
+		seedSelectedAgentExecutionSource(t, ctx, capabilityStore, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC(), executionmode.Mock)
 	} else {
 		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
 	}
