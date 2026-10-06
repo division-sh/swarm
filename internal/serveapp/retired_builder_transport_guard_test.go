@@ -49,8 +49,12 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"internal/store/internal/runtimepersistence/postgres_store_additional_test.go": 6,
 		// One forbidden constructor-name literal in the debt guard's retired map.
 		"internal/store/persistence_authority_debt_test.go": 1,
-		"openrpc.json":       2,
-		"platform-spec.yaml": 50,
+		// Exact retired-test selector/reference lines introduced by core promotion.
+		".github/test-proof-plan.yaml":                          1,
+		"internal/testplanning/static_authority_guards_test.go": 1,
+		"internal/testcatalog/inventory_test.go":                1,
+		"openrpc.json":                                          2,
+		"platform-spec.yaml":                                    50,
 	}
 	expectedUnrelatedTextCounts := map[string]int{
 		"internal/runtime/bootverify/workflow_transition_relation_test.go":                  1,
@@ -226,6 +230,29 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 		if err != nil || len(got) != 2 {
 			t.Fatalf("additional reference escaped the one-reference inventory: %+v: %v", got, err)
 		}
+	}
+	for _, selectorPath := range []string{
+		".github/test-proof-plan.yaml", "internal/testplanning/static_authority_guards_test.go", "internal/testcatalog/inventory_test.go",
+	} {
+		t.Run(selectorPath, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join(repoRootForTest(), selectorPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := retiredBuilderCandidates(selectorPath, body)
+			if err != nil || len(got) != 1 {
+				t.Fatalf("exact selector inventory changed: %+v, %v", got, err)
+			}
+			extra := "\nvar extraRetirementSelector = \"TestRetiredBuilderSemanticReferencesStayExplicit\"\n"
+			if strings.HasSuffix(selectorPath, ".yaml") {
+				extra = "\n# retired Builder additional selector reference\n"
+			}
+			candidate := append(append([]byte(nil), body...), extra...)
+			got, err = retiredBuilderCandidates(selectorPath, candidate)
+			if err != nil || len(got) != 2 {
+				t.Fatalf("extra selector reference escaped the exact inventory: %+v, %v", got, err)
+			}
+		})
 	}
 }
 
