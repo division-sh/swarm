@@ -1,6 +1,10 @@
 package cliapp
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -44,7 +48,7 @@ func TestSelectedRawSQLBoundaryInventoryIsClassified(t *testing.T) {
 }
 
 func TestSelectedRawSQLBoundaryRejectsUnclassifiedProducerFixture(t *testing.T) {
-	matches := rawSQLBoundaryMatchesFromSources(map[string]string{
+	matches, err := rawSQLBoundaryMatchesFromSources(map[string]string{
 		"internal/runtime/unclassified_sql_producer.go": `package runtime
 
 import (
@@ -58,6 +62,9 @@ func unclassifiedProducer(ctx context.Context, db *sql.DB) error {
 }
 `,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	failures := classifyRawSQLBoundaryMatches(matches, selectedRawSQLBoundaryLedger())
 	if len(failures) == 0 {
 		t.Fatal("expected unclassified raw SQL producer fixture to fail")
@@ -68,7 +75,7 @@ func unclassifiedProducer(ctx context.Context, db *sql.DB) error {
 }
 
 func TestSelectedRawSQLBoundaryRejectsUnclassifiedConcreteStoreFixture(t *testing.T) {
-	matches := rawSQLBoundaryMatchesFromSources(map[string]string{
+	matches, err := rawSQLBoundaryMatchesFromSources(map[string]string{
 		"internal/runtime/unclassified_concrete_store_producer.go": `package runtime
 
 import (
@@ -81,6 +88,9 @@ func unclassifiedConcreteStoreProducer(pg *store.PostgresStore) *pipeline.Pipeli
 }
 `,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	failures := classifyRawSQLBoundaryMatches(matches, selectedRawSQLBoundaryLedger())
 	if len(failures) == 0 {
 		t.Fatal("expected unclassified concrete store producer fixture to fail")
@@ -180,10 +190,10 @@ func collectRawSQLBoundaryMatches(root string) (map[string][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rawSQLBoundaryMatchesFromSources(sources), nil
+	return rawSQLBoundaryMatchesFromSources(sources)
 }
 
-func rawSQLBoundaryMatchesFromSources(sources map[string]string) map[string][]string {
+func rawSQLBoundaryMatchesFromSources(sources map[string]string) (map[string][]string, error) {
 	literalPatterns := []string{
 		`"database/sql"`,
 		"*sql.DB",
@@ -205,13 +215,17 @@ func rawSQLBoundaryMatchesFromSources(sources map[string]string) map[string][]st
 	}
 	out := map[string][]string{}
 	for path, src := range sources {
+		code, err := rawSQLBoundaryExecutableSource(path, src)
+		if err != nil {
+			return nil, err
+		}
 		for _, pattern := range literalPatterns {
-			if strings.Contains(src, pattern) {
+			if strings.Contains(code, pattern) {
 				out[path] = append(out[path], pattern)
 			}
 		}
 		for label, pattern := range regexPatterns {
-			if pattern.MatchString(src) {
+			if pattern.MatchString(code) {
 				out[path] = append(out[path], label)
 			}
 		}
@@ -219,7 +233,115 @@ func rawSQLBoundaryMatchesFromSources(sources map[string]string) map[string][]st
 			sort.Strings(out[path])
 		}
 	}
-	return out
+	return out, nil
+}
+
+// Import paths are dependency evidence. Other literals and comments describe
+// data (including codemod input), not live SQL types, calls or capabilities.
+func rawSQLBoundaryExecutableSource(path, source string) (string, error) {
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, path, source, parser.ParseComments|parser.AllErrors)
+	if err != nil {
+		return "", fmt.Errorf("parse owned raw-boundary source %s: %w", path, err)
+	}
+	code := []byte(source)
+	clear := func(start, end token.Pos) {
+		for i := set.Position(start).Offset; i < set.Position(end).Offset; i++ {
+			if code[i] != '\n' {
+				code[i] = ' '
+			}
+		}
+	}
+	imports := map[*ast.BasicLit]bool{}
+	cgo := false
+	for _, spec := range file.Imports {
+		imports[spec.Path] = true
+		cgo = cgo || spec.Path.Value == `"C"`
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		if literal, ok := node.(*ast.BasicLit); ok && !imports[literal] && (literal.Kind == token.STRING || literal.Kind == token.CHAR) {
+			clear(literal.Pos(), literal.End())
+		}
+		return true
+	})
+	for _, group := range file.Comments {
+		compilerEvidence := cgo
+		for _, comment := range group.List {
+			compilerEvidence = compilerEvidence || strings.HasPrefix(comment.Text, "//go:")
+		}
+		if compilerEvidence {
+			continue
+		}
+		clear(group.Pos(), group.End())
+	}
+	return string(code), nil
+}
+
+func TestSelectedRawSQLBoundaryDistinguishesCodemodDataFromLiveAuthority(t *testing.T) {
+	for _, path := range []string{
+		"tools/fixture-codemod/conformance_columns.go",
+		"tools/fixture-codemod/conformance_mutation_projection.go",
+		"tools/fixture-codemod/conformance_native_setup.go",
+		"tools/fixture-codemod/main.go",
+		"tools/fixture-codemod/notify_execution_owner.go",
+	} {
+		t.Run(path, func(t *testing.T) {
+			inert := "package fixture\n// *sql.Tx ExecContext( .DB\nconst input = `\"database/sql\" *sql.DB *store.PostgresStore .DB QueryContext(`\n"
+			matches, err := rawSQLBoundaryMatchesFromSources(map[string]string{path: inert})
+			if err != nil || len(matches) != 0 {
+				t.Fatalf("inert source described live authority: %v %v", matches, err)
+			}
+			live := `package fixture
+import ("context"; alias "database/sql")
+func execute(ctx context.Context, db *alias.DB)error{
+ _,err:=db.ExecContext(ctx,"DELETE FROM events")
+ return err
+}`
+			matches, err = rawSQLBoundaryMatchesFromSources(map[string]string{path: live})
+			if err != nil {
+				t.Fatal(err)
+			}
+			patterns := strings.Join(matches[path], ",")
+			if !strings.Contains(patterns, `"database/sql"`) || !strings.Contains(patterns, "ExecContext(") {
+				t.Fatalf("aliased dependency or live SQL call lost: %v", matches)
+			}
+			if failures := classifyRawSQLBoundaryMatches(matches, selectedRawSQLBoundaryLedger()); len(failures) == 0 {
+				t.Fatal("real SQL in codemod path escaped the unchanged ledger")
+			}
+		})
+	}
+}
+
+func TestSelectedRawSQLBoundaryMalformedOwnedSourceFailsClosed(t *testing.T) {
+	path := "internal/runtime/broken.go"
+	matches, err := rawSQLBoundaryMatchesFromSources(map[string]string{
+		path:                        "package runtime\nfunc broken(",
+		"internal/runtime/other.go": "package runtime\nimport \"database/sql\"\nvar db *sql.DB",
+	})
+	if err == nil || !strings.Contains(err.Error(), path) || matches != nil {
+		t.Fatalf("malformed source returned partial evidence: %v %v", matches, err)
+	}
+}
+
+func TestSelectedRawSQLBoundaryPreservesCompilerOwnedCommentEvidence(t *testing.T) {
+	for name, source := range map[string]string{
+		"linkname": "package fixture\nimport _ \"unsafe\"\n//go:linkname borrowed example.RunRuntimeMutation\nfunc borrowed()\n",
+		"cgo":      "package fixture\n/* void RunRuntimeMutation(void) {} */\nimport \"C\"\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := "internal/runtime/unknown_" + name + ".go"
+			matches, err := rawSQLBoundaryMatchesFromSources(map[string]string{path: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(strings.Join(matches[path], ","), "RunRuntimeMutation") {
+				t.Fatalf("compiler evidence treated as inert data: %v", matches)
+			}
+			if failures := classifyRawSQLBoundaryMatches(matches, selectedRawSQLBoundaryLedger()); len(failures) == 0 {
+				t.Fatal("compiler-owned raw evidence escaped the unchanged ledger")
+			}
+		})
+	}
 }
 
 func classifyRawSQLBoundaryMatches(matches map[string][]string, ledger map[string]rawSQLBoundaryEntry) []string {
