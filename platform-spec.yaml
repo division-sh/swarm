@@ -38957,7 +38957,9 @@ durable_pipeline_processing_obligation_authority:
       recipient, and no event-wide interceptor. Runtime control/diagnostic and selected-replay events retain their
       coordination contract; node routes alone do not authorize skipping timer, decision or activity work.
       The selected-store current publication claim atomically commits its pipeline receipt and executable delivery
-      handoff through the existing settlement owner before its independent private session retires. Pipeline
+      handoff through the existing settlement owner before its independent private session retires and asynchronous
+      publication returns. Only the short database handoff is joined, not downstream node/child/provider execution;
+      deferring this handoff itself would retain the same unbounded already-acknowledged session backlog. Pipeline
       acknowledgement means durable handoff, never recipient success; pending deliveries retain their own completion
       blockers and acquire fresh exact delivery claims before execution. No new queue, pool enlargement, arbitrary
       session group or recursive global permit is introduced. The existing fan-out group consumes the same exact
