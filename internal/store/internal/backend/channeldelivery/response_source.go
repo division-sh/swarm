@@ -44,32 +44,9 @@ func ResponseSourceCurrent(ctx context.Context, q intentQueryer, frozen render.F
 	err := q.QueryRowContext(ctx, query, publicationID).Scan(&action.Provider, &action.ProviderEventID,
 		&key, &raw, &action.ProviderAuthorization, &state, &disposition)
 	if err == nil {
-		if err := json.Unmarshal(raw, &action.ActionFact); err != nil {
+		current, err := responseActionRowCurrent(ctx, q, action, raw, key, state, disposition, frozen.InputCard != nil, postgres, lock)
+		if err != nil || !current {
 			return false, err
-		}
-		if err := action.Validate(); err != nil {
-			return false, err
-		}
-		if key != action.Interface.Key() || state != "settled" ||
-			(disposition != "navigation" && !(frozen.InputCard != nil && (disposition == "input_started" || disposition == "applied"))) {
-			return false, nil
-		}
-		if _, err := RequireActionIntentTx(ctx, q, action, postgres, lock); err != nil {
-			return false, err
-		}
-		if action.Kind == operatorchannel.ActionSourceReply {
-			return currentPurpose()
-		}
-		query = `SELECT COUNT(*) FROM operator_channel_text_intents WHERE publication_id=?`
-		if postgres {
-			query = `SELECT COUNT(*) FROM operator_channel_text_intents WHERE publication_id=$1::uuid`
-		}
-		var count int
-		if err := q.QueryRowContext(ctx, query, publicationID).Scan(&count); err != nil {
-			return false, err
-		}
-		if count != 0 {
-			return false, nil
 		}
 		return currentPurpose()
 	}
@@ -107,4 +84,33 @@ func ResponseSourceCurrent(ctx context.Context, q intentQueryer, frozen render.F
 		return false, nil
 	}
 	return currentPurpose()
+}
+
+func responseActionRowCurrent(ctx context.Context, q intentQueryer, action operatorchannel.InboundAction,
+	raw []byte, key, state, disposition string, inputPrompt, postgres, lock bool) (bool, error) {
+	if err := json.Unmarshal(raw, &action.ActionFact); err != nil {
+		return false, err
+	}
+	if err := action.Validate(); err != nil {
+		return false, err
+	}
+	if key != action.Interface.Key() || state != "settled" ||
+		(disposition != "navigation" && !(inputPrompt && (disposition == "input_started" || disposition == "applied"))) {
+		return false, nil
+	}
+	if _, err := RequireActionIntentTx(ctx, q, action, postgres, lock); err != nil {
+		return false, err
+	}
+	if action.Kind == operatorchannel.ActionSourceReply {
+		return true, nil
+	}
+	query := `SELECT COUNT(*) FROM operator_channel_text_intents WHERE publication_id=?`
+	if postgres {
+		query = `SELECT COUNT(*) FROM operator_channel_text_intents WHERE publication_id=$1::uuid`
+	}
+	var count int
+	if err := q.QueryRowContext(ctx, query, action.PublicationID).Scan(&count); err != nil {
+		return false, err
+	}
+	return count == 0, nil
 }

@@ -170,26 +170,35 @@ func (d *serveChannelDeliveryDispatcher) qualifyResolvedNativeEntry(ctx context.
 		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
 	}
 	if entry.Kind == runtimechanneldelivery.InboxEntryTextReply {
-		if err := plan.Capabilities().Require(packs.ChannelCapabilityInboxListing); err != nil {
+		return d.qualifyTextReplyInboxEntry(ctx, text, entry, selected, plan)
+	}
+	return d.qualifyInstalledInboxEntry(ctx, text, entry, selected, plan)
+}
+
+func (d *serveChannelDeliveryDispatcher) qualifyTextReplyInboxEntry(ctx context.Context, text operatorchannel.InboundText,
+	entry runtimechanneldelivery.ResolvedInboxEntry, selected channelonboarding.ConnectedChannelActivation,
+	plan packs.OutboundBindingPlan) (runtimechanneldelivery.ResolvedInboxEntry, runtimechanneldelivery.InboxEntryDisposition, error) {
+	if err := plan.Capabilities().Require(packs.ChannelCapabilityInboxListing); err != nil {
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
+	}
+	if text.EntryReference != runtimechanneldelivery.TextReplyInboxReference || text.EntryAddress != "" && !plan.HasNativeInbox() {
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
+	}
+	if text.EntryAddress != "" {
+		address, err := d.readNativeInboxAddress(ctx, plan, selected.CredentialAdmissions)
+		if err != nil {
 			return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
 		}
-		if text.EntryReference != runtimechanneldelivery.TextReplyInboxReference {
+		if !strings.EqualFold(text.EntryAddress, address) {
 			return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
 		}
-		if text.EntryAddress != "" {
-			if !plan.HasNativeInbox() {
-				return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
-			}
-			address, err := d.readNativeInboxAddress(ctx, plan, selected.CredentialAdmissions)
-			if err != nil {
-				return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
-			}
-			if !strings.EqualFold(text.EntryAddress, address) {
-				return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
-			}
-		}
-		return entry, runtimechanneldelivery.InboxEntryAccepted, nil
 	}
+	return entry, runtimechanneldelivery.InboxEntryAccepted, nil
+}
+
+func (d *serveChannelDeliveryDispatcher) qualifyInstalledInboxEntry(ctx context.Context, text operatorchannel.InboundText,
+	entry runtimechanneldelivery.ResolvedInboxEntry, selected channelonboarding.ConnectedChannelActivation,
+	plan packs.OutboundBindingPlan) (runtimechanneldelivery.ResolvedInboxEntry, runtimechanneldelivery.InboxEntryDisposition, error) {
 	if entry.Kind != runtimechanneldelivery.InboxEntryNative || !plan.HasNativeInbox() {
 		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
 	}
