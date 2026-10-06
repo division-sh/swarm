@@ -3513,7 +3513,31 @@
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
-    "body_sha256": "615bfdd34f3806b5faf55dafdc203d0ba4ab5d4b851a1950e3db18324505a284"
+    "body_sha256": "762a013cc8a0c9971af8e42e0023b5b735c9accfd6717f6f9d450184e6f0ea71"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Error",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "4d8b539b7a7a5fc7017c6d5d26e3fdb90db16a67e4705914f9ee148249d09f86"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Unwrap",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "a56f4e97874f9091aa4e8bc5cafcd9a93cca63f07e575d2ee65b2e08f39c711c"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::IsRolledBackSerializationConflict",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "79e1e66c3f167c6692dee5a2bc53db0c75749bccf66cce0119560504d949607e"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::exactSerializationConflict",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "86aab4b7abbb8260458f1788faf68b31c54390b8cea10e7e94c9377d74549d08"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.ListSelectedForkRecoveryEntries",

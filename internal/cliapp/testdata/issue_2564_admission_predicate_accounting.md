@@ -24,3 +24,28 @@ mechanism. Qualification runs with that variable absent, including
 `TestVerifyBootStartupPredicateCensus` and all
 `TestAdmissionPredicateRatchetRejects*` actual mutation controls. Do not confuse
 generator success with qualification or use a hash refresh to waive a test.
+
+## F01 Native Fence Evidence And A19/A28 Preservation
+
+Core at54b3cd4bb correctly rejected the stale `Backend.runTransactionOutcome`
+fingerprint. F01, authorized under #2438 comment6008619373 and implemented at
+d52c2cbc7, changes one measured body and adds four measured error-evidence
+helpers. The unchanged census measures every function in this audited file,
+including helpers that are not themselves startup admission predicates.
+The generator records all five; no surface, audit row or proof family is removed
+or exempted. A19/A28 and P18/P24 still refer to the original #2286 audit.
+
+| Measured body | Owner/consumers and preserved admission | Execution witness |
+| --- | --- | --- |
+| `Backend.runTransactionOutcome` | Existing native pooled transaction owner, consumed by named runtime mutations and `schemastore.Postgres.InspectSchema`. Read-only inspection remains caller-cancelled and cannot mint write-conflict retry evidence. Arbitrary callbacks still execute once. Only a mutable, explicitly rolled-back pre-COMMIT error with clean connection disposition may return sealed evidence. | `TestPostgresSerializationConflictRequiresCleanNativeSettlement` includes pooled/retained read-only, cancellation, rollback/cleanup failure, already-settled and uncertain-COMMIT refusal; `TestInspectionNativeReadCancellationJoinsTransactionAndDisposes`, `TestInspectionSnapshotBindsReadersAndRejectsEscapes`, `TestVerifyFreshPostgresSchemaAccountsAbsenceWithoutClaimingPossession`. |
+| `rolledBackSerializationConflict.Error/Unwrap` | Private native settlement evidence retains the original cause for diagnostics. Error text or an error-tree match does not confer retry authority; independent cleanup/cancellation remains non-retryable. | `TestPostgresSerializationConflictClassificationIsExact`, the native settlement matrix, and `TestNativeRetainedPostgresFenceSettlementRefusesRetry`. |
+| `IsRolledBackSerializationConflict` | The existing mutation protocol consumes only the exact sealed value at `AcquireFence`, before domain entry. Wrapped/joined evidence, post-domain failure, uncertain/acknowledged commit and whole fork execution cannot replay. | `TestNativeRetainedPostgresFenceConflictRetriesBeforeDomain`, `TestNativeRetainedPostgresPostFenceConflictsNeverReplay`, and native consumer/settlement controls. |
+| `exactSerializationConflict` | Native settlement alone recognizes one exact40001 cause chain; it does not classify joins, other SQLSTATEs or arbitrary strings as proof of rollback. Recognition is necessary but never sufficient for retry. | `TestPostgresSerializationConflictClassificationIsExact` plus native clean/dirty settlement controls. |
+
+Retained-session settlement is accounted for in the F01 proof record; it does
+not replace pooled startup inspection. Fresh native admission, fixed historical
+cut, unchanged operation identity and original owning cancellation still fence
+each protocol attempt. No domain/provider/materialization callback is replayed.
+Qualification reruns the census in normal environment, actual omission/restored
+refusal controls, read-only startup/inspection and native protocol tests. The
+full failed core receipt remains evidence; interrupted units earn no proof credit.
