@@ -355,6 +355,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load proof policy: %v", err)
 	}
+	assertCoreStructuralGuardTimingInventory(t, policy)
 	modelFile, err := os.Open(filepath.Join(root, ".github", "test-timing-weights.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -624,6 +625,26 @@ func collectProjectionValues(node *yaml.Node, out map[string]bool) {
 	}
 	for _, child := range node.Content {
 		collectProjectionValues(child, out)
+	}
+}
+
+func assertCoreStructuralGuardTimingInventory(t *testing.T, policy testplanning.Policy) {
+	t.Helper()
+	const id = "core-structural-owner-guards"
+	unit, exists := policy.Units[id]
+	wantPackages := []string{
+		policy.Module + "/internal/releasee2e", policy.Module + "/internal/runtime",
+		policy.Module + "/internal/serveapp", policy.Module + "/internal/store/internal/runtimepersistence",
+	}
+	if !exists || !slices.Equal(unit.Packages, wantPackages) || unit.CountMode != "count-1" ||
+		unit.EnvironmentID != "ci-postgres-gateway-empty-v1" || unit.BudgetClass != "broad" ||
+		unit.Skip != "" || unit.GoTimeout != "" || unit.Packable || len(unit.RequiredChildren) != 0 {
+		t.Fatalf("core structural guard timing envelope changed: %+v", unit)
+	}
+	for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+		if slices.Contains(policy.Profiles[tier].Units, id) != (tier == testplanning.ProfileCore) {
+			t.Fatalf("%s changed core-only guard scheduling", tier)
+		}
 	}
 }
 

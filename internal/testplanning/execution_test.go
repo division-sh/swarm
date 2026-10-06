@@ -65,6 +65,7 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				t.Fatalf("unbound plan: %+v", plan)
 			}
 			assertCatalogOracleCoverage(t, plan)
+			assertStaticAuthorityGuardCoverage(t, root, plan)
 			if profile == ProfileCore {
 				if err := validateLocalBusCoverage(plan, inventory, policy.Module+"/internal/runtime/bus"); err != nil {
 					t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -359,6 +360,34 @@ func legacyCatalogOwnerViolations(root string) ([]string, error) {
 	return violations, nil
 }
 
+func assertCoreStructuralGuardCatalogInventory(t *testing.T, policy testplanning.Policy) {
+	t.Helper()
+	const id = "core-structural-owner-guards"
+	unit, exists := policy.Units[id]
+	wantPackages := []string{
+		policy.Module + "/internal/releasee2e", policy.Module + "/internal/runtime",
+		policy.Module + "/internal/serveapp", policy.Module + "/internal/store/internal/runtimepersistence",
+	}
+	if !exists || !slices.Equal(unit.Packages, wantPackages) || unit.CountMode != "count-1" ||
+		unit.BudgetClass != "broad" || unit.Skip != "" || unit.GoTimeout != "" || unit.Packable ||
+		!strings.HasPrefix(unit.Run, "^(") || !strings.HasSuffix(unit.Run, ")$") || strings.Contains(unit.Run, "/") {
+		t.Fatalf("core structural guard catalog envelope changed: %+v", unit)
+	}
+	for _, root := range []string{
+		"TestExecutableDeliverySQLHasClosedOwners", "TestRunForkRevisionStateAccessorInventoryIsClosed",
+		"TestRetiredBuilderSemanticReferencesStayExplicit", "TestReleaseE2EPackageStaysAtPublicProcessBoundary",
+	} {
+		if !regexp.MustCompile(unit.Run).MatchString(root) {
+			t.Fatalf("core structural guard selection omits %s", root)
+		}
+	}
+	for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+		if slices.Contains(policy.Profiles[tier].Units, id) != (tier == testplanning.ProfileCore) {
+			t.Fatalf("%s changed core-only guard scheduling", tier)
+		}
+	}
+}
+
 func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	policyFile, err := os.Open(filepath.Join(catalogRepoRoot(t), ".github", "test-proof-plan.yaml"))
 	if err != nil {
@@ -369,6 +398,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load proof policy: %v", err)
 	}
+	assertCoreStructuralGuardCatalogInventory(t, policy)
 	const cliappPackage = "github.com/division-sh/swarm/internal/cliapp"
 	const releasePackage = "github.com/division-sh/swarm/internal/releasee2e"
 	cliappUnit, ok := policy.Units["catalog-required-verify"]

@@ -118,7 +118,7 @@ sensitive formatting and now uses position-independent AST formatting. The first
 registry refresh identified79 new legitimate private-runtime-adapter rows; every
 row is a bounded native read operation, not an ordinary-site role change.
 
-Corrected tier (reviewer6013292686 and user direction): **CI lifecycle**;
+Historical corrected tier (reviewer6013292686; superseded by6020072051 below): **CI lifecycle**;
 **Local core plus whole store-runtime-full-02, the enumerated native-store and
 runtime-owner structural guard roots, and all 34 named roots**. Final repaired-head
 qualification is pending. The previous f521 hosted core and original 34-root
@@ -164,7 +164,8 @@ Committed debt: **15,183 ->15,065;118 occurrences removed, zero added**. Collect
 All67 excluded-source uncertainties remain; confirmed raw-operation debt is11,181.
 Full census includes legitimate private/infrastructure operations; its53,783
 findings /38,501 raw-operation sites are not the remaining unauthorized debt.
-The final committed-head read-only ratchet must bind to actual extraction83482f4ad.
+The final committed-head read-only ratchet now binds to rebased extractione0448efca;
+the preceding83482f4ad receipts remain historical, not freshness qualification.
 
 Parent #2542/#2151 remains OPEN. Remaining delivery estimate: up to three grouped
 migration batches (native/setup/workflow; fork/recovery/standing; served/channel/
@@ -182,3 +183,72 @@ the already-tracked raw-carrier and shared-fixture authority tail, promoted unde
 finite corpus is multi-batch work with high ROI (prevents coordinator/semantic
 escapes), not a new restoration or compatibility project. G01 collector-transition
 acceptance is a separately recorded G-owned guard delta, not silently folded here.
+
+## Rebase And User-Approved Core Guard Promotion
+
+#2575 merged ase0448efca, including the diagnostic/revision/release repairs and
+both proof-unit splits. The two held batch2 commits were rebased onto that exact
+master. Resolved only the shared delivery projection, its descriptive generated
+inventory and adjacent spec clauses. Preserve the merged seven-column diagnostic
+and existing classified revision accessor verbatim, together with both batch2
+closed-owner operations. Query text, snapshots, row/argument order and refusal
+semantics did not change. The original held branch is retained locally.
+
+Binding promotion ruling: reviewer-b6020072051. **CI core /Local core** is now
+authorized for this observation-only batch plus the additive selection change.
+One `core-structural-owner-guards` unit selects exactly78 complete existing roots:
+42 native-store,29 runtime,4 serveapp and3 release boundaries. It is core-only;
+lifecycle/full retain their original disjoint owners and heavy workloads. The
+existing dedicated census, budgets, weights, timeout, environment, count-1,
+workloads and assertions remain. No new scheduler or semantic runtime behavior.
+
+The source-bound planner derives expected package/name pairs from the exact
+reviewed guard files and the single pinned revision accessor root, independently
+of the YAML selector. Every expected pair must be selected AND required exactly
+once in core/lifecycle/full. Core additionally requires exactly four packages,
+78 selected and required roots, zero deferred credit, an exact anchored selector,
+no skip and the unchanged execution envelope. Negative controls reject omitted
+or duplicated ownership, deferred credit, widened/partial selection, cache mode,
+timeout or budget changes. Timing and catalog consumers independently inventory
+the core-only unit without inserting it into their higher-tier partitions.
+
+Only three concrete tracked selector/reference lines are added to the existing
+retirement count inventory: one policy line, one planner source-inventory line
+and one catalog selector line. Original classification markers, all older exact
+counts and excess-reference rejection remain. The original negative-control root
+now exercises each new selector file as well; no file exclusion, collector change,
+live-constructor permission or spelling fragmentation is introduced.
+
+Fresh local evidence on vemew:
+
+- The source-aware before control fails on actual core's missing required guard;
+  it is a real policy omission, not compilation failure. This first probe used
+  the proposed76-root list; the binding78-root list adds the confirmed dashboard
+  pair and is the complete after obligation.
+- Full planner PASS46.782s; timing PASS8.753s; required catalog selection PASS.
+  Exact core/lifecycle/full ownership, unchanged larger-tier coverage and the
+  omission/duplication/deferred/partial/widening controls all execute.
+- Exact78-root command PASS31.19s wall, all four package terminals successful,
+  counts42/29/4/3, zero failures/skips. Package elapsed11.887/7.169/5.373/0.068s
+  is parallel telemetry, not an additive wall-time estimate or core aggregate.
+- Four affected native observation roots plus actual compiled fan-out and CAS
+  retry consumers PASS under race: six roots,22 passes,12 required backend
+  pairs. Fan-out uses six complete compound backend/case records rather than
+  two synthetic backend-parent records; all original cases ran. Two package
+  terminals PASS20.333s /38.835s, zero failures/skips.
+- Read-only census/registry PASS36.867s: debt15,065, confirmed raw-operation
+  debt11,181,67 excluded-source uncertainties, collector unchanged and12,377
+  descriptive findings verified. No baseline refresh or ordinary relabeling.
+- Old/new completed-family and hostile raw/callback guards: four roots
+  PASS5.463s. Finite codemod controls PASS; repetition is empty.
+
+Evidence: `/home/youmew/.cache/swarm-2542-local-20261003/batch2-static-core-*`
+and `batch2-e044-*`. These focused receipts do NOT qualify a complete managed
+core. Committed-head complexity and final-head managed/hosted core remain required.
+
+The ruling replaces the old whole-full02/new-flow sibling and separate static
+supplements once promotion is verified. The original34-proof/68-backend-cell
+inventory remains byte-for-byte unchanged and must run at the final head along
+with core. Request a server2 window; do not begin without the lead's handover.
+Earlier interrupted/red receipts are retained, not recast as passes. No final
+full tier or parent closure is implied; batch3 remains separate/local.
