@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 type NotifyCompletedTurnsStorage struct{ Turns, Instances int }
@@ -214,13 +216,16 @@ func ReadNotifyFanOutWorkForTest(ctx context.Context, selected any, runID string
 	}
 	var out NotifyFanOutWorkStorage
 	err := read(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT
+		if err := tx.QueryRowContext(ctx, `SELECT
 			(SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1),
 			(SELECT COALESCE(SUM(CASE WHEN next_chunk_size=1 THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1),
 			(SELECT COALESCE(MIN(next_chunk_size),0) FROM fan_out_intents WHERE run_id=$1),
-			(SELECT COALESCE(MAX(next_chunk_size),0) FROM fan_out_intents WHERE run_id=$1),
-			(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1),
-			(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1)`, runID).Scan(&out.Intents, &out.FloorOne, &out.Minimum, &out.Maximum, &out.Revisions, &out.Facts)
+			(SELECT COALESCE(MAX(next_chunk_size),0) FROM fan_out_intents WHERE run_id=$1)`, runID).Scan(&out.Intents, &out.FloorOne, &out.Minimum, &out.Maximum); err != nil {
+			return err
+		}
+		var err error
+		out.Revisions, out.Facts, err = runforkrevision.CountNotifyFanOutRevisionStorageForTest(ctx, tx, runID)
+		return err
 	})
 	if err != nil {
 		return NotifyFanOutWorkStorage{}, err

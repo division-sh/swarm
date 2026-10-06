@@ -67,6 +67,8 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	}
 	allowed[historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical timer-revision witness stays with the canonical ledger owner; no payload decoding or caller selector"}
 	allowed["store/internal/runtimepersistence::ObserveWorkflowTimerReplayStorageForTest/reference:"+historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest"] = historicalBoundaryAllowance{1, "exact selected read transaction delegates physical ledger observation to its canonical owner"}
+	allowed[historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical revision cardinalities stay with the canonical ledger owner; no payload decoding or caller selector"}
+	allowed["store/internal/runtimepersistence::ReadNotifyFanOutWorkForTest/reference:"+historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest"] = historicalBoundaryAllowance{1, "fan-out diagnostic delegates fixed ledger counts within the original selected read snapshot"}
 	allowed[historicalBoundaryOwner+"validateSelectedForkBranchDivergenceTx/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "typed branch evidence verifies its bound point through the canonical contextual resolver; it neither decodes payloads nor grants replay"}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
@@ -271,7 +273,7 @@ func historicalBoundaryCollect(pkg *types.Package, info *types.Info, fset *token
 				case historicalBoundaryWriter + "FactKey", historicalBoundaryWriter + "projectionFactKey", historicalBoundaryWriter + "admitFactKeyCoordinates", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
 					"runtime/runfork::NewTerminalBarrierHistory", historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory",
 					historicalBoundaryOwner + "resolveRunForkRevisionPoint", historicalBoundaryOwner + "resolveSQLiteRunForkRevisionPoint",
-					historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest":
+					historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest", historicalBoundaryWriter + "CountNotifyFanOutRevisionStorageForTest":
 					add(n, "reference:"+callee)
 				case historicalBoundaryOwner + "AppendRunForkRevisionFact", historicalBoundaryOwner + "appendRunForkRevisionFact":
 					add(n, "contextless_append_reference")
@@ -523,6 +525,11 @@ func (arbitrary *unexpectedReader) stealTimerRevisionObservation() {
     alias := observe
     _ = alias
 }
+func (arbitrary *unexpectedReader) stealNotifyRevisionObservation() {
+    observe := revision.CountNotifyFanOutRevisionStorageForTest
+    alias := observe
+    _ = alias
+}
 func (arbitrary *unexpectedReader) mintTerminalHistory() {
     alias := history.NewTerminalBarrierHistory
     _ = alias
@@ -599,6 +606,7 @@ func ordinaryBusiness(raw []byte) error {
 	got := historicalBoundaryProblems(findings, historicalBoundaryAllowances(), false)
 	want := []string{
 		historicalBoundaryOwner + "unexpectedReader.stealTimerRevisionObservation/reference:" + historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest",
+		historicalBoundaryOwner + "unexpectedReader.stealNotifyRevisionObservation/reference:" + historicalBoundaryWriter + "CountNotifyFanOutRevisionStorageForTest",
 		historicalBoundaryOwner + "unexpectedReader.mintInitializer/reference:events::AdmitFlowReceiverInitialization",
 		historicalBoundaryOwner + "unexpectedReader.restoreInitializer/reference:events::RestoreReceiverMaterializationRecord",
 		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:events::NewInheritedFanOutOrigin",
@@ -622,6 +630,32 @@ func ordinaryBusiness(raw []byte) error {
 		}
 		if !matched {
 			t.Errorf("missing hostile finding %s in %v", expected, got)
+		}
+	}
+	for _, extra := range []string{"", `_ = "SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1"`} {
+		source := `package runtimepersistence
+import revision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+func ReadNotifyFanOutWorkForTest() {
+    observe := revision.CountNotifyFanOutRevisionStorageForTest
+    _ = observe
+    ` + extra + `
+}`
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "test_notify_execution_storage.go", source, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
+		pkg, err := (&types.Config{Importer: imports}).Check(historicalBoundaryModule+"store/internal/runtimepersistence", fset, []*ast.File{file}, info)
+		if err != nil {
+			t.Fatalf("exact observation caller control must type-check: %v", err)
+		}
+		problems := historicalBoundaryProblems(historicalBoundaryCollect(pkg, info, fset, file), historicalBoundaryAllowances(), false)
+		if extra == "" && len(problems) != 0 {
+			t.Fatalf("canonical ledger delegation was refused: %v", problems)
+		}
+		if extra != "" && (len(problems) != 1 || !strings.Contains(problems[0], "store/internal/runtimepersistence::ReadNotifyFanOutWorkForTest/ledger_sql")) {
+			t.Fatalf("named observation caller regained ledger SQL authority: %v", problems)
 		}
 	}
 	// Prove an extra decode in the owner itself exceeds the approved call count.

@@ -26,7 +26,7 @@ closed fault wrappers' embedded native owners.
 
 | Coherent family | Canonical owner and exhaustive in-batch consumers | Named execution proof |
 | --- | --- | --- |
-| Conversation canonical columns | Fixed private conversation inventory; requireCanonicalConversationSurface and every caller now use its SQL-free bridge. | Four TestConformanceStorageColumns roots across both stores and exact missing-column/schema/ownership controls |
+| Conversation canonical columns | Fixed private conversation inventory; requireCanonicalConversationSurface and every caller now use its SQL-free bridge. Qualified zero-row SQL proves fixed columns without reading schema catalogs. | Four TestConformanceStorageColumns roots across both stores and exact missing-column/schema/ownership controls |
 | Runtime-log canonical columns | Fixed private log inventory; requireCanonicalRuntimeLogSurface and every caller use it. | Same four roots; original exact table/column inventories |
 | Mutation canonical columns | Fixed private mutation inventory; requireMutationSurface, workflow/tool reconstruction and malformed-mutation consumers use it. | Four column roots; both TestCanonicalMutationSurface_ReconstructsTrackedEntityState roots |
 | Delivery canonical columns | Fixed private delivery inventory; requireCanonicalDeliveryLifecycleSurface and all callers use it. The last arbitrary requireTableColumns selector is deleted. | Four column roots, including complete expected column inventories on both stores |
@@ -35,7 +35,7 @@ closed fault wrappers' embedded native owners.
 | Notification committed child items | Exact outcome/event run join, triggering source, fixed name, duplicates, ordinal, native payload/timestamp. All nine item callers consume the named reader. | Both TestNotifyAllChildrenObservation roots; real public barrier and replay consumers |
 | Notification latest metadata | Exact concrete instance, updated-at order and LIMIT1; no new run/eligibility filter. All eight metadata callers consume it. | Both physical-scope/refusal roots and public barrier/replay |
 | Independent notification diagnostics | Six complete fixed whole-store sections retain columns/order/NULL defaults and independent transactions. All nine diagnostic callers consume it; a failed section returns no partial section and does not poison siblings or grant runtime success. | Both TestNotifyAllChildrenObservation roots, including late failed section and original coordinator assertions |
-| Notification execution/progress | Successful turns, exact transition facts, persisted run/flow counts, cursor/work/first-failure observations; complete retained helper fanout consumes the named ports. Original polls/deadlines and post-progress cuts stay unchanged. Latest agent-delivery status is explicitly excluded/G-owned. | Both TestNotifyExecutionStorage roots; real public delivery barrier and mixed-valid/stale/reopened replay roots |
+| Notification execution/progress | Successful turns, exact transition facts, persisted run/flow counts, cursor/work/first-failure observations; complete retained helper fanout consumes the named ports. Fixed revision/fact counts delegate to runforkrevision.CountNotifyFanOutRevisionStorageForTest in the same original repeatable read snapshot, without ledger body decoding or historical admission. Original polls/deadlines and post-progress cuts stay unchanged. Latest agent-delivery status is explicitly excluded/G-owned. | Both TestNotifyExecutionStorage roots, including nonempty committed ledger counts, foreign-run exclusion and late ledger failure returning no partial diagnostic; real public delivery barrier and mixed-valid/stale/reopened replay roots |
 
 The generic table selector and migrated raw observer parameters/readers become
 invalid, not compatible overloads. Other setup/mutation/fault/served consumers
@@ -60,9 +60,11 @@ uncertainties remain. The previous 143-removal local snapshot was not raised,
 reseeded or used to authorize this extraction. These are occurrences, not
 bugs or a whole-parent closure percentage.
 
-The original registry is separately reconciled:95 new rows in the four
-private bounded operation files retain the existing private-runtime-adapter
-role. No ordinary fixture SQL gains a legitimate-role disposition. The
+The original registry is separately reconciled:98 new rows in the four
+private bounded runtime operation files retain private-runtime-adapter, and
+three rows for the canonical ledger witness retain private-backend, matching
+the existing timer-revision witness. No ordinary fixture SQL gains a
+legitimate-role disposition. The
 completed-family positive and hostile guards supplement the unchanged
 source-bound ratchet; they do not consult debt as permission. Existing
 production/registry guards and every-tier census selection are preserved.
@@ -98,6 +100,36 @@ SQL and aliased-import mutants in all five codemod paths, original producer/
 concrete controls and compiler-evidence controls pass. No ledger entry, path
 exemption, source-walker/census/role change, timeout or tier relaxation was
 added. Repair-head core plus named supplements still requires its own run.
+
+The explicit repair-head server2 core at85afe8b41 is also retained as RED:
+20 of21 units passed, with broad-01 failing exactly two structural roots.
+TestRunForkHistoricalAdmissionConsumers caught ledger SQL in the new fan-out
+work witness; TestSelectedStoreLegacySchemaInterpretersAreAbsent caught a
+post-admission catalog query in the fixed column witness. No runtime assertion
+was relaxed. The joined workers.json and red log are retained, and server2
+was released before any repair or follow-up test. No named remote supplement,
+push or PR occurred against this failed qualification.
+
+Bounded repairs keep both guards strict. Column availability now uses fixed
+table-qualified zero-row queries in public/main, preserving all missing-column,
+TEMP/sibling-schema, cancellation and original-owner controls. It introduces
+no catalog interpreter or metadata fallback. Revision/fact counts move to the
+existing canonical runforkrevision owner; the native read coordinator's existing
+PostgreSQL repeatable-read and SQLite snapshot retain one logical snapshot.
+A late revision/fact-table failure returns an entirely empty diagnostic.
+The existing compiler-resolved historical guard names that exact owner edge,
+rejects stolen aliases and still rejects ledger SQL planted inside the exact
+otherwise-approved runtime observation caller. No source-file exemption,
+collector/role-policy change, generic query port or transaction change.
+
+Vemew focused repair receipts: three structural roots, six private both-store
+roots under race, the additionally strengthened nonempty/foreign-run ledger
+root, four real consumer roots under race,34 authoritative-spec roots and four
+ratchet/registry/completed-family roots pass without failures or skips. Vet
+passes. Debt remains15183 with133 removed/0 added and67 uncertainties.
+Repair-head explicit core plus the complete named remote supplements is still
+pending the next user-assigned server2 window; old partial cores are not
+substituted for that obligation.
 
 Chosen-class commitment: eliminate raw authority from these fixed observation
 owners and their enumerated shared consumers, not the full raw-test corpus.
