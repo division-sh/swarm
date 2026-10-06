@@ -2063,22 +2063,24 @@ stages:
 	}
 }
 
-func TestRun_ErrorsWhenStagesMissInitialOrTerminal(t *testing.T) {
+func TestRun_StagesUseOrderedEntryAndOptionalFinal(t *testing.T) {
 	root := writeStagedLifecycleFixture(t, `
 name: support
 stages:
   waiting: {}
+  active: {}
   done: {}
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "state_machine_coherence", "must declare exactly one initial stage") {
-		t.Fatalf("expected missing initial stage error, got %#v", report.Errors())
+	graph, ok := bundle.WorkflowStageTopology("support")
+	if !ok || graph.InitialStage != "waiting" || len(graph.FinalStageIDs()) != 0 {
+		t.Fatalf("expected ordered entry and no final stages, got %+v", graph)
 	}
-	if !reportContains(report.Errors(), "state_machine_coherence", "must declare at least one terminal stage") {
-		t.Fatalf("expected missing terminal stage error, got %#v", report.Errors())
+	if report.HasErrors() {
+		t.Fatalf("a valid service with no final stage must verify: %#v", report.Errors())
 	}
 }
 
