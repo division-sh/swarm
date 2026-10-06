@@ -137,8 +137,8 @@ func (o HTTPObservation) rpc(ctx context.Context, method string, params any, res
 
 func (o HTTPObservation) consumeRPCResponse(method string, resp *http.Response, result any) error {
 	if resp.StatusCode != http.StatusOK {
-		if method == "tools/call" && resp.StatusCode >= http.StatusInternalServerError {
-			return o.uncertain("server_failure_after_dispatch", nil)
+		if method == "tools/call" {
+			return o.uncertain("http_refusal_after_dispatch", nil)
 		}
 		return o.unavailable("http_refusal", resp.StatusCode)
 	}
@@ -173,14 +173,24 @@ func (o HTTPObservation) consumeRPCResponse(method string, resp *http.Response, 
 		}
 		return o.mismatch("gateway_response_invalid")
 	}
-	if envelope.Error != nil {
-		return o.rpcResponseFailure(method, resp.StatusCode, envelope.Error)
-	}
 	if envelope.ID != 1 {
 		if method == "tools/call" {
 			return o.uncertain("response_identity_foreign", nil)
 		}
-		return o.mismatch("gateway_response_invalid")
+		// Discovery cannot execute an effect; the gateway may reject its boot
+		// authentication before parsing the request and therefore use a null ID.
+		if envelope.Error == nil {
+			return o.mismatch("gateway_response_invalid")
+		}
+	}
+	if envelope.Error != nil {
+		if len(envelope.Result) != 0 {
+			if method == "tools/call" {
+				return o.uncertain("response_result_and_error", nil)
+			}
+			return o.mismatch("gateway_response_invalid")
+		}
+		return o.rpcResponseFailure(method, resp.StatusCode, envelope.Error)
 	}
 	if len(envelope.Result) == 0 || bytes.Equal(envelope.Result, []byte("null")) || json.Unmarshal(envelope.Result, result) != nil {
 		if method == "tools/call" {
@@ -201,7 +211,7 @@ func (o HTTPObservation) rpcResponseFailure(method string, httpStatus int, failu
 			return o.unavailable("context_authentication_refused", httpStatus)
 		}
 	}
-	if method == "tools/call" && failure.Code != -32003 && failure.Code != -32600 && failure.Code != -32601 && failure.Code != -32602 {
+	if method == "tools/call" && failure.Code != -32600 && failure.Code != -32601 && failure.Code != -32602 {
 		return o.uncertain("unclassified_rpc_failure", nil)
 	}
 	return o.mismatch("gateway_context_or_definition_refused")

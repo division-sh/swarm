@@ -32,20 +32,34 @@ import (
 // and the public fork/chat APIs. The existing API-provider fork test remains a
 // separate provider control; it cannot earn mock transport credit.
 func TestMockForkChatPublicMCPTransportBothStores(t *testing.T) {
-	proveMockForkChatPublicMCPTransportBothStores(t, false)
+	proveMockForkChatPublicMCPTransportBothStores(t, false, false)
 }
 
 func TestMockForkChatRealDockerPublicMCPTransportBothStores(t *testing.T) {
 	if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") != "1" {
 		t.Skip("real Docker gateway journey; a skip earns no Docker proof")
 	}
-	proveMockForkChatPublicMCPTransportBothStores(t, true)
+	proveMockForkChatPublicMCPTransportBothStores(t, true, false)
 }
 
-func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
+func TestMockForkChatOversizedPublicMCPTransportBothStores(t *testing.T) {
+	proveMockForkChatPublicMCPTransportBothStores(t, false, true)
+}
+
+func TestMockForkChatOversizedRealDockerPublicMCPTransportBothStores(t *testing.T) {
+	if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") != "1" {
+		t.Skip("real Docker oversized gateway journey; a skip earns no Docker proof")
+	}
+	proveMockForkChatPublicMCPTransportBothStores(t, true, true)
+}
+
+func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker, oversized bool) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyRootIngressServedConversationFork(t)
+			if oversized {
+				installOversizedForkChatSnapshotFixture(t, root)
+			}
 			path := filepath.Join(root, "fork-source", "agents.yaml")
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -54,25 +68,51 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 			if err := os.WriteFile(path, append(data, []byte("  mock: {kind: python, module: mocks/fork-source.py}\n")...), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			if oversized {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sibling := "fork-sibling-agent:\n  role: researcher\n  intent: prompts/fork-sibling-agent.md\n  model: regular\n  memory: true\n  subscriptions: [fork.source_message]\n  mock: {kind: python, module: mocks/fork-source.py}\n"
+				if err := os.WriteFile(path, append(data, []byte(sibling)...), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "fork-source", "prompts", "fork-sibling-agent.md"), []byte("Preserve the independent sibling workspace during the fork proof.\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			module := filepath.Join(root, "fork-source", "mocks", "fork-source.py")
 			if err := os.MkdirAll(filepath.Dir(module), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(module, []byte(`def handle(input):
+			performance := `OVERSIZED_SNAPSHOT = False
+
+def handle(input):
     names = [tool["name"] for tool in input["tools"]]
     if "fork_snapshot_read_entities" in names:
         if input["messages"][-1]["role"] != "tool":
             return {"calls": [{"name": "fork_snapshot_read_entities", "arguments": {}}, {"name": "emit_event", "arguments": {"event_name": "forkchat.note"}}], "usage": {"input_tokens": 4, "output_tokens": 2}}
+        if OVERSIZED_SNAPSHOT:
+            import json
+            content = input["messages"][-1]["content"]
+            reads = [entry for entry in json.loads(content) if entry["name"] == "fork_snapshot_read_entities"]
+            assert len(reads) == 1 and reads[0]["ok"] is True
+            assert reads[0]["result"]["truncated"] is True
+            assert "follow_up" not in reads[0]["result"] and len(content) < 32768
         return {"text": "snapshot inspected; event remained sandboxed", "usage": {"input_tokens": 5, "output_tokens": 3}}
     if input["messages"][-1]["role"] != "tool" and "source receiver still executes" in str(input["messages"][-1]["content"]):
         return {"calls": [{"name": "notify_human", "arguments": {"summary": "source receiver still executes after sandbox cleanup"}}], "usage": {"input_tokens": 2, "output_tokens": 1}}
     return {"text": "source conversation preserved", "usage": {"input_tokens": 2, "output_tokens": 1}}
-`), 0o600); err != nil {
+`
+			if oversized {
+				performance = strings.Replace(performance, "OVERSIZED_SNAPSHOT = False", "OVERSIZED_SNAPSHOT = True", 1)
+			}
+			if err := os.WriteFile(module, []byte(performance), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			var owner workspace.Resolver
 			var refuseAuthority, disconnect atomic.Bool
-			var disconnectedTarget atomic.Value
+			var disconnectedTarget, lastForkTarget atomic.Value
 			factory := func(projection *sourceartifact.RuntimeProjection, source semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error) {
 				if docker {
 					manager := workspace.NewDockerManager()
@@ -86,7 +126,7 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 					manager.SetConfig(cfg)
 					manager.SetSemanticSource(source)
 					owner = manager
-					return &forkChatFaultDockerWorkspace{DockerManager: manager, refuseAuthority: &refuseAuthority, disconnect: &disconnect, disconnectedTarget: &disconnectedTarget, network: cfg.WorkspaceNetwork}, nil
+					return &forkChatFaultDockerWorkspace{DockerManager: manager, refuseAuthority: &refuseAuthority, disconnect: &disconnect, disconnectedTarget: &disconnectedTarget, lastForkTarget: &lastForkTarget, network: cfg.WorkspaceNetwork}, nil
 				}
 				manager := workspace.NewHostManager()
 				cfg := workspace.DefaultHostConfig()
@@ -94,7 +134,7 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 				manager.SetConfig(cfg)
 				manager.SetSemanticSource(source)
 				owner = manager
-				return &forkChatFaultHostWorkspace{HostManager: manager, refuseAuthority: &refuseAuthority}, nil
+				return &forkChatFaultHostWorkspace{HostManager: manager, refuseAuthority: &refuseAuthority, lastForkTarget: &lastForkTarget}, nil
 			}
 			listener := "127.0.0.1:0"
 			targetBackend := workspace.BackendHost
@@ -170,9 +210,29 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 			}
 			initialLifecycle := readLifecycle()
 			verifyWorkspace := verifySource
+			verifySibling := func() {}
+			if oversized {
+				waitForkChatSiblingReady(t, rt, ready.EventID)
+				requireWorkspaceProofMockTurn(t, rt, seed.RunID, "fork-sibling-agent", ready.EventID)
+				var siblingActor actors.AgentConfig
+				for _, actor := range rt.Runtime.Manager.ListAgentConfigs() {
+					if actor.ID == "fork-sibling-agent" && actor.Identity.RunID == seed.RunID {
+						siblingActor = actor
+					}
+				}
+				if siblingActor.Identity.IsZero() {
+					t.Fatal("oversized proof lost the actual sibling receiver")
+				}
+				sibling, err := owner.ResolveWorkspace(correlation.WithRunID(workspaceProofAuthorActivityContext(t, rt), seed.RunID), siblingActor)
+				if err != nil || sibling.ExecutionTarget().Container == sourceTarget.Container && docker || !docker && sibling.Workdir == sourceTarget.Workdir {
+					t.Fatalf("sibling did not retain a distinct workspace: %+v %v", sibling, err)
+				}
+				verifySibling = forkChatSiblingWorkspaceWitness(t, docker, owner, sibling)
+			}
 			verifySource = func() {
 				t.Helper()
 				verifyWorkspace()
+				verifySibling()
 				if current := readLifecycle(); !reflect.DeepEqual(current, initialLifecycle) {
 					t.Fatalf("fork sandbox changed the exact source lifecycle generation: before=%+v after=%+v", initialLifecycle, current)
 				}
@@ -207,6 +267,24 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 			var chat runfork.ConversationForkChatResult
 			chatRequest(params, &chat)
 			verifySource()
+			if oversized {
+				requireOversizedForkChatTargetAndProjection(t, chat, lastForkTarget.Load(), sourceTarget.ExecutionTarget(), docker)
+				target := lastForkTarget.Load().(workspace.ExecutionTarget)
+				if docker {
+					info, err := owner.(*workspace.DockerManager).InspectManagedContainer(context.Background(), target.Container)
+					if err != nil || info.Exists {
+						t.Fatalf("oversized fork left its exact disposable container: %+v %v", info, err)
+					}
+				} else {
+					path, err := target.ResolveHostPath(workspace.LogicalWorkspaceMount, workspace.PathAccessRead)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := os.Stat(path.HostPath); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("oversized fork left its exact disposable host target: %s %v", path.HostPath, err)
+					}
+				}
+			}
 			if chat.IdempotencyReplayed || chat.Snapshot.SourceTurn.TurnID != turnID || chat.Turn.TurnID == "" || !chat.Turn.ParseOK {
 				t.Fatalf("exact public mock fork response: %+v", chat)
 			}
@@ -256,7 +334,9 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 				t.Fatalf("exact committed fork rows=%+v error=%v, want one snapshot and two turns", forkRows, err)
 			}
 			for _, fault := range []string{"stale-authority", "gateway-disconnect"} {
-				if fault == "gateway-disconnect" && !docker {
+				// The oversized supplement qualifies result projection. The original
+				// Docker root retains its exact network-loss/compensation proof.
+				if fault == "gateway-disconnect" && (!docker || oversized) {
 					continue
 				}
 				refuseAuthority.Store(fault == "stale-authority")
@@ -365,13 +445,118 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 
 // Faults enter through the existing owner and real target transport, not an
 // injected model/tool result. Ordinary source resolution is never intercepted.
+func installOversizedForkChatSnapshotFixture(t *testing.T, root string) {
+	t.Helper()
+	padding, err := json.Marshal(strings.Repeat("frozen-sandbox-only ", 4096))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entities := "conversation:\n  context_blob: {type: text, initial: " + string(padding) + ", _unused_reason: oversized immutable fork snapshot proof}\n"
+	if err := os.WriteFile(filepath.Join(root, "fork-source", "entities.yaml"), []byte(entities), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func requireOversizedForkChatTargetAndProjection(t *testing.T, chat runfork.ConversationForkChatResult, rawTarget any, source workspace.ExecutionTarget, docker bool) {
+	t.Helper()
+	target, ok := rawTarget.(workspace.ExecutionTarget)
+	if !ok || (docker && (target.Mode != workspace.ExecutionModeDockerContainer || target.Container == "" || target.Container == source.Container)) ||
+		(!docker && target.Mode != workspace.ExecutionModeHostLocal) {
+		t.Fatalf("oversized fork chat reused the source execution target: target=%+v source=%+v", target, source)
+	}
+	if !docker {
+		sandboxPath, sandboxErr := target.ResolveHostPath(workspace.LogicalWorkspaceMount, workspace.PathAccessRead)
+		sourcePath, sourceErr := source.ResolveHostPath(workspace.LogicalWorkspaceMount, workspace.PathAccessRead)
+		if sandboxErr != nil || sourceErr != nil || sandboxPath.HostPath == sourcePath.HostPath {
+			t.Fatalf("oversized fork reused the source host backing: sandbox=%+v source=%+v errors=%v/%v", sandboxPath, sourcePath, sandboxErr, sourceErr)
+		}
+	}
+	var reads int
+	for _, call := range chat.Turn.ToolCalls {
+		if call.Name != "fork_snapshot_read_entities" {
+			continue
+		}
+		reads++
+		if len(call.Result) <= 64*1024 || !strings.Contains(string(call.Result), "frozen-sandbox-only") {
+			t.Fatalf("snapshot tool did not execute with genuinely oversized output: bytes=%d", len(call.Result))
+		}
+	}
+	if reads != 1 || !chat.Turn.ParseOK {
+		t.Fatalf("oversized sandbox read was repeated or failed: %+v", chat.Turn)
+	}
+	// The pinned Python performance asserts the actual model input before
+	// returning this response; public operator request data is not model input.
+	if string(chat.Turn.ResponsePayload) == "" || !strings.Contains(string(chat.Turn.ResponsePayload), "snapshot inspected; event remained sandboxed") {
+		t.Fatalf("oversized sandbox continuation did not complete its pinned assertions: %s", chat.Turn.ResponsePayload)
+	}
+}
+
+func waitForkChatSiblingReady(t *testing.T, rt servedWorkspaceProofRuntime, eventID string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		count, err := storetest.ReadServedDeliveryStatusCount(context.Background(), rt.Events, eventID, "agent", "fork-sibling-agent", "delivered")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count == 1 {
+			return
+		}
+		if count > 1 || time.Now().After(deadline) {
+			t.Fatalf("sibling did not settle its exact setup occurrence once: count=%d", count)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func forkChatSiblingWorkspaceWitness(t *testing.T, docker bool, owner workspace.Resolver, target *workspace.Target) func() {
+	t.Helper()
+	if !docker {
+		path := filepath.Join(target.Workdir, "forkchat-sibling-sentinel")
+		if err := os.WriteFile(path, []byte("sibling-workspace-survives"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return func() {
+			t.Helper()
+			value, err := os.ReadFile(path)
+			if err != nil || string(value) != "sibling-workspace-survives" {
+				t.Fatalf("fork projection touched sibling files: %q %v", value, err)
+			}
+		}
+	}
+	manager := owner.(*workspace.DockerManager)
+	initial, err := manager.InspectManagedContainer(context.Background(), target.Container)
+	if err != nil || !initial.Exists || !initial.Running || !initial.HasIdentity {
+		t.Fatalf("sibling container baseline: %+v %v", initial, err)
+	}
+	if _, err := manager.RunDocker(context.Background(), "exec", "--user", "0", target.Container, "sh", "-c", "printf sibling-workspace-survives > /workspace/forkchat-sibling-sentinel"); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		current, err := manager.InspectManagedContainer(context.Background(), target.Container)
+		if err != nil || !reflect.DeepEqual(initial, current) {
+			t.Fatalf("fork projection touched sibling container authority: before=%+v after=%+v err=%v", initial, current, err)
+		}
+		value, err := manager.RunDocker(context.Background(), "exec", target.Container, "cat", "/workspace/forkchat-sibling-sentinel")
+		if err != nil || value != "sibling-workspace-survives" {
+			t.Fatalf("fork projection touched sibling Docker files: %q %v", value, err)
+		}
+	}
+}
+
 type forkChatFaultHostWorkspace struct {
 	*workspace.HostManager
 	refuseAuthority *atomic.Bool
+	lastForkTarget  *atomic.Value
 }
 
 func (w *forkChatFaultHostWorkspace) ResolveForkChatWorkspace(ctx context.Context, actor actors.AgentConfig) (*workspace.Target, error) {
-	return w.HostManager.ResolveForkChatWorkspace(forkChatFaultAuthority(ctx, w.refuseAuthority), actor)
+	target, err := w.HostManager.ResolveForkChatWorkspace(forkChatFaultAuthority(ctx, w.refuseAuthority), actor)
+	if err == nil {
+		w.lastForkTarget.Store(target.ExecutionTarget())
+	}
+	return target, err
 }
 
 type forkChatFaultDockerWorkspace struct {
@@ -379,11 +564,15 @@ type forkChatFaultDockerWorkspace struct {
 	refuseAuthority    *atomic.Bool
 	disconnect         *atomic.Bool
 	disconnectedTarget *atomic.Value
+	lastForkTarget     *atomic.Value
 	network            string
 }
 
 func (w *forkChatFaultDockerWorkspace) ResolveForkChatWorkspace(ctx context.Context, actor actors.AgentConfig) (*workspace.Target, error) {
 	target, err := w.DockerManager.ResolveForkChatWorkspace(forkChatFaultAuthority(ctx, w.refuseAuthority), actor)
+	if err == nil {
+		w.lastForkTarget.Store(target.ExecutionTarget())
+	}
 	if err != nil || !w.disconnect.Swap(false) {
 		return target, err
 	}
