@@ -89,7 +89,7 @@ func seedDeclaredEntityForkFanOutFixture(t *testing.T, backend string, fixture a
 	return ctx, source
 }
 
-func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time, withBarrier, withGeneration bool, root string, captured map[string]any, rows any) (context.Context, fanOutOwnerFixture, timeridentity.TimerHandle, func(bool)) {
+func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time, withBarrier, withGeneration bool, root string, captured map[string]any, rows any, beforeTriggerFrontier ...string) (context.Context, fanOutOwnerFixture, timeridentity.TimerHandle, func(bool)) {
 	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
@@ -111,6 +111,13 @@ func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fi
 	currentRevision := int64(1)
 	record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	selected := fixture.store.(storeTestDurableEventBusStore)
+	if len(beforeTriggerFrontier) != 0 {
+		point := eventtest.ExistingRunRootIngressWithRoutingSource(beforeTriggerFrontier[0], "items.ready", "fan-out-test", "", []byte(`{"items":[]}`), 0,
+			runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at.Add(-time.Second))
+		if err := commitSemanticEventFixture(ctx, selected, point); err != nil {
+			t.Fatal(err)
+		}
+	}
 	node := mustPersistenceRootNode("fan-out-source")
 	plans := source.FanOutPlansForHandler(node, "items.ready")
 	if len(plans) != 1 {

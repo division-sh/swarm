@@ -609,6 +609,8 @@ func runForkSourceAdvancedCode(family string) (string, bool) {
 		return "source_conversation_audits_advanced_after_fork_point", true
 	case "reply_contexts":
 		return "source_reply_contexts_advanced_after_fork_point", true
+	case string(privaterunforkrevision.FamilyFanOutObligations):
+		return "source_fan_out_obligations_advanced_after_fork_point", true
 	default:
 		return "", false
 	}
