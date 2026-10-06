@@ -335,7 +335,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
 				if !unavailable {
-					requireSelectedForkPublicControlBoundary(t, rt, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
+					requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
 				}
 			})
 		}
@@ -360,7 +360,7 @@ func writeSelectedForkAgentProofFixture(t *testing.T, root, role, subscriptions,
 	}
 }
 
-func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, owner runtimebus.EventStore, runID, eventID string, declaredAgent bool, completionCount int) {
+func requireSelectedForkPublicControlBoundary(t *testing.T, endpoint string, owner runtimebus.EventStore, loadedBundleHash, runID, eventID string, declaredAgent bool, completionCount int) {
 	t.Helper()
 	// Delivery completion precedes the completion worker's await-mutation
 	// projection. Observe that durable handoff before measuring API mutations;
@@ -370,7 +370,7 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 	var storage storetest.SelectedForkControlStorage
 	for {
 		var err error
-		storage, err = storetest.ReadSelectedForkControlStorage(context.Background(), owner, runID, rt.BundleHash, "same-name")
+		storage, err = storetest.ReadSelectedForkControlStorage(context.Background(), owner, runID, loadedBundleHash, "same-name")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -402,12 +402,12 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 			t.Fatalf("selected declaration did not materialize the control target: count=%d", storage.AgentCount)
 		}
 		cases = append(cases, controlCase{"agent.replay", map[string]any{"run_id": runID, "agent_id": "same-name", "event_id": eventID}})
-		requireSelectedForkDeclaredAgentReads(t, rt, owner, runID, completionCount)
+		requireSelectedForkDeclaredAgentReads(t, endpoint, owner, loadedBundleHash, runID, completionCount)
 	}
 	for _, test := range cases {
 		t.Run(test.method, func(t *testing.T) {
 			before := readWorkspaceProofApplication(t, owner)
-			err := requireServedJSONRPCError(t, rt.Endpoint, test.method, test.params)
+			err := requireServedJSONRPCError(t, endpoint, test.method, test.params)
 			if err.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
 				t.Fatalf("selected control escaped through loaded same-hash runtime: %+v", err)
 			}
@@ -429,7 +429,7 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 	var result struct {
 		OK bool `json:"ok"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.stop", map[string]any{"run_id": runID, "idempotency_key": "selected-exact-stop"}, &result)
+	requireServedJSONRPCResult(t, endpoint, "run.stop", map[string]any{"run_id": runID, "idempotency_key": "selected-exact-stop"}, &result)
 	if !result.OK {
 		t.Fatal("selected public stop did not return its terminal result")
 	}
@@ -438,33 +438,33 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 			Status string `json:"status"`
 		} `json:"run"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": runID}, &terminal)
+	requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &terminal)
 	if terminal.Run.Status != "cancelled" {
 		t.Fatalf("public selected stop readback = %+v", terminal)
 	}
 }
 
-func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRuntime, owner runtimebus.EventStore, runID string, completionCount int) {
+func requireSelectedForkDeclaredAgentReads(t *testing.T, endpoint string, owner runtimebus.EventStore, loadedBundleHash, runID string, completionCount int) {
 	t.Helper()
 	before := readWorkspaceProofApplication(t, owner)
 	params := map[string]any{"run_id": runID, "agent_id": "same-name", "flow_instance": "consumer"}
 	var detail operatorread.OperatorAgentDetail
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.get", params, &detail)
+	requireServedJSONRPCResult(t, endpoint, "agent.get", params, &detail)
 	if detail.Agent.AgentID != "same-name" || detail.Agent.FlowInstance != "consumer" || detail.Agent.Role != "observer" || detail.Agent.ExecutionMode != "mock" {
 		t.Fatalf("selected agent read lost persisted target: %+v", detail)
 	}
 	var diagnosis operatorread.OperatorAgentDiagnosis
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.diagnose", params, &diagnosis)
+	requireServedJSONRPCResult(t, endpoint, "agent.diagnose", params, &diagnosis)
 	if diagnosis.AgentID != "same-name" || diagnosis.Status != detail.Agent.Status || diagnosis.Queue.PendingCount != 0 {
 		t.Fatalf("selected agent diagnosis disagrees with settled target: %+v", diagnosis)
 	}
 	var diagnostics operatorread.OperatorAgentDeliveryDiagnostics
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.delivery_diagnostics", params, &diagnostics)
+	requireServedJSONRPCResult(t, endpoint, "agent.delivery_diagnostics", params, &diagnostics)
 	if diagnostics.AgentID != "same-name" || len(diagnostics.Failures) != 0 || len(diagnostics.DeadLetters) != 0 {
 		t.Fatalf("selected agent diagnostics include foreign or failed work: %+v", diagnostics)
 	}
 	var lifecycle operatorread.OperatorAgentDeliveryLifecycleList
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.delivery_lifecycle", params, &lifecycle)
+	requireServedJSONRPCResult(t, endpoint, "agent.delivery_lifecycle", params, &lifecycle)
 	if lifecycle.AgentID != "same-name" || len(lifecycle.Deliveries) != 1 {
 		t.Fatalf("selected agent lifecycle omitted its one execution: %+v", lifecycle)
 	}
@@ -472,11 +472,11 @@ func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRu
 		t.Fatalf("selected agent lifecycle borrowed another run: %+v", delivery)
 	}
 	var usage operatorread.OperatorAgentUsage
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.usage", params, &usage)
+	requireServedJSONRPCResult(t, endpoint, "agent.usage", params, &usage)
 	if usage.AgentID != "same-name" || usage.Usage.Estimated.LedgerEntries != completionCount || usage.Usage.Exact.LedgerEntries != 0 {
 		t.Fatalf("selected agent usage lost its exact mock turn: %+v", usage)
 	}
-	requireSelectedForkDurablePublicReads(t, rt, owner, runID, completionCount)
+	requireSelectedForkDurablePublicReads(t, endpoint, owner, loadedBundleHash, runID, completionCount)
 	if !reflect.DeepEqual(before, readWorkspaceProofApplication(t, owner)) {
 		t.Fatal("selected agent reads changed durable state")
 	}

@@ -86,7 +86,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				if _, _, err := predecessor.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: "late-predecessor"}); !errors.Is(err, worklifetime.ErrRetired) {
 					t.Fatalf("predecessor stop did not remain retired: %v", err)
 				}
-				expireServedResetTransportCache(t, rt)
+				expireWorkspaceProofResetTransportCache(t, selected.Idempotency(), selected.RuntimeDeps().EventStore)
 				replay := requestServedJSONRPC(t, rt.Endpoint, "runtime.nuke", params)
 				if replay.Error != nil || !reflect.DeepEqual(response.Result, replay.Result) {
 					t.Fatalf("reset outcome replay: %+v", replay)
@@ -202,15 +202,25 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if nativeRead {
 				requireSelectedForkNativeMCPRead(t, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent)
 			}
-			diagnostics := readServedLifecycleDiagnosticReceipts(t, rt.DB, fork.ForkRunID)
-			if len(diagnostics) == 0 {
+			diagnostics, err := storetest.ReadSelectedForkLifecycleDiagnosticStorage(context.Background(), selected.RuntimeDeps().EventStore, fork.ForkRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(diagnostics.Receipts) == 0 {
 				t.Fatal("selected agent lifecycle produced no diagnostic receipts")
 			}
-			for id, receipt := range diagnostics {
+			for _, row := range diagnostics.Receipts {
+				id := row.OutboxID
+				var receipt map[string]any
+				if len(row.Projection) != 0 {
+					if err := json.Unmarshal(row.Projection, &receipt); err != nil {
+						t.Fatal(err)
+					}
+				}
 				if receipt == nil {
 					t.Fatalf("selected execution returned before diagnostic %s projection", id)
 				}
-				requireServedDiagnosticEventCount(t, rt.DB, id, fork.ForkRunID, 1)
+				requireWorkspaceProofDiagnosticEventCount(t, diagnostics.Logs, id, fork.ForkRunID, 1)
 				payload, _ := receipt["payload"].(map[string]any)
 				details, _ := payload["details"].(map[string]any)
 				if receipt["run_id"] != fork.ForkRunID || receipt["parent_event_id"] != "" || receipt["lineage_disposition"] != "parentless" ||
@@ -226,9 +236,9 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if nativeRead {
 				completionCount = 2
 			}
-			requireSelectedForkPublicControlBoundary(t, rt, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent, true, completionCount)
+			requireSelectedForkPublicControlBoundary(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, fork.ForkRunID, childEvent, true, completionCount)
 			t.Run("terminal_public_readback", func(t *testing.T) {
-				requireSelectedForkDeclaredAgentReads(t, rt, selected.RuntimeDeps().EventStore, fork.ForkRunID, completionCount)
+				requireSelectedForkDeclaredAgentReads(t, rt.Endpoint, selected.RuntimeDeps().EventStore, rt.BundleHash, fork.ForkRunID, completionCount)
 				if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
 					t.Fatal("terminal selected readback changed source domain")
 				}
