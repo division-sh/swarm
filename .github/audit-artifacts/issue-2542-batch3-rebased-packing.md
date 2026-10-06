@@ -82,6 +82,6 @@ exhaustive final-parent matrix is consumed mid-migration.
 Nothing is pushed yet. Before publication: exact frozen-head tier receipts,
 root/backend validation, supported-surface supplements, complexity and all
 existing store/retirement/boundary controls. Intermediate PR says Part of #2542
-and #2151, not Closes. The broad parent, unallocated raw migration tail, strict
+and #2151, not Closes. The broad parent, remaining assigned raw migration tail, strict
 zero-debt guards and original SQLite fork-deadline/full integrated finish line
 remain open and explicitly assigned to the remaining bounded batches.
