@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"net"
 	"path/filepath"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -30,6 +32,25 @@ type startupTimerPublicationBarrier struct {
 	release   chan struct{}
 	once      sync.Once
 	eventType string
+}
+
+type startupClockReceiptFault struct {
+	genericschedule.Store
+	calls    int
+	fault    error
+	admitted []genericschedule.Activation
+}
+
+func (s *startupClockReceiptFault) AdmitGenericScheduleOutcome(ctx context.Context, command genericschedule.AdmissionCommand) (genericschedule.AdmissionCommit, error) {
+	s.calls++
+	commit, err := s.Store.AdmitGenericScheduleOutcome(ctx, command)
+	if commit.Acknowledged {
+		s.admitted = append(s.admitted, commit.Result.Activation)
+		if s.calls == 2 {
+			return genericschedule.AdmissionCommit{}, errors.Join(err, s.fault)
+		}
+	}
+	return commit, err
 }
 
 func (b *startupTimerPublicationBarrier) unblock() { b.once.Do(func() { close(b.release) }) }
@@ -54,7 +75,7 @@ func (b *startupTimerPublicationBarrier) NotifyLifecycle(ctx context.Context, si
 
 func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, sourceCase := range []string{"workflow_timer", "root_clock", "child_clock"} {
+		for _, sourceCase := range []string{"workflow_timer", "root_clock", "child_clock", "partial_clock_receipt"} {
 			t.Run(backend+"/"+sourceCase, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
@@ -108,6 +129,9 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 					if sourceCase == "child_clock" {
 						barrier.eventType = "clock/poll.tick"
 					}
+					if sourceCase == "partial_clock_receipt" {
+						writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: clock-export\nstages: []\nschedules:\n  first: {every: 1h, emit: poll.tick}\n  second: {every: 1h, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n")
+					}
 				}
 				loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePlatformSpecPaths{
 					SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
@@ -120,9 +144,15 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 				if err != nil {
 					t.Fatal(err)
 				}
+				persistence := projectServeRuntimePersistence(stores)
+				var receiptFault *startupClockReceiptFault
+				if sourceCase == "partial_clock_receipt" {
+					receiptFault = &startupClockReceiptFault{Store: persistence.deps.GenericScheduleStore, fault: errors.New("lost second real deployment clock receipt")}
+					persistence.deps.GenericScheduleStore = receiptFault
+				}
 				candidate, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 					UseStartupRecovery: true,
-					ExecutionPosture:   executionposture.MockOnly, Ctx: ctx, Stores: projectServeRuntimePersistence(stores), Config: cfg, Loaded: loaded,
+					ExecutionPosture:   executionposture.MockOnly, Ctx: ctx, Stores: persistence, Config: cfg, Loaded: loaded,
 					WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: "host"}, EnableToolGateway: true, ToolGatewayBinding: binding,
 					ProviderTriggerCatalog: testProviderTriggerCatalog(t), ProcessWorkOwner: process, RuntimeInstanceID: instance,
 					Credentials: credentials, ProviderCredentials: credentials,
@@ -198,8 +228,27 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 						t.Fatalf("prepared attachment acquired a clock before release: count=%d err=%v", count, err)
 					}
 				}
-				if err := release(); err != nil {
-					t.Fatalf("real composed startup recovery: %v", err)
+				releaseErr := release()
+				if receiptFault != nil {
+					if !errors.Is(releaseErr, receiptFault.fault) || receiptFault.calls != 2 || len(receiptFault.admitted) != 2 {
+						t.Fatalf("composed partial arming lost its failure/evidence: calls=%d activations=%+v err=%v", receiptFault.calls, receiptFault.admitted, releaseErr)
+					}
+					if lookup := manager.LookupBundleHashStatus(candidate.sourceArtifactFact.BundleHash()); lookup.Loaded() || candidate.runtime.WorkOccurrence().ActiveCount() != 0 {
+						t.Fatalf("failed clock startup retained executable process authority: lookup=%+v work=%d", lookup, candidate.runtime.WorkOccurrence().ActiveCount())
+					}
+					if count, err := storetest.CountInstanceClockActivations(ctx, projectServeRuntimePersistence(stores).deps.EventStore); err != nil || count != 2 {
+						t.Fatalf("partial startup hid/replaced committed clocks: count=%d err=%v", count, err)
+					}
+					for _, original := range receiptFault.admitted {
+						loaded, found, err := receiptFault.Store.LoadGenericScheduleActivation(ctx, original.ID)
+						if err != nil || !found || loaded.ID != original.ID || loaded.ImmutableHash != original.ImmutableHash || !loaded.CurrentDueAt.Equal(original.CurrentDueAt) {
+							t.Fatalf("startup rollback lost exact clock evidence: before=%+v after=%+v found=%t err=%v", original, loaded, found, err)
+						}
+					}
+					return
+				}
+				if releaseErr != nil {
+					t.Fatalf("real composed startup recovery: %v", releaseErr)
 				}
 				if sourceCase != "workflow_timer" {
 					requireClockConstructionFrontier(t, candidate.runtime, frontierRun, sourceCase, pipeline.FlowAttachmentReady)

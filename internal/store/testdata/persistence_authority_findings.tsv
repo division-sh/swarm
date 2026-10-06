@@ -470,6 +470,7 @@ typed-process-local	interface-method	typed	internal/runtime/engine/interfaces.go
 typed-process-local	interface-method	typed	internal/runtime/engine/interfaces.go	CommittedDurablePublication	method:CommittedDurablePublicationEventID	func() string
 typed-process-local	interface-method	typed	internal/runtime/engine/interfaces.go	CommittedDurablePublication	method:CommittedDurablePublicationIntent	func() github.com/division-sh/swarm/internal/runtime/engine.EmitIntent
 typed-process-local	interface-method	typed	internal/runtime/engine/interfaces.go	CommittedDurablePublication	method:ValidateCommittedDurablePublication	func() error
+typed-process-local	interface-method	typed	internal/runtime/engine/interfaces.go	CommittedPublicationDispatcher	method:DispatchCommittedPublication	func(context.Context, github.com/division-sh/swarm/internal/runtime/engine.CommittedDurablePublication) error
 typed-process-local	interface-method	typed	internal/runtime/engine/interfaces.go	DurablePublicationPlan	method:DurablePublicationEventID	func() string
 typed-process-local	interface-method	typed	internal/runtime/engine/interfaces.go	DurablePublicationPlan	method:ValidateDurablePublicationPlan	func() error
 typed-process-local	interface-method	typed	internal/runtime/engine/interfaces.go	EmitPersistenceVerifier	method:VerifyEmitPersistence	func(ctx context.Context, address github.com/division-sh/swarm/internal/runtime/engine.StateAddress, prerequisites github.com/division-sh/swarm/internal/runtime/engine.EmitPersistencePrerequisites) error
