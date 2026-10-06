@@ -330,7 +330,7 @@ func debtExcludedSourceFindings(t *testing.T, path string, file *ast.File, info 
 	}
 	var findings []authorityFinding
 	record := func(node ast.Node, enclosing string) {
-		if debtExcludedDeclarationIsLiteralOnly(node, info) || debtExcludedRefusalForwarder(node, info, refusals) {
+		if debtExcludedDeclarationIsLiteralOnly(node, info) || debtExcludedRefusalForwarder(node, info, refusals) || debtExcludedReadCloserFileRefusal(node, info) {
 			return
 		}
 		// Comments and source positions do not define a permission or occurrence.
@@ -391,6 +391,98 @@ func debtExcludedConstant(expr ast.Expr, info *types.Info) bool {
 		return constant
 	}
 	return false
+}
+
+// This closed transport shape either refuses a native file or returns the same
+// io.ReadCloser unchanged. Every type, binding and executable statement is
+// checked; file names, build tags and declaration digests grant no permission.
+func debtExcludedReadCloserFileRefusal(node ast.Node, info *types.Info) bool {
+	fn, ok := node.(*ast.FuncDecl)
+	if !ok || fn.Recv != nil || fn.Type.TypeParams != nil || fn.Body == nil || len(fn.Body.List) != 2 {
+		return false
+	}
+	object := info.Defs[fn.Name]
+	if object == nil {
+		return false
+	}
+	sig, ok := object.Type().(*types.Signature)
+	if !ok || sig.Variadic() || sig.Params().Len() != 1 || sig.Results().Len() != 2 {
+		return false
+	}
+	readCloser := func(t types.Type) bool {
+		named, ok := types.Unalias(t).(*types.Named)
+		return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "io" && named.Obj().Name() == "ReadCloser"
+	}
+	if !readCloser(sig.Params().At(0).Type()) || !types.Identical(sig.Params().At(0).Type(), sig.Results().At(0).Type()) || !types.Identical(sig.Results().At(1).Type(), types.Universe.Lookup("error").Type()) {
+		return false
+	}
+	input := sig.Params().At(0)
+	isInput := func(expr ast.Expr) bool {
+		id, ok := expr.(*ast.Ident)
+		return ok && info.Uses[id] == input
+	}
+	isNil := func(expr ast.Expr) bool {
+		id, ok := expr.(*ast.Ident)
+		return ok && info.Uses[id] == types.Universe.Lookup("nil")
+	}
+	guard, ok := fn.Body.List[0].(*ast.IfStmt)
+	if !ok || guard.Else != nil || len(guard.Body.List) != 1 {
+		return false
+	}
+	assign, ok := guard.Init.(*ast.AssignStmt)
+	if !ok || assign.Tok != token.DEFINE || len(assign.Lhs) != 2 || len(assign.Rhs) != 1 {
+		return false
+	}
+	discard, ok := assign.Lhs[0].(*ast.Ident)
+	if !ok || discard.Name != "_" {
+		return false
+	}
+	native, ok := assign.Lhs[1].(*ast.Ident)
+	if !ok || native.Name == "_" || info.Defs[native] == nil {
+		return false
+	}
+	condition, ok := guard.Cond.(*ast.Ident)
+	if !ok || info.Uses[condition] != info.Defs[native] {
+		return false
+	}
+	assertion, ok := assign.Rhs[0].(*ast.TypeAssertExpr)
+	if !ok || assertion.Type == nil || !isInput(assertion.X) || info.TypeOf(assertion.Type) == nil {
+		return false
+	}
+	pointer, ok := types.Unalias(info.TypeOf(assertion.Type)).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	file, ok := types.Unalias(pointer.Elem()).(*types.Named)
+	if !ok || file.Obj().Pkg() == nil || file.Obj().Pkg().Path() != "os" || file.Obj().Name() != "File" {
+		return false
+	}
+	refusal, ok := guard.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(refusal.Results) != 2 || !isNil(refusal.Results[0]) {
+		return false
+	}
+	call, ok := refusal.Results[1].(*ast.CallExpr)
+	if !ok || call.Ellipsis.IsValid() || len(call.Args) != 1 {
+		return false
+	}
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	callee, ok := info.Uses[selector.Sel].(*types.Func)
+	if !ok || callee.Pkg() == nil || callee.Pkg().Path() != "fmt" || callee.Name() != "Errorf" {
+		return false
+	}
+	message, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || message.Kind != token.STRING {
+		return false
+	}
+	text, err := strconv.Unquote(message.Value)
+	if err != nil || strings.TrimSpace(text) == "" {
+		return false
+	}
+	forward, ok := fn.Body.List[1].(*ast.ReturnStmt)
+	return ok && len(forward.Results) == 2 && isInput(forward.Results[0]) && isNil(forward.Results[1])
 }
 
 func debtExcludedTypedRefusal(function *ast.FuncDecl, info *types.Info) bool {
