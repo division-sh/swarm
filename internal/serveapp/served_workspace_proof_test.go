@@ -2,10 +2,12 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
@@ -21,6 +23,7 @@ import (
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 // All read roles refer to the original serve projection. This fixture neither
@@ -116,6 +119,46 @@ func readWorkspaceProofApplication(t *testing.T, owner runtimebus.EventStore) ma
 		t.Fatal(err)
 	}
 	return snapshot
+}
+
+func expireWorkspaceProofResetTransportCache(t *testing.T, owner apiv1.APIIdempotencyStore, reader runtimebus.EventStore) {
+	t.Helper()
+	_, _, err := owner.WithAPIIdempotency(context.Background(), apiidempotency.Request{
+		Method: "test.expire-transport-cache", Actor: apiidempotency.BearerActor("expiry-proof"),
+		IdempotencyKey: uuid.NewString(), RequestHash: "expiry-proof",
+		Now: time.Now().UTC().Add(48 * time.Hour), TTL: time.Minute,
+	}, func(context.Context) (apiidempotency.Completion, error) {
+		return apiidempotency.Completion{Response: json.RawMessage(`{"ok":true}`)}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := storetest.ReadResetTransportCacheEntryCount(context.Background(), reader)
+	if err != nil || count != 0 {
+		t.Fatalf("reset transport cache was not expired: count=%d err=%v", count, err)
+	}
+}
+
+func requireWorkspaceProofDiagnosticEventCount(t *testing.T, rows []storetest.SelectedForkLifecycleDiagnosticLog, id, runID string, want int) {
+	t.Helper()
+	var count int
+	for _, row := range rows {
+		var event struct {
+			Details map[string]any `json:"details"`
+		}
+		if err := json.Unmarshal(row.Payload, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Details["outbox_id"] == id {
+			count++
+			if !row.RunPresent || row.RunID != runID || event.Details["run_id"] != runID {
+				t.Fatalf("diagnostic %s changed original run identity: %s %+v", id, row.RunID, event.Details)
+			}
+		}
+	}
+	if count != want {
+		t.Fatalf("diagnostic %s log count=%d want=%d", id, count, want)
+	}
 }
 
 func waitWorkspaceProofPipelineHandoff(t *testing.T, proof servedWorkspaceProofRuntime, runID string) {

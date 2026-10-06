@@ -34,28 +34,58 @@ func validateWorkflowInitialEntry(source semanticview.Source, instance WorkflowI
 // receipt. Neither handler settlement nor current attachment progress is proof
 // that this publication constructed its exact receiver.
 func ValidateFlowConstructionPublication(raw []byte, owner runtimeflowidentity.RunScopedFlowInstance, entityID, eventID string) error {
-	_, err := decodeFlowConstructionPublication(raw, owner, entityID, eventID)
-	return err
+	receipt, err := decodeFlowConstructionPublication(raw, owner, entityID)
+	if err != nil {
+		return err
+	}
+	return matchFlowConstructionPublication(receipt.CreatingInput, eventID)
+}
+
+type FlowConstructionPublicationEvidence struct {
+	CreatingInput FlowConstructionInput
+	Fields        map[string]any
+}
+
+// ProjectFlowConstructionPublication discovers the immutable creating input
+// independently of the incoming delivery or its projected target kind.
+func ProjectFlowConstructionPublication(raw []byte, owner runtimeflowidentity.RunScopedFlowInstance, entityID string) (FlowConstructionPublicationEvidence, error) {
+	receipt, err := decodeFlowConstructionPublication(raw, owner, entityID)
+	if err != nil {
+		return FlowConstructionPublicationEvidence{}, err
+	}
+	evidence := FlowConstructionPublicationEvidence{CreatingInput: receipt.CreatingInput}
+	if receipt.Persisted.Fields == nil {
+		return evidence, nil
+	}
+	fields, err := canonicaljson.CloneRuntimeValue(receipt.Persisted.Fields)
+	if err != nil {
+		return FlowConstructionPublicationEvidence{}, err
+	}
+	evidence.Fields = fields.(map[string]any)
+	return evidence, nil
 }
 
 // FlowConstructionPublicationFields projects immutable initial state through
 // the same receipt admission used by execution, never from current state.
 func FlowConstructionPublicationFields(raw []byte, owner runtimeflowidentity.RunScopedFlowInstance, entityID, eventID string) (map[string]any, error) {
-	receipt, err := decodeFlowConstructionPublication(raw, owner, entityID, eventID)
+	evidence, err := ProjectFlowConstructionPublication(raw, owner, entityID)
 	if err != nil {
 		return nil, err
 	}
-	if receipt.Persisted.Fields == nil {
-		return nil, nil
-	}
-	fields, err := canonicaljson.CloneRuntimeValue(receipt.Persisted.Fields)
-	if err != nil {
+	if err := matchFlowConstructionPublication(evidence.CreatingInput, eventID); err != nil {
 		return nil, err
 	}
-	return fields.(map[string]any), nil
+	return evidence.Fields, nil
 }
 
-func decodeFlowConstructionPublication(raw []byte, owner runtimeflowidentity.RunScopedFlowInstance, entityID, eventID string) (workflowInitialMaterializationProjection, error) {
+func matchFlowConstructionPublication(input FlowConstructionInput, eventID string) error {
+	if eventID == "" || input.EventID != eventID {
+		return fmt.Errorf("flow construction receipt contradicts exact receiver or creating publication")
+	}
+	return nil
+}
+
+func decodeFlowConstructionPublication(raw []byte, owner runtimeflowidentity.RunScopedFlowInstance, entityID string) (workflowInitialMaterializationProjection, error) {
 	if err := owner.Validate(); err != nil {
 		return workflowInitialMaterializationProjection{}, err
 	}
@@ -79,7 +109,7 @@ func decodeFlowConstructionPublication(raw []byte, owner runtimeflowidentity.Run
 		receipt.RunID != owner.RunID || receipt.FlowInstance != owner.Route.InstancePath || receipt.EntityID != entityID ||
 		receipt.WorkflowName != owner.Route.ScopeKey || receipt.WorkflowVersion == "" || receipt.OccurredAt.IsZero() ||
 		receipt.Persisted.Control.StorageRef != owner.Route.InstancePath || receipt.Persisted.Control.EntityID != entityID ||
-		eventID == "" || receipt.CreatingInput.EventID != eventID || receipt.Readiness == nil {
+		receipt.CreatingInput.EventID == "" || receipt.Readiness == nil {
 		return workflowInitialMaterializationProjection{}, fmt.Errorf("flow construction receipt contradicts exact receiver or creating publication")
 	}
 	readinessOwner, err := receipt.Readiness.FlowIdentity()

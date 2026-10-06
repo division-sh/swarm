@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -467,28 +468,22 @@ func requireProviderAliasConstructedNodeTarget(t *testing.T, rt servedControlPro
 	if entityID != target.EntityID || template != flow || mode != "static" {
 		t.Fatalf("target=%#v header entity=%s template=%s mode=%s", target, entityID, template, mode)
 	}
-	var receipt string
-	if err := rt.DB.QueryRow(`SELECT CAST(projection AS TEXT) FROM workflow_instance_initial_materializations WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, runID, entityID, wantPath).Scan(&receipt); err != nil {
-		t.Fatalf("read exact node construction receipt: %v", err)
-	}
-	var construction struct {
-		CreatingInput pipeline.FlowConstructionInput `json:"creating_input"`
-	}
-	if err := json.Unmarshal([]byte(receipt), &construction); err != nil {
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flow, "", wantPath))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := construction.CreatingInput.Validate(); err != nil {
-		t.Fatal(err)
+	var reader pipeline.WorkflowTargetPersistenceReader = rt.SQLite
+	if rt.Postgres != nil {
+		reader = rt.Postgres
+	}
+	construction, err := storetest.ReadReceiverConstructionPublication(context.Background(), reader, owner, entityID)
+	if err != nil {
+		snapshot, inspectErr := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), reader)
+		t.Logf("immutable receipt identity evidence: owner=%+v entity=%s receipts=%+v inspection_error=%v", owner, entityID, snapshot["workflow_instance_initial_materializations"], inspectErr)
+		t.Fatalf("read exact immutable node construction receipt: %v", err)
 	}
 	wantKind := "existing_entity"
 	if construction.CreatingInput.EventID == eventID {
-		owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flow, "", wantPath))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := pipeline.ValidateFlowConstructionPublication([]byte(receipt), owner, entityID, eventID); err != nil {
-			t.Fatalf("creating delivery lacks its exact immutable construction receipt: %v", err)
-		}
 		wantKind = "materializing_entity"
 	}
 	if target.Kind != wantKind {

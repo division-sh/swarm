@@ -10,13 +10,13 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
-func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRuntime, owner runtimebus.EventStore, runID string, completionCount int) {
+func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner runtimebus.EventStore, loadedBundleHash, runID string, completionCount int) {
 	t.Helper()
 	params := map[string]any{"run_id": runID}
 	var get struct {
 		Run operatorread.RunHeader `json:"run"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.get", params, &get)
+	requireServedJSONRPCResult(t, endpoint, "run.get", params, &get)
 	if get.Run.RunID != runID || get.Run.Failure != nil || get.Run.EventCount == 0 {
 		t.Fatalf("selected run header lost completed execution: %+v", get)
 	}
@@ -24,28 +24,28 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 		Run    operatorread.RunHeader                 `json:"run"`
 		Failed []operatorread.RunDebugFailureDelivery `json:"failed_deliveries"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", params, &diagnose)
+	requireServedJSONRPCResult(t, endpoint, "run.diagnose", params, &diagnose)
 	if !reflect.DeepEqual(diagnose.Run, get.Run) || len(diagnose.Failed) != 0 {
 		t.Fatalf("selected run diagnosis disagrees with exact run header: %+v", diagnose)
 	}
 	hash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), owner, runID)
-	if err != nil || hash == rt.BundleHash {
+	if err != nil || hash == loadedBundleHash {
 		t.Fatalf("public read fixture must target an unloaded different artifact: hash=%s err=%v", hash, err)
 	}
 	var runs struct {
 		Runs []operatorread.RunHeader `json:"runs"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.list", map[string]any{"bundle_hash": hash}, &runs)
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": hash}, &runs)
 	if len(runs.Runs) != 1 || !reflect.DeepEqual(runs.Runs[0], get.Run) {
 		t.Fatalf("unloaded target absent or replaced in run list: %+v", runs)
 	}
 	var agents operatorread.OperatorAgentListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.list", map[string]any{"flow": "consumer", "role": "observer"}, &agents)
+	requireServedJSONRPCResult(t, endpoint, "agent.list", map[string]any{"flow": "consumer", "role": "observer"}, &agents)
 	if len(agents.Agents) != 1 || agents.Agents[0].AgentID != "same-name" || agents.Agents[0].FlowInstance != "consumer" {
 		t.Fatalf("unloaded target missing from agent list: %+v", agents)
 	}
 	var entities operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", params, &entities)
+	requireServedJSONRPCResult(t, endpoint, "entity.list", params, &entities)
 	if len(entities.Entities) != get.Run.EntityCount || len(entities.Entities) == 0 {
 		t.Fatalf("selected entity census differs from header: %+v", entities)
 	}
@@ -56,7 +56,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 		}
 		counts[entity.EntityType]++
 		var full operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
+		requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
 		if !reflect.DeepEqual(full.Entity, entity) {
 			t.Fatalf("selected entity get/list disagree: %+v / %+v", entity, full)
 		}
@@ -65,12 +65,12 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 		}
 	}
 	var aggregate operatorread.OperatorEntityAggregateResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.aggregate", map[string]any{"run_id": runID, "group_by": "entity_type"}, &aggregate)
+	requireServedJSONRPCResult(t, endpoint, "entity.aggregate", map[string]any{"run_id": runID, "group_by": "entity_type"}, &aggregate)
 	if !reflect.DeepEqual(aggregate.Counts, counts) {
 		t.Fatalf("selected aggregate disagrees with exact entities: %+v / %v", aggregate, counts)
 	}
 	var conversations operatorread.OperatorConversationListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list", map[string]any{"run_id": runID, "agent_id": "same-name", "flow_instance": "consumer"}, &conversations)
+	requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{"run_id": runID, "agent_id": "same-name", "flow_instance": "consumer"}, &conversations)
 	if len(conversations.Conversations) != 1 {
 		t.Fatalf("selected conversation census: %+v", conversations)
 	}
@@ -79,13 +79,13 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 		t.Fatalf("selected conversation lost its turn authority: %+v", conversation)
 	}
 	var turns operatorread.OperatorConversationTurnListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list_turns", map[string]any{"session_id": conversation.SessionID}, &turns)
+	requireServedJSONRPCResult(t, endpoint, "conversation.list_turns", map[string]any{"session_id": conversation.SessionID}, &turns)
 	if len(turns.Turns) != completionCount || turns.Conversation.RunID != runID || turns.Conversation.SessionID != conversation.SessionID {
 		t.Fatalf("selected turn list borrowed another conversation: %+v", turns)
 	}
 	for _, summary := range turns.Turns {
 		var turn operatorread.OperatorPublicConversationTurnDetail
-		requireServedJSONRPCResult(t, rt.Endpoint, "conversation.get_turn", map[string]any{"session_id": conversation.SessionID, "turn_id": summary.TurnID}, &turn)
+		requireServedJSONRPCResult(t, endpoint, "conversation.get_turn", map[string]any{"session_id": conversation.SessionID, "turn_id": summary.TurnID}, &turn)
 		if turn.Turn.TurnID != summary.TurnID || turn.Session.RunID != runID || turn.Session.SessionID != conversation.SessionID || turn.Turn.Failure != nil || turn.Frame.FrameID == "" {
 			t.Fatalf("selected turn detail lost execution/frame evidence: %+v", turn)
 		}
@@ -94,7 +94,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 		}
 	}
 	var eventList operatorread.OperatorEventListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 1000}, &eventList)
+	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 1000}, &eventList)
 	if len(eventList.Events) == 0 || eventList.NextCursor != "" {
 		t.Fatalf("selected event census missing or unexpectedly paginated: %+v", eventList)
 	}
@@ -105,16 +105,16 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 		}
 		eventIDs[event.EventID] = true
 		var exact operatorread.OperatorEventFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": event.EventID}, &exact)
+		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": event.EventID}, &exact)
 		if !reflect.DeepEqual(exact, event) {
 			t.Fatalf("selected event list/get disagree: %+v / %+v", event, exact)
 		}
 	}
-	requireReceiverPublicReadback(t, rt, runID)
+	requireWorkspaceProofReceiverPublicReadback(t, endpoint, owner, runID)
 	var trace struct {
 		Trace []operatorread.RunDebugTraceRow `json:"trace"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.trace", map[string]any{"run_id": runID, "limit": 2000}, &trace)
+	requireServedJSONRPCResult(t, endpoint, "run.trace", map[string]any{"run_id": runID, "limit": 2000}, &trace)
 	var agentDelivery, nodeDelivery bool
 	for _, row := range trace.Trace {
 		if !eventIDs[row.EventID] {
@@ -129,14 +129,14 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 		t.Fatalf("selected trace omitted mixed recipient execution: %+v", trace)
 	}
 	var logs operatorread.OperatorRuntimeLogListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "runtime.logs", map[string]any{"run_id": runID, "limit": 1000}, &logs)
+	requireServedJSONRPCResult(t, endpoint, "runtime.logs", map[string]any{"run_id": runID, "limit": 1000}, &logs)
 	for _, log := range logs.Logs {
 		if log.RunID != runID {
 			t.Fatalf("selected log query borrowed another run: %+v", log)
 		}
 	}
 	var incidents operatorread.OperatorRuntimeIncidentListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "runtime.incidents", map[string]any{"bundle_hash": hash, "limit": 500}, &incidents)
+	requireServedJSONRPCResult(t, endpoint, "runtime.incidents", map[string]any{"bundle_hash": hash, "limit": 500}, &incidents)
 	if len(incidents.Incidents) != 0 || incidents.NextCursor != "" {
 		t.Fatalf("successful selected execution borrowed an incident or failed: %+v", incidents)
 	}
