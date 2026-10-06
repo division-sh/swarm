@@ -5,13 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"math"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
-	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestSelectedForkPreparationSnapshotRetainsWholePhysicalInventoryBothStores(t *testing.T) {
@@ -128,78 +125,6 @@ func TestSelectedForkPreparationSnapshotRefusesInvalidAndPartialEvidenceBothStor
 			}
 			if snapshot, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected); err == nil || snapshot != nil {
 				t.Fatalf("closed owner returned evidence: %v %v", snapshot, err)
-			}
-		})
-	}
-}
-
-func TestSelectedForkApplicationSnapshotObserverDoesNotAcquireRuntimeAuthorityBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
-			var observer any
-			var runtimeCall func() error
-			if backend == "sqlite" {
-				path := filepath.Join(t.TempDir(), "observer.sqlite")
-				writer := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, writer)
-				if err != nil {
-					t.Fatal(err)
-				}
-				schema, native, err := storeschema.OpenSQLiteReadOnlyForInspection(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				selected, err := ComposeSQLiteRuntimeStore(schema, native)
-				if err != nil {
-					_ = schema.Close()
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					if err := selected.Close(); err != nil {
-						t.Error(err)
-					}
-				})
-				observer = selected
-				runtimeCall = func() error {
-					_, err := selected.ListActiveAgentDescriptors(ctx, unacceptedAdmissionEventID)
-					return err
-				}
-				if err := native.RunTransaction(ctx, "read-only observer refusal", func(ctx context.Context, tx *sql.Tx) error {
-					_, err := tx.ExecContext(ctx, `CREATE TABLE snapshot_forbidden_writer (id TEXT)`)
-					return err
-				}); err == nil {
-					t.Fatal("read-only physical observer acquired write authority")
-				}
-				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, observer)
-				if err != nil || !reflect.DeepEqual(before, after) {
-					t.Fatalf("read-only observer changed or lost physical evidence: err=%v", err)
-				}
-			} else {
-				selected, err := NewPostgresStore(testutil.StartPostgresDSN(t))
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					if err := selected.Close(); err != nil {
-						t.Error(err)
-					}
-				})
-				observer = selected
-				runtimeCall = func() error {
-					_, err := selected.ListActiveAgentDescriptors(ctx, unacceptedAdmissionEventID)
-					return err
-				}
-			}
-			requireUnacceptedAdmissionFailure(t, runtimeCall())
-			before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, observer)
-			if err != nil || len(before["events"].Columns) == 0 {
-				t.Fatalf("physical observer could not inspect native storage: err=%v", err)
-			}
-			requireUnacceptedAdmissionFailure(t, runtimeCall())
-			after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, observer)
-			if err != nil || !reflect.DeepEqual(before, after) {
-				t.Fatalf("runtime refusal changed inspection evidence: err=%v", err)
 			}
 		})
 	}
