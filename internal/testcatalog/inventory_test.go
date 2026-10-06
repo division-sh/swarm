@@ -405,6 +405,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
 		"serveapp-mailbox", "serveapp-mailbox-p-q",
 		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-standing",
+		"serveapp-2564-h1", "serveapp-2564-h2",
 	}
 	catalogUnits := []string{
 		"catalog-replay-1", "catalog-replay-2-3", "catalog-runtime",
