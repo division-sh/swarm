@@ -16888,6 +16888,12 @@ platform_tables:
         Manager delivery and directive carriers install the logical-turn owner
         before invoking the agent. The agent supplies its immutable admitted
         turn_timeout configuration, not a reload from a newer generation.
+        The canonical persisted runtime descriptor carries that exact optional
+        bound and event. Projection and hydration validate it and preserve its
+        configuration identity; opaque user config is not an alternative owner.
+        Required-agent fulfillment consumes the canonical produced-event set,
+        including the platform-owned timeout reaction. This does not grant a
+        corresponding emit tool or satisfy unrelated output requirements.
         Finishing the invocation joins timeout mutation before exact origin
         settlement. Delivery settlement stops claim renewal and releases its
         exact continuation before dispatching the committed reaction. Directives
@@ -16939,7 +16945,12 @@ platform_tables:
         the existing preparation retirement path until cleanup succeeds.
         Startup commits the canceled origin and reaction atomically, releases the
         preparation claim, and defers execution to the existing durable pipeline
-        recovery after startup admission. Failure before this commit leaves the
+        recovery after startup admission. PrepareRecoveredTurnTimeoutReaction
+        retains the exact recovered publication but does not plan receiver claims
+        or allocate executable delivery authority before admission. This applies
+        to normal and selected startup. The original targetless source is checked
+        against immutable admitted publication evidence; journal receiver-target
+        projections are not producer target claims. Failure before this commit leaves the
         unresolved intent discoverable; acknowledged cleanup errors retain committed
         evidence and never justify repeating business work.
         Current completion settlement also returns acknowledged authored intent to

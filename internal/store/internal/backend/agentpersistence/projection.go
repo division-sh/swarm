@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
@@ -26,6 +27,7 @@ type PersistedAgentRuntimeDescriptor struct {
 	ResolvedLLMProvider  string                         `json:"resolved_llm_provider,omitempty"`
 	ResolvedLLMTransport string                         `json:"resolved_llm_transport,omitempty"`
 	MaxTurnsPerTask      int                            `json:"max_turns_per_task,omitempty"`
+	TurnTimeout          *timeridentity.TurnTimeout     `json:"turn_timeout,omitempty"`
 	NativeTools          runtimeactors.NativeToolConfig `json:"native_tools,omitempty"`
 	WorkspaceClass       string                         `json:"workspace_class,omitempty"`
 	ManagerFallback      string                         `json:"manager_fallback,omitempty"`
@@ -70,6 +72,7 @@ var runtimeConfigKeys = map[string]struct{}{
 	"session_scope_authority": {},
 	"memory":                  {},
 	"max_turns_per_task":      {},
+	"turn_timeout":            {},
 	"subscriptions":           {},
 	"emit_events":             {},
 	"tools":                   {},
@@ -93,6 +96,7 @@ var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"resolved_llm_provider":  {},
 	"resolved_llm_transport": {},
 	"max_turns_per_task":     {},
+	"turn_timeout":           {},
 	"native_tools":           {},
 	"workspace_class":        {},
 	"manager_fallback":       {},
@@ -105,6 +109,9 @@ var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 }
 
 func ProjectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID string) (PersistedAgentProjection, error) {
+	if err := cfg.ValidateTurnTimeout(); err != nil {
+		return PersistedAgentProjection{}, err
+	}
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
 	identity, err := cfg.ConcreteIdentity()
@@ -234,6 +241,7 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		Intent:               desc.Intent,
 		Memory:               memory,
 		MaxTurnsPerTask:      desc.MaxTurnsPerTask,
+		TurnTimeout:          timeridentity.CloneTurnTimeout(desc.TurnTimeout),
 		Subscriptions:        subscriptions,
 		EmitEvents:           emitEvents,
 		Tools:                tools,
@@ -271,6 +279,7 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
 		ResolvedLLMProvider:  strings.TrimSpace(cfg.ResolvedLLMProvider),
 		ResolvedLLMTransport: strings.TrimSpace(cfg.ResolvedLLMTransport),
 		MaxTurnsPerTask:      cfg.MaxTurnsPerTask,
+		TurnTimeout:          timeridentity.CloneTurnTimeout(cfg.TurnTimeout),
 		NativeTools:          cfg.NativeTools,
 		WorkspaceClass:       strings.TrimSpace(cfg.WorkspaceClass),
 		ManagerFallback:      strings.TrimSpace(cfg.ManagerFallback),
@@ -313,6 +322,11 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (PersistedAgentRuntimeDes
 	var desc PersistedAgentRuntimeDescriptor
 	if err := json.Unmarshal(raw, &desc); err != nil {
 		return PersistedAgentRuntimeDescriptor{}, fmt.Errorf("decode runtime_descriptor: %w", err)
+	}
+	if desc.TurnTimeout != nil {
+		if err := desc.TurnTimeout.Validate(); err != nil {
+			return PersistedAgentRuntimeDescriptor{}, err
+		}
 	}
 	desc.Type = strings.TrimSpace(desc.Type)
 	desc.FlowID = strings.TrimSpace(desc.FlowID)

@@ -711,6 +711,7 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     run: '^TestServed[A-C].*$'
     required_children:
+      TestServedCanceledTurnRecoveryBothStores: [default_sqlite, explicit_postgres]
       TestServedConstructedDecisionCardDeferralBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -996,7 +997,21 @@ units:
       TestSelectedCanceledOriginRecoveryRetainsPendingIntentBothStores: [sqlite, postgres]
       TestSelectedCanceledOriginRecoveryCommitsReactionBothStores: [sqlite, postgres]
       TestSelectedCanceledOriginStartupReactionBothStores: [sqlite, postgres]
-      TestSelectedTerminatedOriginStartupBothStores: [sqlite/launched/healthy, sqlite/launched/lost_ack, sqlite/launched/auxiliary_error, sqlite/unstarted/healthy, sqlite/unstarted/lost_ack, sqlite/unstarted/auxiliary_error, postgres/launched/healthy, postgres/launched/lost_ack, postgres/launched/auxiliary_error, postgres/unstarted/healthy, postgres/unstarted/lost_ack, postgres/unstarted/auxiliary_error]
+      TestSelectedTerminatedOriginStartupBothStores:
+        [sqlite/launched/healthy, sqlite/launched/lost_ack, sqlite/launched/auxiliary_error,
+         sqlite/launch_only/healthy, sqlite/launch_only/lost_ack, sqlite/launch_only/auxiliary_error,
+         sqlite/unstarted/healthy, sqlite/unstarted/lost_ack, sqlite/unstarted/auxiliary_error,
+         sqlite/prelaunch/healthy, sqlite/prelaunch/lost_ack, sqlite/prelaunch/auxiliary_error,
+         sqlite/retained_success/healthy, sqlite/retained_success/lost_ack, sqlite/retained_success/auxiliary_error,
+         sqlite/retained_uncertain/healthy, sqlite/retained_uncertain/lost_ack, sqlite/retained_uncertain/auxiliary_error,
+         sqlite/two_open_rounds/healthy, sqlite/two_open_rounds/lost_ack, sqlite/two_open_rounds/auxiliary_error,
+         postgres/launched/healthy, postgres/launched/lost_ack, postgres/launched/auxiliary_error,
+         postgres/launch_only/healthy, postgres/launch_only/lost_ack, postgres/launch_only/auxiliary_error,
+         postgres/unstarted/healthy, postgres/unstarted/lost_ack, postgres/unstarted/auxiliary_error,
+         postgres/prelaunch/healthy, postgres/prelaunch/lost_ack, postgres/prelaunch/auxiliary_error,
+         postgres/retained_success/healthy, postgres/retained_success/lost_ack, postgres/retained_success/auxiliary_error,
+         postgres/retained_uncertain/healthy, postgres/retained_uncertain/lost_ack, postgres/retained_uncertain/auxiliary_error,
+         postgres/two_open_rounds/healthy, postgres/two_open_rounds/lost_ack, postgres/two_open_rounds/auxiliary_error]
       TestWorkflowPublicationAcceptanceStageBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
       TestWorkflowEmitFeedbackBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
       TestWorkflowEmitBusReadbackBothStores: [sqlite, postgres]

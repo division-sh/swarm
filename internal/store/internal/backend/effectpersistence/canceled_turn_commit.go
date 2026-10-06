@@ -58,12 +58,12 @@ func commitCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt,
 			result.Directive, err = settleCanceledDirectiveTurn(ctx, mutation, postgres, directives, attempt)
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("commit exact canceled origin: %w", err)
 		}
 		if command.Publication != nil {
 			committed, err := publications.CommitPublicationTx(ctx, mutation, plan.PublicationCommand())
 			if err != nil {
-				return err
+				return fmt.Errorf("commit exact cancellation reaction: %w", err)
 			}
 			if !pending && committed.AppendOutcome != runtimebus.EventAppendExactDuplicate {
 				return fmt.Errorf("settled timeout origin lacks its atomically committed reaction")
@@ -109,14 +109,36 @@ func validateTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, atte
 	}
 	source := event.RoutingSource()
 	if source.Kind() != events.RoutingSourceFlowOwnedControl ||
-		source.Route().FlowID != flowID || source.Route().FlowInstance != path || !event.TargetRoute().Empty() ||
+		source.Route().FlowID != flowID || source.Route().FlowInstance != path ||
 		source.Route().EntityID != attempt.Authority.Target.EntityID ||
 		event.ProducerType() != events.EventProducerPlatform || event.Producer().ID() != runtimeeffects.TurnTimeoutProducerID() {
-		return fmt.Errorf("canceled turn reaction changed its exact flow-owned producer")
+		return fmt.Errorf("canceled turn reaction changed its exact flow-owned producer: expected=%+v source_kind=%s source=%+v target=%+v producer=%+v", events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: attempt.Authority.Target.EntityID}, source.Kind().StorageCode(), source.Route(), event.TargetRoute(), event.Producer())
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(event.Payload(), &fields); err != nil || fields == nil || len(fields) != 0 {
 		return fmt.Errorf("canceled turn reaction must retain its declared empty payload")
+	}
+	// The command event is the journal's receiver projection, not the producer's
+	// target claim. Validate the original targetless publication against the
+	// planner's immutable admitted source, as grouped publication already does.
+	originalSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: attempt.Authority.Target.EntityID})
+	if err != nil {
+		return err
+	}
+	original, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
+		RunID: attempt.Authority.Target.RunID,
+		Facts: events.EventFacts{
+			ID: cause, Type: events.EventType(emit), Payload: []byte(`{}`),
+			Producer:      events.ProducerClaim{Type: events.EventProducerPlatform, ID: runtimeeffects.TurnTimeoutProducerID()},
+			RoutingSource: originalSource, CreatedAt: requestedAt,
+			Envelope: events.EventEnvelope{EntityID: attempt.Authority.Target.EntityID}, ExecutionMode: attempt.Authority.ExecutionMode,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if err := plan.ValidatePreparedFanOutEvent(original); err != nil {
+		return fmt.Errorf("validate original timeout publication: %w", err)
 	}
 	return nil
 }

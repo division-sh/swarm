@@ -5,11 +5,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
@@ -68,6 +70,7 @@ func TestPersistedAgentProjectionRoundTripsCompleteRuntimeDescriptorWithoutInfer
 	cfg.Type = ""
 	cfg.FlowDataAccess = []string{"customers", "orders"}
 	cfg.BudgetEnvelope = 1.25
+	cfg.TurnTimeout = &timeridentity.TurnTimeout{After: time.Minute, Emit: "work.timed_out"}
 
 	projection, err := ProjectPersistedAgentConfig(cfg, "")
 	if err != nil {
@@ -85,6 +88,32 @@ func TestPersistedAgentProjectionRoundTripsCompleteRuntimeDescriptorWithoutInfer
 	}
 	if hydrated.BudgetEnvelope != cfg.BudgetEnvelope {
 		t.Fatalf("hydrated budget envelope = %v, want %v", hydrated.BudgetEnvelope, cfg.BudgetEnvelope)
+	}
+	if hydrated.TurnTimeout == nil || !reflect.DeepEqual(hydrated.TurnTimeout, cfg.TurnTimeout) || hydrated.TurnTimeout == cfg.TurnTimeout {
+		t.Fatalf("persisted runtime descriptor lost the exact independent timeout: %+v", hydrated.TurnTimeout)
+	}
+}
+
+func TestPersistedAgentProjectionRefusesInvalidTurnTimeout(t *testing.T) {
+	for _, timeout := range []timeridentity.TurnTimeout{{After: 0, Emit: "work.timed_out"}, {After: time.Minute}, {After: -1, Emit: "work.timed_out"}} {
+		cfg := persistedIntentTestAgent(t)
+		cfg.TurnTimeout = &timeout
+		if _, err := ProjectPersistedAgentConfig(cfg, ""); err == nil {
+			t.Fatalf("invalid bound was persisted: %+v", timeout)
+		}
+		projection, err := ProjectPersistedAgentConfig(persistedIntentTestAgent(t), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var descriptor map[string]any
+		if err := json.Unmarshal(projection.RuntimeDescriptor, &descriptor); err != nil {
+			t.Fatal(err)
+		}
+		descriptor["turn_timeout"] = timeout
+		projection.RuntimeDescriptor = marshalIntentDescriptor(t, descriptor)
+		if _, err := HydratePersistedAgentConfig(projection); err == nil {
+			t.Fatalf("invalid persisted bound was hydrated: %+v", timeout)
+		}
 	}
 }
 

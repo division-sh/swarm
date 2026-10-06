@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 )
 
-func (am *AgentManager) prepareCanceledTurn(ctx context.Context, turn effects.TurnExecutionResult) (effects.CanceledTurnStore, effects.TurnTimeoutReactionOwner, effects.CanceledTurnCommand, error) {
+func (am *AgentManager) prepareCanceledTurn(ctx context.Context, turn effects.TurnExecutionResult, recovered bool) (effects.CanceledTurnStore, effects.TurnTimeoutReactionOwner, effects.CanceledTurnCommand, error) {
 	if err := turn.Cancellation.ValidateIntent(); err != nil {
 		return nil, nil, effects.CanceledTurnCommand{}, err
 	}
@@ -32,7 +32,13 @@ func (am *AgentManager) prepareCanceledTurn(ctx context.Context, turn effects.Tu
 	if !ok {
 		return nil, nil, command, fmt.Errorf("timeout cancellation requires its publication owner")
 	}
-	plan, err := publication.PrepareTurnTimeoutReaction(ctx, turn)
+	var plan effects.TurnReactionPlan
+	var err error
+	if recovered {
+		plan, err = publication.PrepareRecoveredTurnTimeoutReaction(ctx, turn)
+	} else {
+		plan, err = publication.PrepareTurnTimeoutReaction(ctx, turn)
+	}
 	if err != nil {
 		if plan != nil {
 			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(context.WithoutCancel(ctx), plan))
@@ -59,7 +65,7 @@ func (am *AgentManager) settleCanceledDelivery(ctx context.Context, event events
 	if err != nil {
 		return result, err
 	}
-	store, publication, command, err := am.prepareCanceledTurn(ctx, turn)
+	store, publication, command, err := am.prepareCanceledTurn(ctx, turn, false)
 	if err != nil {
 		return result, err
 	}
@@ -115,7 +121,7 @@ func (am *AgentManager) settleCanceledDirective(ctx context.Context, turn effect
 	if err != nil {
 		return result, err
 	}
-	store, publication, command, err := am.prepareCanceledTurn(ctx, turn)
+	store, publication, command, err := am.prepareCanceledTurn(ctx, turn, false)
 	if err != nil {
 		return result, err
 	}
@@ -172,7 +178,7 @@ func (am *AgentManager) reconcileCanceledTurnsForStartup(ctx context.Context, re
 }
 
 func (am *AgentManager) commitRecoveredCanceledTurn(ctx context.Context, turn effects.TurnExecutionResult) (err error) {
-	store, publication, command, err := am.prepareCanceledTurn(ctx, turn)
+	store, publication, command, err := am.prepareCanceledTurn(ctx, turn, true)
 	if err != nil {
 		return err
 	}
@@ -186,10 +192,10 @@ func (am *AgentManager) commitRecoveredCanceledTurn(ctx context.Context, turn ef
 		return errors.Join(err, fmt.Errorf("recovered cancellation has no exact atomic acknowledgment"))
 	}
 	if result.Origin.Kind == effects.CompletionOriginDelivery {
-		if am.roles.DeliveryRuntime == nil {
-			return errors.Join(err, fmt.Errorf("recovered cancellation lacks its continuation owner"))
-		}
-		err = errors.Join(err, am.roles.DeliveryRuntime.ReleaseDeliveryContinuation(result.Origin.Delivery.DeliveryID()))
+		// Startup inventory did not acquire a process-local continuation. Its
+		// predecessor's capability cannot survive process fencing, and the new
+		// coordinator is installed only after executable admission. The durable
+		// canceled outcome prevents that coordinator from reclaiming this origin.
 		am.logDeliveryLifecycle(ctx, result.Delivery)
 	}
 	// The same transaction persisted the reaction and its pipeline obligations.

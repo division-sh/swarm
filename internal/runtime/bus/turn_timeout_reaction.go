@@ -12,6 +12,19 @@ import (
 )
 
 func (eb *EventBus) PrepareTurnTimeoutReaction(ctx context.Context, turn effects.TurnExecutionResult) (effects.TurnReactionPlan, error) {
+	return eb.prepareTurnTimeoutReaction(ctx, turn, false)
+}
+
+// Recovery commits publication before executable admission. Existing subscribed
+// pipeline recovery plans recipients after admission; no grant is minted here.
+func (eb *EventBus) PrepareRecoveredTurnTimeoutReaction(ctx context.Context, turn effects.TurnExecutionResult) (effects.TurnReactionPlan, error) {
+	return eb.prepareTurnTimeoutReaction(ctx, turn, true)
+}
+
+type startupTurnTimeoutPublicationKey struct{}
+type startupTurnTimeoutPublication struct{ eventID, runID string }
+
+func (eb *EventBus) prepareTurnTimeoutReaction(ctx context.Context, turn effects.TurnExecutionResult, recovery bool) (effects.TurnReactionPlan, error) {
 	intent, clock, attempt := turn.Cancellation, turn.Clock, turn.Attempt
 	if intent.ValidateIntent() != nil || intent.Reason != deliverylifecycle.CancellationTurnTimeout ||
 		clock == nil || clock.Validate() != nil || clock.Timeout == nil ||
@@ -38,6 +51,9 @@ func (eb *EventBus) PrepareTurnTimeoutReaction(ctx context.Context, turn effects
 	})
 	if err != nil {
 		return nil, err
+	}
+	if recovery {
+		ctx = context.WithValue(ctx, startupTurnTimeoutPublicationKey{}, startupTurnTimeoutPublication{eventID: event.ID(), runID: event.RunID()})
 	}
 	plans, err := eb.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: event}})
 	if err != nil {

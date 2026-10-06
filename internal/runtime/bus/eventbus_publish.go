@@ -591,6 +591,10 @@ func (eb *EventBus) finalizeCommittedAgentReadiness(ctx context.Context, event e
 }
 
 func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication eventBusCommitPublishPlan) (PreparedPublish, PublicationCommand, error) {
+	startupTimeout, recoveringTimeout := ctx.Value(startupTurnTimeoutPublicationKey{}).(startupTurnTimeoutPublication)
+	if recoveringTimeout && (publication.event.ID() != startupTimeout.eventID || publication.event.RunID() != startupTimeout.runID || publication.event.ProducerType() != events.EventProducerPlatform || publication.event.Producer().ID() != runtimeeffects.TurnTimeoutProducerID() || publication.direct) {
+		return PreparedPublish{}, PublicationCommand{}, errors.New("startup timeout preparation differs from its exact recovered publication")
+	}
 	if eb.receiverExecution.Kind() == eventreceiver.ExecutionSelectedRecoveryPublication {
 		event := publication.event
 		if err := eb.receiverExecution.ValidateTurnTimeoutRecoveryPublication(event.RunID(), event.Producer().ID(), event.ExecutionMode()); err != nil {
@@ -651,6 +655,15 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	planner := eb.deliveryPlanner
 	planner.recipientPolicy.prospective = publication.prospective
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
+		if recoveringTimeout {
+			connection, err := planner.connectPlanner.Plan(withClosedPublicationPlanning(ctx), evt)
+			if err != nil {
+				return RoutePlan{}, err
+			}
+			plan := newRoutePlan(evt)
+			plan.ConnectEvaluation = connection.Evaluation
+			return plan, nil
+		}
 		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}
 	replayScope := runtimepipelineobligation.ScopeSubscribed
@@ -735,7 +748,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		prepared.dispatchQueued = true
 		prepared.queueReason = dispatchQueueStartupCreationRecovery
 	}
-	if eb.receiverExecution.Kind() == eventreceiver.ExecutionSelectedRecoveryPublication {
+	if recoveringTimeout || eb.receiverExecution.Kind() == eventreceiver.ExecutionSelectedRecoveryPublication {
 		prepared.dispatchQueued = true
 		prepared.queueReason = "startup_turn_cancellation_recovery"
 	}

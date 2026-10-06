@@ -50,7 +50,7 @@ func (o SelectedContractExecutionOwner) settleRecoveredSelectedCancellations(ctx
 			if err != nil {
 				return result, err
 			}
-			command.Publication, err = publication.PrepareTurnTimeoutReaction(ctx, turn)
+			command.Publication, err = publication.PrepareRecoveredTurnTimeoutReaction(ctx, turn)
 			if command.Publication != nil {
 				reactions = append(reactions, struct {
 					owner *bus.EventBus

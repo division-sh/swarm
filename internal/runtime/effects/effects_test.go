@@ -74,6 +74,9 @@ func TestCompletionAuthorityPreservesExecutionMode(t *testing.T) {
 	if authority.ExecutionMode != ExecutionModeMock {
 		t.Fatalf("execution mode = %q, want mock", authority.ExecutionMode)
 	}
+	if authority.Target.RunID != token.Identity.RunID || authority.Target.AgentID != token.AgentID || authority.Target.AgentIdentity != token.Identity || authority.Target.Kind != "" || authority.Target.ID != "" || authority.Target.Valid() {
+		t.Fatalf("pre-allocation authority lost its actor or fabricated a physical target: %+v", authority.Target)
+	}
 	ctx = WithUsageTarget(ctx, UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: "agent-1",
 		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Plan{Enabled: false},

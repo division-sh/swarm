@@ -72,6 +72,7 @@ func TurnTimeoutProducerID() string { return "agent-turn-timeout" }
 
 type TurnTimeoutReactionOwner interface {
 	PrepareTurnTimeoutReaction(context.Context, TurnExecutionResult) (TurnReactionPlan, error)
+	PrepareRecoveredTurnTimeoutReaction(context.Context, TurnExecutionResult) (TurnReactionPlan, error)
 	ReleaseTurnTimeoutReaction(context.Context, TurnReactionPlan) error
 	DispatchTurnTimeoutReaction(context.Context, CommittedTurnReaction) error
 }

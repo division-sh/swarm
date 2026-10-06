@@ -755,6 +755,9 @@ func completionAuthorityFromContext(ctx context.Context) (Authority, bool) {
 	}
 	owner := fmt.Sprintf("agent:%s:%d:%d", token.AgentID, token.RuntimeEpoch, token.Generation)
 	authority := NormalAgentAuthority(token, owner, time.Now().UTC().Add(5*time.Minute))
+	// Session binding precedes physical turn allocation. Retain the exact
+	// lifecycle actor for origin validation, without inventing a usage target.
+	authority.Target = UsageTarget{RunID: token.Identity.RunID, AgentID: token.AgentID, AgentIdentity: token.Identity, FlowInstance: token.Identity.FlowInstance()}
 	if mode, found := ExecutionModeFromContext(ctx); found {
 		authority.ExecutionMode = mode
 	}

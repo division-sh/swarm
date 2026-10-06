@@ -18,15 +18,17 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/google/uuid"
 )
 
 func TestSelectedTerminatedOriginStartupBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, originState := range []string{"launched", "unstarted"} {
+		for _, originState := range []string{"launched", "launch_only", "unstarted", "prelaunch", "retained_success", "retained_uncertain", "two_open_rounds"} {
 			for _, cut := range []string{"healthy", "lost_ack", "auxiliary_error"} {
 				t.Run(backend+"/"+originState+"/"+cut, func(t *testing.T) {
 					selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
@@ -55,12 +57,50 @@ func TestSelectedTerminatedOriginStartupBothStores(t *testing.T) {
 					}
 					command := effects.CanceledTurnCommand{Origin: origin}
 					var uncertain int
-					if originState == "launched" {
-						handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "startup-terminate")
+					var retained *effects.Handle
+					if originState != "unstarted" {
+						var handle *effects.Handle
+						if originState == "prelaunch" {
+							handle, err = beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("startup-terminate-prelaunch"))
+							if err != nil {
+								t.Fatal(err)
+							}
+						} else if originState == "launch_only" {
+							handle, err = beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("startup-terminate-launch-only"))
+							if err != nil {
+								t.Fatal(err)
+							}
+							if err := handle.MarkLaunched(ctx); err != nil {
+								t.Fatal(err)
+							}
+							uncertain = 1
+						} else {
+							handle = beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "startup-terminate")
+							uncertain = 1
+						}
 						command = effects.CanceledTurnCommandForAttempt(handle.Attempt(), nil)
-						uncertain = 1
+						if originState == "retained_success" || originState == "retained_uncertain" {
+							retained, uncertain = handle, 0
+						}
+						if originState == "two_open_rounds" {
+							roundAuthority := authority
+							roundAuthority.Target.ID = uuid.NewString()
+							roundCtx := effects.WithLogicalOperationIdentity(effects.WithAuthority(ctx, roundAuthority), "startup-terminate-second-round")
+							beginObservedCompletionForSettlementTest(t, roundCtx, "anthropic_api", "startup-terminate-second-round")
+							uncertain = 2
+						}
 					}
 					requestSelectedTurnTerminationForTest(t, ctx, selected, f, plan, origin)
+					if retained != nil {
+						if originState == "retained_success" {
+							settleSelectedCompletionForTest(t, ctx, retained, authority.Target, time.Now().UTC())
+						} else {
+							failure := failures.FromError(context.Canceled, "selected-turn-test", "physical_join").Failure
+							if err := retained.Settle(ctx, effects.StateOutcomeUncertain, &failure, map[string]any{"physical_joined": true, "observed_response": "kept"}); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
 					if err := f.process.Release(ctx); err != nil {
 						t.Fatal(err)
 					}
@@ -85,7 +125,11 @@ func TestSelectedTerminatedOriginStartupBothStores(t *testing.T) {
 						}
 					}()
 					results, err := owner.RecoverSelectedForkContexts(startupCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{})
-					if cut != "healthy" && !errors.Is(err, responseFailure) || cut == "healthy" && err != nil || len(results) != 1 || results[0].Effects.OutcomeUncertain != uncertain || fork.commits != 1 {
+					expectedSummary := effects.RecoverySummary{OutcomeUncertain: uncertain}
+					if originState == "prelaunch" {
+						expectedSummary.PrelaunchTerminal = 1
+					}
+					if cut != "healthy" && !errors.Is(err, responseFailure) || cut == "healthy" && err != nil || len(results) != 1 || results[0].Effects != expectedSummary || fork.commits != 1 {
 						t.Fatalf("terminate startup handoff: %+v %v", results, err)
 					}
 					if cut == "lost_ack" {
@@ -119,6 +163,14 @@ func TestSelectedTerminatedOriginStartupBothStores(t *testing.T) {
 					snapshot, err := selected.(deliverylifecycle.Store).Snapshot(startupCtx, commit.Delivery.DeliveryID)
 					if err != nil || snapshot.ClaimVersion != origin.Delivery.Version() || !snapshot.SettledAt.Equal(commit.Delivery.SettledAt) {
 						t.Fatalf("startup response cut changed exact origin: %+v %v", snapshot, err)
+					}
+					if retained != nil {
+						state, rows := effects.StateOutcomeUncertain, 0
+						if originState == "retained_success" {
+							state, rows = effects.StateSettled, 1
+						}
+						requireExternalAttemptState(t, db, sqlite, retained.Attempt().AttemptID, state)
+						requireCompletionSettlementRows(t, completionSettlementFixture{db: db, sqlite: sqlite}, retained.Attempt().AttemptID, authority.Target.ID, state, rows, 0)
 					}
 				})
 			}

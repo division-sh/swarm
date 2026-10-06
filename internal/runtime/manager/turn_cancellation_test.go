@@ -59,6 +59,10 @@ func (b *canceledTurnConsumerBus) PrepareTurnTimeoutReaction(_ context.Context, 
 	return b.reaction, b.prepareErr
 }
 
+func (b *canceledTurnConsumerBus) PrepareRecoveredTurnTimeoutReaction(ctx context.Context, turn effects.TurnExecutionResult) (effects.TurnReactionPlan, error) {
+	return b.PrepareTurnTimeoutReaction(ctx, turn)
+}
+
 func (b *canceledTurnConsumerBus) ReleaseTurnTimeoutReaction(context.Context, effects.TurnReactionPlan) error {
 	b.releases++
 	return nil
@@ -163,7 +167,7 @@ func TestCanceledDeliveryConsumerKeepsExactCommitAndCleanupEvidence(t *testing.T
 }
 
 func TestStartupCanceledTurnCommitsBeforeAdmissionWithoutExecutingReaction(t *testing.T) {
-	for _, mode := range []string{"healthy", "list_failure", "prepare_failure", "unacknowledged", "missing_reaction", "commit_cleanup", "continuation_cleanup"} {
+	for _, mode := range []string{"healthy", "list_failure", "prepare_failure", "unacknowledged", "missing_reaction", "commit_cleanup", "unowned_continuation"} {
 		t.Run(mode, func(t *testing.T) {
 			deliveries := newManagerDeliveryTestStore(t)
 			bus := &canceledTurnConsumerBus{reaction: turnReactionProbe{id: uuid.NewString()}}
@@ -226,12 +230,12 @@ func TestStartupCanceledTurnCommitsBeforeAdmissionWithoutExecutingReaction(t *te
 			if mode == "prepare_failure" {
 				bus.prepareErr = cleanup
 			}
-			if mode == "continuation_cleanup" {
+			if mode == "unowned_continuation" {
 				bus.failure = cleanup
 			}
 			err = am.reconcileExternalEffectsForStartup(ctx)
-			if mode == "healthy" {
-				if err != nil || !am.startupEffectsReconciled || calls != 1 || bus.releases != 1 || len(bus.released) != 1 {
+			if mode == "healthy" || mode == "unowned_continuation" {
+				if err != nil || !am.startupEffectsReconciled || calls != 1 || bus.releases != 1 || len(bus.released) != 0 {
 					t.Fatalf("startup did not commit/release exactly once: calls=%d plans=%d deliveries=%v err=%v", calls, bus.releases, bus.released, err)
 				}
 				if err := am.reconcileExternalEffectsForStartup(ctx); err != nil || calls != 1 {
@@ -241,7 +245,7 @@ func TestStartupCanceledTurnCommitsBeforeAdmissionWithoutExecutingReaction(t *te
 				if err == nil || am.startupEffectsReconciled {
 					t.Fatalf("failed startup marked recovery complete: %v", err)
 				}
-				if mode == "list_failure" || mode == "prepare_failure" || mode == "commit_cleanup" || mode == "continuation_cleanup" {
+				if mode == "list_failure" || mode == "prepare_failure" || mode == "commit_cleanup" {
 					if !errors.Is(err, cleanup) {
 						t.Fatalf("startup lost cleanup evidence: %v", err)
 					}
