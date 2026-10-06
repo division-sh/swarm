@@ -36,11 +36,22 @@ func ResolveActionFactForMutationTx(ctx context.Context, tx *sql.Tx, fact operat
 // RequireCardActionTx is the channel-owned pre-mutation projection. Call it
 // before idempotency replay and again in the card write transaction.
 func RequireCardActionTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, demand render.CardActionDemand, postgres, lock bool) error {
-	if uuid.Validate(demand.CardID) != nil || uuid.Validate(demand.PrincipalID) != nil ||
-		(demand.Method != "mailbox.decide" && demand.Method != "mailbox.begin_input" && demand.Method != "mailbox.cancel_input") ||
-		(demand.Method == "mailbox.cancel_input" && uuid.Validate(demand.DraftID) != nil) ||
-		(demand.Method != "mailbox.cancel_input" && (uuid.Validate(demand.ReceiptOperationID) != nil || demand.Verdict == "")) ||
-		(demand.Method == "mailbox.decide" && demand.RenderHash == "") {
+	if uuid.Validate(demand.CardID) != nil || uuid.Validate(demand.PrincipalID) != nil {
+		return fmt.Errorf("channel card action demand is incomplete")
+	}
+	switch demand.Method {
+	case "mailbox.cancel_input":
+		if uuid.Validate(demand.DraftID) != nil {
+			return fmt.Errorf("channel card action demand is incomplete")
+		}
+	case "mailbox.decide", "mailbox.begin_input":
+		if uuid.Validate(demand.ReceiptOperationID) != nil || demand.Verdict == "" {
+			return fmt.Errorf("channel card action demand is incomplete")
+		}
+		if demand.Method == "mailbox.decide" && demand.RenderHash == "" {
+			return fmt.Errorf("channel card action demand is incomplete")
+		}
+	default:
 		return fmt.Errorf("channel card action demand is incomplete")
 	}
 	var resolved render.ResolvedAction
