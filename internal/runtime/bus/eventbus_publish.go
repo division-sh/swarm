@@ -866,6 +866,7 @@ type PreparedPublish struct {
 	providerRawSettlement providerRawSettlementAdmission
 	receiver              receiverDispatchProjection
 	committedHandoffs     []runtimedelivery.DurableHandoffProof
+	durableHandoffReady   bool
 	authorScope           runtimeauthoractivity.Scope
 	hasAuthorScope        bool
 	authorDescriptor      runtimeauthoractivity.EventDescriptor
@@ -1461,11 +1462,32 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 	go func() {
 		defer closeDispatchContext()
 		defer func() { _ = lease.Done() }()
-		if err := eb.dispatchPreparedPublish(dispatchCtx, prepared); err != nil {
+		if err := eb.dispatchPreparedPublishAsyncBody(dispatchCtx, prepared); err != nil {
 			eb.reportLocalDispatchFailure("async_dispatch_failed", prepared.Event, err)
 		}
 	}()
 	return nil
+}
+
+func (eb *EventBus) dispatchPreparedPublishAsyncBody(ctx context.Context, prepared PreparedPublish) (err error) {
+	if !prepared.durableHandoffReady || prepared.direct || prepared.receiver.completion != nil || prepared.receiver.channelExecution != nil {
+		return eb.dispatchPreparedPublish(ctx, prepared)
+	}
+	authority, err := eb.DeliveryAuthority()
+	if err != nil {
+		return errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(ctx)))
+	}
+	if authority.Kind() != runtimedelivery.ExecutionAuthorityNormalRuntime ||
+		!eb.canTransferNodeDeliveries(prepared.Event, prepared.plan, prepared.committedHandoffs) {
+		return eb.dispatchPreparedPublish(ctx, prepared)
+	}
+	defer func() { err = errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(ctx))) }()
+	if err := eb.AcceptCommittedDeliveryHandoffs(prepared.committedHandoffs); err != nil {
+		return err
+	}
+	// Pipeline acknowledgement enables exact durable deliveries atomically. A
+	// pending node retains its continuation, not a publication SQL session.
+	return prepared.publicationClaim.Settle(ctx, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
 }
 
 func (eb *EventBus) reportLocalDispatchFailure(action string, evt events.Event, err error) {
