@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -213,4 +214,40 @@ func workspaceProofMockTurns(t *testing.T, proof servedWorkspaceProofRuntime, ru
 		}
 	}
 	return matches
+}
+
+func requireWorkspaceProofWorkReadyEvent(t *testing.T, endpoint string, owner runtimebus.EventStore, runID string) string {
+	t.Helper()
+	params := map[string]any{
+		"filter": map[string]any{"run_id": runID, "event_name": "producer/work.ready"},
+		"limit":  1,
+	}
+	seenCursors := map[string]bool{}
+	var found []operatorread.OperatorEventFull
+	for {
+		var page operatorread.OperatorEventListResult
+		requireServedJSONRPCResult(t, endpoint, "event.list", params, &page)
+		for _, event := range page.Events {
+			if event.RunID != runID || event.EventName != "producer/work.ready" {
+				t.Fatalf("work-ready lookup escaped its exact run/name: %+v", event)
+			}
+			found = append(found, event)
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		if seenCursors[page.NextCursor] {
+			t.Fatal("work-ready lookup repeated its pagination cursor")
+		}
+		seenCursors[page.NextCursor] = true
+		params["cursor"] = page.NextCursor
+	}
+	if len(found) != 1 {
+		t.Fatalf("exact work-ready event count=%d, want one", len(found))
+	}
+	stored := storetest.LoadCanonicalEventRecord(t, context.Background(), owner, found[0].EventID)
+	if stored.RunID() != runID || string(stored.Type()) != "producer/work.ready" {
+		t.Fatalf("work-ready lookup disagrees with the canonical stored record: %+v", stored)
+	}
+	return stored.ID()
 }
