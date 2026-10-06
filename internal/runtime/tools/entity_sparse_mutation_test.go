@@ -386,31 +386,9 @@ writer:
 			if !reflect.DeepEqual(before, read()) {
 				t.Fatal("canonical writer rejection changed state or revision")
 			}
-			// Inspect actual persisted history on both stores. Only PostgreSQL's
-			// existing internal debug reader exposes these records; neither store
-			// has a public entity.history RPC.
-			historyRows, err := db.QueryContext(ctx, `SELECT entity_id, domain, path, COALESCE(new_value, 'null'), COALESCE(old_value, 'null'), COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
-				FROM entity_mutations WHERE run_id = $1 ORDER BY created_at DESC, mutation_id DESC`, runID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var mutations []operatorread.RunDebugMutation
-			for historyRows.Next() {
-				var mutation operatorread.RunDebugMutation
-				var value, oldValue []byte
-				if err := historyRows.Scan(&mutation.EntityID, &mutation.Domain, &mutation.Path, &value, &oldValue, &mutation.WriterType, &mutation.WriterID, &mutation.HandlerStep); err != nil {
-					historyRows.Close()
-					t.Fatal(err)
-				}
-				mutation.NewValue = append(json.RawMessage(nil), value...)
-				mutation.OldValue = append(json.RawMessage(nil), oldValue...)
-				mutations = append(mutations, mutation)
-			}
-			if err := historyRows.Err(); err != nil {
-				historyRows.Close()
-				t.Fatal(err)
-			}
-			historyRows.Close()
+			// Use the original selected mutation owner on both stores. The
+			// public entity.history surface does not expose these fixture facts.
+			mutations := storetest.ObserveEntityMutationHistory(t, ctx, persistence, runID)
 			if backend == "postgres" {
 				report, err := persistence.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{MutationLimit: 100})
 				if err != nil {
@@ -419,7 +397,11 @@ writer:
 				if len(report.Mutations) != len(mutations) {
 					t.Fatalf("debug history omitted records: got %d want %d", len(report.Mutations), len(mutations))
 				}
-				mutations = report.Mutations
+				for i, mutation := range report.Mutations {
+					if !reflect.DeepEqual(mutation, mutations[i].RunDebugMutation) {
+						t.Fatalf("debug history changed mutation %d: got=%+v want=%+v", i, mutation, mutations[i].RunDebugMutation)
+					}
+				}
 			}
 			labels, initials, withNote, withoutNote, nestedNames := 0, 0, 0, 0, 0
 			for _, mutation := range mutations {
