@@ -198,6 +198,9 @@ func (l *Lifecycle) Admit(ctx context.Context, command AdmissionCommand) (admitt
 	if err := l.posture.Admit(command.ExecutionMode, "generic schedule admission"); err != nil {
 		return AdmissionResult{}, err
 	}
+	if err := l.validateInstanceHandoffOwner(command); err != nil {
+		return AdmissionResult{}, err
+	}
 	lease, err := instanceExecutionLease(ctx, command)
 	if err != nil {
 		return AdmissionResult{}, err
@@ -499,13 +502,38 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 	}
 	// Publication is already durable. Finalization/dispatch failures are logged
 	// for downstream recovery and never cause a synchronous occurrence resend.
-	if finalizeErr := l.planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{result.Publication}); finalizeErr != nil {
+	publicationCtx := ctx
+	if activation.Command.OwnerKind == OwnerInstance {
+		publicationCtx = context.WithoutCancel(ctx)
+	}
+	if finalizeErr := l.planner.FinalizeEnginePublications(publicationCtx, []runtimeengine.CommittedDurablePublication{result.Publication}); finalizeErr != nil {
 		err = errors.Join(err, finalizeErr)
 	}
-	if dispatchErr := l.dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); dispatchErr != nil {
+	if dispatchErr := l.dispatchAcceptedOccurrence(publicationCtx, activation, result.Publication, intent); dispatchErr != nil {
 		err = errors.Join(err, dispatchErr)
 	}
 	return result, err
+}
+
+func (l *Lifecycle) dispatchAcceptedOccurrence(ctx context.Context, activation Activation, publication runtimeengine.CommittedDurablePublication, intent runtimeengine.EmitIntent) error {
+	if activation.Command.OwnerKind != OwnerInstance {
+		return l.dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent})
+	}
+	dispatcher, ok := l.dispatcher.(runtimeengine.CommittedPublicationDispatcher)
+	if !ok {
+		return errors.New("instance clock requires its committed publication handoff owner")
+	}
+	return dispatcher.DispatchCommittedPublication(ctx, publication)
+}
+
+func (l *Lifecycle) validateInstanceHandoffOwner(command AdmissionCommand) error {
+	if command.OwnerKind != OwnerInstance {
+		return nil
+	}
+	if _, ok := l.dispatcher.(runtimeengine.CommittedPublicationDispatcher); !ok {
+		return errors.New("instance clock requires its committed publication handoff owner")
+	}
+	return nil
 }
 
 func (l *Lifecycle) admitOccurrencePreparation(ctx context.Context, wakeup Wakeup) (bool, error) {
@@ -520,6 +548,9 @@ func (l *Lifecycle) admitOccurrencePreparation(ctx context.Context, wakeup Wakeu
 		return false, err
 	}
 	if loadErr == nil {
+		if err := l.validateInstanceHandoffOwner(activation.Command); err != nil {
+			return false, err
+		}
 		if err := validateInstanceExecutionOwner(ctx, activation.Command); err != nil {
 			return false, err
 		}

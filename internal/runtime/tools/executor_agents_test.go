@@ -197,6 +197,21 @@ func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 			"schedule_key": "foreign-entity", "entity_id": "entity-other", "event_type": "root.timer.fired",
 			"mode": "absolute", "at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
 		}},
+		{name: "cron descriptor", input: map[string]any{
+			"schedule_key": "descriptor", "event_type": "root.timer.fired", "mode": "cron", "cron": "@daily",
+		}},
+		{name: "cron time zone", input: map[string]any{
+			"schedule_key": "zone", "event_type": "root.timer.fired", "mode": "cron", "cron": "CRON_TZ=Europe/Paris 0 9 * * *",
+		}},
+		{name: "impossible cron", input: map[string]any{
+			"schedule_key": "impossible", "event_type": "root.timer.fired", "mode": "cron", "cron": "0 0 31 2 *",
+		}},
+		{name: "stationary every", input: map[string]any{
+			"schedule_key": "stationary", "event_type": "root.timer.fired", "mode": "every", "every": "1ns",
+		}},
+		{name: "rounded every", input: map[string]any{
+			"schedule_key": "rounded", "event_type": "root.timer.fired", "mode": "every", "every": "1.5us",
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			exec, scheduler := newExecutor()

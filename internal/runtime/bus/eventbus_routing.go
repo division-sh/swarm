@@ -914,6 +914,10 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 		}
 		return runtimedeliverycontinuation.Fatal(ErrRunDispatchBlocked)
 	}
+	// Run admission below owns standing authorization, not receiver lifetime.
+	// Keep the already-accounted runtime carrier through that separate binding;
+	// coordinator retirement must cancel/join it without a fresh runtime Begin.
+	receiverParent := ctx
 	var standingLease *worklifetime.Lease
 	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, evt)
 	if err != nil {
@@ -950,7 +954,7 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	if err != nil {
 		return runtimedeliverycontinuation.Fatal(fmt.Errorf("project continuation receiver: %w", err))
 	}
-	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(ctx, projection, evt)
+	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(receiverParent, projection, evt)
 	if err != nil {
 		return runtimedeliverycontinuation.Fatal(fmt.Errorf("admit continuation receiver: %w", err))
 	}

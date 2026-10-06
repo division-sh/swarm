@@ -15,10 +15,12 @@ import (
 
 func TestClockScheduleBareEventAndConsumerLaw(t *testing.T) {
 	for _, tc := range []struct {
-		name, fields, pins, nodes, want string
+		name, fields, pins, nodes, agents, want string
 	}{
 		{name: "root export", pins: "pins:\n  outputs: [poll.tick]\n"},
 		{name: "actual local handler", nodes: "observer:\n  event_handlers:\n    poll.tick: {}\n"},
+		{name: "actual local agent", agents: "observer:\n  intent: {inline: 'Observe the clock.'}\n  model: regular\n  subscriptions: [poll.tick]\n  emit_events: []\n"},
+		{name: "unsubscribed local agent", agents: "observer:\n  intent: {inline: 'Observe nothing.'}\n  model: regular\n  subscriptions: []\n  emit_events: []\n", want: "actual consumer"},
 		{name: "dangling emission", want: "actual consumer"},
 		{name: "input is not consumer", pins: "pins:\n  inputs: [poll.tick]\n", want: "actual consumer"},
 		{name: "required field", fields: "  reason: text\n", pins: "pins:\n  outputs: [poll.tick]\n", want: "bare event"},
@@ -36,6 +38,11 @@ func TestClockScheduleBareEventAndConsumerLaw(t *testing.T) {
 			}
 			if tc.nodes != "" {
 				if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte(tc.nodes), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.agents != "" {
+				if err := os.WriteFile(filepath.Join(root, "agents.yaml"), []byte(tc.agents), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}

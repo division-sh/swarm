@@ -2812,19 +2812,31 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		releasePreparation()
 		releasePreparation = nil
 	}
-	for _, occurrence := range standingToRetire {
-		if err := occurrence.RetireAndWait(context.Background()); err != nil {
-			result.ShutdownErr = errors.Join(result.ShutdownErr, fmt.Errorf("retire standing process occurrence: %w", err))
+	joinStanding := func() {
+		for _, occurrence := range standingToRetire {
+			if err := occurrence.RetireAndWait(context.Background()); err != nil {
+				result.ShutdownErr = errors.Join(result.ShutdownErr, fmt.Errorf("retire standing process occurrence: %w", err))
+			}
 		}
 	}
 	if runtimeToShutdown == nil {
+		joinStanding()
 		return result
 	}
 	entry.shutdownMu.Lock()
 	defer entry.shutdownMu.Unlock()
 	if entry.shutdownComplete {
+		joinStanding()
 		return result
 	}
+	// A continuation may retain a standing authorization lease while its
+	// receiver executes under the independent runtime owner. Return those
+	// carriers before joining standing children; their parent leases must then
+	// settle before the runtime occurrence itself can join.
+	if runtimeToShutdown.deliveryContinuations != nil {
+		result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.deliveryContinuations.Retire(context.Background()))
+	}
+	joinStanding()
 	result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.ShutdownWithOptions(opts))
 	if result.ShutdownErr == nil {
 		entry.shutdownComplete = true

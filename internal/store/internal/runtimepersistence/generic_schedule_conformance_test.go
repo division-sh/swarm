@@ -73,6 +73,14 @@ func (d *terminalScheduleDispatcherProbe) DispatchPostCommit(context.Context, []
 	return nil
 }
 
+func (d *terminalScheduleDispatcherProbe) DispatchCommittedPublication(_ context.Context, publication runtimeengine.CommittedDurablePublication) error {
+	if err := publication.ValidateCommittedDurablePublication(); err != nil {
+		return err
+	}
+	d.calls++
+	return nil
+}
+
 func TestPostgresGenericScheduleEmptyTerminalPreparationTransfersExactClaim(t *testing.T) {
 	for _, terminalCase := range []string{"missing", "malformed"} {
 		t.Run(terminalCase, func(t *testing.T) {
