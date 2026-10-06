@@ -35,6 +35,15 @@ helper. Existing eventFixtureDialectForTest validates the admitted original
 native composition; none of these operations constructs a store or coordinator.
 Existing transaction probes prove one original read snapshot and zero writes.
 
+Executable-delivery SQL additionally belongs to the existing closed
+backend/delivery/read_projections.go owner: FixtureHandlerSelectionStorageTx
+and FixtureFanOutTriggeredIntentStorageTx hold the two fixed joins. The
+runtimepersistence operations below are their sole direct consumers, preserving
+validation and the original selected read transaction. Detached evidence aliases
+do not decode stored display labels, source coordinates, capsule bytes or status.
+The closed domain guard is independent of the authority census; passing the
+census never permits another executable-delivery SQL owner.
+
 | Family / Canonical Operation | Complete Touched Consumers | Old Path / Systematic Consumption |
 | --- | --- | --- |
 | Handler selection / ReadHandlerSelectionStorageForTest | assertPersistedHandlerRuleSelectionInFlow and its complete wrapper fanout; TestSelectionRetryAfterRealCASConflictBothStores | moved to owner; exact physical node selection columns and retry-zero row count preserved; old direct selection SQL removed |
@@ -109,10 +118,44 @@ sensitive formatting and now uses position-independent AST formatting. The first
 registry refresh identified79 new legitimate private-runtime-adapter rows; every
 row is a bounded native read operation, not an ordinary-site role change.
 
-Tier: core/core plus the 34 named roots. Final-head Local core and hosted CI are
-**pending**; no tier run on server2, push or PR is credited by this focused audit.
+Corrected tier (reviewer6013292686 and user direction): **CI lifecycle**;
+**Local core plus whole store-runtime-full-02, the enumerated native-store and
+runtime-owner structural guard roots, and all 34 named roots**. Final repaired-head
+qualification is pending. The previous f521 hosted core and original 34-root
+focused receipts are historical evidence, not the new head's qualification.
+The f521 server2 core was cancelled when approval was withdrawn; all its workers
+joined and no interrupted aggregate is credited. No new server2 run starts without
+the lead's explicit handover.
 Exact committed base/head complexity is mandatory before push. No timing budget,
 collector, planner, workload, deadline, skip or correctness assertion is relaxed.
+
+## Closed Delivery Owner Repair (Supersedes Original Guard Claim)
+
+Reviewer6013292686 independently reproduced new violations in
+test_handler_selection_storage.go and test_fan_out_storage.go, plus inherited
+master diagnostic SQL from #2572. Approval at f521 was withdrawn. These are
+same-concept siblings, not a different semantic concept or waived private SQL.
+The two new queries now live in the existing closed delivery projection file;
+exact query text, joins, argument order, physical columns, ordering, absent-row
+behavior and source/capsule bytes are retained. Both operations discard partial
+evidence on query, scan, row iteration, close or transaction failure. Public ports
+remain unchanged and SQL-free. The production domain guard and its owner map are
+unchanged. No compatibility path, renamed query or private-file allowance exists.
+
+Inherited master diagnostic violation is separately fixed by urgent #2575,
+d5cece6ac. Before that lands/rebase, the local unchanged domain guard now reports
+ONLY that inherited diagnostic, proving the two new joins were relocated, but
+this is still a red guard and not qualification. Rebase and final guard success
+are required before push. The exact pre-repair red and interrupted core receipts
+are retained. A preparation compile failure from removing a still-needed
+fanoutobligation import was fixed before qualification and earns no credit.
+
+Focused owner controls retain original both-store transaction probes, exact
+node/event/run/declaration sibling exclusion, raw display text, canonical identity
+refusal, cancelled/closed/unavailable storage and NULL-source partial-read refusal.
+Actual durable selection/CAS and compiled fan-out journeys remain among the
+unchanged 34 named final-head proofs; no workload is removed to make guards pass.
+The minimal scope is existing-owner repair, not another lifecycle framework.
 
 ## Parent And Tracking
 

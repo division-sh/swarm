@@ -3,13 +3,16 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	. "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -772,4 +775,87 @@ func FixtureNotifyAllChildrenDiagnosticTx(ctx context.Context, tx *sql.Tx) (sect
 		section.Rows = append(section.Rows, values)
 	}
 	return section, rows.Err()
+}
+
+// These observations retain physical columns, not live eligibility or normalized
+// lifecycle projections. Their caller owns the original selected read snapshot.
+type FixtureHandlerSelectionStorage struct {
+	DeliveryID   string
+	Context      string
+	Disposition  string
+	FlowPath     string
+	Family       string
+	SemanticPath string
+	DisplayLabel string
+}
+
+func FixtureHandlerSelectionStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (evidence []FixtureHandlerSelectionStorage, err error) {
+	if tx == nil {
+		return nil, fmt.Errorf("handler selection evidence requires a read transaction")
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT s.delivery_id, s.selection_context, s.disposition,
+		COALESCE(s.flow_path, ''), COALESCE(s.declaration_family, ''),
+		COALESCE(s.semantic_path, ''), s.display_label
+		FROM event_delivery_handler_rule_selections s
+		JOIN event_deliveries d ON d.delivery_id=s.delivery_id
+		WHERE d.event_id=$1 AND d.subscriber_type='node' ORDER BY s.delivery_id`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			evidence = nil
+		}
+	}()
+	for rows.Next() {
+		var row FixtureHandlerSelectionStorage
+		if err := rows.Scan(&row.DeliveryID, &row.Context, &row.Disposition, &row.FlowPath, &row.Family, &row.SemanticPath, &row.DisplayLabel); err != nil {
+			return nil, err
+		}
+		evidence = append(evidence, row)
+	}
+	return evidence, rows.Err()
+}
+
+type FixtureFanOutTriggeredIntentStorage struct {
+	TriggeringDeliveryID, SemanticDigest string
+	Capsule                              json.RawMessage
+	Source                               fanoutobligation.SourceRef
+	Cursor, Cardinality                  int
+	Status                               string
+}
+
+func FixtureFanOutTriggeredIntentStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, nodeKey string, ref runtimecontracts.FanOutElementRef) (evidence []FixtureFanOutTriggeredIntentStorage, err error) {
+	if tx == nil {
+		return nil, fmt.Errorf("fan-out trigger evidence requires a read transaction")
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT i.triggering_delivery_id,i.semantic_digest,i.capsule,
+		i.source_kind,COALESCE(CAST(i.source_event_id AS TEXT),''),COALESCE(CAST(i.source_run_id AS TEXT),''),COALESCE(CAST(i.source_entity_id AS TEXT),''),
+		i.source_field,COALESCE(CAST(i.source_mutation_id AS TEXT),''),i.cardinality,i.cursor,i.status
+		FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id
+		WHERE i.run_id=$1 AND d.event_id=$2 AND d.subscriber_type='node' AND d.subscriber_id=$3
+		AND i.flow_path=$4 AND i.declaration_family=$5 AND i.semantic_path=$6`,
+		runID, eventID, nodeKey, ref.FlowPath, ref.Family, ref.SemanticPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			evidence = nil
+		}
+	}()
+	for rows.Next() {
+		var row FixtureFanOutTriggeredIntentStorage
+		var capsule []byte
+		if err := rows.Scan(&row.TriggeringDeliveryID, &row.SemanticDigest, &capsule,
+			&row.Source.Kind, &row.Source.EventID, &row.Source.RunID, &row.Source.EntityID,
+			&row.Source.Field, &row.Source.MutationID, &row.Cardinality, &row.Cursor, &row.Status); err != nil {
+			return nil, err
+		}
+		row.Capsule = append(json.RawMessage(nil), capsule...)
+		evidence = append(evidence, row)
+	}
+	return evidence, rows.Err()
 }

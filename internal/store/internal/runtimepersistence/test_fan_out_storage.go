@@ -3,22 +3,16 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/google/uuid"
 )
 
-type FanOutTriggeredIntentStorageEvidence struct {
-	TriggeringDeliveryID, SemanticDigest string
-	Capsule                              json.RawMessage
-	Source                               fanoutobligation.SourceRef
-	Cursor, Cardinality                  int
-	Status                               string
-}
+type FanOutTriggeredIntentStorageEvidence = storedelivery.FixtureFanOutTriggeredIntentStorage
 
 type FanOutIntentOutcomeStorageEvidence struct {
 	Ordinal       int
@@ -49,32 +43,9 @@ func ReadFanOutTriggeredIntentStorageForTest(ctx context.Context, selected any, 
 	}
 	var evidence []FanOutTriggeredIntentStorageEvidence
 	read := func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT i.triggering_delivery_id,i.semantic_digest,i.capsule,
-			i.source_kind,COALESCE(CAST(i.source_event_id AS TEXT),''),COALESCE(CAST(i.source_run_id AS TEXT),''),COALESCE(CAST(i.source_entity_id AS TEXT),''),
-			i.source_field,COALESCE(CAST(i.source_mutation_id AS TEXT),''),i.cardinality,i.cursor,i.status
-			FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id
-			WHERE i.run_id=$1 AND d.event_id=$2 AND d.subscriber_type='node' AND d.subscriber_id=$3
-			AND i.flow_path=$4 AND i.declaration_family=$5 AND i.semantic_path=$6`,
-			runID, eventID, node.Key(), ref.FlowPath, ref.Family, ref.SemanticPath)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var row FanOutTriggeredIntentStorageEvidence
-			var capsule []byte
-			if err := rows.Scan(&row.TriggeringDeliveryID, &row.SemanticDigest, &capsule,
-				&row.Source.Kind, &row.Source.EventID, &row.Source.RunID, &row.Source.EntityID,
-				&row.Source.Field, &row.Source.MutationID, &row.Cardinality, &row.Cursor, &row.Status); err != nil {
-				return err
-			}
-			row.Capsule = append(json.RawMessage(nil), capsule...)
-			evidence = append(evidence, row)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		return rows.Close()
+		var err error
+		evidence, err = storedelivery.FixtureFanOutTriggeredIntentStorageTx(ctx, tx, runID, eventID, node.Key(), ref)
+		return err
 	}
 	var err error
 	switch owner := selected.(type) {
