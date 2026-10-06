@@ -281,6 +281,8 @@ func validateInterfaceField(subject string, field runtimecontracts.PackInterface
 
 type ChannelManifest struct {
 	source       yamlsource.Value
+	Transport    ChannelTransport                            `yaml:"transport"`
+	Capabilities CompiledChannelCapabilities                 `yaml:"capabilities"`
 	NativeInbox  *NativeInboxProfile                         `yaml:"native_inbox"`
 	Provider     string                                      `yaml:"provider"`
 	OpaqueTypes  map[string]runtimecontracts.ToolInputSchema `yaml:"opaque_types"`
@@ -292,6 +294,24 @@ type ChannelManifest struct {
 
 type ChannelActivationPosture string
 
+type ChannelTransport string
+
+const (
+	ChannelTransportWebhook ChannelTransport = "webhook"
+	ChannelTransportSession ChannelTransport = "session"
+)
+
+func (t ChannelTransport) ActivationPosture() (ChannelActivationPosture, error) {
+	switch t {
+	case ChannelTransportWebhook:
+		return ChannelActivationWebhookRegistration, nil
+	case ChannelTransportSession:
+		return ChannelActivationSessionConnection, nil
+	default:
+		return "", fmt.Errorf("channel transport must be webhook or session, got %q", t)
+	}
+}
+
 const (
 	ChannelActivationWebhookRegistration ChannelActivationPosture = "webhook_registration"
 	ChannelActivationSessionConnection   ChannelActivationPosture = "session_connection"
@@ -301,11 +321,9 @@ type ChannelIdentityCeremony string
 
 const (
 	ChannelCeremonyAuthenticatedTextChallenge ChannelIdentityCeremony = "authenticated_text_challenge"
-	ChannelCeremonyProviderPairing            ChannelIdentityCeremony = "provider_pairing"
 )
 
 type ChannelOnboardingProfile struct {
-	Activation             string                    `yaml:"activation"`
 	Ceremony               string                    `yaml:"ceremony"`
 	ProviderCredentialRole string                    `yaml:"provider_credential"`
 	SigningCredentialRole  string                    `yaml:"signing_credential,omitempty"`
@@ -345,7 +363,7 @@ func (p CompiledChannelOnboardingProfile) ConnectionHealth() string {
 	return p.connectionHealth.String()
 }
 
-func CompileChannelOnboardingProfile(provider string, profile ChannelOnboardingProfile, operations []string) (CompiledChannelOnboardingProfile, error) {
+func CompileChannelOnboardingProfile(provider string, transport ChannelTransport, profile ChannelOnboardingProfile, operations []string) (CompiledChannelOnboardingProfile, error) {
 	if len(profile.LearnedDestination) == 0 {
 		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding requires an explicit learned_destination relation")
 	}
@@ -353,17 +371,23 @@ func CompileChannelOnboardingProfile(provider string, profile ChannelOnboardingP
 	if err != nil {
 		return CompiledChannelOnboardingProfile{}, err
 	}
-	activation := ChannelActivationPosture(strings.TrimSpace(profile.Activation))
+	activation, err := transport.ActivationPosture()
+	if err != nil {
+		return CompiledChannelOnboardingProfile{}, err
+	}
 	ceremony := ChannelIdentityCeremony(strings.TrimSpace(profile.Ceremony))
 	if activation != ChannelActivationWebhookRegistration && activation != ChannelActivationSessionConnection {
 		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding activation must be webhook_registration or session_connection")
 	}
-	if ceremony != ChannelCeremonyAuthenticatedTextChallenge && ceremony != ChannelCeremonyProviderPairing {
-		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding ceremony must be authenticated_text_challenge or provider_pairing")
+	if ceremony != ChannelCeremonyAuthenticatedTextChallenge {
+		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding ceremony must be authenticated_text_challenge; provider readiness never identifies the operator")
 	}
-	providerCredential, err := admitChannelPlanIdentity("channel onboarding provider credential", profile.ProviderCredentialRole)
-	if err != nil {
-		return CompiledChannelOnboardingProfile{}, err
+	var providerCredential channelPlanIdentity
+	if activation == ChannelActivationWebhookRegistration || strings.TrimSpace(profile.ProviderCredentialRole) != "" {
+		providerCredential, err = admitChannelPlanIdentity("channel onboarding provider credential", profile.ProviderCredentialRole)
+		if err != nil {
+			return CompiledChannelOnboardingProfile{}, err
+		}
 	}
 	confirmation, err := admitChannelPlanIdentity("channel onboarding confirmation operation", profile.Confirmation)
 	if err != nil {
@@ -616,6 +640,8 @@ func validateChannelPath(raw string) error {
 }
 
 type SatisfactionPlan struct {
+	capabilities      CompiledChannelCapabilities
+	transport         ChannelTransport
 	nativeInbox       *CompiledNativeInboxProfile
 	interfaceRef      channelPlanIdentity
 	channel           PackIdentity
@@ -761,6 +787,16 @@ func (p SatisfactionPlan) Provider() string {
 	return p.provider.String()
 }
 
+func (p SatisfactionPlan) Capabilities() CompiledChannelCapabilities { return p.capabilities }
+func (p SatisfactionPlan) Transport() ChannelTransport               { return p.transport }
+func (p OutboundBindingPlan) Transport() ChannelTransport            { return p.structural.Transport() }
+func (p OutboundBindingPlan) Capabilities() CompiledChannelCapabilities {
+	return p.structural.Capabilities()
+}
+
+func (p SatisfactionPlan) HasNativeInbox() bool    { return p.nativeInbox != nil }
+func (p OutboundBindingPlan) HasNativeInbox() bool { return p.structural.HasNativeInbox() }
+
 func (p SatisfactionPlan) InterfaceIdentity() (operatorchannel.InterfaceIdentity, error) {
 	generation, err := p.Generation()
 	if err != nil {
@@ -870,6 +906,7 @@ func (p SatisfactionPlan) ProjectActionFact(eventName string, authorization runt
 		return operatorchannel.ActionFact{}, false, err
 	}
 	fact := operatorchannel.ActionFact{
+		Kind:      operatorchannel.ActionSourceCallback,
 		Interface: identity, ExternalAccountRef: account, ConversationRef: conversation,
 		ConversationScope: operatorchannel.ConversationScope(scope), MessageReference: message,
 		InteractionRef: interaction, Token: token,
@@ -945,6 +982,9 @@ func (p SatisfactionPlan) EventFieldSchema(eventName, fieldName string) (runtime
 }
 
 func (p SatisfactionPlan) ConnectorOperation(name string) (string, runtimecontracts.ToolSchemaEntry, error) {
+	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
+		return "", runtimecontracts.ToolSchemaEntry{}, err
+	}
 	operation, ok := p.operations[strings.TrimSpace(name)]
 	if !ok {
 		return "", runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("channel operation %q is not compiled", name)
@@ -953,6 +993,9 @@ func (p SatisfactionPlan) ConnectorOperation(name string) (string, runtimecontra
 }
 
 func (p SatisfactionPlan) OperationEffectClass(name string) (runtimecontracts.ActivityEffectClass, error) {
+	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
+		return "", err
+	}
 	operation, ok := p.operations[strings.TrimSpace(name)]
 	if !ok {
 		return "", fmt.Errorf("channel operation %q is not compiled", name)
@@ -1092,6 +1135,9 @@ func (p OutboundBindingPlan) ConnectorOperation(operation string) (string, runti
 }
 
 func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (string, map[string]any, error) {
+	if err := p.structural.requireOperation(strings.TrimSpace(operation)); err != nil {
+		return "", nil, err
+	}
 	compiled, ok := p.structural.operations[strings.TrimSpace(operation)]
 	if !ok {
 		return "", nil, fmt.Errorf("channel operation %q is not compiled", operation)
@@ -1162,6 +1208,9 @@ func (p OutboundBindingPlan) CapabilitySubject() (Subject, error) {
 }
 
 func (p SatisfactionPlan) OperationTool(name string) (runtimecontracts.ToolSchemaEntry, error) {
+	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
+		return runtimecontracts.ToolSchemaEntry{}, err
+	}
 	operation, ok := p.operations[strings.TrimSpace(name)]
 	if !ok {
 		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("channel operation %q is not compiled", name)
@@ -1172,6 +1221,9 @@ func (p SatisfactionPlan) OperationTool(name string) (runtimecontracts.ToolSchem
 // OperationInputSchema is the provider-neutral operation input after applying
 // the finite constraints selected from the concrete connector generation.
 func (p SatisfactionPlan) OperationInputSchema(name string) (runtimecontracts.ToolInputSchema, error) {
+	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
+		return runtimecontracts.ToolInputSchema{}, err
+	}
 	operation, ok := p.operations[strings.TrimSpace(name)]
 	if !ok {
 		return runtimecontracts.ToolInputSchema{}, fmt.Errorf("channel operation %q is not compiled", name)
@@ -1244,6 +1296,9 @@ func replaceChannelSchemaPathValue(current runtimecontracts.ToolInputSchema, par
 }
 
 func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any) (map[string]any, error) {
+	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
+		return nil, err
+	}
 	operation, ok := p.operations[strings.TrimSpace(name)]
 	if !ok {
 		return nil, fmt.Errorf("channel operation %q is not compiled", name)
@@ -1266,6 +1321,9 @@ func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any)
 }
 
 func (p SatisfactionPlan) ProjectOperationOutput(name string, result any) (map[string]any, error) {
+	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
+		return nil, err
+	}
 	operation, ok := p.operations[strings.TrimSpace(name)]
 	if !ok {
 		return nil, fmt.Errorf("channel operation %q is not compiled", name)
@@ -1386,6 +1444,16 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	if !ok {
 		return SatisfactionPlan{}, fmt.Errorf("channel pack %q implements unknown interface %q", channel.Envelope.ID, interfaceRef.String())
 	}
+	if _, err := CompileChannelCapabilities(channel.Manifest.Capabilities.Vector()); err != nil {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q capabilities: %w", channel.Envelope.ID, err)
+	}
+	if _, err := channel.Manifest.Transport.ActivationPosture(); err != nil {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q transport: %w", channel.Envelope.ID, err)
+	}
+	definition, err = selectChannelCapabilityDefinition(definition, channel.Manifest.Capabilities, channel.Manifest.NativeInbox != nil)
+	if err != nil {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q capability contract: %w", channel.Envelope.ID, err)
+	}
 	trigger, err := resolveTriggerDependency(channel, triggers)
 	if err != nil {
 		return SatisfactionPlan{}, err
@@ -1425,6 +1493,8 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		return SatisfactionPlan{}, err
 	}
 	plan := SatisfactionPlan{
+		capabilities: channel.Manifest.Capabilities,
+		transport:    channel.Manifest.Transport,
 		interfaceRef: interfaceRef,
 		channel:      identityFromEnvelope(channel.Envelope, channel.Source), trigger: trigger.Identity, connector: connector.Identity,
 		provider: provider, triggerGeneration: trigger.Generation, opaqueTypes: cloneSchemaMap(channel.Manifest.OpaqueTypes),
@@ -1456,7 +1526,7 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		}
 		drafts[name] = channelOperationDraft{name: operationID, tool: toolID, toolSchema: tool, effect: effect, input: binding.Input, output: binding.Output, interfaceValue: operation}
 	}
-	plan.constraints, err = compileSelectedChannelConstraints(drafts, plan.schemas, plan.opaqueTypes)
+	plan.constraints, err = compileSelectedChannelConstraints(drafts, plan.schemas, plan.opaqueTypes, plan.capabilities.Vector().ActionsAsButtons)
 	if err != nil {
 		return SatisfactionPlan{}, err
 	}
@@ -1512,7 +1582,7 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		}
 	}
 	if channel.Manifest.Onboarding != nil {
-		compiled, compileErr := CompileChannelOnboardingProfile(provider.String(), *channel.Manifest.Onboarding, sortedKeys(plan.operations))
+		compiled, compileErr := CompileChannelOnboardingProfile(provider.String(), channel.Manifest.Transport, *channel.Manifest.Onboarding, sortedKeys(plan.operations))
 		if compileErr != nil {
 			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding: %w", channel.Envelope.ID, compileErr)
 		}
@@ -1572,7 +1642,7 @@ type selectedChannelConstraint struct {
 	requireMax bool
 }
 
-func compileSelectedChannelConstraints(operations map[string]channelOperationDraft, schemas, opaqueTypes map[string]runtimecontracts.ToolInputSchema) (map[string]runtimecontracts.ToolInputSchema, error) {
+func compileSelectedChannelConstraints(operations map[string]channelOperationDraft, schemas, opaqueTypes map[string]runtimecontracts.ToolInputSchema, buttons bool) (map[string]runtimecontracts.ToolInputSchema, error) {
 	definitions := []selectedChannelConstraint{
 		{key: "presentation.text", sourcePath: "input.presentation.text", requireMax: true},
 		{key: "actions", sourcePath: "input.actions", requireMax: true},
@@ -1581,10 +1651,32 @@ func compileSelectedChannelConstraints(operations map[string]channelOperationDra
 	}
 	constraints := make(map[string]runtimecontracts.ToolInputSchema, len(definitions))
 	for _, definition := range definitions {
+		if !buttons && definition.sourcePath == "input.actions" {
+			controls, found := schemas["text_reply_controls"]
+			if !found {
+				return nil, fmt.Errorf("text/reply baseline requires finite text_reply_controls")
+			}
+			selected := controls
+			if definition.itemField != "" {
+				items, found := controls.ItemsSchema()
+				if !found {
+					return nil, fmt.Errorf("text/reply controls require item schema")
+				}
+				selected, found = items.Property(definition.itemField)
+				if !found {
+					return nil, fmt.Errorf("text/reply controls require %s", definition.itemField)
+				}
+			}
+			constraints[definition.key] = selected
+			continue
+		}
 		var selected *runtimecontracts.ToolInputSchema
 		for _, operationName := range []string{"deliver", "edit"} {
 			operation, ok := operations[operationName]
 			if !ok {
+				if operationName == "edit" {
+					continue
+				}
 				return nil, fmt.Errorf("selected channel constraint %q requires operation %q", definition.key, operationName)
 			}
 			interfaceSchema, err := selectedConstraintInterfaceSchema(operation, definition, schemas, opaqueTypes)

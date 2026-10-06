@@ -228,7 +228,7 @@ func selectedChannelConfirmationAuthorityFixture(
 	}
 	admissions := []channelonboarding.CredentialAdmission{{
 		Role: "bot_token", StoreKey: "telegram_bot_token." + string(state), Kind: channelonboarding.CredentialAdmissionWritten,
-		Receipt: "receipt-" + string(state), ValueSeal: operatorChannelProviderEvidence().Seal,
+		Receipt: "receipt-" + string(state), ValueSeal: operatorChannelProviderAuthority().Credential.Seal,
 	}}
 	op, err = selected.AdvanceChannelOnboarding(context.Background(), channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,

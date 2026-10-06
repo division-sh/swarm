@@ -415,7 +415,7 @@ func TestCredentialRotationBeforeConfirmationResetsParentAndAdmitsReplacement(t 
 				identities := &cancellationTestIdentities{
 					operation: operatorchannel.Operation{
 						OperationID: identityID, OnboardingOperationID: parentID, State: operatorchannel.StateCredentialStale,
-						Revision: 3, ProviderCredential: runtimecredentials.ValueEvidence{Key: admissions[0].StoreKey, Seal: admissions[0].ValueSeal},
+						Revision: 3, ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: runtimecredentials.ValueEvidence{Key: admissions[0].StoreKey, Seal: admissions[0].ValueSeal}},
 					},
 					binding: operatorchannel.Binding{PrincipalID: "principal-a", Interface: candidate.Interface, Revision: 3, Status: operatorchannel.BindingCurrent},
 				}
@@ -549,12 +549,12 @@ func TestBoundCredentialStaleIdentityResetsParentIntoExactReconnect(t *testing.T
 	identities := &cancellationTestIdentities{
 		operation: operatorchannel.Operation{
 			OperationID: identityID, OnboardingOperationID: parentID, State: operatorchannel.StateBound,
-			Revision: 3, BindingRevision: 1, ProviderCredential: runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal},
+			Revision: 3, BindingRevision: 1, ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}},
 		},
 		binding: operatorchannel.Binding{
 			PrincipalID: "principal-a", Interface: candidate.Interface, Revision: 1, Status: operatorchannel.BindingCurrent,
 			ExternalAccountRef: "account-a", ConversationRef: "conversation-a", ConversationScope: operatorchannel.ConversationScopeDirect,
-			ProviderCredential: runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal},
+			ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}},
 		},
 		bindingErr: operatorchannel.ErrCredentialStale,
 	}
@@ -1041,7 +1041,7 @@ func TestReconnectRequiresFreshConfirmationWhenRequestedProofPostureIsNotCurrent
 			identities := &cancellationTestIdentities{
 				binding: operatorchannel.Binding{
 					PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a",
-					Revision: 3, Status: operatorchannel.BindingCurrent, ProofID: test.proofID, ProviderCredential: bindingCredential,
+					Revision: 3, Status: operatorchannel.BindingCurrent, ProofID: test.proofID, ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: bindingCredential},
 				},
 				proofCurrent: test.proofCurrent, proofCurrentSet: true,
 			}
@@ -2224,7 +2224,7 @@ func (i *cancellationTestIdentities) Principal() (operatorchannel.Principal, err
 	return operatorchannel.Principal{ID: "principal-a"}, nil
 }
 
-func (i *cancellationTestIdentities) Begin(ctx context.Context, _ string, kind operatorchannel.OperationKind, expectedRevision int64, requestKey, requestHash, onboardingOperationID string, providerCredential runtimecredentials.ValueEvidence, _ bool, _ time.Time) (operatorchannel.Operation, error) {
+func (i *cancellationTestIdentities) Begin(ctx context.Context, _ string, kind operatorchannel.OperationKind, expectedRevision int64, requestKey, requestHash, onboardingOperationID string, providerCredential operatorchannel.ProviderAuthority, _ bool, _ time.Time) (operatorchannel.Operation, error) {
 	i.observe(ctx)
 	i.beginCalls++
 	i.beginKind = kind
@@ -2237,13 +2237,13 @@ func (i *cancellationTestIdentities) Begin(ctx context.Context, _ string, kind o
 	if i.operation.OperationID == "" || i.operation.State == operatorchannel.StateCredentialStale {
 		i.operation = operatorchannel.Operation{
 			OperationID: uuid.NewString(), State: operatorchannel.StateAwaitingClaim, Revision: 1,
-			OnboardingOperationID: onboardingOperationID, ProviderCredential: providerCredential,
+			OnboardingOperationID: onboardingOperationID, ProviderAuthority: providerCredential,
 		}
 	}
 	if i.bindOnBegin {
 		i.binding.Revision = expectedRevision + 1
 		i.binding.Status = operatorchannel.BindingCurrent
-		i.binding.ProviderCredential = providerCredential
+		i.binding.ProviderAuthority = providerCredential
 		i.operation.State = operatorchannel.StateBound
 		i.operation.BindingRevision = i.binding.Revision
 	}

@@ -234,7 +234,7 @@ func TestRuntimeContextRetirementRetainsCurrentBindingCredentialOnly(t *testing.
 		calls: &calls, identity: identity, principal: operatorchannel.Principal{ID: "principal-a"},
 		binding: operatorchannel.Binding{
 			Interface: identity, Revision: 4, Status: operatorchannel.BindingCurrent,
-			ProviderCredential: runtimecredentials.ValueEvidence{Key: provider.StoreKey, Seal: provider.ValueSeal},
+			ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: runtimecredentials.ValueEvidence{Key: provider.StoreKey, Seal: provider.ValueSeal}},
 		},
 	}
 	service, err := NewDestructiveService(store, identities, credentials, recordingActivationRefresher{calls: &calls}, testTeardownNow, nil)
@@ -366,7 +366,7 @@ func TestChannelProofRevokeRecoveryReplaysCommittedProofFileBeforeResponsibility
 		Method: "manual", Challenge: operatorchannel.ChallengePrefix + "AAAAAAAAAAAAAAAA",
 		OriginalOperationID: "proof-operation-a", MintingStoreID: "store-a", MintingDeploymentID: "deployment-a",
 		VerifiedAt: now, OperatorConfirmed: true, ConsentScopes: []operatorchannel.ConsentScope{operatorchannel.ConsentNotify},
-		ProviderCredential: providerEvidence,
+		ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: providerEvidence},
 	}
 	if err := proofs.Put(ctx, proof); err != nil {
 		t.Fatal(err)

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
@@ -159,18 +161,14 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 
 func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, postgres, lock bool) (bool, error) {
 	d := authority.ChannelDelivery
-	query := `SELECT p.delivery_id FROM channel_delivery_plans p
+	query := `SELECT p.delivery_id, r.render_input, r.render_hash FROM channel_delivery_plans p
 		JOIN channel_delivery_renders r ON r.delivery_id=p.delivery_id
-		LEFT JOIN operator_channel_text_intents intent ON intent.publication_id=p.source_id
-		LEFT JOIN operator_channel_action_intents action ON action.publication_id=p.source_id
 		JOIN channel_delivery_defaults selected ON selected.singleton_id=1
 		JOIN operator_channel_bindings binding ON binding.interface_key=p.interface_key
 		JOIN connected_channel_activations activation ON activation.activation_id=?
 		JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 		WHERE p.delivery_id=? AND p.source_kind='response' AND p.state='rendered'
 		AND p.current_render_id=r.render_id AND r.render_id=? AND r.render_hash=?
-		AND ((intent.state='settled' AND intent.disposition IN ('entry','teaching','chooser') AND action.publication_id IS NULL)
-		  OR (action.state='settled' AND action.disposition='navigation' AND intent.publication_id IS NULL))
 		AND p.principal_id=? AND p.interface_key=? AND p.delivery_epoch=?
 		AND p.external_account_reference=? AND p.conversation_reference=?
 		AND selected.state='current' AND selected.principal_id=p.principal_id
@@ -201,18 +199,14 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		d.PackInventoryGeneration, d.RuntimeInstanceID, d.ContextPublicationGeneration,
 		d.PlanGeneration.Diagnostic(), d.TargetGeneration, d.EffectOperationID}
 	if postgres {
-		query = `SELECT p.delivery_id::text FROM channel_delivery_plans p
+		query = `SELECT p.delivery_id::text, r.render_input, r.render_hash FROM channel_delivery_plans p
 			JOIN channel_delivery_renders r ON r.delivery_id=p.delivery_id
-			LEFT JOIN operator_channel_text_intents intent ON intent.publication_id=p.source_id
-			LEFT JOIN operator_channel_action_intents action ON action.publication_id=p.source_id
 			JOIN channel_delivery_defaults selected ON selected.singleton_id=1
 			JOIN operator_channel_bindings binding ON binding.interface_key=p.interface_key
 			JOIN connected_channel_activations activation ON activation.activation_id=$1::uuid
 			JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 			WHERE p.delivery_id=$2::uuid AND p.source_kind='response' AND p.state='rendered'
 			AND p.current_render_id=r.render_id AND r.render_id=$3::uuid AND r.render_hash=$4
-			AND ((intent.state='settled' AND intent.disposition IN ('entry','teaching','chooser') AND action.publication_id IS NULL)
-			  OR (action.state='settled' AND action.disposition='navigation' AND intent.publication_id IS NULL))
 			AND p.principal_id=$5::uuid AND p.interface_key=$6 AND p.delivery_epoch=$7
 			AND p.external_account_reference=$8 AND p.conversation_reference=$9
 			AND selected.state='current' AND selected.principal_id=p.principal_id
@@ -244,15 +238,27 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 	if postgres && lock {
 		query += ` FOR UPDATE OF p, selected, binding, activation`
 	}
-	var id string
-	err := q.QueryRowContext(ctx, query, args...).Scan(&id)
+	var id, hash string
+	var raw []byte
+	err := q.QueryRowContext(ctx, query, args...).Scan(&id, &raw, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("check exact channel response authority: %w", err)
 	}
-	return id == d.DeliveryID, nil
+	if id != d.DeliveryID {
+		return false, nil
+	}
+	raw, err = canonicaljson.Canonicalize(raw)
+	if err != nil {
+		return false, err
+	}
+	frozen, err := render.Decode(raw, hash)
+	if err != nil {
+		return false, err
+	}
+	return channeldelivery.ResponseSourceCurrent(ctx, q, frozen, postgres, lock)
 }
 
 // Both source queries bind the same nineteen authority coordinates. Receipt

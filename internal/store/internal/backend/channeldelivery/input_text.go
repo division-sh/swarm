@@ -116,7 +116,7 @@ func RequireChosenInputDraftTx(ctx context.Context, tx *sql.Tx, action operatorc
 // one transaction. A final answer belongs to the canonical decision mutation.
 func AdvancePartialInputDraftTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
 	at time.Time, draftID string, postgres bool) (decisioncard.InputFieldProgress, error) {
-	_, resolved, err := RequireCurrentInputDraftTx(ctx, tx, text, at, draftID, true, postgres)
+	candidate, resolved, err := RequireCurrentInputDraftTx(ctx, tx, text, at, draftID, true, postgres)
 	if err != nil {
 		return decisioncard.InputFieldProgress{}, err
 	}
@@ -135,6 +135,9 @@ func AdvancePartialInputDraftTextTx(ctx context.Context, tx *sql.Tx, text operat
 		return decisioncard.InputFieldProgress{}, fmt.Errorf("channel input progress changed before settlement")
 	}
 	if err := SettleTextIntentTx(ctx, tx, text, "input_progressed", postgres); err != nil {
+		return decisioncard.InputFieldProgress{}, err
+	}
+	if err := PlanInputPromptForTextTx(ctx, tx, text, candidate.CardID, draftID, postgres); err != nil {
 		return decisioncard.InputFieldProgress{}, err
 	}
 	return progress, nil
@@ -177,7 +180,7 @@ func RequireCurrentSkipActionTx(ctx context.Context, tx *sql.Tx, action operator
 	if err != nil {
 		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, err
 	}
-	if !found || !resolved.CurrentRender || resolved.SourceKind != PlanCard ||
+	if !found || !resolved.CurrentRender || resolved.TargetCardID() == "" ||
 		resolved.Action.Kind != "skip_input" || uuid.Validate(resolved.Action.DraftID) != nil {
 		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, fmt.Errorf("channel skip has no current prompt")
 	}
@@ -191,7 +194,8 @@ func RequireCurrentSkipActionTx(ctx context.Context, tx *sql.Tx, action operator
 	if err != nil {
 		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, err
 	}
-	if draft.CardID != resolved.SourceID {
+	if draft.CardID != resolved.TargetCardID() ||
+		(resolved.Action.ParentReceiptOperationID != "" && draft.DeliveryReceiptID != resolved.Action.ParentReceiptOperationID) {
 		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, fmt.Errorf("channel skip draft contradicts current card")
 	}
 	return resolved, progress, draft, nil
@@ -214,6 +218,9 @@ func AdvancePartialSkipActionTx(ctx context.Context, tx *sql.Tx, action operator
 		return decisioncard.InputFieldProgress{}, fmt.Errorf("channel skip progress changed before settlement")
 	}
 	if err := SettleAppliedActionIntentTx(ctx, tx, action, render.ActionApplied, postgres); err != nil {
+		return decisioncard.InputFieldProgress{}, err
+	}
+	if err := PlanInputPromptForActionTx(ctx, tx, action, draft.CardID, draft.InputDraftID, postgres); err != nil {
 		return decisioncard.InputFieldProgress{}, err
 	}
 	return progress, nil
@@ -240,6 +247,9 @@ func AdvancePartialChosenInputDraftTextTx(ctx context.Context, tx *sql.Tx, actio
 		return decisioncard.InputFieldProgress{}, fmt.Errorf("chosen input progress changed before settlement")
 	}
 	if err := SettleAppliedActionIntentTx(ctx, tx, action, render.ActionApplied, postgres); err != nil {
+		return decisioncard.InputFieldProgress{}, err
+	}
+	if err := PlanInputPromptForActionTx(ctx, tx, action, candidate.CardID, candidate.DraftID, postgres); err != nil {
 		return decisioncard.InputFieldProgress{}, err
 	}
 	return progress, nil

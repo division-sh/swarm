@@ -99,7 +99,7 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 			business := 0
 			for _, operation := range []string{"/v2/deliver", "/v2/edit"} {
 				for _, input := range p.calls[operation] {
-					if !objectChannelPresentationValid(input) {
+					if !objectChannelPresentationValid(input, false) {
 						t.Fatalf("actual %s exceeded the independent compiled bounds: %#v", operation, input)
 					}
 					if operation == "/v2/deliver" && input["queue"] == "queue-b" && input["body"] == "approved-effect" {

@@ -119,7 +119,7 @@ func TestFileProofStoreClassifiesV1WithoutDecodingAuthorityAndQuarantinesOnFresh
 		t.Fatalf("v1 quarantine = %q, %v", quarantined, err)
 	}
 	current, found, err := store.Get(context.Background(), proof.Interface)
-	if err != nil || !found || current.ProofID != proof.ProofID || current.ProviderCredential != proof.ProviderCredential {
+	if err != nil || !found || current.ProofID != proof.ProofID || current.ProviderAuthority != proof.ProviderAuthority {
 		t.Fatalf("fresh v2 proof = %#v, found=%v err=%v", current, found, err)
 	}
 }
@@ -132,14 +132,18 @@ func testVerifiedProof(at time.Time) VerifiedProof {
 		ConversationScope: ConversationScopeDirect, AccountPresentation: "@operator", Method: "connect",
 		Challenge: "SWARM-AAAAAAAAAAAAAAAA", OriginalOperationID: uuid.NewString(), MintingStoreID: uuid.NewString(),
 		MintingDeploymentID: uuid.NewString(), VerifiedAt: at, OperatorConfirmed: true,
-		ConsentScopes:      []ConsentScope{ConsentNotify, ConsentDecide},
-		ProviderCredential: runtimecredentials.ValueEvidence{Key: "channel.telegram.provider", Seal: runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat("a", 64))},
+		ConsentScopes:     []ConsentScope{ConsentNotify, ConsentDecide},
+		ProviderAuthority: ProviderAuthority{Kind: ProviderAuthorityCredential, Credential: runtimecredentials.ValueEvidence{Key: "channel.telegram.provider", Seal: runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat("a", 64))}},
 	}
 }
 
 func mustProofRecordJSON(t *testing.T, proof VerifiedProof) string {
 	t.Helper()
-	raw, err := json.Marshal(recordFromProof(proof))
+	record, err := recordFromProof(proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -27,7 +28,7 @@ func TestChannelOnboardingPendingResetInterruptionSelectedStoreParity(t *testing
 						begun, account, retained := beginPendingResetJourney(t, rig, channelonboarding.VerbConnect, true, inherited)
 						claimed := claimPendingResetJourney(t, rig, begun, account, true)
 						before := rig.parent(t, begun.Operation.OperationID)
-						if err := rig.file.Set(ctx, claimed.ProviderCredential.Key, "corrected-value"); err != nil {
+						if err := rig.file.Set(ctx, claimed.ProviderAuthority.Credential.Key, "corrected-value"); err != nil {
 							t.Fatal(err)
 						}
 						interrupted := errors.New("pending reset interrupted")
@@ -47,7 +48,7 @@ func TestChannelOnboardingPendingResetInterruptionSelectedStoreParity(t *testing
 						if boundary != channelonboarding.TestAfterPendingResetCommit && !reflect.DeepEqual(checkpoint, before) {
 							t.Fatalf("cleanup responsibility changed before commit: %#v", checkpoint)
 						}
-						if value, found, err := rig.file.Get(ctx, claimed.ProviderCredential.Key); err != nil || !found || value != "corrected-value" {
+						if value, found, err := rig.file.Get(ctx, claimed.ProviderAuthority.Credential.Key); err != nil || !found || value != "corrected-value" {
 							t.Fatalf("cleanup removed corrected value: %q %t %v", value, found, err)
 						}
 						rig.testBarrier = nil
@@ -95,7 +96,7 @@ func TestChannelOnboardingPendingResetSelectedStoreFences(t *testing.T) {
 						t.Fatal(err)
 					}
 				default:
-					if err := rig.file.Set(ctx, claimed.ProviderCredential.Key, "corrected-value"); err != nil {
+					if err := rig.file.Set(ctx, claimed.ProviderAuthority.Credential.Key, "corrected-value"); err != nil {
 						t.Fatal(err)
 					}
 					if _, _, err := rig.identities.Confirm(ctx, claimed.OperationID, claimed.Revision, true, rig.now); !errors.Is(err, operatorchannel.ErrCredentialStale) {
@@ -137,7 +138,16 @@ func TestChannelOnboardingPendingResetSelectedStoreFences(t *testing.T) {
 					db, _ := pendingResetTestDB(t, fixture.store)
 					column, value := "onboarding_operation_id", any(uuid.NewString())
 					if change == "wrong_evidence" {
-						column, value = "provider_credential_key", "unadmitted-key"
+						record, err := claimed.ProviderAuthority.PrivateRecord()
+						if err != nil {
+							t.Fatal(err)
+						}
+						record.CredentialKey = "unadmitted-key"
+						raw, err := json.Marshal(record)
+						if err != nil {
+							t.Fatal(err)
+						}
+						column, value = "provider_authority", string(raw)
 					}
 					if change == "wrong_predecessor" {
 						column, value = "expected_binding_revision", parent.BindingRevision+1
@@ -193,7 +203,7 @@ func TestChannelOnboardingPendingResetIdentityJoinSelectedStoreParity(t *testing
 			begun, account, retained := beginPendingResetJourney(t, rig, channelonboarding.VerbConnect, false, true)
 			child := claimPendingResetJourney(t, rig, begun, account, true)
 			ctx := context.Background()
-			if err := rig.file.Set(ctx, child.ProviderCredential.Key, "rotated"); err != nil {
+			if err := rig.file.Set(ctx, child.ProviderAuthority.Credential.Key, "rotated"); err != nil {
 				t.Fatal(err)
 			}
 			if _, _, err := rig.identities.Confirm(ctx, child.OperationID, child.Revision, true, rig.now); !errors.Is(err, operatorchannel.ErrCredentialStale) {
@@ -203,7 +213,7 @@ func TestChannelOnboardingPendingResetIdentityJoinSelectedStoreParity(t *testing
 			db, postgres := pendingResetTestDB(t, rig.fixture.store)
 			for _, mismatch := range []string{"principal", "interface", "binding_interface"} {
 				t.Run(mismatch, func(t *testing.T) {
-					req := identityowner.StaleOnboardingChildRequest{ParentID: parent.OperationID, PrincipalID: parent.PrincipalID, Interface: parent.Interface, ChildID: child.OperationID, RetainedBindingRevision: retained, AdmittedCredentials: []credentials.ValueEvidence{child.ProviderCredential}}
+					req := identityowner.StaleOnboardingChildRequest{ParentID: parent.OperationID, PrincipalID: parent.PrincipalID, Interface: parent.Interface, ChildID: child.OperationID, RetainedBindingRevision: retained, AdmittedCredentials: []credentials.ValueEvidence{child.ProviderAuthority.Credential}}
 					if mismatch == "principal" {
 						req.PrincipalID = uuid.NewString()
 					}

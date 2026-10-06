@@ -60,10 +60,10 @@ func (d *serveChannelDeliveryDispatcher) processCardAction(ctx context.Context, 
 	if err != nil {
 		return channelCardActionResult{}, err
 	}
-	if !found || resolved.SourceKind != "card" {
+	if !found || resolved.TargetCardID() == "" {
 		return channelCardActionResult{}, fmt.Errorf("channel callback has no current card receipt")
 	}
-	card, err := d.cards.GetDecisionCard(ctx, resolved.SourceID)
+	card, err := d.cards.GetDecisionCard(ctx, resolved.TargetCardID())
 	if err != nil {
 		return channelCardActionResult{}, err
 	}
@@ -291,6 +291,12 @@ func (d *serveChannelDeliveryDispatcher) currentChannelActionActivation(ctx cont
 }
 
 func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Context, pending runtimechanneldelivery.PendingAction, resolved runtimechanneldelivery.ResolvedAction) error {
+	if err := pending.Fact.Validate(); err != nil {
+		return err
+	}
+	if pending.Fact.Kind == operatorchannel.ActionSourceReply {
+		return nil
+	}
 	if d == nil || d.activations == nil || d.manager == nil || d.effects == nil || d.credentials == nil || d.now == nil || !d.posture.Valid() {
 		return fmt.Errorf("channel callback acknowledgment owners are unavailable")
 	}
@@ -487,13 +493,17 @@ func (d *serveChannelDeliveryDispatcher) currentCompiledDelivery(ctx context.Con
 	return selected, compiled.Plan, lease, nil
 }
 
-func (d *serveChannelDeliveryDispatcher) selectedPresentationBounds(ctx context.Context, candidate runtimechanneldelivery.Candidate) (packs.PresentationBounds, error) {
+func (d *serveChannelDeliveryDispatcher) selectedPresentation(ctx context.Context, candidate runtimechanneldelivery.Candidate) (packs.PresentationBounds, packs.CompiledChannelCapabilities, error) {
 	_, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
-		return packs.PresentationBounds{}, err
+		return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
 	}
 	defer lease.Release()
-	return plan.PresentationBounds()
+	if err := plan.RequireExecutableProvider(); err != nil {
+		return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
+	}
+	bounds, err := plan.PresentationBounds()
+	return bounds, plan.Capabilities(), err
 }
 
 func validateChannelDispatch(candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
@@ -522,6 +532,12 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		return err
 	}
 	defer lease.Release()
+	if err := plan.RequireExecutableProvider(); err != nil {
+		return err
+	}
+	if err := plan.RequireOperation(operation); err != nil {
+		return err
+	}
 	ctx, err = withChannelProviderAdmission(ctx, lease, plan)
 	if err != nil {
 		return err
@@ -529,7 +545,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	if err := d.reconcileNativeInboxActivation(ctx, selected); err != nil {
 		return fmt.Errorf("channel delivery recovery entry is unavailable: %w", err)
 	}
-	presentation, _, err := runtimechanneldelivery.PresentationText(prepared.Frozen)
+	presentation, err := runtimechanneldelivery.TextReplyPresentation(prepared.Frozen, prepared.Actions)
 	if err != nil {
 		return err
 	}
@@ -549,6 +565,9 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	}
 	semanticInput := map[string]any{
 		"presentation": map[string]any{"text": presentation}, "actions": actions,
+	}
+	if !plan.Capabilities().Vector().ActionsAsButtons {
+		semanticInput = map[string]any{"presentation": map[string]any{"text": presentation}}
 	}
 	if operation == "edit" {
 		semanticInput["delivery_reference"] = previousReference

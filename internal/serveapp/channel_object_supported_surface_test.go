@@ -622,6 +622,7 @@ type objectChannelProvider struct {
 	businessResponse  *objectChannelResponsePause
 	editResponse      *objectChannelResponsePause
 	editReference     string
+	textOnly          bool
 }
 
 func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -635,6 +636,11 @@ func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 	}
 	p.calls[r.URL.Path] = append(p.calls[r.URL.Path], input)
+	if p.textOnly && r.URL.Path != "/v2/deliver" && r.URL.Path != "/v2/identify" &&
+		r.URL.Path != "/v2/register" && r.URL.Path != "/v2/registration" {
+		http.Error(w, "operation not provided by text/reply channel", http.StatusBadRequest)
+		return
+	}
 	output := map[string]any{}
 	switch r.URL.Path {
 	case "/v2/identify":
@@ -645,7 +651,7 @@ func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request
 	case "/v2/registration":
 		output["callback"] = p.callback
 	case "/v2/deliver":
-		if !objectChannelPresentationValid(input) {
+		if !objectChannelPresentationValid(input, p.textOnly) {
 			http.Error(w, "presentation violates compiled bounds", 400)
 			return
 		}
@@ -662,7 +668,7 @@ func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request
 			return
 		}
 	case "/v2/edit":
-		if !objectChannelPresentationValid(input) {
+		if !objectChannelPresentationValid(input, p.textOnly) {
 			http.Error(w, "presentation violates compiled bounds", 400)
 			return
 		}
@@ -725,8 +731,12 @@ func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(output)
 }
 
-func objectChannelPresentationValid(input map[string]any) bool {
+func objectChannelPresentationValid(input map[string]any, textOnly bool) bool {
 	text, ok := input["body"].(string)
+	if textOnly {
+		_, controls := input["controls"]
+		return ok && len([]rune(text)) > 0 && len([]rune(text)) <= 512 && !controls
+	}
 	controls, array := input["controls"].([]any)
 	if !ok || !array || len([]rune(text)) > 512 || len(controls) > 2 {
 		return false
@@ -748,10 +758,15 @@ func writeObjectChannelSource(t *testing.T, configPath string) string {
 
 func writeObjectChannelPacks(t *testing.T, configPath, root string) string {
 	t.Helper()
+	return writeObjectChannelPacksWithBodies(t, configPath, root, objectChannelPackBodies(t))
+}
+
+func writeObjectChannelPacksWithBodies(t *testing.T, configPath, root string, bodies map[string][]byte) string {
+	t.Helper()
 	_, dirs := packfixture.DevelopmentBase(t, nil)
 	// Development overrides replace the finite base inventory. Pack IDs remain
 	// exact dependency coordinates; the authored provider and protocol are mock.
-	for kind, body := range objectChannelPackBodies(t) {
+	for kind, body := range bodies {
 		id := map[string]string{packmodel.TypeTrigger: "provider.telegram", packmodel.TypeConnector: "provider.telegram.connector", packmodel.TypeChannel: "provider.telegram.hitl_channel"}[kind]
 		envelope := packmodel.Envelope{ID: id, Version: "0.1.0", PlatformVersion: ">=0.7.0 <0.8.0", Type: kind,
 			Provenance: packmodel.Provenance{Source: "platform"}, ManifestHash: packmodel.ManifestHash(body),
@@ -949,8 +964,11 @@ func objectChannelPackBodies(t *testing.T) map[string][]byte {
 		"normalized_events": []any{map[string]any{"event": "inbound.mock.text", "fields": textFields, "when": map[string]any{"absent": []string{"data.token"}}}, map[string]any{"event": "inbound.mock.action", "fields": actionFields, "when": map[string]any{"absent": []string{"data.text"}}}},
 		"ack":               map[string]any{"mode": "durable_before_dispatch"},
 	}
-	channel := map[string]any{"provider": "mock", "native_inbox": map[string]any{"kind": "scoped_commands_v1", "client_languages": []string{"en", "fr"}, "direct_launcher_read": "read_inbox_launcher", "default_launcher_read": "read_default_inbox_launcher", "commands_launcher": "commands", "inherited_launcher": "default"},
-		"onboarding":   map[string]any{"activation": "webhook_registration", "ceremony": "authenticated_text_challenge", "provider_credential": "mock_api_key", "signing_credential": "mock_callback_key", "confirmation": "deliver", "learned_destination": map[string]any{"destination.queue": "conversation_reference.room"}},
+	channel := map[string]any{"provider": "mock", "transport": "webhook", "capabilities": map[string]any{
+		"card_render": true, "reply_to_reference": true, "actions_as_buttons": true, "actions_as_text": true,
+		"edit": true, "acknowledgment": true, "inbox_listing": true},
+		"native_inbox": map[string]any{"kind": "scoped_commands_v1", "client_languages": []string{"en", "fr"}, "direct_launcher_read": "read_inbox_launcher", "default_launcher_read": "read_default_inbox_launcher", "commands_launcher": "commands", "inherited_launcher": "default"},
+		"onboarding":   map[string]any{"ceremony": "authenticated_text_challenge", "provider_credential": "mock_api_key", "signing_credential": "mock_callback_key", "confirmation": "deliver", "learned_destination": map[string]any{"destination.queue": "conversation_reference.room"}},
 		"registration": map[string]any{"slot": map[string]any{"namespace": "workspace_webhook", "identify": map[string]any{"tool": "mock.identify", "output": map[string]any{"resource_id": "result.resource"}}}, "credentials": map[string]any{"provider": []string{"mock_api_key"}, "signing": "mock_callback_key"}, "apply": map[string]any{"tool": "mock.register", "input": map[string]any{"callback": "context.callback_url"}}, "readback": map[string]any{"tool": "mock.registration", "output": map[string]any{"callback_url": "result.callback"}}},
 		"opaque_types": map[string]any{"destination": obj(map[string]any{"queue": room}, "queue"), "conversation_reference": obj(map[string]any{"room": room}, "room"), "external_account_reference": obj(map[string]any{"principal": principal}, "principal"), "interaction_reference": obj(map[string]any{"cursor": str(1, 24)}, "cursor"), "delivery_reference": reference, "delivery_receipt": reference},
 		"operations":   operations, "events": map[string]any{

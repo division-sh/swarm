@@ -31,7 +31,7 @@ type selectedChannelDeliveryTestStore interface {
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (render.ResolvedAction, bool, error)
 	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (render.ResolvedText, bool, error)
 	ListCurrentChannelInputDrafts(context.Context, operatorchannel.InboundText, time.Time, string, int) ([]render.InputDraftCandidate, string, error)
-	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (render.ResolvedNativeEntry, bool, error)
+	ResolveCurrentInboxEntry(context.Context, operatorchannel.InboundText) (render.ResolvedInboxEntry, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]render.Candidate, error)
 	GetCurrentChannelSentReceipt(context.Context, string, string) (render.SentReceipt, bool, error)
@@ -40,7 +40,7 @@ type selectedChannelDeliveryTestStore interface {
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mode := range append([]string{"current", "late", "shared_current", "shared_late", "edit_uncertain", "response_matrix", "native_reset_healthy", "native_reset_uncertain", "eligibility_before_authorize", "eligibility_before_launch", "eligibility_after_launch", "eligibility_after_observation", "eligibility_edit", "eligibility_uncertain", "eligibility_recover_authorized", "eligibility_recover_launched", "eligibility_recover_observed"}, channelRecoveryProofModes()...) {
+		for _, mode := range append([]string{"current", "late", "shared_current", "shared_late", "edit_uncertain", "response_matrix", "reply_matrix", "native_reset_healthy", "native_reset_uncertain", "eligibility_before_authorize", "eligibility_before_launch", "eligibility_after_launch", "eligibility_after_observation", "eligibility_edit", "eligibility_uncertain", "eligibility_recover_authorized", "eligibility_recover_launched", "eligibility_recover_observed"}, channelRecoveryProofModes()...) {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				late := strings.HasSuffix(mode, "late") || mode == "native_reset_uncertain"
 				conversationScope := operatorchannel.ConversationScopeDirect
@@ -102,7 +102,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					OperationID: bindingOperationID, Kind: operatorchannel.OperationConnect,
 					PrincipalID: principal.ID, Interface: activation.Interface, ExpectedRevision: 0,
 					RequestKeyHash: bindingOperationID, RequestHash: bindingOperationID,
-					ProviderCredential: operatorChannelProviderEvidence(), RequestedAt: now,
+					ProviderAuthority: operatorChannelProviderAuthority(), RequestedAt: now,
 					ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
 				})
 				if err != nil {
@@ -124,7 +124,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				}
 				_, binding, err := selected.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 					OperationID: bindingOperationID, PrincipalID: principal.ID, ExpectedRevision: claimed.Operation.Revision,
-					Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
+					Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -396,14 +396,14 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
-				if entry, found, err := selected.ResolveCurrentNativeInboxEntry(ctx, entryText); err != nil || !found {
+				if entry, found, err := selected.ResolveCurrentInboxEntry(ctx, entryText); err != nil || !found {
 					t.Fatalf("known uninstalled generation was not discovered: found=%t err=%v", found, err)
-				} else if _, err := selected.(render.Store).PlanNativeInboxResponse(ctx, entryText, entry, "must not deliver"); err == nil {
+				} else if _, err := selected.(render.Store).PlanInboxResponse(ctx, entryText, entry, "must not deliver"); err == nil {
 					t.Fatal("unqualified discovery granted response authority")
 				}
 				forgedEntry := entryText
 				forgedEntry.PublicationID = uuid.NewString()
-				if _, _, err := selected.ResolveCurrentNativeInboxEntry(ctx, forgedEntry); err == nil {
+				if _, _, err := selected.ResolveCurrentInboxEntry(ctx, forgedEntry); err == nil {
 					t.Fatal("native entry accepted a fact absent from verified inbound intent")
 				}
 				if late {
@@ -424,7 +424,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					if err := nativeHandle.Succeed(nativeCtx, map[string]any{"readback_hash": runtimeeffects.Fingerprint(desired)}); err != nil {
 						t.Fatalf("settle native setting: %v", err)
 					}
-					entry, found, err := selected.ResolveCurrentNativeInboxEntry(ctx, entryText)
+					entry, found, err := selected.ResolveCurrentInboxEntry(ctx, entryText)
 					if err != nil || !found || entry.PrincipalID != principal.ID || entry.SettingID != setting.SettingID ||
 						entry.ActivationID != activation.ActivationID || entry.EntryReference != setting.EntryCommand {
 						t.Fatalf("installed native entry = %#v, found=%t err=%v", entry, found, err)
@@ -477,7 +477,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					if _, found, err := selected.ResolveCurrentChannelText(ctx, textFact); err != nil || found {
 						t.Fatalf("retired binding admitted predecessor text: found=%t err=%v", found, err)
 					}
-					if _, found, err := selected.ResolveCurrentNativeInboxEntry(ctx, entryText); err != nil || found {
+					if _, found, err := selected.ResolveCurrentInboxEntry(ctx, entryText); err != nil || found {
 						t.Fatalf("retired binding admitted predecessor native entry: found=%t err=%v", found, err)
 					}
 					if err := native.RetireStaleNativeInboxConsumers(ctx); err != nil {
@@ -549,6 +549,10 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					previous, found, err := selected.GetCurrentChannelSentReceipt(ctx, deliveryID, effectOperationID)
 					if err != nil || !found || previous.RenderID != renderID {
 						t.Fatalf("current sent receipt = %#v, found=%t err=%v", previous, found, err)
+					}
+					if mode == "reply_matrix" {
+						proveChannelReplyTransfer(t, selected, runTx, current, authority, textFact, actions[0], postgres)
+						return
 					}
 					if err := runTx(func(txctx context.Context, tx *sql.Tx) error {
 						query := `UPDATE mailbox SET summary=? WHERE item_id=?`
@@ -675,7 +679,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						return
 					}
 				}
-				fact := operatorchannel.ActionFact{
+				fact := operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback,
 					Interface: binding.Interface, ExternalAccountRef: plan.ExternalAccountRef,
 					ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope,
 					MessageReference: `{"id":91}`, InteractionRef: "interaction-1", Token: actions[0].Token,

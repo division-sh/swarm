@@ -84,7 +84,7 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 				defer p.mu.Unlock()
 				for _, operation := range []string{"/v2/deliver", "/v2/edit"} {
 					for _, sent := range p.calls[operation] {
-						if !objectChannelPresentationValid(sent) {
+						if !objectChannelPresentationValid(sent, false) {
 							t.Fatalf("%s temporal receipt violates the compiled bounds: %s", operation, fmt.Sprint(sent))
 						}
 					}

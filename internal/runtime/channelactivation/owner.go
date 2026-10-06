@@ -158,6 +158,11 @@ func (l *Lease) ValidateAdmission(ctx context.Context) error {
 	if !l.live() {
 		return fmt.Errorf("channel activation lease is no longer live")
 	}
+	if l.operation.Binding.BindingID() != "" {
+		if err := l.operation.Binding.RequireExecutableProvider(); err != nil {
+			return err
+		}
+	}
 	if l.snapshot.admit != nil {
 		publication := l.snapshot.publication
 		if bindingID := l.operation.Binding.BindingID(); bindingID != "" {
@@ -330,6 +335,9 @@ func compileSnapshot(publication channelonboarding.ChannelActivationPublication)
 		tools: map[string]runtimecontracts.ToolSchemaEntry{},
 	}
 	for _, binding := range next.bindings {
+		if err := binding.RequireExecutableProvider(); err != nil {
+			return nil, err
+		}
 		tools, err := binding.RuntimeTools()
 		if err != nil {
 			return nil, fmt.Errorf("channel binding %q runtime tools: %w", binding.BindingID(), err)

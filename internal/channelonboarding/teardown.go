@@ -424,10 +424,13 @@ func (s *DestructiveService) retainedCredentialEvidence(ctx context.Context, sco
 	if err != nil && !errors.Is(err, operatorchannel.ErrCredentialStale) && !errors.Is(err, operatorchannel.ErrNotFound) {
 		return nil, fmt.Errorf("resolve retained channel credential authority: %w", err)
 	}
-	if binding.Status != operatorchannel.BindingCurrent || binding.ProviderCredential.Validate() != nil {
+	if binding.Status != operatorchannel.BindingCurrent || binding.ProviderAuthority.Validate() != nil {
 		return nil, nil
 	}
-	return []runtimecredentials.ValueEvidence{binding.ProviderCredential}, nil
+	if binding.ProviderAuthority.Credential == (runtimecredentials.ValueEvidence{}) {
+		return nil, nil
+	}
+	return []runtimecredentials.ValueEvidence{binding.ProviderAuthority.Credential}, nil
 }
 
 func teardownScopeMatchesOperation(scope TeardownScope, operation Operation) bool {

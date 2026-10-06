@@ -22,7 +22,7 @@ var errOnboardingRuntimeContextRetired = errors.New("onboarding runtime context 
 
 type IdentityLifecycle interface {
 	Principal() (operatorchannel.Principal, error)
-	Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, string, runtimecredentials.ValueEvidence, bool, time.Time) (operatorchannel.Operation, error)
+	Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, string, operatorchannel.ProviderAuthority, bool, time.Time) (operatorchannel.Operation, error)
 	Confirm(context.Context, string, int64, bool, time.Time) (operatorchannel.Operation, operatorchannel.Binding, error)
 	GetOperation(context.Context, string) (operatorchannel.Operation, error)
 	ExpireOperation(context.Context, string, int64, time.Time) (operatorchannel.Operation, error)
@@ -251,10 +251,13 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if err := candidate.Plan.RequireExecutableProvider(); err != nil {
+		return Result{}, err
+	}
 	if input.ClientLanguage != "" {
 		profile, err := candidate.Plan.NativeInboxProfile()
 		if err != nil {
-			return Result{}, err
+			return Result{}, fmt.Errorf("%w: client_language requires the native_inbox extension: %w", ErrInvalidRequest, err)
 		}
 		if err := profile.ValidateLanguage(input.ClientLanguage); err != nil {
 			return Result{}, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
@@ -1247,7 +1250,7 @@ func credentialRequiredForStaleIdentity(parent Operation, identity operatorchann
 	return &CredentialRequiredError{
 		OperationID: parent.OperationID,
 		Role:        role,
-		StoreKey:    strings.TrimSpace(identity.ProviderCredential.Key),
+		StoreKey:    strings.TrimSpace(identity.ProviderAuthority.Credential.Key),
 	}
 }
 
@@ -1496,6 +1499,10 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 	if err != nil {
 		return op, false, err
 	}
+	providerAuthority, err := operatorchannel.CredentialProviderAuthority(providerCredential)
+	if err != nil {
+		return op, false, err
+	}
 	identityKind := operatorchannel.OperationConnect
 	expectedRevision := int64(0)
 	boundCredentialRestart := op.Phase == PhaseAwaitingExternalIdentity && op.BindingRevision > 0
@@ -1512,7 +1519,7 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 	if !boundCredentialRestart && op.Verb == VerbReconnect {
 		binding, proofCurrent, bindingErr := s.identities.CurrentBindingReadiness(ctx, op.Interface)
 		if bindingErr == nil {
-			proofPostureCurrent := binding.ProviderCredential == providerCredential &&
+			proofPostureCurrent := binding.ProviderAuthority == providerAuthority &&
 				((op.SaveProof && strings.TrimSpace(binding.ProofID) != "" && proofCurrent) ||
 					(!op.SaveProof && strings.TrimSpace(binding.ProofID) == ""))
 			if proofPostureCurrent {
@@ -1543,7 +1550,7 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 		operatorchannel.Hash("channel-onboarding-identity-key-v2", op.OperationID, fmt.Sprint(op.Revision)),
 		operatorchannel.Hash("channel-onboarding-identity-request-v2", op.OperationID, fmt.Sprint(op.Revision), string(op.Verb), candidate.Interface.Key()),
 		op.OperationID,
-		providerCredential, op.SaveProof, s.now().UTC())
+		providerAuthority, op.SaveProof, s.now().UTC())
 	if err != nil {
 		return op, false, err
 	}

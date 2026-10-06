@@ -62,12 +62,12 @@ func TestRestoredOriginalValueCanResumeBoundReset(t *testing.T) {
 	identities := &cancellationTestIdentities{
 		operation: operatorchannel.Operation{
 			OperationID: identityID, OnboardingOperationID: parentID, State: operatorchannel.StateBound,
-			Revision: 3, BindingRevision: 1, ProviderCredential: runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal},
+			Revision: 3, BindingRevision: 1, ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}},
 		},
 		binding: operatorchannel.Binding{
 			PrincipalID: "principal-a", Interface: candidate.Interface, Revision: 1, Status: operatorchannel.BindingCurrent,
 			ExternalAccountRef: "account-a", ConversationRef: "conversation-a", ConversationScope: operatorchannel.ConversationScopeDirect,
-			ProviderCredential: runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal},
+			ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}},
 		},
 		bindingErr: operatorchannel.ErrCredentialStale,
 	}
@@ -116,7 +116,7 @@ type fileBackedHandoffIdentities struct {
 }
 
 func (i fileBackedHandoffIdentities) CurrentBinding(ctx context.Context, _ operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
-	current, err := runtimecredentials.CurrentValueMatchesSeal(ctx, i.store, i.binding.ProviderCredential)
+	current, err := runtimecredentials.CurrentValueMatchesSeal(ctx, i.store, i.binding.ProviderAuthority.Credential)
 	if err != nil {
 		return i.binding, err
 	}

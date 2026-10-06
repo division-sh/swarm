@@ -194,7 +194,11 @@ func RequireTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 	return nil
 }
 
-func requireExactTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres, lock bool) (string, string, error) {
+type intentQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func requireExactTextIntentTx(ctx context.Context, tx intentQueryer, text operatorchannel.InboundText, postgres, lock bool) (string, string, error) {
 	if tx == nil {
 		return "", "", fmt.Errorf("channel text admission requires a selected transaction")
 	}
@@ -306,8 +310,32 @@ func LoadChooserTextIntentTx(ctx context.Context, tx *sql.Tx, publicationID stri
 	return pending, nil
 }
 
+func RejectUnboundTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) error {
+	if text.EntryReference != "" {
+		return fmt.Errorf("unbound text rejection does not interpret inbox entries")
+	}
+	state, disposition, err := requireExactTextIntentTx(ctx, tx, text, postgres, true)
+	if err != nil {
+		return err
+	}
+	if state == "settled" {
+		if disposition != "rejected" {
+			return fmt.Errorf("unbound text already has another disposition")
+		}
+		return nil
+	}
+	_, current, err := ResolveCurrentTextTx(ctx, tx, text, postgres)
+	if err != nil {
+		return err
+	}
+	if current {
+		return fmt.Errorf("unbound text rejection cannot reject a current operator binding")
+	}
+	return SettleTextIntentTx(ctx, tx, text, "rejected", postgres)
+}
+
 func SettleTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, disposition string, postgres bool) error {
-	if disposition != "input_progressed" && disposition != "input_complete" && disposition != "teaching" && disposition != "chooser" {
+	if disposition != "input_progressed" && disposition != "input_complete" && disposition != "teaching" && disposition != "chooser" && disposition != "control" && disposition != "rejected" {
 		return fmt.Errorf("unsupported channel text disposition %q", disposition)
 	}
 	if err := RequireTextIntentTx(ctx, tx, text, postgres); err != nil {
@@ -386,7 +414,7 @@ func decodeActionTime(value any) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("decode channel action time %T", value)
 }
 
-func RequireActionIntentTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, postgres, lock bool) (string, error) {
+func RequireActionIntentTx(ctx context.Context, tx intentQueryer, action operatorchannel.InboundAction, postgres, lock bool) (string, error) {
 	if tx == nil {
 		return "", fmt.Errorf("channel action admission requires a selected transaction")
 	}
@@ -419,6 +447,14 @@ func RequireActionIntentTx(ctx context.Context, tx *sql.Tx, action operatorchann
 		interfaceKey != action.Interface.Key() || authorization != action.ProviderAuthorization ||
 		stored != action.ActionFact || (state != "pending" && state != "settled") {
 		return "", fmt.Errorf("verified channel action intent contradicts admitted fact")
+	}
+	if action.Kind == operatorchannel.ActionSourceReply {
+		text := operatorchannel.InboundText{TextFact: action.TextSource, Provider: action.Provider,
+			ProviderEventID: action.ProviderEventID, PublicationID: action.PublicationID, ProviderAuthorization: action.ProviderAuthorization}
+		textState, disposition, err := requireExactTextIntentTx(ctx, tx, text, postgres, lock)
+		if err != nil || textState != "settled" || disposition != "control" {
+			return "", errors.Join(err, fmt.Errorf("reply action lacks its exact transferred text intent"))
+		}
 	}
 	return state, nil
 }

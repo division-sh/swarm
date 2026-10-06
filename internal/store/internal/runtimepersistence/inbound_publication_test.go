@@ -347,7 +347,7 @@ func runInboundPublicationOperatorChannelActionProof(t *testing.T, ctx context.C
 	command := func(providerEventID string) runtimeinbound.CommitCommand {
 		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, providerEventID)
 		identity := operatorChannelContractIdentity("inbound-action-generation")
-		fact := operatorchannel.ActionFact{
+		fact := operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback,
 			Interface: identity, ExternalAccountRef: "account-action", ConversationRef: "conversation-action",
 			ConversationScope: operatorchannel.ConversationScopeDirect, MessageReference: `{"id":91}`,
 			InteractionRef: "callback-91", Token: uuid.NewString(),
@@ -508,7 +508,7 @@ func runInboundPublicationOperatorChannelClaimProof(t *testing.T, ctx context.Co
 	}
 	identity := operatorChannelContractIdentity("inbound-atomic-generation")
 	begin := func(key string) operatorchannel.Operation {
-		op, err := channelStore.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderCredential: operatorChannelProviderEvidence(),
+		op, err := channelStore.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderAuthority: operatorChannelProviderAuthority(),
 			OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
 			Interface: identity, ExpectedRevision: 0, RequestKeyHash: key, RequestHash: key + "-body",
 			RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),

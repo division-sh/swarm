@@ -190,7 +190,7 @@ func PlanNoticeTx(ctx context.Context, tx *sql.Tx, noticeID string, postgres boo
 	if err != nil || !found {
 		return false, err
 	}
-	selected, found, err := LoadDefault(ctx, tx, postgres)
+	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil || !found || selected.State != StateCurrent {
 		return false, err
 	}
@@ -215,7 +215,7 @@ func PlanOpenCardTx(ctx context.Context, tx *sql.Tx, cardID string, postgres boo
 	if err != nil || !found {
 		return false, err
 	}
-	selected, found, err := LoadDefault(ctx, tx, postgres)
+	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil || !found || selected.State != StateCurrent {
 		return false, err
 	}

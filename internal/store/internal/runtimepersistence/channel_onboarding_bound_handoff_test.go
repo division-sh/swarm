@@ -69,7 +69,7 @@ func runBoundHandoff(t *testing.T, fixture channelOnboardingConfirmationFixture,
 			t.Fatalf("publication checkpoint = %#v", parent)
 		}
 	}
-	if err := rig.file.Set(ctx, bound.ProviderCredential.Key, "intervening-token"); err != nil {
+	if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "intervening-token"); err != nil {
 		t.Fatal(err)
 	}
 	if recovery {

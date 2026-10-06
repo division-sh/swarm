@@ -3,11 +3,11 @@ package channeldelivery
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/google/uuid"
@@ -116,25 +116,27 @@ func ListCurrentInputDraftsTx(ctx context.Context, tx *sql.Tx, text operatorchan
 
 func quotedCardReceiptMatchesTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
 	bound render.ResolvedText, cardID string, postgres bool) (bool, error) {
-	query := `SELECT receipt.provider_reference FROM channel_delivery_receipts receipt
+	query := `SELECT receipt.provider_reference, frozen.render_input, frozen.render_hash, plan.source_kind, plan.source_id FROM channel_delivery_receipts receipt
 		JOIN channel_delivery_plans plan ON plan.delivery_id=receipt.delivery_id
+		JOIN channel_delivery_renders frozen ON frozen.render_id=receipt.render_id
 		JOIN channel_delivery_defaults selected ON selected.singleton_id=1 AND selected.state='current'
 			AND selected.interface_key=plan.interface_key AND selected.delivery_epoch=plan.delivery_epoch
 			AND selected.binding_revision=plan.binding_revision AND selected.principal_id=plan.principal_id
 		WHERE receipt.state='sent' AND plan.state='sent'
 		AND plan.current_receipt_operation_id=receipt.effect_operation_id AND plan.current_render_id=receipt.render_id
-		AND plan.source_kind='card' AND plan.source_id=?
+		AND ((plan.source_kind='card' AND plan.source_id=?) OR plan.source_kind='response')
 		AND plan.principal_id=? AND plan.interface_key=? AND plan.binding_revision=?
 		AND plan.external_account_reference=? AND plan.conversation_reference=? AND plan.conversation_scope=?`
 	if postgres {
-		query = `SELECT receipt.provider_reference FROM channel_delivery_receipts receipt
+		query = `SELECT receipt.provider_reference, frozen.render_input, frozen.render_hash, plan.source_kind, plan.source_id::text FROM channel_delivery_receipts receipt
 			JOIN channel_delivery_plans plan ON plan.delivery_id=receipt.delivery_id
+			JOIN channel_delivery_renders frozen ON frozen.render_id=receipt.render_id
 			JOIN channel_delivery_defaults selected ON selected.singleton_id=1 AND selected.state='current'
 				AND selected.interface_key=plan.interface_key AND selected.delivery_epoch=plan.delivery_epoch
 				AND selected.binding_revision=plan.binding_revision AND selected.principal_id=plan.principal_id
 			WHERE receipt.state='sent' AND plan.state='sent'
 			AND plan.current_receipt_operation_id=receipt.effect_operation_id AND plan.current_render_id=receipt.render_id
-			AND plan.source_kind='card' AND plan.source_id=$1::uuid
+			AND ((plan.source_kind='card' AND plan.source_id=$1::uuid) OR plan.source_kind='response')
 			AND plan.principal_id=$2::uuid AND plan.interface_key=$3 AND plan.binding_revision=$4
 			AND plan.external_account_reference=$5 AND plan.conversation_reference=$6 AND plan.conversation_scope=$7`
 	}
@@ -144,27 +146,51 @@ func quotedCardReceiptMatchesTx(ctx context.Context, tx *sql.Tx, text operatorch
 		return false, err
 	}
 	defer rows.Close()
-	matched := false
+	type quotedReceipt struct {
+		reference, input     []byte
+		hash, kind, sourceID string
+	}
+	quotes := make([]quotedReceipt, 0)
 	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
+		var quote quotedReceipt
+		if err := rows.Scan(&quote.reference, &quote.input, &quote.hash, &quote.kind, &quote.sourceID); err != nil {
 			return false, err
 		}
-		var receipt map[string]any
-		if err := json.Unmarshal(raw, &receipt); err != nil {
-			return false, fmt.Errorf("decode channel card receipt: %w", err)
+		encoded, err := receiptMessageReference(quote.reference)
+		if err != nil {
+			return false, err
 		}
-		reference, ok := receipt["delivery_reference"]
-		if !ok {
-			return false, fmt.Errorf("channel card receipt lacks delivery reference")
+		if encoded == text.ReplyToReference {
+			quotes = append(quotes, quote)
 		}
-		encoded, valid, err := operatorchannel.OpaqueReference(reference)
-		if err != nil || !valid {
-			return false, fmt.Errorf("channel card receipt has invalid delivery reference: %w", err)
-		}
-		matched = matched || encoded == text.ReplyToReference
 	}
-	return matched, rows.Err()
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	for _, quote := range quotes {
+		if quote.kind == PlanCard && quote.sourceID == cardID {
+			return true, nil
+		}
+		raw, err := canonicaljson.Canonicalize(quote.input)
+		if err != nil {
+			return false, err
+		}
+		frozen, err := render.Decode(raw, quote.hash)
+		if err != nil {
+			return false, err
+		}
+		if frozen.InputCard == nil || frozen.InputCard.CardID != cardID {
+			continue
+		}
+		current, err := inputPromptCurrent(ctx, tx, frozen, postgres, false)
+		if err != nil || current {
+			return current, err
+		}
+	}
+	return false, nil
 }
 
 func HasCurrentBareInputDraftTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, at time.Time, postgres bool) (bool, error) {
