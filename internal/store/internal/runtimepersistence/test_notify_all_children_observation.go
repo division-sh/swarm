@@ -23,7 +23,7 @@ func ReadNotifyAllChildrenDiagnosticStorageForTest(ctx context.Context, selected
 	var read func(context.Context, func(context.Context, *sql.Tx) error) error
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		if owner == nil || owner.backend == nil || !owner.backend.Valid() {
+		if owner == nil || owner.backend == nil || owner.pipelinePostgresOwner == nil || !owner.backend.Valid() {
 			return nil, fmt.Errorf("observation requires an initialized postgres read owner")
 		}
 		if err := owner.requireCurrentSchema(); err != nil {
@@ -31,7 +31,7 @@ func ReadNotifyAllChildrenDiagnosticStorageForTest(ctx context.Context, selected
 		}
 		read = owner.backend.RunReadTransaction
 	case *SQLiteRuntimeStore:
-		if owner == nil || owner.backend == nil || !owner.backend.Valid() {
+		if owner == nil || owner.backend == nil || owner.pipelineSQLiteOwner == nil || !owner.backend.Valid() {
 			return nil, fmt.Errorf("observation requires an initialized sqlite read owner")
 		}
 		if err := owner.requireCurrentSchema(); err != nil {
@@ -94,7 +94,7 @@ func ReadNotifyAllChildrenItemStorageForTest(ctx context.Context, selected any, 
 	var read func(context.Context, func(context.Context, *sql.Tx) error) error
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		if owner == nil || owner.backend == nil || !owner.backend.Valid() {
+		if owner == nil || owner.backend == nil || owner.pipelinePostgresOwner == nil || !owner.backend.Valid() {
 			return nil, fmt.Errorf("observation requires an initialized postgres read owner")
 		}
 		if err := owner.requireCurrentSchema(); err != nil {
@@ -102,7 +102,7 @@ func ReadNotifyAllChildrenItemStorageForTest(ctx context.Context, selected any, 
 		}
 		read = owner.backend.RunReadTransaction
 	case *SQLiteRuntimeStore:
-		if owner == nil || owner.backend == nil || !owner.backend.Valid() {
+		if owner == nil || owner.backend == nil || owner.pipelineSQLiteOwner == nil || !owner.backend.Valid() {
 			return nil, fmt.Errorf("observation requires an initialized sqlite read owner")
 		}
 		if err := owner.requireCurrentSchema(); err != nil {
@@ -155,7 +155,7 @@ func ReadNotifyAllChildrenMetadataStorageForTest(ctx context.Context, selected a
 	var read func(context.Context, func(context.Context, *sql.Tx) error) error
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		if owner == nil || owner.backend == nil || !owner.backend.Valid() {
+		if owner == nil || owner.backend == nil || owner.pipelinePostgresOwner == nil || !owner.backend.Valid() {
 			return "", fmt.Errorf("observation requires an initialized postgres read owner")
 		}
 		if err := owner.requireCurrentSchema(); err != nil {
@@ -163,7 +163,7 @@ func ReadNotifyAllChildrenMetadataStorageForTest(ctx context.Context, selected a
 		}
 		read = owner.backend.RunReadTransaction
 	case *SQLiteRuntimeStore:
-		if owner == nil || owner.backend == nil || !owner.backend.Valid() {
+		if owner == nil || owner.backend == nil || owner.pipelineSQLiteOwner == nil || !owner.backend.Valid() {
 			return "", fmt.Errorf("observation requires an initialized sqlite read owner")
 		}
 		if err := owner.requireCurrentSchema(); err != nil {
