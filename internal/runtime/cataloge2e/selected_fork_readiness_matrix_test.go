@@ -3,7 +3,6 @@ package cataloge2e
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +21,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	flowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -35,6 +35,8 @@ import (
 )
 
 type terminalUnwindProbe struct {
+	kind   runtimelifecycleprobe.Kind
+	node   string
 	mode   string
 	status string
 	cancel context.CancelFunc
@@ -42,19 +44,22 @@ type terminalUnwindProbe struct {
 }
 
 func (p *terminalUnwindProbe) NotifyLifecycle(_ context.Context, signal runtimelifecycleprobe.Signal) {
-	if signal.Kind != runtimelifecycleprobe.WorkflowTerminalCommitted {
+	if signal.Kind != p.kind || (p.node != "" && signal.SubscriberID != p.node) {
 		return
 	}
 	status := p.status
 	if status == "" {
-		status = "committed"
+		status = "completed"
 	}
 	if signal.Status != status {
 		return
 	}
 	p.calls.Add(1)
 	if p.mode == "panic" {
-		panic("test panic after durable terminal commit before completion transfer")
+		if p.kind == runtimelifecycleprobe.WorkflowTerminalCommitted {
+			panic("test panic after durable terminal commit before completion transfer")
+		}
+		panic("test panic after acknowledged final-stage handler completion")
 	}
 	p.cancel()
 }
@@ -68,7 +73,7 @@ func TestTerminalCommittedUnwindBothStores(t *testing.T) {
 				materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.inspect.requested")
 				ctx, cancel := context.WithCancel(catalogRunContext(h, catalogRuntimeRunID))
 				defer cancel()
-				probe := &terminalUnwindProbe{mode: mode, cancel: cancel}
+				probe := &terminalUnwindProbe{kind: runtimelifecycleprobe.HandlerCompleted, node: identitytest.FlowNode(t, "worker-flow", "inspect-node").Key(), mode: mode, cancel: cancel}
 				h.rt.Pipeline.SetTestLifecycleProbe(probe)
 				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType("worker.inspect"), "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
 					events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
@@ -85,7 +90,7 @@ func TestTerminalCommittedUnwindBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				state, found, err := h.workflow.Load(readCtx, owner)
-				if err != nil || !found || state.Status != "terminated" || state.CurrentState != "complete" {
+				if err != nil || !found || state.Status != "active" || !state.TerminatedAt.IsZero() || state.CurrentState != "complete" {
 					t.Fatalf("terminal readback after %s: state=%+v found=%t err=%v", mode, state, found, err)
 				}
 			})
@@ -134,7 +139,10 @@ func (p *concurrentTerminalProbe) NotifyLifecycle(ctx context.Context, signal ru
 			close(p.bothStarted)
 			<-p.firstCommitted
 		}
-	case runtimelifecycleprobe.WorkflowTerminalCommitted:
+	case runtimelifecycleprobe.HandlerCompleted:
+		if signal.Status != "completed" {
+			return
+		}
 		p.committed.Add(1)
 		p.release.Do(func() { close(p.firstCommitted) })
 	}
@@ -147,23 +155,26 @@ func (p *concurrentTerminalProbe) require(t *testing.T) {
 	}
 }
 
-type fencedFrontierAgent struct {
+type countedFrontierAgent struct {
 	config models.AgentConfig
 	calls  *atomic.Int32
 }
 
-func (a fencedFrontierAgent) ID() string   { return a.config.ID }
-func (a fencedFrontierAgent) Type() string { return "test" }
-func (a fencedFrontierAgent) Subscriptions() []events.EventType {
+func (a countedFrontierAgent) ID() string   { return a.config.ID }
+func (a countedFrontierAgent) Type() string { return "test" }
+func (a countedFrontierAgent) Subscriptions() []events.EventType {
 	result := make([]events.EventType, len(a.config.Subscriptions))
 	for i, eventType := range a.config.Subscriptions {
 		result[i] = events.EventType(eventType)
 	}
 	return result
 }
-func (a fencedFrontierAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+func (a countedFrontierAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {
 	a.calls.Add(1)
-	return nil, errors.New("terminal node must fence the agent before execution")
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("ordinary final entry canceled accepted agent work: %w", err)
+	}
+	return nil, nil
 }
 
 func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
@@ -192,7 +203,7 @@ func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				state, found, err := h.workflow.Load(ctx, owner)
-				if err != nil || !found || state.Status != "terminated" || state.CurrentState != "complete" {
+				if err != nil || !found || state.Status != "active" || !state.TerminatedAt.IsZero() || state.CurrentState != "complete" {
 					t.Fatalf("terminal canonical readback: state=%+v found=%t err=%v", state, found, err)
 				}
 				observed, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
@@ -221,6 +232,15 @@ func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
 				}
 				if outputs != 2 || delivered != 2 {
 					t.Fatalf("terminal public readback: outputs=%d delivered=%d, want exactly two each; events=%v", outputs, delivered, observedNames)
+				}
+				// Ordinary final entry retained both accepted agents. Explicit cleanup
+				// remains a separate supported operation with idempotent retirement.
+				request := runtimepipeline.FlowInstanceDeactivationRequest{Instance: flowidentity.Stored(nil, "worker-flow", path, "worker-001", entity, ""), FinalState: "complete"}
+				if err := h.rt.Manager.DeactivateFlowInstanceModel(ctx, request); err != nil {
+					t.Fatal(err)
+				}
+				if err := h.rt.Manager.WaitForQuiescence(ctx); err != nil {
+					t.Fatal(err)
 				}
 				beforeDuplicate := selectedForkReadinessSnapshot(t, ctx, h, catalogRuntimeRunID, owner.Route)
 				for i := 0; i < 2; i++ {
@@ -289,7 +309,7 @@ func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
 	}
 }
 
-func TestStageTimerTerminalJoinsAgentsWithoutJoiningItsCallbackBothStores(t *testing.T) {
+func TestStageTimerFinalEntryPreservesAgentsAndSettlesCallbackBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := selectedForkReadinessCatalogFixture(t, 2, "agent")
@@ -319,7 +339,7 @@ func TestStageTimerTerminalJoinsAgentsWithoutJoiningItsCallbackBothStores(t *tes
 					t.Fatal(err)
 				}
 			case <-time.After(5 * time.Second):
-				t.Fatal("accepted stage timer could not join terminal agents")
+				t.Fatal("accepted stage timer did not acknowledge final entry")
 			}
 			if err := h.rt.Manager.WaitForQuiescence(catalogRunContext(h, catalogRuntimeRunID)); err != nil {
 				t.Fatal(err)
@@ -329,8 +349,17 @@ func TestStageTimerTerminalJoinsAgentsWithoutJoiningItsCallbackBothStores(t *tes
 				t.Fatal(err)
 			}
 			state, found, err := h.workflow.Load(catalogRunContext(h, catalogRuntimeRunID), owner)
-			if err != nil || !found || state.Status != "terminated" || state.CurrentState != "complete" {
+			if err != nil || !found || state.Status != "active" || !state.TerminatedAt.IsZero() || state.CurrentState != "complete" {
 				t.Fatalf("timer terminal canonical readback: state=%+v found=%t err=%v", state, found, err)
+			}
+			agents := 0
+			for _, cfg := range h.rt.Manager.ListAgentConfigs() {
+				if cfg.Identity.RunID == catalogRuntimeRunID && cfg.Identity.FlowInstance() == path {
+					agents++
+				}
+			}
+			if agents != 2 {
+				t.Fatalf("ordinary stage deadline retired declared agents: count=%d want 2", agents)
 			}
 		})
 	}
@@ -475,10 +504,10 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							}
 							options.AgentManagerOptions.TestLifecycleProbe = terminalProbe
 						}
-						var fencedAgentCalls atomic.Int32
+						var acceptedAgentCalls atomic.Int32
 						if frontier == "mixed" {
 							options.AgentFactory = func(config models.AgentConfig) (runtimemanager.Agent, error) {
-								return fencedFrontierAgent{config: config, calls: &fencedAgentCalls}, nil
+								return countedFrontierAgent{config: config, calls: &acceptedAgentCalls}, nil
 							}
 						}
 						executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h)
@@ -530,9 +559,8 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								t.Fatalf("failed final validation lost execution evidence: count=%d calls=%d err=%v", result.ExecutedEventCount, activityCalls.Load(), err)
 							}
 						} else if frontier == "mixed" {
-							t.Logf("fenced mixed execution evidence: %v", err)
-							if err == nil || !strings.Contains(err.Error(), "authoritative_delivery_incomplete") || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || result.Activation.Activated || fencedAgentCalls.Load() != 0 {
-								t.Fatalf("terminal-node fence must refuse agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, fencedAgentCalls.Load(), err)
+							if err != nil || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || !result.Activation.Activated || acceptedAgentCalls.Load() != int32(declarations) {
+								t.Fatalf("ordinary final entry must retain accepted agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, acceptedAgentCalls.Load(), err)
 							}
 						} else if err != nil || result.ExecutedEventCount != 1 {
 							t.Logf("frontier=%s activity calls=%d", frontier, activityCalls.Load())
@@ -564,7 +592,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							t.Fatal(err)
 						}
 						forkState, found, err := h.workflow.Load(ctx, forkOwner)
-						fenced := (frontier == "mixed" || frontier == "activity_rejected") && stage == "initial"
+						fenced := frontier == "activity_rejected" && stage == "initial"
 						if err != nil || (fenced && found) || (!fenced && (!found || forkState.Fields["worker_id"] != "worker-001")) {
 							logSelectedForkRecoveryFailure(t, ctx, h, forkRun, err)
 							t.Fatalf("fork flow: %#v found=%t err=%v", forkState, found, err)
@@ -586,6 +614,23 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						observed, err := catalogRunScopedOperatorEvents(h, forkRun)
 						if err != nil || (!refused && !fenced && len(observed) == 0) || ((refused || fenced) && len(observed) != 0) {
 							t.Fatalf("public fork readback: %#v %v", observed, err)
+						}
+						if frontier == "mixed" && !refused {
+							accepted := 0
+							for _, event := range observed {
+								for _, delivery := range event.Deliveries {
+									if delivery.Route.AgentIdentity.IsZero() {
+										continue
+									}
+									if delivery.Status != "delivered" || delivery.ClaimVersion != 1 || delivery.RetryCount != 0 || delivery.Route.AgentIdentity.RunID != forkRun {
+										t.Fatalf("accepted mixed agent lost its exact child-run settlement: %+v", delivery)
+									}
+									accepted++
+								}
+							}
+							if accepted != declarations || forkState.Status != "active" || !forkState.TerminatedAt.IsZero() {
+								t.Fatalf("ordinary final entry retired or lost accepted agents: deliveries=%d state=%+v", accepted, forkState)
+							}
 						}
 						if !refused && !fenced && forkState.CurrentState != "complete" {
 							t.Fatalf("fork did not execute to terminal state: %#v", forkState)

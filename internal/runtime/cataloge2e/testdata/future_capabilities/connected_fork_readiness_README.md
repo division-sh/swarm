@@ -55,3 +55,13 @@ start remains in the fork frontier, without introducing an extra loop handler.
 This local-source repair does not admit the completed dynamic ancestor in #642.
 Neither success matrix is waived, skipped or converted to a refusal assertion.
 Full-suite and PR-readiness results are recorded separately on the issue/PR.
+
+The frozen oracle also retains the superseded ordinary-final retirement probes
+and assertions from that historical checkpoint. The ratified #2269 D1 model,
+composed under #2564 ruling6021549457, distinguishes final-stage entry from
+operational retirement. Its active counterparts now retain accepted agents and
+structural routes, observe real handler completion/settlement, and test explicit
+termination separately. The two pinned `.go.txt` files are intentionally not
+rewritten: future #642 activation must reconcile their old final-entry assumptions
+with the then-current contract without losing the retained routing, identity,
+restart and source-isolation obligations.

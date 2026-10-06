@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -109,7 +110,7 @@ func TestTerminalMiddleMemberFailureRetainsSuffixBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			state, found, err := h.workflow.Load(ctx, owner)
-			if err != nil || !found || state.CurrentState != "complete" || state.Status != "terminated" {
+			if err != nil || !found || state.CurrentState != "complete" || state.Status != "active" || !state.TerminatedAt.IsZero() {
 				t.Fatalf("unrelated flow terminal readback: state=%+v found=%t err=%v", state, found, err)
 			}
 		})
@@ -162,7 +163,7 @@ func proveDirectTerminalCommitUnwind(t *testing.T, mode string) {
 			configs := h.rt.Manager.ListAgentConfigs()
 			callerCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
-			probe := &terminalUnwindProbe{mode: mode, status: "terminated", cancel: cancel}
+			probe := &terminalUnwindProbe{kind: lifecycleprobe.WorkflowTerminalCommitted, mode: mode, status: "terminated", cancel: cancel}
 			h.rt.Pipeline.SetTestLifecycleProbe(probe)
 			const injected = "test panic after durable terminal commit"
 			if mode == "panic" {
