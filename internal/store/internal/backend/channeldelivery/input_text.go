@@ -60,6 +60,11 @@ func RequireChosenInputDraftTx(ctx context.Context, tx *sql.Tx, action operatorc
 	if tx == nil || at.IsZero() {
 		return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, fmt.Errorf("draft choice is incomplete")
 	}
+	if lock {
+		if _, _, err := LockCurrentPrincipalTx(ctx, tx, postgres); err != nil {
+			return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, err
+		}
+	}
 	state, err := RequireActionIntentTx(ctx, tx, action, postgres, lock)
 	if err != nil {
 		return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, err
@@ -149,6 +154,11 @@ func RequireCurrentSkipActionTx(ctx context.Context, tx *sql.Tx, action operator
 	at time.Time, lock, postgres bool) (render.ResolvedAction, decisioncard.InputFieldProgress, decisioncard.InputDraft, error) {
 	if tx == nil || at.IsZero() {
 		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, fmt.Errorf("channel skip requires exact action time")
+	}
+	if lock {
+		if _, _, err := LockCurrentPrincipalTx(ctx, tx, postgres); err != nil {
+			return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, err
+		}
 	}
 	state, err := RequireActionIntentTx(ctx, tx, action, postgres, lock)
 	if err != nil {
