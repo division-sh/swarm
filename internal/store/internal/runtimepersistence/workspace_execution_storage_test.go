@@ -39,9 +39,15 @@ func TestWorkspaceExecutionObserversRefuseNonOwnersCancelledAndClosedBothStores(
 		{"fork-domain", func(ctx context.Context, owner any, id string) (any, error) {
 			return ReadConversationForkDomainStorageForTest(ctx, owner, id)
 		}, ConversationForkDomainStorage{}},
+		{"fork-diagnostics", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadConversationForkTurnDiagnosticsForTest(ctx, owner, id)
+		}, []ConversationForkTurnDiagnostic(nil)},
 		{"http-effects", func(ctx context.Context, owner any, _ string) (any, error) {
 			return ReadAuthoredHTTPToolEffectStorageForTest(ctx, owner)
 		}, []AuthoredHTTPToolEffectStorage(nil)},
+		{"workspace-invocation", func(ctx context.Context, owner any, _ string) (any, error) {
+			return ReadWorkspaceMockInvocationStorageForTest(ctx, owner)
+		}, WorkspaceMockInvocationStorage{}},
 		{"source-domain", func(ctx context.Context, owner any, id string) (any, error) {
 			return ReadSelectedForkSourceDomainForTest(ctx, owner, id)
 		}, map[string]SelectedForkStorageTableSnapshot(nil)},

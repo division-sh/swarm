@@ -14,8 +14,14 @@ type SelectedExecutionStorage = private.SelectedExecutionStorage
 type ConversationForkStorage = private.ConversationForkStorage
 type ConversationForkTurnStorage = private.ConversationForkTurnStorage
 type ConversationForkDomainStorage = private.ConversationForkDomainStorage
+type ConversationForkTurnDiagnostic = private.ConversationForkTurnDiagnostic
 type AuthoredHTTPToolEffectStorage = private.AuthoredHTTPToolEffectStorage
 type SelectedSourceOutcomeFixture = private.SelectedSourceOutcomeFixture
+type WorkspaceMockInvocationStorage = private.WorkspaceMockInvocationStorage
+
+func ReadWorkspaceMockInvocationStorage(ctx context.Context, selected any) (WorkspaceMockInvocationStorage, error) {
+	return private.ReadWorkspaceMockInvocationStorageForTest(ctx, selected)
+}
 
 func ReadManagedAgentTurnStorage(ctx context.Context, selected any, runID, agentID string) ([]ManagedAgentTurnStorageRow, error) {
 	return private.ReadManagedAgentTurnStorageForTest(ctx, selected, runID, agentID)
@@ -37,6 +43,9 @@ func ReadConversationForkStorage(ctx context.Context, selected any, forkID strin
 }
 func ReadConversationForkTurnStorage(ctx context.Context, selected any, forkID, key string) (ConversationForkTurnStorage, error) {
 	return private.ReadConversationForkTurnStorageForTest(ctx, selected, forkID, key)
+}
+func ReadConversationForkTurnDiagnostics(ctx context.Context, selected any, forkID string) ([]ConversationForkTurnDiagnostic, error) {
+	return private.ReadConversationForkTurnDiagnosticsForTest(ctx, selected, forkID)
 }
 func ReadConversationForkDomainStorage(ctx context.Context, selected any, runID string) (ConversationForkDomainStorage, error) {
 	return private.ReadConversationForkDomainStorageForTest(ctx, selected, runID)
