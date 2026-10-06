@@ -41,6 +41,13 @@ type observationRPCError struct {
 	} `json:"data"`
 }
 
+type observationRPCResponse struct {
+	JSONRPC string               `json:"jsonrpc"`
+	ID      int                  `json:"id"`
+	Result  json.RawMessage      `json:"result"`
+	Error   *observationRPCError `json:"error"`
+}
+
 func (o HTTPObservation) Probe(ctx context.Context) ([]ListedDefinition, error) {
 	if err := o.Initialize(ctx); err != nil {
 		return nil, err
@@ -155,41 +162,11 @@ func (o HTTPObservation) consumeRPCResponse(method string, resp *http.Response, 
 		}
 		return o.mismatch("gateway_response_over_budget")
 	}
-	if _, err := canonicaljson.Decode(raw); err != nil {
-		if method == "tools/call" {
-			return o.uncertain("response_invalid", nil)
-		}
-		return o.mismatch("gateway_response_invalid")
-	}
-	var envelope struct {
-		JSONRPC string               `json:"jsonrpc"`
-		ID      int                  `json:"id"`
-		Result  json.RawMessage      `json:"result"`
-		Error   *observationRPCError `json:"error"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.JSONRPC != "2.0" {
-		if method == "tools/call" {
-			return o.uncertain("response_invalid", nil)
-		}
-		return o.mismatch("gateway_response_invalid")
-	}
-	if envelope.ID != 1 {
-		if method == "tools/call" {
-			return o.uncertain("response_identity_foreign", nil)
-		}
-		// Discovery cannot execute an effect; the gateway may reject its boot
-		// authentication before parsing the request and therefore use a null ID.
-		if envelope.Error == nil {
-			return o.mismatch("gateway_response_invalid")
-		}
+	envelope, err := o.decodeRPCResponse(method, raw)
+	if err != nil {
+		return err
 	}
 	if envelope.Error != nil {
-		if len(envelope.Result) != 0 {
-			if method == "tools/call" {
-				return o.uncertain("response_result_and_error", nil)
-			}
-			return o.mismatch("gateway_response_invalid")
-		}
 		return o.rpcResponseFailure(method, resp.StatusCode, envelope.Error)
 	}
 	if len(envelope.Result) == 0 || bytes.Equal(envelope.Result, []byte("null")) || json.Unmarshal(envelope.Result, result) != nil {
@@ -199,6 +176,39 @@ func (o HTTPObservation) consumeRPCResponse(method string, resp *http.Response, 
 		return o.mismatch("gateway_result_invalid")
 	}
 	return nil
+}
+
+func (o HTTPObservation) decodeRPCResponse(method string, raw []byte) (observationRPCResponse, error) {
+	var envelope observationRPCResponse
+	if _, err := canonicaljson.Decode(raw); err != nil {
+		if method == "tools/call" {
+			return envelope, o.uncertain("response_invalid", nil)
+		}
+		return envelope, o.mismatch("gateway_response_invalid")
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.JSONRPC != "2.0" {
+		if method == "tools/call" {
+			return envelope, o.uncertain("response_invalid", nil)
+		}
+		return envelope, o.mismatch("gateway_response_invalid")
+	}
+	if envelope.ID != 1 {
+		if method == "tools/call" {
+			return envelope, o.uncertain("response_identity_foreign", nil)
+		}
+		// Discovery cannot execute an effect; the gateway may reject its boot
+		// authentication before parsing the request and therefore use a null ID.
+		if envelope.Error == nil {
+			return envelope, o.mismatch("gateway_response_invalid")
+		}
+	}
+	if envelope.Error != nil && len(envelope.Result) != 0 {
+		if method == "tools/call" {
+			return envelope, o.uncertain("response_result_and_error", nil)
+		}
+		return envelope, o.mismatch("gateway_response_invalid")
+	}
+	return envelope, nil
 }
 
 func (o HTTPObservation) rpcResponseFailure(method string, httpStatus int, failure *observationRPCError) error {
