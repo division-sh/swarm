@@ -10,6 +10,24 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
+// InstallActiveForkReceiverHeaderDoneFaultTx deliberately invalidates only the
+// live header, without manufacturing a workflow transition or its revisions.
+func InstallActiveForkReceiverHeaderDoneFaultTx(ctx context.Context, tx *sql.Tx, runID, entityID string) error {
+	if tx == nil {
+		return fmt.Errorf("fork receiver header fault requires the selected transaction")
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET current_state='done'
+		WHERE run_id=$1 AND entity_id=$2 AND current_state='active'`, runID, entityID)
+	if err != nil {
+		return fmt.Errorf("install active fork receiver header fault: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("fork receiver header fault requires exactly one active header: count=%d err=%v", count, err)
+	}
+	return nil
+}
+
 // The constructed header owns lifecycle identity and compare-and-write progress,
 // independently of whether the flow declares an entity field contract.
 func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool, record pipeline.WorkflowEngineStateRecord, create bool) (workflowEngineStateFact, error) {
