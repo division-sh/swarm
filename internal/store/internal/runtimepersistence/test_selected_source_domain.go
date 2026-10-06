@@ -3,8 +3,6 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"sort"
 )
 
 // The inventory is fixed and run-scoped. Lifecycle/freeze and fork lineage
@@ -32,41 +30,10 @@ func ReadSelectedForkSourceDomainForTest(ctx context.Context, selected any, runI
 			if err != nil {
 				return err
 			}
-			columns, err := rows.Columns()
+			snapshot, err := readSelectedForkSnapshotRows(rows)
 			if err != nil {
-				rows.Close()
 				return err
 			}
-			snapshot := SelectedForkStorageTableSnapshot{Columns: append([]string(nil), columns...), Rows: []string{}}
-			for rows.Next() {
-				values, pointers := make([]any, len(columns)), make([]any, len(columns))
-				for i := range values {
-					pointers[i] = &values[i]
-				}
-				if err := rows.Scan(pointers...); err != nil {
-					rows.Close()
-					return err
-				}
-				for i, value := range values {
-					if raw, ok := value.([]byte); ok {
-						values[i] = string(raw)
-					}
-				}
-				encoded, err := json.Marshal(values)
-				if err != nil {
-					rows.Close()
-					return err
-				}
-				snapshot.Rows = append(snapshot.Rows, string(encoded))
-			}
-			if err := rows.Err(); err != nil {
-				rows.Close()
-				return err
-			}
-			if err := rows.Close(); err != nil {
-				return err
-			}
-			sort.Strings(snapshot.Rows)
 			out[table] = snapshot
 		}
 		return nil

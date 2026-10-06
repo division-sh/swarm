@@ -7,6 +7,27 @@ import (
 	"strings"
 )
 
+// Transferred from B70ab4d333 /888cb4958 under6010346696. The three OR arms
+// are one exact handoff predicate, not a delivery-active substitute.
+func ReadServedIncompletePipelineHandoffCountForTest(ctx context.Context, selected any, runID string) (int, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return 0, err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
+			(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
+			(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&count)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func ReadServedDeliveryStatusCountForTest(ctx context.Context, selected any, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {
 	dialect, err := eventFixtureDialectForTest(selected)
 	if err != nil {
