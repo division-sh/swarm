@@ -921,6 +921,9 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	var standingLease *worklifetime.Lease
 	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, evt)
 	if err != nil {
+		if runtimefailures.OnlyBranches(err, func(cause error) bool { return errors.Is(cause, ErrStandingRestartParked) }) {
+			return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeRunContinue)
+		}
 		return runtimedeliverycontinuation.Fatal(fmt.Errorf("bind continuation run work: %w", err))
 	}
 	if standingLease != nil {

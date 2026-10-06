@@ -31,7 +31,7 @@ const (
 	startupRecoveryPipelineReplayReasonQuarantined           = "replay_quarantined"
 )
 
-var errStandingRestartParked = errors.New("standing restart disposition is non-executable")
+var ErrStandingRestartParked = errors.New("standing restart disposition is non-executable")
 
 type OutboxSweeperConfig struct {
 	Interval time.Duration
@@ -280,7 +280,7 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 					closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
 					return result, errors.Join(processErr, closeErr)
 				}
-				if errors.Is(processErr, errStandingRestartParked) || errors.Is(processErr, errRunDispatchParked) {
+				if errors.Is(processErr, ErrStandingRestartParked) || errors.Is(processErr, errRunDispatchParked) {
 					continue
 				}
 				if errors.Is(processErr, ErrRunDispatchBlocked) {
@@ -506,7 +506,7 @@ func (eb *EventBus) bindClaimedRunWork(
 		return ctx, nil, nil
 	}
 	if !disposition.Executable() {
-		return ctx, nil, fmt.Errorf("%w: run %s is %s", errStandingRestartParked, runID, disposition.Kind)
+		return ctx, nil, fmt.Errorf("%w: run %s is %s", ErrStandingRestartParked, runID, disposition.Kind)
 	}
 	eb.mu.RLock()
 	owner := eb.standingRunWorkOwner

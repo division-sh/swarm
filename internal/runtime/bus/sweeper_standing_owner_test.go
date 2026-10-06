@@ -120,7 +120,7 @@ func TestStandingPipelineRecoveryParksNonExecutableDispositionBeforeLease(t *tes
 			)
 
 			_, lease, err := bus.bindClaimedRunWork(context.Background(), event)
-			if !errors.Is(err, errStandingRestartParked) {
+			if !errors.Is(err, ErrStandingRestartParked) {
 				t.Fatalf("bind non-executable standing recovery error = %v, want parked disposition", err)
 			}
 			if lease != nil {

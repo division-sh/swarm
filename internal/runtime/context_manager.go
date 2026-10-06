@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -574,6 +575,11 @@ func (m *RuntimeContextManager) BeginStandingRunRecovery(
 	if m.resetExecutionFenced {
 		return nil, worklifetime.ErrAdmissionFenced
 	}
+	if suppressed, err := m.standingRecoverySuppressedLocked(runID, origin); err != nil {
+		return nil, err
+	} else if suppressed {
+		return nil, runtimebus.ErrStandingRestartParked
+	}
 	var selected *worklifetime.StandingOccurrence
 	for _, entry := range m.contexts {
 		if !runtimeContextEntryLoaded(entry) || entry.standing == nil {
@@ -602,6 +608,33 @@ func (m *RuntimeContextManager) BeginStandingRunRecovery(
 		)
 	}
 	return selected.Begin(ctx)
+}
+
+func (m *RuntimeContextManager) standingRecoverySuppressedLocked(runID string, origin runtimerunlifecycle.RunOrigin) (bool, error) {
+	if !m.standingServiceSuppressedLocked(origin.ServiceID()) {
+		return false, nil
+	}
+	expected := worklifetime.StandingIdentity{ServiceID: origin.ServiceID(), RunID: runID, Generation: uint64(origin.Generation())}
+	found := false
+	for _, entry := range m.contexts {
+		if !runtimeContextEntryLoaded(entry) || entry.context == nil {
+			continue
+		}
+		identities, err := StandingExecutionIdentities(entry.context.StandingTargets, entry.context.StandingActivations)
+		if err != nil {
+			return false, err
+		}
+		for _, identity := range identities {
+			if identity != expected {
+				continue
+			}
+			if found {
+				return false, fmt.Errorf("standing recovery run %s has multiple admitted suppressed generations", runID)
+			}
+			found = true
+		}
+	}
+	return found, nil
 }
 
 func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklifetime.RuntimeOccurrence, targets []StandingTarget, activations []StandingActivation) (map[string]*worklifetime.StandingOccurrence, error) {
@@ -1875,6 +1908,11 @@ func (t *StandingServiceTransition) Restore(ctx context.Context) error {
 	}
 	t.manager.mu.Unlock()
 	t.settled = true
+	for _, item := range t.occurrences {
+		if item.entry.runtime != nil && item.entry.runtime.Bus != nil {
+			item.entry.runtime.Bus.SignalDeliveryContinuations()
+		}
+	}
 	return nil
 }
 

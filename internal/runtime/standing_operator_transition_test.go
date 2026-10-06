@@ -5,14 +5,85 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
+
+type standingTransitionSignalProbe struct {
+	runtimebus.DeliveryContinuationOwner
+	signals atomic.Int32
+}
+
+func (p *standingTransitionSignalProbe) Signal() { p.signals.Add(1) }
+
+func TestStandingRecoverySuppressionRequiresExactGenerationAndSignalsRestore(t *testing.T) {
+	manager, expected := standingOperatorProcessFixture(t)
+	entry := manager.contexts[runtimeContextTestHashA]
+	probe := &standingTransitionSignalProbe{}
+	if err := entry.runtime.Bus.SetDeliveryContinuationOwner(probe); err != nil {
+		t.Fatal(err)
+	}
+	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(expected.ServiceID, expected.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition, err := manager.BeginStandingServiceOperation(context.Background(), expected, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := manager.BeginStandingRunRecovery(context.Background(), expected.RunID, origin)
+	if lease != nil || !errors.Is(err, runtimebus.ErrStandingRestartParked) {
+		t.Fatalf("known transition was not deferred: lease=%v err=%v", lease, err)
+	}
+	foreign, err := runtimerunlifecycle.StandingGenerationRunOrigin(expected.ServiceID, expected.Generation+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, coordinate := range []struct {
+		run    string
+		origin runtimerunlifecycle.RunOrigin
+	}{{uuid.NewString(), origin}, {expected.RunID, foreign}} {
+		lease, err := manager.BeginStandingRunRecovery(context.Background(), coordinate.run, coordinate.origin)
+		if lease != nil || err == nil || errors.Is(err, runtimebus.ErrStandingRestartParked) {
+			t.Fatalf("foreign coordinate borrowed deferral: lease=%v err=%v", lease, err)
+		}
+	}
+	before := probe.signals.Load()
+	if err := transition.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if probe.signals.Load() != before+1 {
+		t.Fatalf("restored owner did not signal exactly once: before=%d after=%d", before, probe.signals.Load())
+	}
+	if err := transition.Restore(context.Background()); err != nil || probe.signals.Load() != before+1 {
+		t.Fatalf("settled transition signalled fictitious progress: err=%v signals=%d", err, probe.signals.Load())
+	}
+	lease, err = manager.BeginStandingRunRecovery(context.Background(), expected.RunID, origin)
+	if err != nil || lease == nil {
+		t.Fatalf("exact restored generation remained unavailable: lease=%v err=%v", lease, err)
+	}
+	if err := lease.Done(); err != nil {
+		t.Fatal(err)
+	}
+	child := entry.standing[expected.ServiceID]
+	if err := child.Fence(); err != nil {
+		t.Fatal(err)
+	}
+	lease, err = manager.BeginStandingRunRecovery(context.Background(), expected.RunID, origin)
+	if lease != nil || err == nil || errors.Is(err, runtimebus.ErrStandingRestartParked) {
+		t.Fatalf("untracked fence masqueraded as an owned transition: lease=%v err=%v", lease, err)
+	}
+	if err := child.Reopen(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func standingOperatorProcessFixture(t *testing.T) (*RuntimeContextManager, runtimepipeline.StandingServiceReconciliation) {
 	t.Helper()
