@@ -52,6 +52,8 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/internal/backend/pipelinepersistence/fan_out_barrier_owner.go": {},
 	// Sealed-group readback uses LoadAdmitted before comparing exact member integrity.
 	"internal/store/internal/backend/pipelinepersistence/publication_group.go": {},
+	// Clock replay reads accepted occurrences through the canonical event record owner.
+	"internal/store/internal/backend/pipelinepersistence/generic_schedule_occurrence_commit.go": {},
 	// Operator hydration uses canonical admitted records and canonical delivery snapshots.
 	"internal/store/internal/operatorsurface/operator_event_batch.go":                {},
 	"internal/store/internal/operatorsurface/operator_observability_read_surface.go": {},
@@ -559,6 +561,7 @@ func TestHostileEventRecordConsumerClassificationDoesNotGrantSQL(t *testing.T) {
 	for _, path := range []string{
 		"internal/store/internal/backend/pipelinepersistence/fan_out_barrier_owner.go",
 		"internal/store/internal/backend/pipelinepersistence/publication_group.go",
+		"internal/store/internal/backend/pipelinepersistence/generic_schedule_occurrence_commit.go",
 		"internal/store/internal/operatorsurface/operator_event_batch.go",
 		"internal/store/internal/operatorsurface/operator_observability_read_surface.go",
 		"internal/store/internal/operatorsurface/sqlite_runtime_observability.go",
