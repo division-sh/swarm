@@ -41,7 +41,7 @@ func projectSchemaSchedulesValue(value yamlsource.Value) (map[string]FlowSchedul
 	}
 	out := make(map[string]FlowSchedule, len(declarations))
 	for _, declaration := range declarations {
-		fields, err := schemaValueFields(declaration.Value, "schedule", map[string]struct{}{"cron": {}, "every": {}, "emit": {}}, nil, true)
+		fields, err := schemaValueFields(declaration.Value, "schedule", map[string]struct{}{"cron": {}, "every": {}, "emit": {}}, true)
 		if err != nil {
 			return nil, err
 		}

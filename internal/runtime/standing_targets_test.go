@@ -343,7 +343,7 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	published.RunID = "run-2"
 	published.Generation = 2
 	published.PublicationSequence = 3
-	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{published}); err != nil {
+	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{published}, nil); err != nil {
 		t.Fatalf("PublishStandingServiceTargets: %v", err)
 	}
 	lookup := manager.LookupIngress("chat", "telegram")
@@ -383,7 +383,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 	if err := manager.Register(contextDef); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{target}); err != nil {
+	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{target}, nil); err != nil {
 		t.Fatalf("PublishStandingServiceTargets after suspended startup: %v", err)
 	}
 	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Loaded() || lookup.Target.ServiceID != target.ServiceID {
