@@ -192,6 +192,28 @@ func TestHTTPObservationLostCallReplyIsUncertainNotPreModelRefusal(t *testing.T)
 		{"foreign_reply", func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{}}`))
 		}},
+		{"foreign_auth_error", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"error":{"code":-32001,"message":"private"}}`))
+		}},
+		{"foreign_context_error", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"error":{"code":-32003,"data":{"runtimeError":{"protocol_error":{"code":"mcp_context_token_not_found"}}}}}`))
+		}},
+		{"null_auth_error", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32001}}`))
+		}},
+		{"unclassified_context_error", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32003}}`))
+		}},
+		{"ambiguous_http_unauthorized", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32001}}`))
+		}},
+		{"ambiguous_http_forbidden", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+		}},
+		{"ambiguous_result_and_error", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{},"error":{"code":-32001}}`))
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var calls atomic.Int32
@@ -207,6 +229,25 @@ func TestHTTPObservationLostCallReplyIsUncertainNotPreModelRefusal(t *testing.T)
 				t.Fatalf("post-call outcome = %+v, calls=%d", failure, calls.Load())
 			}
 		})
+	}
+}
+
+func TestHTTPObservationOnlyAttributablePreExecutionCallRefusalIsKnown(t *testing.T) {
+	for _, reply := range []string{
+		`{"jsonrpc":"2.0","id":1,"error":{"code":-32001}}`,
+		`{"jsonrpc":"2.0","id":1,"error":{"code":-32003,"data":{"runtimeError":{"protocol_error":{"code":"mcp_context_token_not_found"}}}}}`,
+	} {
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			_, _ = w.Write([]byte(reply))
+		}))
+		_, err := testObservation(server.URL).Call(context.Background(), "emit_event", map[string]any{}, "one-call")
+		server.Close()
+		assertObservationFailure(t, err, "workspace_gateway_unreachable")
+		if failure := failures.Normalize(err, "test", "execute"); failure.Class != failures.ClassDependencyUnavailable || calls.Load() != 1 {
+			t.Fatalf("attributable pre-execution refusal changed: %+v calls=%d", failure, calls.Load())
+		}
 	}
 }
 

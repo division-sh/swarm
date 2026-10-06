@@ -419,9 +419,11 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		if g.hooks.AfterToolSuccess != nil {
 			g.hooks.AfterToolSuccess(ctx, r, toolName)
 		}
-		resultText, err := projectToolCallSuccessText(ctx, g.executor, toolName, req.Params["arguments"], out)
+		resultText, err := projectToolCallSuccessText(ctx, g.executorForContext(ctx), toolName, req.Params["arguments"], out)
 		if err != nil {
-			err = g.newGatewayError(ErrCodeToolExecFailed, "mcp.tools.call.result_project", err, map[string]any{"tool": toolName})
+			// Execution already succeeded. Another round could replace a call
+			// whose effect committed even though its result could not be delivered.
+			err = failures.Wrap(failures.ClassOutcomeUncertain, "workspace_tool_outcome_uncertain", "mcp-gateway", "mcp.tools.call.result_project", map[string]any{"tool": toolName, "status": "result_projection_failed"}, err)
 			g.logMCP(r, "warn", "mcp.tools.call.exec_error", err, map[string]any{
 				"method":    "tools/call",
 				"tool_name": toolName,
@@ -474,16 +476,13 @@ func projectToolCallSuccessText(ctx context.Context, executor runtimeGatewayExec
 	if len(raw) <= toolCallRelayResultLimit(toolName, input) {
 		return ToolResultText(out), nil
 	}
-	if !runtimeReadFileFollowUpAllowedInContext(ctx) {
+	writer, canRelay := executor.(OversizedToolResultRelayWriter)
+	if !runtimeReadFileFollowUpAllowedInContext(ctx) || !canRelay {
 		return ToolResultText(map[string]any{
 			"truncated": true,
 			"bytes":     len(raw),
 			"preview":   clampRunes(string(raw), maxToolResultPreviewRunes),
 		}), nil
-	}
-	writer, ok := executor.(OversizedToolResultRelayWriter)
-	if !ok {
-		return ToolResultText(out), nil
 	}
 	relay, err := writer.PersistOversizedToolResultRelay(ctx, toolName, raw)
 	if err != nil {

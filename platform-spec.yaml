@@ -40310,6 +40310,14 @@ managed_agent_capability_surface:
       tool-result handling. Loss of a launched model response remains
       outcome_uncertain, whereas an observed pre-model refusal with proven cleanup
       is not an invocation.
+      After successful tool execution, any result projection or relay error is
+      outcome_uncertain even when the underlying error is otherwise a known
+      data-limit or storage failure. Call-response identity is validated before
+      RPC-error classification; foreign, missing or ambiguous identity, combined
+      result/error envelopes and non-200 HTTP replies after tools/call dispatch
+      cannot prove pre-execution refusal. Only exact-ID defined pre-execution
+      RPC refusals retain known-refusal classification. Non-executing discovery
+      may observe boot authentication refusal before the request ID was parsed.
     forkchat_transport: >
       Fork-chat subprocess consumers carry the original frozen conversation snapshot/stub executor and definitions
       through the existing opaque MCP turn registry. The server validates the exact fork, turn, source, request
@@ -40319,6 +40327,11 @@ managed_agent_capability_surface:
       Sandbox target resolution consumes the existing capability-admission workspace without materializing a live
       run's data projection. Fork-scoped Claude backing remains invocation-local, and live Claude still requires
       Docker; a mock subprocess descriptor is not mistaken for the live Claude provider or its host prohibition.
+      Post-call result projection consumes the same context-selected snapshot/stub executor as dispatch,
+      never the live workflow executor or its source/sibling workspace resolver. An oversized result may use
+      only that selected executor's relay capability and the current callable follow-up tool. Without both,
+      it returns a bounded preview with no invented relay path; complete role-scoped typed reads still fail
+      rather than truncate, and any post-success projection failure preserves outcome uncertainty.
     cli_inventory: Every fresh, resumed and tool-result CLI process requires a valid authoritative inventory. Native
       comparisons consume the exact native channel only; MCP names remain exact MCP evidence, even when their canonical
       display names collide with native names. A failure discovered after provider execution settles outcome_uncertain
