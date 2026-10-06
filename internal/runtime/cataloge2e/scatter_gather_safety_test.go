@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/replayconformance"
 	"github.com/google/uuid"
 )
@@ -48,7 +49,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 				h := newRuntimeHarnessForBackend(t, filepath.Join(canonicalrouting.RepoRoot(t), "internal/runtime/cataloge2e/testdata/scatter-gather-safety"), backend, true)
 				var finalization *scatterGatherFinalizationHold
 				if variant.holdFinalization {
-					finalization = &scatterGatherFinalizationHold{held: make(chan events.Event, 1), release: make(chan struct{})}
+					finalization = &scatterGatherFinalizationHold{held: make(chan events.Event, 1), release: make(chan struct{}), returned: make(chan struct{})}
 					t.Cleanup(finalization.Release)
 					h.rt.Pipeline.SetTestLifecycleProbe(finalization)
 				}
@@ -350,12 +351,12 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 						}
 					}
 					if variant.repeat {
-						terminalRoutes := map[string]string{}
+						finalRoutes := map[string]string{}
 						for key := range done {
-							terminalRoutes[paths[key]] = ids[key]
+							finalRoutes[paths[key]] = ids[key]
 						}
 						if index+1 == len(items) {
-							terminalRoutes[collectorRef] = collectorID
+							finalRoutes[collectorRef] = collectorID
 						}
 						if finalization != nil && index+1 == len(items) {
 							ctx, cancel := context.WithDeadline(catalogRunContext(h, catalogRuntimeRunID), publicationDeadline)
@@ -367,18 +368,38 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 							case <-ctx.Done():
 								t.Fatalf("collector finalization was not held within the publication deadline: %v", ctx.Err())
 							}
-							ready, err := scatterGatherTerminalRoutesReady(ctx, h, terminalRoutes)
-							if err != nil || ready {
-								t.Fatalf("delivered join passed terminal snapshot fence while finalization was held: ready=%v err=%v", ready, err)
+							ready, err := scatterGatherFinalStageSnapshotsReady(ctx, h, finalRoutes)
+							if err != nil || !ready {
+								t.Fatalf("committed final-stage snapshot was lost while cleanup was held: ready=%v err=%v", ready, err)
+							}
+							select {
+							case <-finalization.returned:
+								t.Fatal("postcommit cleanup passed the held completion barrier")
+							default:
 							}
 							held := scatterGatherLoad(t, h, collectorRef, ctx)
 							if held.CurrentState != "complete" || held.Status != "active" || !held.TerminatedAt.IsZero() {
-								t.Fatalf("negative control did not hold exact terminal lifecycle: %+v", held)
+								t.Fatalf("negative control lost exact final-stage lifecycle: %+v", held)
+							}
+							if len(held.TransitionHistory) == 0 {
+								t.Fatal("held final-stage snapshot has no exact transition cause")
 							}
 							finalization.Release()
+							select {
+							case <-finalization.returned:
+							case <-ctx.Done():
+								t.Fatalf("released postcommit cleanup did not return within the publication deadline: %v", ctx.Err())
+							}
+							var selected any = h.pg
+							if h.sqlite != nil {
+								selected = h.sqlite
+							}
+							if receipt := storetest.ObservePipelineReceipt(t, ctx, selected, held.TransitionHistory[len(held.TransitionHistory)-1].TriggerEventID); receipt.Count > 1 {
+								t.Fatalf("held finalization duplicated its exact pipeline settlement: %+v", receipt)
+							}
 							cancel()
 						}
-						scatterGatherWaitForTerminalRoutes(t, h, terminalRoutes, publicationDeadline)
+						scatterGatherWaitForFinalStageSnapshots(t, h, finalRoutes, publicationDeadline)
 						before := scatterGatherCounts(t, h, h.ctx)
 						states := scatterGatherStates(t, h, paths, collectorRef)
 						if err := h.publishRuntimeEventResultForStep(step, 20*time.Second, false); err != nil {
@@ -761,13 +782,14 @@ func scatterGatherPublicEvents(h *runtimeHarness, ctx context.Context) (map[stri
 }
 
 type scatterGatherFinalizationHold struct {
-	held    chan events.Event
-	release chan struct{}
-	once    sync.Once
+	held     chan events.Event
+	release  chan struct{}
+	returned chan struct{}
+	once     sync.Once
 }
 
 func (p *scatterGatherFinalizationHold) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
-	if signal.Kind != lifecycleprobe.WorkflowTerminalCommitted || signal.Status != "committed" || signal.EventType != "platform.join_complete" {
+	if signal.Kind != lifecycleprobe.HandlerCompleted || signal.Status != "completed" || signal.EventType != "platform.join_complete" {
 		return
 	}
 	event, ok := correlation.InboundEventFromContext(ctx)
@@ -776,53 +798,80 @@ func (p *scatterGatherFinalizationHold) NotifyLifecycle(ctx context.Context, sig
 	}
 	p.held <- event
 	<-p.release
+	close(p.returned)
 }
 
 func (p *scatterGatherFinalizationHold) Release() {
 	p.once.Do(func() { close(p.release) })
 }
 
-func scatterGatherTerminalRoutesReady(ctx context.Context, h *runtimeHarness, routes map[string]string) (bool, error) {
+func scatterGatherFinalStageSnapshotsReady(ctx context.Context, h *runtimeHarness, routes map[string]string) (bool, error) {
 	if correlation.RunIDFromContext(ctx) != catalogRuntimeRunID || len(routes) == 0 {
-		return false, fmt.Errorf("terminal snapshot fence requires exact current-run routes")
+		return false, fmt.Errorf("final-stage snapshot fence requires exact current-run routes")
 	}
 	ready := true
 	for path, entityID := range routes {
 		owner := catalogExactWorkflowRoute(path)
 		instance, found, err := h.workflow.Load(ctx, owner)
 		if err != nil {
-			return false, fmt.Errorf("terminal snapshot load %s: %w", path, err)
+			return false, fmt.Errorf("final-stage snapshot load %s: %w", path, err)
 		}
 		if !found || entityID == "" || instance.StorageRef != path || instance.InstanceID != owner.Route.InstanceID || instance.WorkflowName != owner.Route.ScopeKey || instance.EntityID != entityID {
-			return false, fmt.Errorf("terminal snapshot route %s entity %s has mismatched persisted authority: found=%v instance=%+v", path, entityID, found, instance)
+			return false, fmt.Errorf("final-stage snapshot route %s entity %s has mismatched persisted authority: found=%v instance=%+v", path, entityID, found, instance)
 		}
-		if instance.Status != "terminated" || instance.TerminatedAt.IsZero() {
+		if instance.Status != "active" || !instance.TerminatedAt.IsZero() {
+			return false, fmt.Errorf("ordinary final entry retired exact instance %s: %+v", path, instance)
+		}
+		if instance.CurrentState != "complete" {
 			ready = false
 		}
 	}
 	return ready, nil
 }
 
-func scatterGatherWaitForTerminalRoutes(t testing.TB, h *runtimeHarness, routes map[string]string, deadline time.Time) {
+func scatterGatherWaitForFinalStageSnapshots(t testing.TB, h *runtimeHarness, routes map[string]string, deadline time.Time) {
 	t.Helper()
 	if deadline.IsZero() {
-		t.Fatal("terminal snapshot fence requires the original publication deadline")
+		t.Fatal("final-stage snapshot fence requires the original publication deadline")
 	}
 	ctx, cancel := context.WithDeadline(catalogRunContext(h, catalogRuntimeRunID), deadline)
 	defer cancel()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		ready, err := scatterGatherTerminalRoutesReady(ctx, h, routes)
+		ready, err := scatterGatherFinalStageSnapshotsReady(ctx, h, routes)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if ready {
-			return
+			var selected any = h.pg
+			if h.sqlite != nil {
+				selected = h.sqlite
+			}
+			for path := range routes {
+				instance := scatterGatherLoad(t, h, path, ctx)
+				if len(instance.TransitionHistory) == 0 {
+					t.Fatalf("final-stage snapshot %s lacks its exact transition cause", path)
+				}
+				eventID := instance.TransitionHistory[len(instance.TransitionHistory)-1].TriggerEventID
+				if eventID == "" {
+					t.Fatalf("final-stage snapshot %s has no committed cause", path)
+				}
+				receipt := storetest.ObservePipelineReceipt(t, ctx, selected, eventID)
+				if receipt.Count > 1 || (receipt.Count == 1 && receipt.Outcome != "success") {
+					t.Fatalf("final-stage snapshot %s has inexact pipeline settlement: %+v", path, receipt)
+				}
+				if receipt.Count != 1 {
+					ready = false
+				}
+			}
+			if ready {
+				return
+			}
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("terminal snapshot routes did not finalize within the original publication deadline: routes=%v err=%v", routes, ctx.Err())
+			t.Fatalf("final-stage snapshots did not settle within the original publication deadline: routes=%v err=%v", routes, ctx.Err())
 		case <-ticker.C:
 		}
 	}

@@ -48,7 +48,7 @@ type causalSelectedGrant struct {
 }
 
 func (g causalSelectedGrant) CommitAgentLifecycleTransition(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, error) {
-	if req.TargetPhase != manager.AgentLifecycleTerminated {
+	if req.OperationKind != "self_release" || req.Trigger != "self_release" || req.TargetPhase != manager.AgentLifecycleRegistered {
 		return g.GenerationGrant.CommitAgentLifecycleTransition(ctx, req)
 	}
 	evidence, err := g.Evidence()
@@ -154,7 +154,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 					SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,
 					Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 				})
-				if kind != "missing" && (err != nil || result.ExecutedEventCount != 1 || !result.Activation.Activated) {
+				if err != nil || result.ExecutedEventCount != 1 || !result.Activation.Activated {
 					t.Fatalf("real selected execution/activation: %+v %v", result, err)
 				}
 				probe.mu.Lock()
@@ -162,11 +162,13 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 				refusals := probe.refusals
 				probe.mu.Unlock()
 				if len(items) == 0 {
-					t.Fatal("actual selected actor produced no terminal causal diagnostic")
+					t.Fatal("actual selected actor produced no owned self-release causal diagnostic")
 				}
 				if kind == "missing" {
-					if err == nil || !strings.Contains(err.Error(), "causal source event") || !strings.Contains(err.Error(), "does not exist") || result.Activation.Activated || result.ExecutedEventCount != 1 || refusals != 2*len(items) {
-						t.Fatalf("missing-parent retirement must refuse activation after exact projection refusals: count=%d refusals=%d activated=%t err=%v", result.ExecutedEventCount, refusals, result.Activation.Activated, err)
+					// Invalid diagnostics remain unprojected/unacknowledged. They are
+					// not an ordinary-final retirement prerequisite for business ACK.
+					if refusals != 2*len(items) {
+						t.Fatalf("missing-parent self-release lost exact projection refusals: count=%d refusals=%d activated=%t err=%v", result.ExecutedEventCount, refusals, result.Activation.Activated, err)
 					}
 					return
 				}

@@ -109,7 +109,7 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 				t.Fatalf("publish run A: %v", err)
 			}
 			waitForCatalogRunScopedPublication(t, h, completedA, runA)
-			assertCatalogRunScopedFlowOwner(t, h, selected, runA, flowPath, "complete", false)
+			assertCatalogRunScopedFlowOwner(t, h, selected, runA, flowPath, "complete")
 			assertCatalogRunScopedAgent(t, h, selected, runA, flowPath, "delivered")
 
 			startedB := make(chan struct{}, 1)
@@ -129,7 +129,7 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 			}
 
 			waitForCatalogRunScopedSpawnSettlement(t, h, runB, flowPath)
-			assertCatalogRunScopedFlowOwner(t, h, selected, runB, flowPath, "awaiting_observed", true)
+			assertCatalogRunScopedFlowOwner(t, h, selected, runB, flowPath, "awaiting_observed")
 			assertCatalogRunScopedAgent(t, h, selected, runB, flowPath, "in_progress")
 
 			controller := runtimeruncontrol.NewController(selected, h.rt.Bus, runtimeruncontrol.Options{})
@@ -160,13 +160,13 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 			}
 			waitForCatalogRunScopedPublication(t, h, completedB, runB)
 
-			assertCatalogRunScopedFlowOwner(t, h, selected, runB, flowPath, "complete", false)
+			assertCatalogRunScopedFlowOwner(t, h, selected, runB, flowPath, "complete")
 			assertCatalogRunScopedAgent(t, h, selected, runB, flowPath, "delivered")
 			afterA, err := selected.LoadRunLifecycleSnapshot(catalogRunContext(h, runA), runA)
 			if err != nil || !reflect.DeepEqual(snapshotA, afterA) {
 				t.Fatalf("run B or refused stop changed completed run A: before=%#v after=%#v err=%v", snapshotA, afterA, err)
 			}
-			assertCatalogRunScopedFlowOwner(t, h, selected, runA, flowPath, "complete", false)
+			assertCatalogRunScopedFlowOwner(t, h, selected, runA, flowPath, "complete")
 			assertCatalogRunScopedAgent(t, h, selected, runA, flowPath, "delivered")
 			assertCatalogRunScopedPublicReadback(t, h, selected, runA, runB, flowPath)
 		})
@@ -281,7 +281,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 				t.Fatalf("selected-contract flow fork result = %#v", result)
 			}
 			forkRunID := materialization.ForkRunID
-			assertCatalogRunScopedFlowOwner(t, h, selected, forkRunID, flowPath, "complete", false)
+			assertCatalogRunScopedFlowOwner(t, h, selected, forkRunID, flowPath, "complete")
 			forkAgent := catalogRunScopedAgentDeliveryIdentity(t, h, forkRunID, flowPath, string(sourceEvent.Type()), "delivered")
 			if sourceAgent.RunID == forkAgent.RunID || sourceAgent.Name != forkAgent.Name || sourceAgent.Route != forkAgent.Route {
 				t.Fatalf("source/fork agent identity = %#v/%#v, want equal declaration+route and distinct run", sourceAgent, forkAgent)
@@ -450,7 +450,6 @@ func assertCatalogRunScopedFlowOwner(
 	h *runtimeHarness,
 	selected runScopedCatalogSelectedStore,
 	runID, flowPath, wantState string,
-	wantActiveRoutes bool,
 ) {
 	t.Helper()
 	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.RouteForInstancePath(flowPath))
@@ -464,15 +463,15 @@ func assertCatalogRunScopedFlowOwner(
 	if instance.CurrentState != wantState {
 		t.Fatalf("%s state = %q, want %q", owner.Key(), instance.CurrentState, wantState)
 	}
+	if instance.Status != "active" || !instance.TerminatedAt.IsZero() {
+		t.Fatalf("ordinary final entry retired %s: %+v", owner.Key(), instance)
+	}
 	routes, err := selected.ListFlowInstanceRouteRecords(catalogRunContext(h, runID), owner)
 	if err != nil {
 		t.Fatalf("%s route records: %v", owner.Key(), err)
 	}
-	if wantActiveRoutes && len(routes) == 0 {
+	if len(routes) == 0 {
 		t.Fatalf("%s has no active route records", owner.Key())
-	}
-	if !wantActiveRoutes && len(routes) != 0 {
-		t.Fatalf("%s terminal owner retained %d active route records", owner.Key(), len(routes))
 	}
 	for _, route := range routes {
 		if route.Identity != owner {
