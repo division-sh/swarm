@@ -85,3 +85,104 @@ site, compatibility reader or qualification waiver is introduced.
 Early reviewer-e review, composed-candidate core, final lifecycle plus the 13
 named supplements, eventual hosted full and the actual PR proof audit. No
 core/lifecycle/full pass or complete failure-class closure is claimed here.
+
+## Early Review Retry Repair
+
+Binding review: #2269 comment6024231565. Both P1s were reproduced red before
+repair: the preserved eight normal-store cells failed at reviewed source
+aaa32c0b0 in4.605s (stale first claim or incompatible authorization/launch
+anchors). The regression is committed separately at dca363b68. Earlier
+diagnostic compile/setup failures are not finding evidence.
+
+Production repair and expanded normal/selected/directive regressions:
+`b1b33c9ee`. Captured-tail oracle reconciliation: `4aee09f5a`, test-only.
+
+- The canonical effects authorization mutation binds `current_attempt_id` to
+  its actual successfully authorized attempt. `admitted_attempt_id`,
+  `first_attempt_id`, first launch/deadline, bound and predecessor physical
+  evidence stay immutable. No latest-attempt selection or compatibility reader.
+- The guarded terminate writer, launch/timeout admission, retained completion
+  intent, canceled physical settlement and both recovery scopes consume that
+  binding. Historical anchors validate the logical delivery and constructed
+  owner; execution and settlement still require the exact current claim.
+- A reclaimed claim terminated before authorization records exact
+  `origin_evidence` and no current physical attempt. Closed predecessor history
+  does not suppress it. Origin-only settlement refuses a physical attempt on
+  that claim and also waits for the entire logical physical set to close.
+- Directive execution-owner changes remain separately fenced, not delivery
+  claim renewal. Same-owner prelaunch retry is proven; a foreign owner is
+  rejected without another provider attempt or fabricated delivery.
+- The captured-tail oracle now checks current attempt/authority independently
+  from the immutable first-launch clock. It still proves all physical joins,
+  rollback, exact reaction retry and no adoption of the newer live generation.
+- Authoritative `platform_tables.runtime_agent_turn_lifetimes` prose/DDL are
+  reconciled in this repair. The timeout start, authored cancellation semantics,
+  claim `Same` fencing, provider replay policy and routing rights are unchanged.
+
+### Temporal Coverage
+
+Every row below is part of the existing cancellation split, not universal idle
+or graph eligibility. Exact tests run on both SQLite and PostgreSQL.
+
+| Manifestation | Proof |
+| --- | --- |
+| No attempt / termination versus first authorization | `TestUnstartedClaimedTurnTerminationBothStores`, `TestUnstartedDirectiveTurnRecoveryBothStores` |
+| First authorization / prelaunch termination | `TestAuthoredTurnTerminationCommitsWithExactStageBothStores` prelaunch and restart rows |
+| Canonical prelaunch rejection / queued retry cancellation | `TestRetriedBusinessTurnTerminationAndTimeoutRecoveryBothStores/retry_queued` preserves version, retry count and immutable predecessor |
+| Current reclaimed claim before authorization | Same root `unstarted`; selected retry root `unstarted`; real origin-only recovery/settlement and repeat, no fabricated attempt/clock |
+| Current retry authorization and first actual launch | Normal/selected retry roots `authorized`, `launched`; exact current cancellation, premature-settlement refusal and immutable anchors |
+| Timeout recovery / foreground and selected reaction settlement | Normal `timeout-recovery`, selected `timeout_recovery`; actual commit, unchanged deadline, exactly one reaction, repeated readback, no normal acquisition of selected work |
+| Several physical tails / captured settlement | `TestCanceledOriginWaitsForEveryCapturedProviderTailBothStores`; separate current attempt and first clock; every physical tail remains required |
+| Captured recovery / retained late response | `TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores`, `TestCompletionReportsCanceledOriginWithoutDroppingAcceptedResponseBothStores` |
+| Stale predecessor / canceled claim subsequently reclaimed | New retry roots plus unchanged `TestCanceledTurnRecoveryPreservesExactClaimBoundaryBothStores` negatives |
+| Directive retry versus foreign execution owner | `TestLogicalTurnDirectiveRetryKeepsExactExecutionOwnerBothStores` |
+| Bound/clock immutability and corrupt history | `TestLogicalTurnClock*`, `TestLogicalTurnTimeout*`, `TestCanceledTurnRecoveryRejectsCorruptFirstOriginBothStores` |
+
+### Repair Receipts
+
+The b1b33c9ee production and new regression sources are unchanged in4aee09f5a.
+Race/count-three at b1b33c9ee, with unchanged3m budgets:
+
+- Normal retry root: PASS95.292s, all30 repeated backend/mode cells.
+- Selected retry root: PASS130.412s, all24 repeated backend/mode cells.
+- Directive retry and unchanged stale-claim negative roots: PASS43.641s,
+  all18 repeated backend/mode cells.
+- Combined four-root race command remains RED/incomplete at180.046s. The
+  package budget expired while progressing through a PostgreSQL case that had
+  run1s. Individual slices above retain the same race/count/timeout; no budget
+  inflation, reduced assertions or retry-to-green.
+
+Managed surrounding controls at b1b33c9ee remain RED43.522s: the two-tail
+oracle still conflated first clock with current settlement authority, on both
+stores. Repaired narrowly at4aee09f5a, preserving and strengthening exact clock
+and authority checks. Its three captured-tail/recovery/retained-response roots
+PASS71.550s at race/count-three and the original3m budget, both stores.
+
+Managed authority ratchet/registry at4aee09f5a: PASS176.913s, debt14996,
+ZERO added debt sites,13012 exact findings. Baseline and collector are unchanged
+(collector494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5).
+The35 newly classified findings are exact private effects-owner SQL/types,
+not public/runtime escape sites. No raw-SQL test statement or new observation
+port was added; regression observations consume the existing native owner.
+
+The full focused surrounding native control group (clock, queue/unstarted,
+authored terminate, captured tails, corrupt-history/atomic reaction,
+selected startup and emit feedback) PASS40.601s through the managed runner at
+4aee09f5a, count-one, unchanged3m budget, both stores.
+
+`TestServedCanceledTurnRecoveryBothStores` PASS25.263s at4aee09f5a,
+count-one,3m budget. It uses the compiled internal mock-lifecycle process and
+public RPC readback, not paid-provider/public-launcher qualification. The
+native retry matrices, rather than this generic served control, prove the
+specific retry manifestations.
+
+Active required-root/child binding for core/lifecycle/full proof plans:
+`TestCurrentProofPlansBindActiveRequiredRoots` PASS76.829s at4aee09f5a.
+This builds/checks the plans; it does not execute their tiers. Generated facade,
+provider adapters, authority collector and debt baseline have no repair diff;
+all changed surviving Go files are formatted and the diff is whitespace-clean.
+
+No server2 window or tier run has started. Fresh core, lifecycle plus13,
+hosted full and independent repair approval remain required. The existing
+watchlist node was refined by reviewer-e at swarm-docs595a156 for both P1s;
+no additional class, issue, collector exception or compatibility path is added.
