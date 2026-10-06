@@ -223,7 +223,14 @@ func (f receiverConfigActivationFixture) request(key, instanceID, label string) 
 		panic("receiver fixture requires one exact creating input")
 	}
 	req.ConstructorInput = pins[0].EventType()
-	fields := map[string]any{"request_id": key}
+	schema, ok := pins[0].ReceiverEventSchema()
+	if !ok {
+		panic("receiver fixture requires its admitted creating-input schema")
+	}
+	fields := map[string]any{}
+	if _, supplied := schema.StructuralField("request_id"); supplied {
+		fields["request_id"] = key
+	}
 	if req.ConstructorInput == "task.create" {
 		fields["label"], fields["nested"] = label, []any{int64(7), float64(7), nil}
 	}
