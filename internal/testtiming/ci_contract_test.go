@@ -487,8 +487,20 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatalf("store-admission-full unit = %#v, want uncached facade/admission complement without skips", storeUnit)
 	}
 	censusUnit, ok := policy.Units["persistence-authority-debt-census"]
-	if !ok || !slices.Equal(censusUnit.Packages, []string{storePackage}) || censusUnit.Run != "^TestPersistenceAuthorityDebtRatchet$" || censusUnit.Skip != "" || censusUnit.CountMode != "count-1" || censusUnit.BudgetClass != "broad" {
+	if !ok || !slices.Equal(censusUnit.Packages, []string{storePackage}) || censusUnit.Run != `^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$` || censusUnit.Skip != "" || censusUnit.CountMode != "count-1" || censusUnit.BudgetClass != "broad" {
 		t.Fatalf("dedicated persistence census changed execution envelope: %+v", censusUnit)
+	}
+	nativeChildren := []string{
+		"TestInboundSetupSeedDoesNotReceiveRawAuthority",
+		"TestNativeActivitySetupDoesNotReceiveRawAuthority",
+		"TestNativeChannelTerminalFixturesDoNotReceiveRawAuthority",
+		"TestNativeJournalFixturesDoNotReceiveRawAuthority",
+		"TestNativeLoopClaimFixturesDoNotReceiveRawAuthority",
+		"TestNativeMockFixturesDoNotReceiveRawAuthority",
+		"TestNativeAPIReadSetupDoesNotReceiveRawAuthority",
+	}
+	if len(censusUnit.RequiredChildren) != 1 || !slices.Equal(censusUnit.RequiredChildren["TestNativeFixtureFamiliesDoNotReceiveRawAuthority"], nativeChildren) {
+		t.Fatal("census unit dropped a completed-family assertion")
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "store"), []*regexp.Regexp{regexp.MustCompile(storeUnit.Run), regexp.MustCompile(censusUnit.Run)})
 	assertGoProofPartition(t, filepath.Join(root, "internal", "testpostgres"), []*regexp.Regexp{regexp.MustCompile(storeUnit.Run)})

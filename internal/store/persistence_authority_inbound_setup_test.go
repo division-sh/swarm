@@ -4,8 +4,7 @@ import (
 	"testing"
 )
 
-func TestInboundSetupSeedDoesNotReceiveRawAuthority(t *testing.T) {
-	findings := debtLoadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+func verifyInboundSetupSeedDoesNotReceiveRawAuthority(t *testing.T, findings []authorityFinding) {
 	for _, finding := range findings {
 		if unusedInboundSetupAuthority(finding) {
 			t.Errorf("native inbound seed regained unused raw authority: %s", finding.registryLine())

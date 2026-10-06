@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -712,12 +713,25 @@ func TestPersistenceAuthorityDebtRatchetIsSelectedInEveryTier(t *testing.T) {
 				t.Fatal(err)
 			}
 			unit, err := plan.Unit("persistence-authority-debt-census")
-			if err != nil || unit.Run != "^TestPersistenceAuthorityDebtRatchet$" || unit.CountMode != "count-1" || unit.Skip != "" || len(unit.RequiredTests) != 1 || len(unit.SelectedRoots) != 1 {
+			if err != nil || unit.Run != `^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$` || unit.CountMode != "count-1" || unit.Skip != "" || len(unit.RequiredTests) != 2 || len(unit.SelectedRoots) != 2 {
 				t.Fatalf("%s/%s changed mandatory census execution: %+v, %v", venue, tier, unit, err)
 			}
-			root := unit.RequiredTests[0]
+			root := unit.RequiredTests[1]
 			if root.Name != "TestPersistenceAuthorityDebtRatchet" || root.Package != "github.com/division-sh/swarm/internal/store" {
 				t.Fatalf("census requires a different root: %+v", root)
+			}
+			family := unit.RequiredTests[0]
+			children := []string{
+				"TestInboundSetupSeedDoesNotReceiveRawAuthority",
+				"TestNativeActivitySetupDoesNotReceiveRawAuthority",
+				"TestNativeChannelTerminalFixturesDoNotReceiveRawAuthority",
+				"TestNativeJournalFixturesDoNotReceiveRawAuthority",
+				"TestNativeLoopClaimFixturesDoNotReceiveRawAuthority",
+				"TestNativeMockFixturesDoNotReceiveRawAuthority",
+				"TestNativeAPIReadSetupDoesNotReceiveRawAuthority",
+			}
+			if family.Name != "TestNativeFixtureFamiliesDoNotReceiveRawAuthority" || family.Package != root.Package || !slices.Equal(unit.RequiredChildren[family.Name], children) {
+				t.Fatalf("census lost a required native family: %+v, %v", family, unit.RequiredChildren)
 			}
 		}
 	}

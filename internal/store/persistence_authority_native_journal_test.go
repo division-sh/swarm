@@ -2,8 +2,7 @@ package store_test
 
 import "testing"
 
-func TestNativeJournalFixturesDoNotReceiveRawAuthority(t *testing.T) {
-	findings := debtLoadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+func verifyNativeJournalFixturesDoNotReceiveRawAuthority(t *testing.T, findings []authorityFinding) {
 	for _, finding := range findings {
 		if nativeJournalFixtureAuthority(finding) {
 			t.Errorf("native journal fixture regained raw authority: %s", finding.registryLine())

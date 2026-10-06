@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-func TestNativeActivitySetupDoesNotReceiveRawAuthority(t *testing.T) {
-	findings := debtLoadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+func verifyNativeActivitySetupDoesNotReceiveRawAuthority(t *testing.T, findings []authorityFinding) {
 	for _, finding := range findings {
 		if nativeActivitySetupAuthority(finding) {
 			t.Errorf("native activity fixture regained raw authority: %s", finding.registryLine())
