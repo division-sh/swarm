@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -100,6 +101,11 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				rt.Events = selected.RuntimeDeps().EventStore
 				rt.Lifecycle = selected.RuntimeDeps().ManagerPersistenceRoles.LifecycleState
 				rt.Observability = selected.Observability()
+				rt.WorkflowTargets = rt.Events.(pipeline.WorkflowTargetPersistenceReader)
+				rt.Inbound = selected.RuntimeDeps().InboundStore
+				rt.Standing = rt.Events.(interface {
+					ListStandingServiceStatuses(context.Context) ([]pipeline.StandingServiceStatus, error)
+				})
 			}
 			declarations := semanticview.AgentDeclarations(rt.Runtime.Options.WorkflowModule.SemanticSource())
 			if len(declarations) != 1 || declarations[0].LocalID != "same-name" || declarations[0].Entry.Role != "loaded-decoy" {
