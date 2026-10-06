@@ -15,6 +15,40 @@ type ConversationForkTurnStorage struct {
 }
 type ConversationForkDomainStorage struct{ Runs, Events, Mailbox, Mutations int }
 
+type ConversationForkTurnDiagnostic struct {
+	Index          int
+	State, Failure string
+}
+
+func ReadConversationForkTurnDiagnosticsForTest(ctx context.Context, selected any, forkID string) ([]ConversationForkTurnDiagnostic, error) {
+	if err := validateSelectedForkStorageIdentity(forkID); err != nil {
+		return nil, err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []ConversationForkTurnDiagnostic
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT turn_index,state,COALESCE(CAST(failure AS TEXT),'') FROM conversation_fork_turns WHERE fork_id=$1 ORDER BY turn_index`, forkID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var row ConversationForkTurnDiagnostic
+			if err := rows.Scan(&row.Index, &row.State, &row.Failure); err != nil {
+				return err
+			}
+			out = append(out, row)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ReadConversationForkStorageForTest(ctx context.Context, selected any, forkID string) (ConversationForkStorage, error) {
 	var out ConversationForkStorage
 	if err := validateSelectedForkStorageIdentity(forkID); err != nil {

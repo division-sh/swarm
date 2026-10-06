@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // This uses an actually completed source turn, native worker, real MCP HTTP,
@@ -99,7 +102,7 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 				listener = "0.0.0.0:0"
 				targetBackend = workspace.BackendDocker
 			}
-			rt := startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t, backend, root, true, targetBackend, factory, listener)
+			rt := startWorkspaceGatewayProofRuntime(t, backend, root, targetBackend, factory, listener)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "external.observed", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{}, "idempotency_key": "mock-forkchat-source",
@@ -108,7 +111,7 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 				"event_name": "fork.source_message", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"note": "actual source conversation"}, "idempotency_key": "mock-forkchat-turn",
 			})
-			waitServedConversationForkSourceAgentReady(t, servedConversationForkProofRuntime{servedControlProofRuntime: rt}, seed.RunID, ready.EventID)
+			waitWorkspaceProofSourceAgentReady(t, rt, seed.RunID, ready.EventID)
 			var sourceActor actors.AgentConfig
 			for _, actor := range rt.Runtime.Manager.ListAgentConfigs() {
 				if actor.ID == "fork-source-agent" && actor.Identity.RunID == seed.RunID {
@@ -118,7 +121,7 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 			if sourceActor.Identity.IsZero() {
 				t.Fatal("completed source turn has no live concrete receiver")
 			}
-			sourceTarget, err := owner.ResolveWorkspace(correlation.WithRunID(servedControlProofAuthorActivityContext(t, rt), seed.RunID), sourceActor)
+			sourceTarget, err := owner.ResolveWorkspace(correlation.WithRunID(workspaceProofAuthorActivityContext(t, rt), seed.RunID), sourceActor)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -158,15 +161,8 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 			}
 			readLifecycle := func() manager.AgentLifecycleState {
 				t.Helper()
-				ctx := servedControlProofAuthorActivityContext(t, rt)
-				var state manager.AgentLifecycleState
-				var found bool
-				var err error
-				if rt.SQLite != nil {
-					state, found, err = rt.SQLite.LoadAgentLifecycleState(ctx, sourceActor.Identity)
-				} else {
-					state, found, err = rt.Postgres.LoadAgentLifecycleState(ctx, sourceActor.Identity)
-				}
+				ctx := workspaceProofAuthorActivityContext(t, rt)
+				state, found, err := rt.Lifecycle.LoadAgentLifecycleState(ctx, sourceActor.Identity)
 				if err != nil || !found || state.Phase != manager.AgentLifecycleRunning {
 					t.Fatalf("source lifecycle is not executable: %+v found=%v err=%v", state, found, err)
 				}
@@ -181,10 +177,8 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 					t.Fatalf("fork sandbox changed the exact source lifecycle generation: before=%+v after=%+v", initialLifecycle, current)
 				}
 			}
-			var sessionID, turnID string
-			if err := rt.DB.QueryRow(`SELECT session_id, turn_id FROM agent_turns WHERE trigger_event_id=$1 AND execution_mode='mock' AND agent_id='fork-source-agent'`, ready.EventID).Scan(&sessionID, &turnID); err != nil {
-				t.Fatal(err)
-			}
+			turn := requireWorkspaceProofMockTurn(t, rt, seed.RunID, "fork-source-agent", ready.EventID)
+			sessionID, turnID := turn.SessionID, turn.TurnID
 			var created struct {
 				Fork runfork.OperatorConversationForkSession `json:"fork"`
 			}
@@ -198,7 +192,12 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 				// the API-stub response exercised by the five-second helper.
 				response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "conversation.fork_chat", params, 30*time.Second)
 				if response.Error != nil {
-					t.Fatalf("public mock fork chat: %+v\n%s", response.Error, servedConversationForkTurnDebug(t, rt.DB, rt.Backend, created.Fork.ForkID))
+					turns, err := storetest.ReadConversationForkTurnDiagnostics(context.Background(), rt.Events, created.Fork.ForkID)
+					var rows []string
+					for _, turn := range turns {
+						rows = append(rows, fmt.Sprintf("turn=%d state=%s failure=%s", turn.Index, turn.State, turn.Failure))
+					}
+					t.Fatalf("public mock fork chat: %+v\nconversation_fork_turns: %s read_error=%v", response.Error, strings.Join(rows, "; "), err)
 				}
 				if err := json.Unmarshal(response.Result, out); err != nil {
 					t.Fatal(err)
@@ -252,8 +251,10 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 			if after := mockForkChatDomainCounts(t, rt, seed.RunID); after != before {
 				t.Fatalf("mock MCP sandbox mutated live facts: before=%+v after=%+v", before, after)
 			}
-			requireServedConversationForkRowCount(t, rt.DB, rt.Backend, "conversation_fork_snapshots", created.Fork.ForkID, 1)
-			requireServedConversationForkRowCount(t, rt.DB, rt.Backend, "conversation_fork_turns", created.Fork.ForkID, 2)
+			forkRows, err := storetest.ReadConversationForkStorage(context.Background(), rt.Events, created.Fork.ForkID)
+			if err != nil || forkRows.Snapshots != 1 || forkRows.Turns != 2 {
+				t.Fatalf("exact committed fork rows=%+v error=%v, want one snapshot and two turns", forkRows, err)
+			}
 			for _, fault := range []string{"stale-authority", "gateway-disconnect"} {
 				if fault == "gateway-disconnect" && !docker {
 					continue
@@ -266,11 +267,12 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 				if response.Error == nil {
 					t.Fatalf("%s reached model execution", fault)
 				}
-				var state, failureRaw, refusedTurn string
-				if err := rt.DB.QueryRow(`SELECT state, failure, fork_turn_id FROM conversation_fork_turns WHERE fork_id=$1 AND idempotency_key=$2`, created.Fork.ForkID, key).Scan(&state, &failureRaw, &refusedTurn); err != nil {
+				refused, err := storetest.ReadConversationForkTurnStorage(context.Background(), rt.Events, created.Fork.ForkID, key)
+				if err != nil {
 					t.Fatal(err)
 				}
-				failure, err := failures.UnmarshalEnvelope([]byte(failureRaw))
+				state, failureRaw, refusedTurn := refused.State, refused.Failure, refused.TurnID
+				failure, err := failures.UnmarshalEnvelope(failureRaw)
 				wantDetail := "forkchat_workspace_authority_invalid"
 				wantClass := failures.ClassLifecycleConflict
 				if fault == "gateway-disconnect" {
@@ -296,17 +298,16 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 				if err != nil || publicFailure.Class != wantClass || publicFailure.Detail.Code != wantDetail {
 					t.Fatalf("public RPC erased typed target refusal: %s err=%v", raw, err)
 				}
-				var completions int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM conversation_fork_turn_completions WHERE fork_turn_id=$1`, refusedTurn).Scan(&completions); err != nil || completions != 0 {
-					t.Fatalf("%s dispatched a provider: completions=%d err=%v", fault, completions, err)
+				if refused.Completions != 0 {
+					t.Fatalf("%s dispatched a provider: completions=%d", fault, refused.Completions)
 				}
 				replayed := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "conversation.fork_chat", params, 30*time.Second)
 				if replayed.Error == nil {
 					t.Fatalf("failed exact occurrence was relaunched: %s", fault)
 				}
-				var occurrences int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM conversation_fork_turns WHERE fork_id=$1 AND idempotency_key=$2`, created.Fork.ForkID, key).Scan(&occurrences); err != nil || occurrences != 1 {
-					t.Fatalf("refusal replay created another occurrence: count=%d err=%v", occurrences, err)
+				refusedReplay, err := storetest.ReadConversationForkTurnStorage(context.Background(), rt.Events, created.Fork.ForkID, key)
+				if err != nil || refusedReplay.KeyedOccurrences != 1 || refusedReplay.TurnID != refusedTurn {
+					t.Fatalf("refusal replay created another occurrence: row=%+v err=%v", refusedReplay, err)
 				}
 				verifySource()
 				if fault == "gateway-disconnect" {
@@ -332,14 +333,10 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 				"directive": "prove the source receiver still executes after sandbox cleanup", "idempotency_key": "mock-forkchat-source-survives",
 			}, 30*time.Second)
 			if response.Error != nil {
-				rows, err := rt.DB.Query(`SELECT request_payload, response_payload FROM agent_turns WHERE run_id=$1 AND agent_id='fork-source-agent' ORDER BY created_at`, seed.RunID)
+				rows, err := storetest.ReadManagedAgentTurnStorage(context.Background(), rt.Events, seed.RunID, "fork-source-agent")
 				if err == nil {
-					defer rows.Close()
-					for rows.Next() {
-						var request, result string
-						if err := rows.Scan(&request, &result); err == nil {
-							t.Logf("source turn request=%s result=%s", request, result)
-						}
+					for _, row := range rows {
+						t.Logf("source turn request=%s result=%s", row.RequestPayload, row.ResponsePayload)
 					}
 				} else {
 					t.Logf("source turn evidence: %v", err)
@@ -352,9 +349,14 @@ func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker bool) {
 			if !later.OK || later.RunID != seed.RunID || later.Response != "source conversation preserved" {
 				t.Fatalf("source receiver did not complete a later turn: %+v", later)
 			}
-			var continuedSession string
-			if err := rt.DB.QueryRow(`SELECT session_id FROM agent_turns WHERE trigger_event_id=$1 AND execution_mode='mock' AND agent_id='fork-source-agent'`, later.DirectiveEventID).Scan(&continuedSession); err != nil || continuedSession != sessionID {
-				t.Fatalf("source continuation lost its original session: %q, want %q: %v", continuedSession, sessionID, err)
+			continued := workspaceProofMockTurns(t, rt, seed.RunID, "fork-source-agent", later.DirectiveEventID)
+			if len(continued) == 0 {
+				t.Fatal("source continuation has no completed mock turn")
+			}
+			for _, turn := range continued {
+				if turn.SessionID != sessionID {
+					t.Fatalf("source continuation lost its original session: %q, want %q", turn.SessionID, sessionID)
+				}
 			}
 			verifySource()
 		})
@@ -401,13 +403,13 @@ func forkChatFaultAuthority(ctx context.Context, refuse *atomic.Bool) context.Co
 	return effects.WithAuthority(ctx, authority)
 }
 
-func mockForkChatDomainCounts(t *testing.T, rt servedControlProofRuntime, runID string) servedConversationForkCounts {
+func mockForkChatDomainCounts(t *testing.T, rt servedWorkspaceProofRuntime, runID string) servedConversationForkCounts {
 	t.Helper()
-	counts := servedConversationForkLiveCounts(t, rt.DB, rt.Backend, runID)
 	// Real gateway traffic produces the canonical observational runtime log.
 	// Exclude only that event class, not business events or lifecycle mutations.
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name <> 'platform.runtime_log'`).Scan(&counts.Events); err != nil {
+	counts, err := storetest.ReadConversationForkDomainStorage(context.Background(), rt.Events, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return counts
+	return servedConversationForkCounts{Runs: counts.Runs, Events: counts.Events, Mailbox: counts.Mailbox, Mutations: counts.Mutations}
 }
