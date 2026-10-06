@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -86,6 +87,52 @@ func TestFlowConstructionPublicationDiscoversDetachedCreatingInput(t *testing.T)
 	}
 	if err := ValidateFlowConstructionPublication(raw, owner, receipt.EntityID, evidence.CreatingInput.EventID); err == nil {
 		t.Fatal("discovery weakened rejection of a later incoming publication")
+	}
+}
+
+func TestFlowConstructionPublicationObservesTypedAbsenceButNeverMatchesAnEvent(t *testing.T) {
+	receipt, owner := constructionPublicationFieldsFixture(t)
+	receipt.CreatingInput = FlowConstructionInput{}
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := ProjectFlowConstructionPublication(raw, owner, receipt.EntityID)
+	if err != nil || evidence.CreatingInput != (FlowConstructionInput{}) || !reflect.DeepEqual(evidence.Fields, receipt.Persisted.Fields) {
+		t.Fatalf("explicit no-publication receipt lost provenance or fields: %#v %v", evidence, err)
+	}
+	for _, event := range []string{"", "22222222-2222-4222-8222-222222222222", "unrelated"} {
+		if err := ValidateFlowConstructionPublication(raw, owner, receipt.EntityID, event); err == nil {
+			t.Fatalf("typed absence falsely matched publication %q", event)
+		}
+		if fields, err := FlowConstructionPublicationFields(raw, owner, receipt.EntityID, event); err == nil || fields != nil {
+			t.Fatalf("known-event fields accepted no-publication receipt for %q: %#v %v", event, fields, err)
+		}
+	}
+	for _, variant := range []string{"missing", "null", "partial", "unknown"} {
+		t.Run(variant, func(t *testing.T) {
+			var document map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &document); err != nil {
+				t.Fatal(err)
+			}
+			switch variant {
+			case "missing":
+				delete(document, "creating_input")
+			case "null":
+				document["creating_input"] = json.RawMessage(`null`)
+			case "partial":
+				document["creating_input"] = json.RawMessage(`{"event_id":"","input":"task.create"}`)
+			case "unknown":
+				document["creating_input"] = json.RawMessage(`{"event_id":"","input":"","unknown":true}`)
+			}
+			invalid, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if evidence, err := ProjectFlowConstructionPublication(invalid, owner, receipt.EntityID); err == nil || !reflect.DeepEqual(evidence, FlowConstructionPublicationEvidence{}) {
+				t.Fatalf("%s provenance became typed absence: %#v %v", variant, evidence, err)
+			}
+		})
 	}
 }
 

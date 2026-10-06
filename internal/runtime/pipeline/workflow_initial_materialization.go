@@ -92,24 +92,33 @@ func decodeFlowConstructionPublication(raw []byte, owner runtimeflowidentity.Run
 	if _, err := canonicaljson.Decode(raw); err != nil {
 		return workflowInitialMaterializationProjection{}, fmt.Errorf("flow construction receipt: %w", err)
 	}
-	var receipt workflowInitialMaterializationProjection
+	// Preserve explicit no-publication construction without accepting an absent
+	// or null provenance member as an equally valid receipt.
+	var wire struct {
+		workflowInitialMaterializationProjection
+		CreatingInput *FlowConstructionInput `json:"creating_input"`
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	decoder.UseNumber()
-	if err := decoder.Decode(&receipt); err != nil {
+	if err := decoder.Decode(&wire); err != nil {
 		return workflowInitialMaterializationProjection{}, fmt.Errorf("flow construction receipt: %w", err)
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return workflowInitialMaterializationProjection{}, fmt.Errorf("flow construction receipt requires one object")
 	}
+	if wire.CreatingInput == nil {
+		return workflowInitialMaterializationProjection{}, fmt.Errorf("flow construction receipt requires creating_input")
+	}
+	receipt := wire.workflowInitialMaterializationProjection
+	receipt.CreatingInput = *wire.CreatingInput
 	if err := receipt.CreatingInput.Validate(); err != nil {
 		return workflowInitialMaterializationProjection{}, err
 	}
 	if receipt.Version != workflowInitialMaterializationProjectionVersion ||
 		receipt.RunID != owner.RunID || receipt.FlowInstance != owner.Route.InstancePath || receipt.EntityID != entityID ||
 		receipt.WorkflowName != owner.Route.ScopeKey || receipt.WorkflowVersion == "" || receipt.OccurredAt.IsZero() ||
-		receipt.Persisted.Control.StorageRef != owner.Route.InstancePath || receipt.Persisted.Control.EntityID != entityID ||
-		receipt.CreatingInput.EventID == "" || receipt.Readiness == nil {
+		receipt.Persisted.Control.StorageRef != owner.Route.InstancePath || receipt.Persisted.Control.EntityID != entityID || receipt.Readiness == nil {
 		return workflowInitialMaterializationProjection{}, fmt.Errorf("flow construction receipt contradicts exact receiver or creating publication")
 	}
 	readinessOwner, err := receipt.Readiness.FlowIdentity()
