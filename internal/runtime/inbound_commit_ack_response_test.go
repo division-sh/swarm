@@ -108,7 +108,7 @@ func inboundAcknowledgedSelectedFixture(t *testing.T, backend, runID, entityID, 
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		selected := storetest.AdmitPostgresRuntimeStore(t, db)
-		target := seedPostgresInboundGatewayRuntime(t, ctx, db, selected, runID, entityID, flowInstance, slug, "telegram", "telegram-secret", agentID)
+		target := seedPostgresInboundGatewayRuntime(t, ctx, selected, runID, entityID, flowInstance, slug, "telegram", "telegram-secret", agentID)
 		return ctx, selected, db, target
 	}
 	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
