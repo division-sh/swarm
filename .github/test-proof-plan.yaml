@@ -237,11 +237,12 @@ units:
     budget_class: full
   local-routing-reporter:
     packages: [github.com/division-sh/swarm/internal/serveapp]
-    run: '^TestIssue2394(ServedFanOutSupportedSurfacesBothStores|HeldReporterConsumerKeepsRunUnreadyBothStores|ServedReporterTransactionCensusBothStores)$'
+    run: '^TestIssue(2394(ServedFanOutSupportedSurfacesBothStores|HeldReporterConsumerKeepsRunUnreadyBothStores|ServedReporterTransactionCensusBothStores)|2566ReporterFiniteFixtureCanCloseBothStores)$'
     required_children:
       TestIssue2394ServedFanOutSupportedSurfacesBothStores: [sqlite, postgres]
       TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores: [sqlite/run.start, sqlite/event.publish, postgres/run.start, postgres/event.publish]
       TestIssue2394ServedReporterTransactionCensusBothStores: [sqlite, postgres]
+      TestIssue2566ReporterFiniteFixtureCanCloseBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
@@ -792,9 +793,10 @@ units:
   serveapp-other-late:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
+    run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
     required_children:
       TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
+      TestIssue2566ReporterFiniteFixtureCanCloseBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
