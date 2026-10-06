@@ -7497,12 +7497,13 @@ func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func()
 
 func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory func() cliapp.ServeWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
-	if workspaceFactory == nil {
-		return installServeRuntimePostgresTestStoresForDatabase(t, nil, false)
+	var configured func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle
+	if workspaceFactory != nil {
+		configured = func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
+			return workspaceFactory()
+		}
 	}
-	return installServeRuntimePostgresTestStoresForDatabase(t, func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
-		return workspaceFactory()
-	}, false)
+	return installServeRuntimePostgresTestStoresForDatabase(t, configured, false)
 }
 
 func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *runtimecontracts.WorkflowContractBundle) (string, string) {
