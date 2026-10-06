@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	"os"
 	"path/filepath"
@@ -133,15 +134,11 @@ func TestReviewer2566FeedOnlyRejectsNestedServiceBothStores(t *testing.T) {
 	})
 }
 
-func finiteRunStartDurableCounts(t *testing.T, fixture dataRunLifecycleFixture) map[string]int {
+func finiteRunStartDurableCounts(t *testing.T, fixture dataRunLifecycleFixture) storetest.FiniteRunStartStorageCounts {
 	t.Helper()
-	counts := map[string]int{}
-	for _, table := range []string{"runs", "events", "flow_instances", "entity_state", "resource_versions", "resource_heads", "resource_source_invocations", "resource_version_pins", "fan_out_intents", "resource_run_creation_operations", "resource_run_creation_child_evaluations", "resource_run_creation_child_reservations", "api_idempotency"} {
-		var count int
-		if err := fixture.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		counts[table] = count
+	counts, err := storetest.ReadFiniteRunStartStorageCounts(context.Background(), fixture.primary)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return counts
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -198,24 +200,50 @@ func TestIssue2566ReporterFiniteFixtureCanCloseBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := issue2394ServedReporterSource(t)
-			opts, start := lifecycleRestartHarness(t, backend, root)
-			opts.TestLLMRuntime = servedNoopLLMRuntime{}
-			_, runtime := start()
+			unsetStoreSelectorEnv(t)
+			stubServeRuntimeWorkspaceLifecycle(t)
+			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath,
+				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
+				TestLLMRuntime: servedNoopLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+			if backend == "sqlite" {
+				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "reporter.sqlite"))
+			} else {
+				opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, testutil.StartPostgresDSN(t))
+			}
+			process := startServeRuntimeTestProcess(t, opts)
+			process.waitForReadyLine()
+			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+			bundleHash := servedEventPublishFixtureBundleHash(t, root)
 			var opened struct {
 				RunID string `json:"run_id"`
 			}
-			requireServedJSONRPCResult(t, runtime.Endpoint, "run.start", map[string]any{
-				"run_id": uuid.NewString(), "bundle_hash": runtime.BundleHash, "event_name": "portfolio.opened",
+			requireServedJSONRPCResult(t, endpoint, "run.start", map[string]any{
+				"run_id": uuid.NewString(), "bundle_hash": bundleHash, "event_name": "portfolio.opened",
 				"payload": map[string]any{"portfolio_id": "finite-fixture", "threshold": 75}, "idempotency_key": uuid.NewString(),
 			}, &opened)
-			waitPublicationSiteCompletion(t, runtime, opened.RunID)
+			var diagnosis cliapp.DiagnosticRunDiagnosisResult
+			settled := false
+			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+				requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &diagnosis)
+				if len(diagnosis.FailedDeliveries) != 0 {
+					t.Fatalf("opening publication delivery failed: %+v", diagnosis)
+				}
+				if diagnosis.TestQuiescence != nil && cliapp.BoolPointerValue(diagnosis.TestQuiescence.Ready) &&
+					cliapp.IntPointerValue(diagnosis.TestQuiescence.ActiveDeliveries) == 0 && cliapp.IntPointerValue(diagnosis.TestQuiescence.UnsettledPipelineEvents) == 0 {
+					settled = true
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if !settled {
+				t.Fatalf("opening publication pipeline did not finish: %+v", diagnosis)
+			}
 			var publication map[string]any
-			requireServedJSONRPCResult(t, runtime.Endpoint, "event.publish", map[string]any{
+			requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{
 				"run_id": opened.RunID, "event_name": "portfolio.close.requested", "payload": map[string]any{}, "idempotency_key": uuid.NewString(),
 			}, &publication)
-			var diagnosis cliapp.DiagnosticRunDiagnosisResult
 			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
-				requireServedJSONRPCResult(t, runtime.Endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &diagnosis)
+				requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &diagnosis)
 				if diagnosis.Run.Status == "completed" {
 					return
 				}

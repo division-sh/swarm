@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -48,7 +47,6 @@ func finiteRunStartLoadedSource(t *testing.T, finite bool) semanticview.Source {
 
 func TestFiniteRunStartRefusesServiceBeforeMutationBothStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		ctx := context.Background()
 		source := finiteRunStartLoadedSource(t, false)
 		bundle, _ := semanticview.Bundle(source)
 		catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
@@ -64,18 +62,6 @@ func TestFiniteRunStartRefusesServiceBeforeMutationBothStores(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		counts := func() map[string]int {
-			t.Helper()
-			out := map[string]int{}
-			for _, table := range []string{"runs", "events", "flow_instances", "entity_state", "resource_versions", "resource_heads", "resource_source_invocations", "resource_version_pins", "fan_out_intents", "resource_run_creation_operations", "resource_run_creation_child_evaluations", "resource_run_creation_child_reservations", "api_idempotency"} {
-				var count int
-				if err := fixture.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
-					t.Fatalf("count %s: %v", table, err)
-				}
-				out[table] = count
-			}
-			return out
-		}
 		for _, form := range []string{"event", "event_and_data", "feed"} {
 			t.Run(form, func(t *testing.T) {
 				params := map[string]any{"run_id": uuid.NewString(), "bundle_hash": runStartTestBundleHashForSource(source), "idempotency_key": uuid.NewString()}
@@ -89,7 +75,7 @@ func TestFiniteRunStartRefusesServiceBeforeMutationBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				before := counts()
+				before := finiteRunStartDurableCounts(t, fixture)
 				for attempt := 0; attempt < 2; attempt++ {
 					response := rpcCall(t, handler, string(body))
 					if response.Error == nil || asMap(t, response.Error.Data)["code"] != RunNeverCompletesCode {
@@ -99,7 +85,7 @@ func TestFiniteRunStartRefusesServiceBeforeMutationBothStores(t *testing.T) {
 					if details["flow_id"] != "." || details["detail"] != "flow .: this flow never completes; use `serve`, or mark its end stages `final`" {
 						t.Fatalf("wrong exact-flow diagnostic: %#v", details)
 					}
-					if after := counts(); !reflect.DeepEqual(before, after) {
+					if after := finiteRunStartDurableCounts(t, fixture); !reflect.DeepEqual(before, after) {
 						t.Fatalf("refusal created durable effects: before=%v after=%v", before, after)
 					}
 				}

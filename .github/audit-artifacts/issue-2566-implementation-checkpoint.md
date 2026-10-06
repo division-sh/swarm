@@ -77,7 +77,11 @@ Executed on vemew; no core/lifecycle/full tier or hosted CI is claimed here.
 
 ## Remaining Qualification
 
-Request the user-controlled server2 core slot, then run Local-Tier lifecycle and
+Core at `cbaa3127e` completed red on stale API counts, a presentation-only reorder
+assumption that included stages, and new raw fixture authority. The bounded
+repairs and complete local structural/census/registry/debt evidence are recorded
+in `issue-2566-early-review-repairs.md`; no failed tier is called qualified.
+Wait for the user-controlled server2 core handoff after E/C/A, then run Local-Tier lifecycle and
 the exact Gate D supplements. Compose
 E/A's relevant implementing pins before claiming late/no-handler versus
 authority refusal or accepted-work disposition. Complete fresh source
