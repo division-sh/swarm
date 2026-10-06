@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -63,6 +64,111 @@ func (d retirementBusDispatcher) DispatchDeliveryContinuation(ctx context.Contex
 	result := d.bus.DispatchDeliveryContinuation(ctx, event, route)
 	d.result <- result
 	return result
+}
+
+type issue2564RetirementInterceptor struct {
+	entered chan context.Context
+	release <-chan struct{}
+	bus     *EventBus
+}
+
+func (issue2564RetirementInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, pipelineobligation.ExecutionOutcome, error) {
+	return true, nil, pipelineobligation.Continue(), nil
+}
+
+func (i issue2564RetirementInterceptor) InterceptDeliveryRoute(ctx context.Context, event events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, pipelineobligation.ExecutionOutcome, error) {
+	if err := consumeReceiverProjectionTestCarrier(ctx, event.Event(), route); err != nil {
+		return false, nil, pipelineobligation.Continue(), err
+	}
+	projection, err := i.bus.receiverProjection(ctx, route.Context)
+	if err != nil {
+		return false, nil, pipelineobligation.Continue(), err
+	}
+	nested, cleanup, err := i.bus.beginReceiverDispatch(ctx, projection, event.Event())
+	if err != nil {
+		return false, nil, pipelineobligation.Continue(), err
+	}
+	defer cleanup()
+	ctx = nested.Context
+	i.entered <- ctx
+	select {
+	case <-ctx.Done():
+		return false, nil, pipelineobligation.Continue(), ctx.Err()
+	case <-i.release:
+		return false, nil, pipelineobligation.Continue(), nil
+	}
+}
+
+func TestIssue2564ContinuationRetirementCancelsActiveNode(t *testing.T) {
+	process := worklifetime.NewProcess()
+	owner := newReceiverProjectionRuntimeOwner(t, process, "active-node-retirement")
+	eb, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{WorkOwner: owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eb.durable.RunOrigins = &recoveryOriginStore{}
+	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.retirement", "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	route := nodeOnlyDeliveryPlan(t, event, "retirement-node").DeliveryRoutes()[0]
+	id, err := runtimedelivery.DeliveryID(event.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := eb.DeliveryAuthority()
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan := recoveryReadScan{item: runtimedelivery.ContinuationItem{DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimAcquired, Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Authority: authority, Status: runtimedelivery.StatusPending}}}
+	reported := make(chan error, 1)
+	c, err := deliverycontinuation.New(scan, &recoveryOriginStore{}, authority, owner, eb, func(_ context.Context, err error) { reported <- err })
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan context.Context, 1)
+	release := make(chan struct{})
+	eb.SetInterceptors(issue2564RetirementInterceptor{entered: entered, release: release, bus: eb})
+	t.Cleanup(func() {
+		close(release)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = c.Retire(ctx)
+		_ = eb.ResetInMemoryState()
+		_, _ = owner.RetireAndWait(ctx)
+		process.Retire()
+		_, _ = process.Join(ctx)
+	})
+	if err := eb.SetDeliveryContinuationOwner(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var receiverCtx context.Context
+	select {
+	case receiverCtx = <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("exact continuation did not enter node execution")
+	}
+	waitCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = c.Retire(waitCtx)
+	select {
+	case <-receiverCtx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("coordinator retirement did not cancel its admitted node execution")
+	}
+	ctx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelJoin()
+	if err := c.Retire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-reported:
+		t.Fatalf("owned node retirement reported a runtime failure: %v", err)
+	default:
+	}
 }
 
 func TestCoordinatorRetirementRealEventBusDispatch(t *testing.T) {
