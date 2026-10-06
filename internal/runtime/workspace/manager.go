@@ -1231,21 +1231,12 @@ func (m *DockerManager) ensureContainerRunningWithIdentity(ctx context.Context, 
 		return err
 	}
 	if exists && len(labels) > 0 {
-		existing, found, inspectErr := m.inspectRuntimeContainerIdentity(ctx, name)
-		if inspectErr != nil {
-			return inspectErr
+		replaced, err := m.replaceStaleWorkspaceContainer(ctx, name, identity, replaceStaleIdentity)
+		if err != nil {
+			return err
 		}
 		identity.ContainerName = strings.TrimSpace(name)
-		if !found {
-			return fmt.Errorf("container %s exists without the required runtime identity", name)
-		}
-		if !existing.Equal(identity) {
-			if !replaceStaleIdentity || !existing.ResetEligibleManaged() || existing.ContainerName != strings.TrimSpace(name) {
-				return fmt.Errorf("container %s has a conflicting non-replaceable runtime identity", name)
-			}
-			if _, err := m.RunDocker(ctx, "rm", "--force", name); err != nil {
-				return fmt.Errorf("replace stale workspace container %s: %w", name, err)
-			}
+		if replaced {
 			exists = false
 			running = false
 		}
@@ -1280,6 +1271,27 @@ func (m *DockerManager) ensureContainerRunningWithIdentity(ctx context.Context, 
 	}
 	m.recordProjectionContainer(name, identity)
 	return nil
+}
+
+func (m *DockerManager) replaceStaleWorkspaceContainer(ctx context.Context, name string, identity runtimecontaineridentity.Identity, replaceStaleIdentity bool) (bool, error) {
+	existing, found, err := m.inspectRuntimeContainerIdentity(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	identity.ContainerName = strings.TrimSpace(name)
+	if !found {
+		return false, fmt.Errorf("container %s exists without the required runtime identity", name)
+	}
+	if existing.Equal(identity) {
+		return false, nil
+	}
+	if !replaceStaleIdentity || !existing.ResetEligibleManaged() || existing.ContainerName != strings.TrimSpace(name) {
+		return false, fmt.Errorf("container %s has a conflicting non-replaceable runtime identity", name)
+	}
+	if _, err := m.RunDocker(ctx, "rm", "--force", name); err != nil {
+		return false, fmt.Errorf("replace stale workspace container %s: %w", name, err)
+	}
+	return true, nil
 }
 
 func (m *DockerManager) createWorkspaceContainer(ctx context.Context, name string, identity runtimecontaineridentity.Identity, labels map[string]string, createArgs []string) error {
