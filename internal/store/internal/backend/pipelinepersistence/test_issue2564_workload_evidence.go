@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
 type H1FlowAccountingEvidence struct{ FieldlessRoots, RootEntities, ActiveHubs int }
@@ -419,21 +421,13 @@ func (s *PipelineSQLiteOwner) ObserveH1BumpHistoryForTest(ctx context.Context, r
 }
 
 func observeH1BumpHistoryForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H1BumpHistoryEvidence, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT m.entity_id,m.caused_by_event,CAST(m.old_value AS TEXT),CAST(m.new_value AS TEXT) FROM entity_mutations m JOIN events e ON e.event_id=m.caused_by_event JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=m.run_id AND d.subscriber_type='node' WHERE m.run_id=$1 AND m.domain='authored_field' AND m.path='count' AND e.event_name='hub.bump' AND d.status='delivered'`, runID)
+	rows, err := storedelivery.FixtureH1BumpHistoryTx(ctx, tx, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []H1BumpHistoryEvidence
-	for rows.Next() {
-		var row H1BumpHistoryEvidence
-		if err := rows.Scan(&row.Entity, &row.Event, &row.Before, &row.After); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		out = append(out, row)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
+	for _, row := range rows {
+		out = append(out, H1BumpHistoryEvidence{Entity: row.Entity, Event: row.Event, Before: row.Before, After: row.After})
 	}
 	return out, nil
 }
