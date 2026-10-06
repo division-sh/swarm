@@ -445,7 +445,6 @@ func newIssue2564OperationFixture(t *testing.T, backend string) issue2564Operati
 	runID := correlation.RunIDFromContext(f.ctx)
 	req := sqliteFlowActivationRequest(f.bundle, flow, "receiver", "", flow+"/receiver")
 	req.OccurredAt = time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-	req.Config = map[string]any{"receiver_key": "receiver"}
 	req.ConstructorInput, req.ResolvedKey = "construct.requested", "receiver"
 	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, req.OccurredAt)
 	activation, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
@@ -736,8 +735,8 @@ func issue2564AssertOperationReceipts(t *testing.T, f issue2564OperationFixture,
 func issue2564AssertOperationConstruction(t *testing.T, f issue2564OperationFixture, initial pipeline.WorkflowInstance) {
 	t.Helper()
 	current := issue2564LoadOperationInstance(t, f)
-	if current.EntityID != initial.EntityID || current.EntityType != initial.EntityType || current.CurrentState != initial.CurrentState || !reflect.DeepEqual(current.Config, initial.Config) || !reflect.DeepEqual(current.InitialFieldValues, initial.InitialFieldValues) || !reflect.DeepEqual(current.Bookkeeping, initial.Bookkeeping) || !reflect.DeepEqual(current.Gates, initial.Gates) || !reflect.DeepEqual(current.StateBuckets, initial.StateBuckets) || !reflect.DeepEqual(current.TransitionHistory, initial.TransitionHistory) {
-		t.Fatal("field operation rewrote constructor identity/config/initial fields or lifecycle history")
+	if current.StorageRef != initial.StorageRef || current.InstanceID != initial.InstanceID || current.EntityID != initial.EntityID || current.EntityType != initial.EntityType || current.InstanceKind != initial.InstanceKind || current.TemplateVersion != initial.TemplateVersion || current.ParentFlowID != initial.ParentFlowID || current.ParentFlowInstance != initial.ParentFlowInstance || current.ParentEntityID != initial.ParentEntityID || current.WorkflowName != initial.WorkflowName || current.WorkflowVersion != initial.WorkflowVersion || current.Mode != initial.Mode || current.Status != initial.Status || !current.TerminatedAt.Equal(initial.TerminatedAt) || !current.CreatedAt.Equal(initial.CreatedAt) || current.CurrentState != initial.CurrentState || !reflect.DeepEqual(current.InitialFieldValues, initial.InitialFieldValues) || !reflect.DeepEqual(current.Bookkeeping, initial.Bookkeeping) || !reflect.DeepEqual(current.Gates, initial.Gates) || !reflect.DeepEqual(current.StateBuckets, initial.StateBuckets) || !reflect.DeepEqual(current.TransitionHistory, initial.TransitionHistory) {
+		t.Fatal("field operation rewrote constructor identity/initial fields or lifecycle history")
 	}
 	artifact, err := f.store.(selectedSourceArtifactStore).GetSourceArtifact(f.ctx, f.bundle.SourceArtifact.BundleHash())
 	if err != nil || !reflect.DeepEqual(artifact, f.artifact) {

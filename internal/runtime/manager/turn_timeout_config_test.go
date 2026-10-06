@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -40,7 +41,7 @@ func TestIssue2269StaticAndTemplateAgentsRetainExactTurnTimeout(t *testing.T) {
 			if flow == "static" {
 				cfg, err = buildStaticFlowAgentConfig(managerIdentityTestRunID, source, name, flow, flow, "worker", entry, staticFlowLocalEventSetForTest(scope.Agents))
 			} else {
-				cfg, err = buildFlowAgentConfig(managerIdentityTestRunID, source, name, flow, "one", "entity-one", flow+"/one", "worker", entry, map[string]string{"instance_id": "one"}, staticFlowLocalEventSetForTest(scope.Agents), map[string]any{})
+				cfg, err = buildFlowAgentConfig(managerIdentityTestRunID, source, name, flow, "one", "entity-one", flow+"/one", "worker", entry, map[string]string{"instance_id": "one"}, staticFlowLocalEventSetForTest(scope.Agents))
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -58,11 +59,15 @@ func TestIssue2269StaticAndTemplateAgentsRetainExactTurnTimeout(t *testing.T) {
 }
 
 func TestIssue2269TurnTimeoutParticipatesInPlanAndRecovery(t *testing.T) {
-	blueprints, err := TemplateFlowAgentMaterializationBlueprints(semanticview.Wrap(testFlowBundle(t, "")), "review", "review/inst-1", "ent-1", map[string]any{"instance_key": "inst-1"})
+	source := semanticview.Wrap(testFlowBundle(t, ""))
+	materialization, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, runtimeflowidentity.Stored(source, "review", "review/inst-1", "inst-1", runtimepipeline.FlowInstanceEntityID("review/inst-1"), ""))
 	if err != nil {
 		t.Fatal(err)
 	}
-	blueprint := blueprints[0]
+	if len(materialization.Agents) != 1 {
+		t.Fatalf("constructed materialization has %d agents, want one", len(materialization.Agents))
+	}
+	blueprint := materialization.Agents[0]
 	seen := map[string]bool{}
 	for _, timeout := range []*timeridentity.TurnTimeout{nil,
 		{After: time.Minute, Emit: "work.aborted"},

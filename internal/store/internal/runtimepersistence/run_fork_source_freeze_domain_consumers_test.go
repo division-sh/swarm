@@ -190,19 +190,11 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 func seedForkedFlowInstance(t *testing.T, fixture *forkedConsumerTestBackend, instancePath string) {
 	t.Helper()
-	var entityID string
-	entityQuery := `SELECT entity_id FROM entity_state WHERE run_id = ? AND flow_instance = ?`
-	if fixture.postgres != nil {
-		entityQuery = `SELECT entity_id::text FROM entity_state WHERE run_id = $1::uuid AND flow_instance = $2`
-	}
-	if err := fixture.db.QueryRowContext(context.Background(), entityQuery, fixture.sourceRun, instancePath).Scan(&entityID); err != nil {
-		t.Fatal(err)
-	}
-	config, err := pipeline.WorkflowInstanceConfigPayloadForIdentity(runtimeflowidentity.Instance{TemplateID: "freeze", ScopeKey: "freeze", InstanceID: "domain", InstancePath: instancePath, EntityID: entityID, HasStoredPath: true}, "1", map[string]any{})
+	header, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(runtimeflowidentity.StoredRoute("freeze", "domain", instancePath), fixture.sourceBundleHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	configJSON, err := json.Marshal(config)
+	config, err := json.Marshal(header)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +205,7 @@ func seedForkedFlowInstance(t *testing.T, fixture *forkedConsumerTestBackend, in
 			SELECT run_id, flow_instance, entity_id, entity_type, 'freeze', 'template', $1::jsonb, 'active', TRUE, 'active', $2, $3, $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1 FROM entity_state WHERE run_id = $5::uuid AND flow_instance = $6`
 	}
 	at := fixture.forkedAt.Add(-time.Minute)
-	result, err := fixture.db.ExecContext(context.Background(), query, string(configJSON), at, at, at, fixture.sourceRun, instancePath)
+	result, err := fixture.db.ExecContext(context.Background(), query, string(config), at, at, at, fixture.sourceRun, instancePath)
 	if err != nil {
 		t.Fatal(err)
 	}

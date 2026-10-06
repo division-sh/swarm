@@ -174,6 +174,67 @@ func t22RestoreTrigger(unexpected t22ErasedTrigger) runtimeengine.StateMutation 
 	want["internal/runtime/pipeline.t22RewriteTrigger::accepted trigger TriggeredAt"] = 2
 	want["internal/runtime/pipeline.t22EraseTrigger::erase typed evidence internal/runtime/engine.StateMutation"] = 1
 	want["internal/runtime/pipeline.t22RestoreTrigger::construct internal/runtime/engine.StateMutation"] = 1
+	// D1 deletes ordinary final-entry retirement, not explicit flow termination.
+	// Restore the deleted chain in memory to prove both declarations and uses
+	// remain forbidden after removing their obsolete inventory entries.
+	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/engine_adapter.go", `
+func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
+    graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), flowID)
+    if !ok || graph.FlowID != flowID { return false }
+    ref, err := graph.ResolveStoredStage(state)
+    return err == nil && ref.IsTerminal()
+}
+func (pc *PipelineCoordinator) prepareTerminalFlowInstanceDeactivation(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, nextState string) (PreparedFlowInstanceDeactivation, error) {
+    _ = pc.isTerminalFlowState(flowIdentity.Route.InstancePath, nextState)
+    return nil, nil
+}
+func (o pipelineEngineMutationOwner) finishCommittedFlowDeactivation(ctx context.Context, terminal PreparedFlowInstanceDeactivation) error {
+    o.state.coordinator.notifyTestWorkflowTerminalCommitted(ctx)
+    return errors.Join(commitPreparedFlowDeactivation(terminal), abortPreparedFlowDeactivation(terminal))
+}
+func commitPreparedFlowDeactivation(terminal PreparedFlowInstanceDeactivation) error { return terminal.Commit() }
+func abortPreparedFlowDeactivation(terminal PreparedFlowInstanceDeactivation) error { return terminal.Abort() }
+type committedEngineFlowDeactivation struct { owner pipelineEngineMutationOwner; terminal PreparedFlowInstanceDeactivation }
+func (d committedEngineFlowDeactivation) FinalizeFlowDeactivation(ctx context.Context) error {
+    return d.owner.finishCommittedFlowDeactivation(ctx, d.terminal)
+}
+func t22OrdinaryRetirement(pc *PipelineCoordinator, owner pipelineEngineMutationOwner, ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, nextState string) error {
+    terminal, err := pc.prepareTerminalFlowInstanceDeactivation(ctx, flowIdentity, entityID, nextState)
+    if err != nil || terminal == nil { return err }
+    return owner.finishCommittedFlowDeactivation(ctx, terminal)
+}
+`)
+	overlay[path] = raw
+	for _, function := range []string{
+		"PipelineCoordinator.isTerminalFlowState", "PipelineCoordinator.prepareTerminalFlowInstanceDeactivation",
+		"pipelineEngineMutationOwner.finishCommittedFlowDeactivation", "commitPreparedFlowDeactivation",
+		"abortPreparedFlowDeactivation", "committedEngineFlowDeactivation.FinalizeFlowDeactivation",
+	} {
+		want["internal/runtime/pipeline."+function+"::retired declaration"] = 1
+	}
+	want["internal/runtime/pipeline.<package>::retired type committedEngineFlowDeactivation"] = 1
+	want["internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState::call internal/runtime/semanticview.WorkflowStageTopology"] = 1
+	want["internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState::graph metadata"] = 1
+	want["internal/runtime/pipeline.PipelineCoordinator.prepareTerminalFlowInstanceDeactivation::retired use internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState"] = 1
+	want["internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation::retired use internal/runtime/pipeline.PipelineCoordinator.notifyTestWorkflowTerminalCommitted"] = 1
+	want["internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation::retired use internal/runtime/pipeline.commitPreparedFlowDeactivation"] = 1
+	want["internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation::retired use internal/runtime/pipeline.abortPreparedFlowDeactivation"] = 1
+	want["internal/runtime/pipeline.committedEngineFlowDeactivation.FinalizeFlowDeactivation::retired use internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation"] = 1
+	want["internal/runtime/pipeline.t22OrdinaryRetirement::retired use internal/runtime/pipeline.PipelineCoordinator.prepareTerminalFlowInstanceDeactivation"] = 1
+	want["internal/runtime/pipeline.t22OrdinaryRetirement::retired use internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation"] = 1
+	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/lifecycle_probe.go", `
+func (pc *PipelineCoordinator) notifyTestWorkflowTerminalCommitted(ctx context.Context) {
+    _, _ = runtimecorrelation.InboundEventFromContext(ctx)
+}
+`)
+	overlay[path] = raw
+	want["internal/runtime/pipeline.PipelineCoordinator.notifyTestWorkflowTerminalCommitted::retired declaration"] = 1
+	want["internal/runtime/pipeline.PipelineCoordinator.notifyTestWorkflowTerminalCommitted::call internal/runtime/correlation.InboundEventFromContext"] = 1
+	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/workflow_instance_activation.go", `
+type FlowInstanceDeactivationPreparer func(context.Context, FlowInstanceDeactivationRequest) (PreparedFlowInstanceDeactivation, error)
+`)
+	overlay[path] = raw
+	want["internal/runtime/pipeline.<package>::retired type FlowInstanceDeactivationPreparer"] = 1
 	path, raw = transitionGuardOverlay(t, "internal/runtime/pipeline/delivery_target_application.go", "")
 	for _, entry := range []struct {
 		needle, extra, boundary string
@@ -263,7 +324,15 @@ func t22RetiredHandlerSelection(unexpected Transition) { _ = unexpected.Validate
 	path, raw = transitionGuardOverlay(t, "internal/runtime/engine/interfaces.go", `
 type TransitionValidator interface { ValidateTransition(currentState, nextState string) error }
 func t22RetiredValidatorPort(unexpected TransitionValidator) error { return unexpected.ValidateTransition("from", "to") }
+type CommittedFlowDeactivation interface { FinalizeFlowDeactivation(context.Context) error }
+func t22OrdinaryRetirementHandoff(unexpected CommittedFlowDeactivation, ctx context.Context) error { return unexpected.FinalizeFlowDeactivation(ctx) }
+func t22RawRetirementCallback(unexpected CommittedEngineMutation, ctx context.Context) error { return unexpected.FlowDeactivation(ctx) }
 `)
+	needle = "type CommittedEngineMutation struct {"
+	if strings.Count(string(raw), needle) != 1 {
+		t.Fatal("retired callback fixture cannot find its exact committed-result owner")
+	}
+	raw = []byte(strings.Replace(string(raw), needle, needle+"\nFlowDeactivation func(context.Context) error", 1))
 	needle = "type RuntimeDependencies struct {"
 	if strings.Count(string(raw), needle) != 1 {
 		t.Fatal("retired validator fixture cannot find its exact dependency owner")
@@ -891,7 +960,9 @@ func protectedTransitionConstruction(owner string) bool {
 func retiredTransitionType(object *types.TypeName) bool {
 	key := strings.TrimPrefix(object.Pkg().Path(), transitionGuardModule) + "." + object.Name()
 	switch key {
-	case "internal/runtime/contracts.WorkflowTransitionContract", "internal/runtime/pipeline.WorkflowDefinition", "internal/runtime/pipeline.WorkflowTransition", "internal/runtime/engine.TransitionValidator":
+	case "internal/runtime/contracts.WorkflowTransitionContract", "internal/runtime/pipeline.WorkflowDefinition", "internal/runtime/pipeline.WorkflowTransition", "internal/runtime/engine.TransitionValidator",
+		"internal/runtime/pipeline.FlowInstanceDeactivationPreparer", "internal/runtime/pipeline.committedEngineFlowDeactivation",
+		"internal/runtime/engine.CommittedFlowDeactivation":
 		return true
 	}
 	return false
@@ -900,7 +971,8 @@ func retiredTransitionType(object *types.TypeName) bool {
 func retiredTransitionField(owner, field string) bool {
 	return (owner == "internal/runtime/contracts.WorkflowSemanticView" && field == "Transitions") ||
 		(owner == "internal/runtime/contracts.SystemNodeContract" && field == "OwnedTransitions") ||
-		(owner == "internal/runtime/engine.RuntimeDependencies" && field == "TransitionValidator")
+		(owner == "internal/runtime/engine.RuntimeDependencies" && field == "TransitionValidator") ||
+		(owner == "internal/runtime/engine.CommittedEngineMutation" && field == "FlowDeactivation")
 }
 
 func retiredTransitionFunction(fn *types.Func) bool {
@@ -917,6 +989,10 @@ func retiredTransitionFunction(fn *types.Func) bool {
 		"internal/runtime/pipeline.WorkflowStateTransition", "internal/runtime/pipeline.workflowTransitionRecord",
 		"internal/runtime/pipeline.workflowTransitionIdentity", "internal/runtime/pipeline.workflowTransitionFromHandlerOutcome",
 		"internal/runtime/pipeline.terminalStateFlowCandidates", "internal/runtime/pipeline.flowIDForWorkflowState",
+		"internal/runtime/pipeline.PipelineCoordinator.isTerminalFlowState", "internal/runtime/pipeline.PipelineCoordinator.prepareTerminalFlowInstanceDeactivation",
+		"internal/runtime/pipeline.PipelineCoordinator.notifyTestWorkflowTerminalCommitted", "internal/runtime/pipeline.pipelineEngineMutationOwner.finishCommittedFlowDeactivation",
+		"internal/runtime/pipeline.commitPreparedFlowDeactivation", "internal/runtime/pipeline.abortPreparedFlowDeactivation",
+		"internal/runtime/pipeline.committedEngineFlowDeactivation.FinalizeFlowDeactivation", "internal/runtime/engine.CommittedFlowDeactivation.FinalizeFlowDeactivation",
 		"internal/runtime/bootverify.transitionOwningFlowID", "internal/runtime/bootverify.transitionTriggerIsTimerReference",
 		"internal/runtime/engine.TransitionValidator.ValidateTransition", "internal/runtime/engine.Executor.killStateTarget",
 		"internal/runtime/workflowlifecycle.Transition.ValidateHandlerSelection":
