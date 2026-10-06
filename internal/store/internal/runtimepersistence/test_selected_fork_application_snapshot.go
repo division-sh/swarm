@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 )
 
 type SelectedForkStorageTableSnapshot struct {
@@ -70,27 +72,10 @@ func readSelectedForkSnapshot(ctx context.Context, tx *sql.Tx, postgres bool) (m
 }
 
 func readSelectedForkSnapshotTables(ctx context.Context, tx *sql.Tx, postgres bool) ([]string, error) {
-	query := `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
 	if postgres {
-		query = `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name`
+		return schemastore.PostgresDataTables(ctx, tx)
 	}
-	rows, err := tx.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var tables []string
-	for rows.Next() {
-		var table string
-		if err := rows.Scan(&table); err != nil {
-			return nil, err
-		}
-		tables = append(tables, table)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return tables, rows.Close()
+	return schemastore.SQLiteDataTables(ctx, tx)
 }
 
 func readSelectedForkSnapshotTable(ctx context.Context, tx *sql.Tx, table string) (SelectedForkStorageTableSnapshot, error) {

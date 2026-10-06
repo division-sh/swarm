@@ -143,6 +143,26 @@ func SQLiteUserTables(ctx context.Context, q schemaQueryer) (map[string]struct{}
 	return sqliteUserTables(ctx, q)
 }
 
+func SQLiteDataTables(ctx context.Context, q schemaQueryer) ([]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			return nil, err
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return tables, rows.Close()
+}
+
 func loadSQLiteSchemaShape(ctx context.Context, q schemaQueryer, expected schemaShape) (schemaShape, error) {
 	actual := schemaShape{Tables: map[string]schemaTableShape{}}
 	rows, err := q.QueryContext(ctx, `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table', 'index') AND sql IS NOT NULL ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END, name`)

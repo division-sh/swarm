@@ -129,6 +129,26 @@ func PostgresPublicTables(ctx context.Context, q schemaQueryer) (map[string]stru
 	return postgresPublicTables(ctx, q)
 }
 
+func PostgresDataTables(ctx context.Context, q schemaQueryer) ([]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			return nil, err
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return tables, rows.Close()
+}
+
 func loadPostgresSchemaShape(ctx context.Context, q schemaQueryer, expected schemaShape) (schemaShape, error) {
 	actual := schemaShape{Tables: map[string]schemaTableShape{}}
 	rows, err := q.QueryContext(ctx, `
