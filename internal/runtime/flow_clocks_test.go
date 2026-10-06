@@ -38,6 +38,16 @@ func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
 			if len(semanticview.ClockSchedules(source)) != 1 {
 				t.Fatal("deployment selection removed the compiled declaration")
 			}
+			flow := "."
+			if nested {
+				flow = "clock"
+			}
+			if err := rt.ValidateStandingClockMutation(flowidentity.StandingServiceID(flow)); (err == nil) != enabled {
+				t.Fatalf("clock mutation binding authority: nested=%t enabled=%t err=%v", nested, enabled, err)
+			}
+			if err := rt.ValidateStandingClockMutation(flowidentity.StandingServiceID("independent")); err != nil {
+				t.Fatalf("clock guard claimed an unrelated legacy standing declaration: %v", err)
+			}
 		}
 	}
 }

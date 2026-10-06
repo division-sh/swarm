@@ -63,6 +63,23 @@ func selectStandingClockBindings(declarations []StandingTargetDeclaration, enabl
 	return selected
 }
 
+// A finite host can retain independent standing declarations, but cannot
+// mutate a clock binding through that service's operator surface.
+func (rt *Runtime) ValidateStandingClockMutation(serviceID string) error {
+	if rt == nil || rt.Options.WorkflowModule == nil {
+		return fmt.Errorf("standing clock mutation requires its runtime source")
+	}
+	if rt.Options.EnableDeclaredClockBinding {
+		return nil
+	}
+	for _, clock := range semanticview.ClockSchedules(rt.Options.WorkflowModule.SemanticSource()) {
+		if flowidentity.StandingServiceID(clock.FlowID) == serviceID {
+			return fmt.Errorf("standing service %s requires its deployment clock binding", serviceID)
+		}
+	}
+	return nil
+}
+
 func (rt *Runtime) armFlowClock(ctx context.Context, source semanticview.Source, activation StandingActivation, declaration semanticview.ClockSchedule, owner runtimebus.StandingRunWorkOwner) error {
 	if rt.GenericSchedules == nil || owner == nil {
 		return fmt.Errorf("clock deployment requires its durable schedule and execution owners")

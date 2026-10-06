@@ -8,6 +8,10 @@ import (
 
 type ClockStorageObservation = private.ClockStorageObservation
 
+func CountInstanceClockActivations(ctx context.Context, selected any) (int, error) {
+	return private.CountInstanceClockActivationsForTest(ctx, selected)
+}
+
 func CorruptClockImmutableHash(ctx context.Context, selected any, runID, activationID string) error {
 	return private.CorruptClockImmutableHashForTest(ctx, selected, runID, activationID)
 }

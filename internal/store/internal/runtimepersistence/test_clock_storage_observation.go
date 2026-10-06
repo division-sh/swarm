@@ -13,6 +13,22 @@ type ClockStorageObservation struct {
 	Status, ImmutableHash string
 }
 
+// Counts every instance clock, including terminal rows. An empty active list
+// alone cannot prove that a finite host never admitted a deployment binding.
+func CountInstanceClockActivationsForTest(ctx context.Context, selected any) (int, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE owner_kind='instance'`).Scan(&count)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func validateClockStorageCoordinate(runID, activationID string) error {
 	for _, value := range []string{runID, activationID} {
 		id, err := uuid.Parse(value)
