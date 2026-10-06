@@ -84,11 +84,17 @@ func (eb *EventBus) beginReceiverDispatch(parent context.Context, projection rec
 		}
 		var closeContext func()
 		ctx, closeContext = eventreceiver.NewContext(lease.Context())
+		ctx = worklifetime.CarryAcceptedLease(ctx, lease.Context())
 		closeReceiver = func() error {
 			closeContext()
 			return lease.Done()
 		}
 	}
+	// Nested committed output remains part of this admitted dispatch. Keep its
+	// lifetime, not the caller value tree, when rebuilding the next receiver.
+	ctx = context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{
+		owner: projection.occurrence, context: ctx,
+	})
 	ctx = worklifetime.WithOccurrence(ctx, projection.occurrence)
 	ctx = runtimechannelactivation.WithExecutionLease(ctx, projection.channelExecution)
 	ctx = withReceiverSourceArtifact(ctx, projection.runtimeInstanceID, projection.sourceArtifactFact)
