@@ -246,7 +246,7 @@ func proveSelectedWorkspacePreparation(t *testing.T, backend, mode string, real 
 		t.Fatal(err)
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
-	seedSelectedClaudeExecutionSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC())
+	seedSelectedClaudeExecutionSource(t, ctx, selected, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC())
 	trace := &workspacePreparationTrace{mode: mode, real: real, started: make(chan struct{}), cancelled: make(chan struct{}), finish: make(chan struct{})}
 	t.Cleanup(func() {
 		trace.mu.Lock()

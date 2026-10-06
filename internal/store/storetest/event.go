@@ -11,7 +11,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
@@ -173,27 +172,11 @@ func ClaimDelivery(ctx context.Context, selected DeliveryLifecycleStore, event e
 // runtime recovery and replay readers.
 func LoadCanonicalEventRecord(t testing.TB, ctx context.Context, selectedStore any, eventID string) events.Event {
 	t.Helper()
-	var (
-		record eventrecord.Record
-		found  bool
-		err    error
-	)
-	switch selected := selectedStore.(type) {
-	case *store.PostgresStore:
-		record, found, err = eventrecordpostgres.Load(ctx, DatabaseForTest(selected), eventID)
-	case *store.SQLiteRuntimeStore:
-		record, found, err = eventrecordsqlite.Load(ctx, DatabaseForTest(selected), eventID)
-	default:
-		t.Fatalf("canonical event readback store %T is unsupported", selectedStore)
-	}
-	if err != nil || !found {
-		t.Fatalf("load canonical event record %s: found=%v err=%v", eventID, found, err)
-	}
-	admitted, err := record.Decode()
+	event, err := private.LoadCanonicalEventRecordForTest(ctx, selectedStore, eventID)
 	if err != nil {
-		t.Fatalf("decode canonical event record %s: %v", eventID, err)
+		t.Fatalf("load canonical event record %s: %v", eventID, err)
 	}
-	return admitted.Event()
+	return event
 }
 
 func InsertExistingRunRootEventRecord(
