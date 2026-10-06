@@ -67,6 +67,28 @@ func TestFlowConstructionPublicationFieldsPreservesKindsAndIsolation(t *testing.
 	}
 }
 
+func TestFlowConstructionPublicationDiscoversDetachedCreatingInput(t *testing.T) {
+	receipt, owner := constructionPublicationFieldsFixture(t)
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := ProjectFlowConstructionPublication(raw, owner, receipt.EntityID)
+	if err != nil || evidence.CreatingInput != receipt.CreatingInput || !reflect.DeepEqual(evidence.Fields, receipt.Persisted.Fields) {
+		t.Fatalf("receipt discovery changed original provenance or precise fields: %#v %v", evidence, err)
+	}
+	evidence.CreatingInput.EventID = "33333333-3333-4333-8333-333333333333"
+	evidence.CreatingInput.Input = "different.input"
+	evidence.Fields["nested"].(map[string]any)["values"].([]any)[0] = int64(99)
+	again, err := ProjectFlowConstructionPublication(raw, owner, receipt.EntityID)
+	if err != nil || again.CreatingInput != receipt.CreatingInput || !reflect.DeepEqual(again.Fields, receipt.Persisted.Fields) {
+		t.Fatalf("caller mutation changed original provenance or fields: %#v %v", again, err)
+	}
+	if err := ValidateFlowConstructionPublication(raw, owner, receipt.EntityID, evidence.CreatingInput.EventID); err == nil {
+		t.Fatal("discovery weakened rejection of a later incoming publication")
+	}
+}
+
 func TestFlowConstructionPublicationFieldsSharesStrictReceiptAdmission(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -104,6 +126,14 @@ func TestFlowConstructionPublicationFieldsSharesStrictReceiptAdmission(t *testin
 			if validation == nil || err == nil || fields != nil || validation.Error() != err.Error() {
 				t.Fatalf("projection bypassed canonical refusal: fields=%#v err=%v validation=%v", fields, err, validation)
 			}
+			evidence, discoveryErr := ProjectFlowConstructionPublication(raw, owner, entity)
+			if tc.name == "foreign_creating_event" {
+				if discoveryErr != nil || evidence.CreatingInput != receipt.CreatingInput {
+					t.Fatalf("discovery must report the stored event independently of the caller: %#v %v", evidence, discoveryErr)
+				}
+			} else if discoveryErr == nil || !reflect.DeepEqual(evidence, FlowConstructionPublicationEvidence{}) || discoveryErr.Error() != validation.Error() {
+				t.Fatalf("discovery bypassed canonical receipt admission: %#v %v validation=%v", evidence, discoveryErr, validation)
+			}
 		})
 	}
 	receipt, owner := constructionPublicationFieldsFixture(t)
@@ -119,6 +149,9 @@ func TestFlowConstructionPublicationFieldsSharesStrictReceiptAdmission(t *testin
 	} {
 		if fields, err := FlowConstructionPublicationFields(raw, owner, receipt.EntityID, receipt.CreatingInput.EventID); err == nil || fields != nil {
 			t.Fatalf("malformed receipt became initial fields: %s -> %#v err=%v", raw, fields, err)
+		}
+		if evidence, err := ProjectFlowConstructionPublication(raw, owner, receipt.EntityID); err == nil || !reflect.DeepEqual(evidence, FlowConstructionPublicationEvidence{}) {
+			t.Fatalf("malformed receipt became creation coordinates: %s -> %#v err=%v", raw, evidence, err)
 		}
 	}
 }
