@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestSelectedForkDockerGatewayTransportBothStores(t *testing.T) {
@@ -116,9 +118,9 @@ func (w *selectedForkGatewayWorkspace) ResolveWorkspaceForCapabilityAdmission(ct
 	return target, nil
 }
 
-func requireSelectedForkGatewayLossBeforeModel(t *testing.T, rt servedControlProofRuntime, params map[string]any, fault *selectedForkGatewayFault, sourceRunID string) {
+func requireSelectedForkGatewayLossBeforeModel(t *testing.T, endpoint string, owner runtimebus.EventStore, params map[string]any, fault *selectedForkGatewayFault, sourceRunID string) {
 	t.Helper()
-	response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", params, 30*time.Second)
+	response := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", params, 30*time.Second)
 	if response.Error == nil {
 		t.Fatal("selected target executed with its real gateway disconnected")
 	}
@@ -130,19 +132,24 @@ func requireSelectedForkGatewayLossBeforeModel(t *testing.T, rt servedControlPro
 	}
 	// run.fork reports aggregate execution refusal. The exact turn failure is
 	// authoritative in its settled delivery and public diagnostic projection.
-	var deliveryID, eventID, failureRaw string
-	if err := rt.DB.QueryRow(`SELECT d.delivery_id, d.event_id, CAST(a.failure AS TEXT)
-		FROM event_deliveries d JOIN event_delivery_attempts a
-		ON a.delivery_id=d.delivery_id AND a.claim_version=d.claim_version AND a.closure_kind='settled'
-		WHERE d.run_id=$1 AND d.subscriber_type='agent' AND d.subscriber_id='same-name' AND d.status='dead_letter'`, runID).Scan(&deliveryID, &eventID, &failureRaw); err != nil {
-		t.Fatal(err)
+	storage, err := storetest.ReadManagedDeliveryStorage(context.Background(), owner, runID, "same-name")
+	if err != nil || len(storage.Failures) != 1 {
+		t.Fatalf("exact selected settled failure count=%d error=%v", len(storage.Failures), err)
 	}
-	failure, err := failures.UnmarshalEnvelope([]byte(failureRaw))
+	deliveryID, eventID, failureRaw := storage.Failures[0].DeliveryID, storage.Failures[0].EventID, storage.Failures[0].Failure
+	failure, err := failures.UnmarshalEnvelope(failureRaw)
 	if err != nil || failure.Class != failures.ClassDependencyUnavailable || failure.Detail.Code != "workspace_gateway_unreachable" {
 		t.Fatalf("selected pre-model refusal lost durable typed gateway evidence: failure=%s err=%v", failureRaw, err)
 	}
+	turns, err := storetest.ReadManagedAgentTurnStorage(context.Background(), owner, runID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 0 {
+		t.Fatalf("unreachable selected target launched %d model turns", len(turns))
+	}
 	var diagnostics operatorread.OperatorAgentDeliveryDiagnostics
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.delivery_diagnostics", map[string]any{
+	requireServedJSONRPCResult(t, endpoint, "agent.delivery_diagnostics", map[string]any{
 		"agent_id": "same-name", "run_id": runID, "flow_instance": "consumer",
 	}, &diagnostics)
 	if len(diagnostics.DeadLetters) != 1 {
@@ -162,14 +169,8 @@ func requireSelectedForkGatewayLossBeforeModel(t *testing.T, rt servedControlPro
 			t.Fatalf("public selected refusal changed persisted failure bytes: want=%s got=%s err=%v", wantFailure, got, err)
 		}
 	}
-	for _, query := range []string{
-		`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1`,
-		`SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.agent_run_id=$1 AND o.effect_kind='provider_turn'`,
-		`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND status='delivered' AND subscriber_id='same-name'`,
-	} {
-		var count int
-		if err := rt.DB.QueryRow(query, runID).Scan(&count); err != nil || count != 0 {
-			t.Fatalf("unreachable selected target launched/settled model work: query=%s count=%d err=%v", query, count, err)
-		}
+	effects, err := storetest.ReadManagedTurnEffectStorage(context.Background(), owner, runID, "same-name")
+	if err != nil || effects.ProviderAttempts != 0 || storage.Delivered != 0 {
+		t.Fatalf("unreachable selected target launched/settled model work: effects=%+v delivered=%d err=%v", effects, storage.Delivered, err)
 	}
 }

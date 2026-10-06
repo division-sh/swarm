@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Artifact admission below is private setup. This proves the public fork and
@@ -185,7 +187,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				"allow_source_freeze": true, "idempotency_key": "public-selected-changed-target",
 			}
 			if options.gatewayLoss {
-				requireSelectedForkGatewayLossBeforeModel(t, rt, params, gatewayFault, seed.RunID)
+				requireSelectedForkGatewayLossBeforeModel(t, rt.Endpoint, selected.RuntimeDeps().EventStore, params, gatewayFault, seed.RunID)
 				if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
 					t.Fatal("failed selected target changed source domain")
 				}
@@ -205,7 +207,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			rows := readForkReceiverRows(t, rt, fork.ForkRunID)
 			requireSelectedForkMixedBusinessMutation(t, rt, fork.ForkRunID, childEvent, rows["consumer"].ID)
 			if nativeRead {
-				requireSelectedForkNativeMCPRead(t, rt, fork.ForkRunID, childEvent)
+				requireSelectedForkNativeMCPRead(t, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent)
 			}
 			diagnostics := readServedLifecycleDiagnosticReceipts(t, rt.DB, fork.ForkRunID)
 			if len(diagnostics) == 0 {
@@ -242,21 +244,18 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 	}
 }
 
-func requireSelectedForkNativeMCPRead(t *testing.T, rt servedControlProofRuntime, runID, eventID string) {
+func requireSelectedForkNativeMCPRead(t *testing.T, owner runtimebus.EventStore, runID, eventID string) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT CAST(tool_calls AS TEXT), CAST(response_payload AS TEXT), CAST(emitted_events AS TEXT), session_id
-		FROM agent_turns WHERE run_id=$1 AND trigger_event_id=$2 AND agent_id='same-name' AND execution_mode='mock'
-		ORDER BY created_at, turn_id`, runID, eventID)
+	rows, err := storetest.ReadManagedAgentTurnStorage(context.Background(), owner, runID, "same-name")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	count, sessionID := 0, ""
-	for rows.Next() {
-		var callsRaw, responseRaw, emittedRaw, currentSession string
-		if err := rows.Scan(&callsRaw, &responseRaw, &emittedRaw, &currentSession); err != nil {
-			t.Fatal(err)
+	for _, row := range rows {
+		if row.TriggerEventID != eventID || row.ExecutionMode != "mock" {
+			continue
 		}
+		callsRaw, responseRaw, emittedRaw, currentSession := row.ToolCalls, row.ResponsePayload, row.EmittedEvents, row.SessionID
 		if count == 0 {
 			sessionID = currentSession
 		}
@@ -292,8 +291,8 @@ func requireSelectedForkNativeMCPRead(t *testing.T, rt servedControlProofRuntime
 		}
 		count++
 	}
-	if err := rows.Err(); err != nil || count != 2 {
-		t.Fatalf("selected native turn persisted %d completions: %v", count, err)
+	if count != 2 {
+		t.Fatalf("selected native turn persisted %d completions, want exactly two", count)
 	}
 }
 
