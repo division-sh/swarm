@@ -6,12 +6,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -78,4 +82,86 @@ func TestManagerOwnsDirectiveLaunchTimeoutAndReactionBothStores(t *testing.T) {
 			t.Fatalf("same-key canceled directive reexecuted: calls=%d err=%v", agent.calls.Load(), err)
 		}
 	})
+}
+
+func TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores(t *testing.T) {
+	for _, phase := range []string{"prelaunch", "launched"} {
+		t.Run(phase, func(t *testing.T) {
+			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
+				store := backend.store.(completionControllerTestStore)
+				if backend.name == "postgres" {
+					registerTestAuthorActivityCatalog(t, backend.store.(testAuthorActivityCatalogRegistrar))
+				}
+				agent := &directiveAmbiguityAgent{id: "manager-terminate-agent", effects: store}
+				var harness *directiveAmbiguityHarness
+				agent.onBoard = func(ctx context.Context, directive agentcontrol.BoardDirective) (string, error) {
+					token, found := runtimeeffects.LifecycleTokenFromContext(ctx)
+					if !found {
+						t.Fatal("termination invocation lost exact Manager lease")
+					}
+					authority := runtimeeffects.NormalAgentAuthority(token, "manager-termination-provider", time.Now().UTC().Add(time.Minute))
+					authority.Target = runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: directive.Event.RunID(), AgentID: agent.id,
+						AgentIdentity: token.Identity, FlowInstance: token.Identity.FlowInstance(), SessionID: uuid.NewString()}
+					ctx = runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewCompletionController(store, store, store, nil).WithExecutionPosture(executionposture.Live))
+					ctx = withManagedCompletionTestSurface(t, ctx, authority, "anthropic_api")
+					handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("manager-owned-termination"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if phase == "launched" {
+						if err := handle.MarkLaunched(ctx); err != nil {
+							t.Fatal(err)
+						}
+					}
+					scope, instanceID, path, _ := token.Identity.Route.Fields()
+					owner := flowidentity.RunScopedFlowInstance{RunID: directive.Event.RunID(), Route: flowidentity.StoredRoute(scope, instanceID, path)}
+					entity, at := uuid.NewString(), time.Now().UTC().Truncate(time.Microsecond)
+					record := seedTurnTerminationHeader(t, completionSettlementFixture{store: backend.store.(completionSettlementTestStore)}, owner, entity, at)
+					node, err := identity.AdmitExecutableNodeDeclaration(scope, "termination-router")
+					if err != nil {
+						t.Fatal(err)
+					}
+					event := managedCompletionTestEventWithIdentity(authority, uuid.NewString(), "test.node_emitted")
+					route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+						FlowID: scope, FlowInstance: path, EntityID: entity,
+					})}
+					if err := commitSemanticEventFixtureWithRoutes(ctx, backend.store.(completionSettlementTestStore), event, []events.DeliveryRoute{route}); err != nil {
+						t.Fatal(err)
+					}
+					claimed, err := claimDeliveryFixture(ctx, backend.store.(deliveryFixtureStore), event, route)
+					if err != nil {
+						t.Fatal(err)
+					}
+					committed, err := backend.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, turnTerminationCommandForClaim(t, record, event, claimed.Claim, at))
+					if err != nil || !committed.Committed || len(committed.Lifecycle.TurnCancellations) != 1 {
+						t.Fatalf("guarded termination commit: %+v err=%v", committed, err)
+					}
+					if err := harness.manager.ApplyCommittedTurnCancellations(ctx, committed.Lifecycle.TurnCancellations); err != nil || ctx.Err() == nil {
+						t.Fatalf("actual Manager lease missed termination: cause=%v err=%v", context.Cause(ctx), err)
+					}
+					var authored *runtimeeffects.AuthoredTurnCancellationError
+					if !errors.As(context.Cause(ctx), &authored) || authored.Cancellation.Reason != deliverylifecycle.CancellationTerminate || authored.Cancellation.CauseEvent != event.ID() {
+						t.Fatal("Manager substituted termination reason or cause")
+					}
+					failure := runtimefailures.FromError(context.Canceled, "manager-termination-test", "physical_cleanup").Failure
+					state := runtimeeffects.StateOutcomeUncertain
+					if phase == "prelaunch" {
+						state = runtimeeffects.StateTerminalFailure
+					}
+					settleErr := handle.Settle(context.WithoutCancel(ctx), state, &failure, map[string]any{"physical_joined": true, "launch_rejected": phase == "prelaunch"})
+					return "", errors.Join(context.Canceled, settleErr)
+				}
+				harness = newDirectiveAmbiguityHarness(t, backend, agent)
+				_, err := harness.manager.SendDirective(harness.workContext(t), harness.request)
+				operation := harness.loadOperation(t)
+				if !errors.Is(err, agentcontrol.ErrDirectiveCanceled) || operation.State != agentcontrol.DirectiveOperationCanceled || operation.CancellationReason != deliverylifecycle.CancellationTerminate || operation.Failure != nil {
+					t.Fatalf("real Manager termination settlement: %+v err=%v", operation, err)
+				}
+				_, err = harness.manager.SendDirective(harness.workContext(t), harness.request)
+				if !errors.Is(err, agentcontrol.ErrDirectiveCanceled) || agent.calls.Load() != 1 {
+					t.Fatalf("same-key terminated directive repeated provider work: calls=%d err=%v", agent.calls.Load(), err)
+				}
+			})
+		})
+	}
 }

@@ -944,6 +944,7 @@ units:
     run: ^Test[I-O].*$
     required_children:
       TestManagerOwnsDirectiveLaunchTimeoutAndReactionBothStores: [sqlite, postgres]
+      TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores: [prelaunch/sqlite, prelaunch/postgres, launched/sqlite, launched/postgres]
       TestLogicalTurnExecutionCancelsAndSettlesRealDeliveryOriginBothStores: [sqlite, postgres]
       TestLogicalTurnExecutionCancelsRealDirectiveWithoutDeliveryBothStores: [sqlite, postgres]
       TestOrdinaryHandlerRequiresCanonicalConstructionBothStores: [postgres/fielded_accumulation/absent, postgres/fielded_accumulation/constructed, postgres/fielded_stage/absent, postgres/fielded_stage/constructed, postgres/fieldless_emit/absent, postgres/fieldless_emit/constructed, postgres/fieldless_gate/absent, postgres/fieldless_gate/constructed, postgres/fieldless_stage/absent, postgres/fieldless_stage/constructed, sqlite/fielded_accumulation/absent, sqlite/fielded_accumulation/constructed, sqlite/fielded_stage/absent, sqlite/fielded_stage/constructed, sqlite/fieldless_emit/absent, sqlite/fieldless_emit/constructed, sqlite/fieldless_gate/absent, sqlite/fieldless_gate/constructed, sqlite/fieldless_stage/absent, sqlite/fieldless_stage/constructed]

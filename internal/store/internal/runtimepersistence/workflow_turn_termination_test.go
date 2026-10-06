@@ -51,7 +51,6 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 					record = seedTurnTerminationHeader(t, fixture, owner, entityID, now)
 				}
 				event := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")
-				eventID, eventType := event.ID(), string(event.Type())
 				node, err := identity.AdmitExecutableNodeDeclaration(path, "router")
 				if err != nil {
 					t.Fatal(err)
@@ -66,35 +65,9 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				graph := contracts.BuildWorkflowStageTopology(path, "ready", []string{"ready", "done"}, []string{"done"}, []contracts.HandlerTransitionSemantic{{Node: node, EventType: eventType, AdvancesTo: "done", Terminate: true}}, nil, nil)
-				compiled, err := graph.AdmitTransition(contracts.WorkflowTransitionSite{Node: node, HandlerEvent: eventType, AdvanceCarrier: contracts.HandlerAdvanceCarrierHandler}, "ready", "done")
-				if err != nil {
-					t.Fatal(err)
-				}
-				transition, err := workflowlifecycle.NewCompiledTransition(compiled, handlerselection.NotApplicable(), nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				cause, err := workflowlifecycle.NewAcceptedEvent(owner.Route, identity.NormalizeEntityID(entityID), eventID, eventType, executionmode.Live, now, &transition)
-				if err != nil {
-					t.Fatal(err)
-				}
-				cause, err = cause.WithExecutionOccurrence("delivery", claimed.Claim.DeliveryID())
-				if err != nil {
-					t.Fatal(err)
-				}
-				termination, err := workflowlifecycle.NewTurnTermination(owner, cause)
-				if err != nil {
-					t.Fatal(err)
-				}
-				record.CurrentState, record.ExpectedState, record.ExpectedRevision = "done", "ready", 1
-				record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
-				record.UpdatedAt, record.EnteredStageAt = now.Add(time.Second), now.Add(time.Second)
+				command := turnTerminationCommandForClaim(t, record, event, claimed.Claim, now)
 				if mode == "stale_cas" {
-					record.ExpectedRevision = 2
-				}
-				command := pipeline.WorkflowEngineMutationCommand{State: record, Lifecycle: pipeline.WorkflowLifecycleMutationPlan{TurnTermination: &termination},
-					DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
+					command.State.ExpectedRevision = 2
 				}
 				if mode == "late_rollback" {
 					if _, err := fixture.store.(deliverylifecycle.Store).SettleSuccess(ctx, claimed.Claim, []string{"prior-commit"}, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
@@ -177,6 +150,42 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+func turnTerminationCommandForClaim(t *testing.T, record pipeline.WorkflowEngineStateRecord, event events.Event, claim deliverylifecycle.Claim, at time.Time) pipeline.WorkflowEngineMutationCommand {
+	t.Helper()
+	node, err := identity.ParseExecutableNodeKey(claim.SubscriberID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow := record.Identity.Route.ScopeKey
+	graph := contracts.BuildWorkflowStageTopology(flow, "ready", []string{"ready", "done"}, []string{"done"}, []contracts.HandlerTransitionSemantic{{Node: node, EventType: string(event.Type()), AdvancesTo: "done", Terminate: true}}, nil, nil)
+	compiled, err := graph.AdmitTransition(contracts.WorkflowTransitionSite{Node: node, HandlerEvent: string(event.Type()), AdvanceCarrier: contracts.HandlerAdvanceCarrierHandler}, "ready", "done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition, err := workflowlifecycle.NewCompiledTransition(compiled, handlerselection.NotApplicable(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cause, err := workflowlifecycle.NewAcceptedEvent(record.Identity.Route, identity.NormalizeEntityID(record.EntityID), event.ID(), string(event.Type()), executionmode.Live, at, &transition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cause, err = cause.WithExecutionOccurrence("delivery", claim.DeliveryID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	termination, err := workflowlifecycle.NewTurnTermination(record.Identity, cause)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.CurrentState, record.ExpectedState, record.ExpectedRevision = "done", "ready", 1
+	record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+	record.UpdatedAt, record.EnteredStageAt = at.Add(time.Second), at.Add(time.Second)
+	return pipeline.WorkflowEngineMutationCommand{State: record, Lifecycle: pipeline.WorkflowLifecycleMutationPlan{TurnTermination: &termination},
+		DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
 	}
 }
 
