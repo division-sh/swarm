@@ -1,5 +1,29 @@
 # Ratchet Migration Batch 2: Pipeline And Connector Observations
 
+## Rebase Onto Merged Slice 2c
+
+The current qualification base is5029ab79e, including merged #2573. The
+fixture repair and exact78-root core promotion are unchanged in range-diff;
+the only conflict was the generated descriptive authority registry. Both
+classified owner sets were retained and the canonical typed generator restored
+its ordering. No production/test predicate, allowance, collector or tier changed.
+
+The downward collector also incorporated33 already-landed #2573 removals:
+the recorded inherited baseline15183 now becomes15032, zero additions.
+This batch's own contribution remains118 removals; the other33 are not credited
+to B. Confirmed raw-operation debt is11149, with all67 excluded-source
+uncertainties and the original collector unchanged. The exact descriptive
+registry verifies12467 facts, including C's landed private owner operations.
+
+Fresh vemew evidence: all78 promoted roots pass with four successful package
+terminals and no fail/skip; complete planner/timing and catalog checks pass;
+canonical inventory/downward census and codemod controls pass. Independent
+5029ab79e/candidate complexity retains561 cognitive and261 cyclomatic hotspots.
+Receipts are `batch2-5029-*` under B's local evidence cache. Final committed-head
+read-only checks precede the one authorized push. Local core and the unchanged
+34 named proofs/68 backend cells remain pending explicit server2 handover.
+No managed aggregate or exact-head hosted green is claimed by these checks.
+
 ## Boundary And Governing Context
 
 Part of #2542 / #2151, under broad approval5897692464 and ratchet delivery
