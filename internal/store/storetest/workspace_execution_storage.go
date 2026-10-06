@@ -18,6 +18,11 @@ type ConversationForkTurnDiagnostic = private.ConversationForkTurnDiagnostic
 type AuthoredHTTPToolEffectStorage = private.AuthoredHTTPToolEffectStorage
 type SelectedSourceOutcomeFixture = private.SelectedSourceOutcomeFixture
 type WorkspaceMockInvocationStorage = private.WorkspaceMockInvocationStorage
+type WorkspaceEffectFailureStorage = private.WorkspaceEffectFailureStorage
+
+func ReadWorkspaceEffectFailures(ctx context.Context, selected any) ([]WorkspaceEffectFailureStorage, error) {
+	return private.ReadWorkspaceEffectFailuresForTest(ctx, selected)
+}
 
 func ReadWorkspaceMockInvocationStorage(ctx context.Context, selected any) (WorkspaceMockInvocationStorage, error) {
 	return private.ReadWorkspaceMockInvocationStorageForTest(ctx, selected)
