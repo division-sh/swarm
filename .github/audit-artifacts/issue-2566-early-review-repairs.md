@@ -49,6 +49,8 @@ Post-Implementation Proof Audit, a core qualification receipt, or merge readines
 | Two test interfaces fail to compile | Exact managed `core-structural-owner-guards` unit: all four packages pass |
 | Public final projection still agrees with join settlement | `TestA2JoinPublicProjectionAgreementBothStores`; race/count-three pass (76.371s) |
 | Reporter run.start fixture had no completion lifecycle | `TestServedReporterFiniteContractHasRealClosureCarriers` checks admitted topology; `TestIssue2566ReporterFiniteFixtureCanCloseBothStores` executes the declared close/ack path to completed, both stores race/count-three pass |
+| CLI graph oracle still requires the retired terminal label | `TestDescribeCommandGraphRendersStageGraph`; exact final JSON/text projection and absence of the retired text marker, race/count-three pass |
+| Old boot oracle still requires authored entry/end markers | `TestRun_StagesUseOrderedEntryAndOptionalFinal`; ordered waiting entry and zero final stages, valid service verifies; race/count-three pass |
 | Rewrite/runtime complexity introduces hotspots | Independent base/head measurement at `4c53d2712`: cognitive >=30 561/561, >=50 192/192; cyclomatic >=30 261/261, >=50 58/58; unchanged maxima/policy |
 
 Whole-corpus replay remains 417 exact files / 553 decisions / byte-idempotent.
@@ -92,10 +94,23 @@ The combined four-test reporter race/count-three run hit its unchanged 180-secon
 package deadline without a reported assertion failure; it is not a green receipt.
 The new both-store closure test passes separately at race/count-three. Original
 reporter assertions are being qualified separately without changed limits.
+`TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores` (156.963s) and
+`TestIssue2394ServedReporterTransactionCensusBothStores` (64.362s) pass separately
+race/count-three; no assertion, repetition or timeout change.
+`TestIssue2394ServedFanOutSupportedSurfacesBothStores` also passes separately
+race/count-three, with the original supported-surface assertions unchanged.
 The first replacement core at `324bf0454` stopped before execution: the newly
 added closure proof had no primary full-plan owner. It is now explicitly selected
 by the existing local reporter and full served-late units, with both store
 children required. Existing selection, count modes, budgets and soaks are intact.
+Core at `f5af987f9` then stopped on the CLI graph test's stale `[terminal]`
+expectation while the supported output correctly reported `[final]`. The oracle
+now requires the new label and rejects the old label. An adjacent obsolete boot
+error oracle now explicitly checks declaration-order entry and optional final
+admission; its valid service fixture declares all existing handler destinations.
+Both focused tests pass race/count-three. The script ledger retains the original
+entry/end decisions while replaying this bounded test update. Interrupted core
+units are unqualified. Server2 was released; another run requires a new handoff.
 The failed f60 core receipt remains unqualified. Lifecycle and
 named supplements, hosted full, ten-family completion, and composed A/E supported
 proof remain outstanding. No CI/PR was opened for these repairs.
