@@ -16,25 +16,7 @@ import (
 func TestServedClockRetainsWithoutIngressCredentialsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			root := canonicalrouting.CopyStandingRootTreePublic(t)
-			path := filepath.Join(root, "schema.yaml")
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var schema map[string]any
-			if err := yaml.Unmarshal(raw, &schema); err != nil {
-				t.Fatal(err)
-			}
-			schema["schedules"] = map[string]any{"poll": map[string]any{"every": "1h", "emit": "poll.tick"}}
-			pins := schema["pins"].(map[string]any)
-			pins["outputs"] = append(pins["outputs"].([]any), "poll.tick")
-			updated, err := yaml.Marshal(schema)
-			if err != nil {
-				t.Fatal(err)
-			}
-			writeWorkflowValidationFixtureFile(t, path, string(updated))
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "poll.tick:\n")
+			root := copyClockMixedIngress(t)
 			credentialPath := filepath.Join(t.TempDir(), "clock-credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 			file, err := credentials.NewFileStore(credentialPath)
@@ -112,6 +94,97 @@ func TestServedClockRetainsWithoutIngressCredentialsBothStores(t *testing.T) {
 			}
 			if code := second.stop(); code != 0 {
 				t.Fatalf("mixed binding joined shutdown=%d", code)
+			}
+		})
+	}
+}
+
+func copyClockMixedIngress(t *testing.T) string {
+	t.Helper()
+	root := canonicalrouting.CopyStandingRootTreePublic(t)
+	path := filepath.Join(root, "schema.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err := yaml.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	schema["schedules"] = map[string]any{"poll": map[string]any{"every": "1h", "emit": "poll.tick"}}
+	pins := schema["pins"].(map[string]any)
+	pins["outputs"] = append(pins["outputs"].([]any), "poll.tick")
+	updated, err := yaml.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeWorkflowValidationFixtureFile(t, path, string(updated))
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "poll.tick:\n")
+	return root
+}
+
+func TestServedClockMixedEnabledBindingsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "credentials.json")
+			t.Setenv("SWARM_CREDENTIALS_FILE", path)
+			file, err := credentials.NewFileStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"telegram_bot_token", "webhook_signing.alpha", "webhook_signing.beta"} {
+				if err := file.Set(context.Background(), key, "clock-binding-secret"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, start := clockDeploymentHarness(t, backend, copyClockMixedIngress(t))
+			process, served := start()
+			rt := servedTestProcessRuntime(t, process)
+			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
+			if err != nil || len(statuses) != 2 {
+				t.Fatalf("independently enabled binding inventory=%+v err=%v", statuses, err)
+			}
+			rootRun, rootService, sibling := "", "", ""
+			for _, status := range statuses {
+				if !status.RestartDisposition.Executable() {
+					t.Fatalf("enabled binding was not executable: %+v", status)
+				}
+				if status.FlowPath == "." {
+					rootRun, rootService = status.RunID, status.ServiceID
+				} else if status.FlowPath == "beta" {
+					sibling = status.ServiceID
+				}
+			}
+			if rootRun == "" || sibling == "" {
+				t.Fatal("mixed bindings did not acquire their distinct generations")
+			}
+			before := readServedClockHeader(t, served.Endpoint, rootRun).ClockSchedules[0]
+			if before.Status != genericschedule.StatusActive || !before.RetainsRun {
+				t.Fatalf("enabled clock lacked retention: %+v", before)
+			}
+			invokeServedStandingOperation(t, served.Endpoint, "standing.suspend", rootService, "mixed-enabled-park")
+			parked := readServedClockHeader(t, served.Endpoint, rootRun).ClockSchedules[0]
+			if parked.ActivationID != before.ActivationID || parked.Status != genericschedule.StatusParked || parked.RetainsRun {
+				t.Fatalf("mixed service failed exact parking: %+v", parked)
+			}
+			statuses, err = rt.Pipeline.ListStandingServiceStatuses(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, status := range statuses {
+				if status.ServiceID == sibling {
+					found = true
+					if !status.RestartDisposition.Executable() {
+						t.Fatalf("root suspension withdrew sibling ingress: %+v", status)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("root suspension erased sibling binding")
+			}
+			if code := process.stop(); code != 0 {
+				t.Fatalf("mixed binding shutdown=%d\n%s", code, process.outputString())
 			}
 		})
 	}

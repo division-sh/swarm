@@ -138,6 +138,12 @@ type PostCommitDispatcher interface {
 	DispatchPostCommit(ctx context.Context, intents []EmitIntent) error
 }
 
+// CommittedPublicationDispatcher transfers exact accepted publications to the
+// existing durable delivery owner without awaiting downstream execution.
+type CommittedPublicationDispatcher interface {
+	DispatchCommittedPublication(context.Context, CommittedDurablePublication) error
+}
+
 type ActivityIntentWriter interface {
 	WriteActivityIntents(ctx context.Context, intents []ActivityIntent) error
 }

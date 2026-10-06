@@ -187,7 +187,7 @@ func (eb *EventBus) DispatchFanOutPublications(ctx context.Context, group runtim
 		if err := committed.ValidateCommittedDurablePublication(); err != nil {
 			return err
 		}
-		operation, found, takeErr := eb.takeFanOutOutboxOperation(committed)
+		operation, found, takeErr := eb.takeCommittedOutboxOperation(committed)
 		if takeErr != nil {
 			return takeErr
 		}
@@ -251,7 +251,7 @@ func (eb *EventBus) retireFanOutOutboxOperations(values []runtimeengine.Committe
 	}
 }
 
-func (eb *EventBus) takeFanOutOutboxOperation(committed CommittedEnginePublication) (pendingOutboxOperation, bool, error) {
+func (eb *EventBus) takeCommittedOutboxOperation(committed CommittedEnginePublication) (pendingOutboxOperation, bool, error) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 	id := committed.CommittedDurablePublicationEventID()
@@ -261,7 +261,7 @@ func (eb *EventBus) takeFanOutOutboxOperation(committed CommittedEnginePublicati
 	}
 	operation := operations[0]
 	if operation.finalizationErr != nil {
-		return pendingOutboxOperation{}, false, fmt.Errorf("fan-out publication %s has incomplete prerequisites: %w", id, operation.finalizationErr)
+		return pendingOutboxOperation{}, false, fmt.Errorf("committed publication %s has incomplete prerequisites: %w", id, operation.finalizationErr)
 	}
 	actual, actualErr := events.IntegrityProjection(operation.intent.Event)
 	want, wantErr := events.IntegrityProjection(committed.plan.intent.Event)
@@ -272,7 +272,7 @@ func (eb *EventBus) takeFanOutOutboxOperation(committed CommittedEnginePublicati
 		!reflect.DeepEqual(actual, want) ||
 		!reflect.DeepEqual(operation.intent.Context, committed.plan.intent.Context) ||
 		operation.outcome != committed.committed.AppendOutcome {
-		return pendingOutboxOperation{}, false, errors.New("fan-out pending operation differs from exact committed publication")
+		return pendingOutboxOperation{}, false, errors.New("pending operation differs from exact committed publication")
 	}
 	if len(operations) == 1 {
 		delete(eb.pendingOutboxByID, id)

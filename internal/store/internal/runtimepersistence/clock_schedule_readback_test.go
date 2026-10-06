@@ -45,7 +45,7 @@ func TestClockScheduleRunReadbackOnBothStores(t *testing.T) {
 					RoutingSource: source, ExecutionMode: executionmode.Live, Due: genericschedule.EveryDue(time.Minute)}
 				activations = append(activations, admitGenericScheduleFixture(t, ctx, store, command))
 			}
-			admitGenericScheduleFixture(t, ctx, store, testAgentGenericScheduleCommand(t, runID, "agent", "agent/instance", uuid.NewString(), "poll", genericschedule.DelayDue(time.Hour)))
+			agent := admitGenericScheduleFixture(t, ctx, store, testAgentGenericScheduleCommand(t, runID, "agent", "agent/instance", uuid.NewString(), "poll", genericschedule.DelayDue(time.Hour)))
 			for repeatedRead := 0; repeatedRead < 2; repeatedRead++ {
 				clocks, err = reader.LoadRunClockSchedules(ctx, runID)
 				if err != nil || len(clocks) != 3 {
@@ -83,7 +83,40 @@ func TestClockScheduleRunReadbackOnBothStores(t *testing.T) {
 			if !found || runTimers.Totals().ActiveCount != 3 || !runTimers.Summary(timers.ObservedAt).BlocksCompletion() {
 				t.Fatalf("clock readback disagrees with canonical retention owner: %#v", timers)
 			}
+			cancelGenericScheduleFixture(t, ctx, store, agent, "agent_removed", time.Now().UTC())
+			requireClockTimerRetention(t, ctx, store, runID, 2)
+			transitionClockLifetimeForTest(t, ctx, store, runID, time.Now().UTC(), false)
+			requireClockTimerRetention(t, ctx, store, runID, 0)
+			clocks, err = reader.LoadRunClockSchedules(ctx, runID)
+			if err != nil || clocks[0].Status != genericschedule.StatusParked || clocks[0].RetainsRun || clocks[2].Status != genericschedule.StatusParked || clocks[2].RetainsRun {
+				t.Fatalf("parked clocks retained the run or cancelled another family: clocks=%+v err=%v", clocks, err)
+			}
+			transitionClockLifetimeForTest(t, ctx, store, runID, time.Now().UTC(), true)
+			requireClockTimerRetention(t, ctx, store, runID, 2)
+			cancelGenericScheduleFixture(t, ctx, store, activations[0], "root_clock_removed", time.Now().UTC())
+			requireClockTimerRetention(t, ctx, store, runID, 1)
+			cancelGenericScheduleFixture(t, ctx, store, activations[2], "last_clock_removed", time.Now().UTC())
+			requireClockTimerRetention(t, ctx, store, runID, 0)
+			if count, err := CountInstanceClockActivationsForTest(ctx, store); err != nil || count != 3 {
+				t.Fatalf("terminal clock evidence was erased/rearmed: count=%d err=%v", count, err)
+			}
 		})
+	}
+}
+
+func requireClockTimerRetention(t *testing.T, ctx context.Context, selected selectedScheduleStore, runID string, active int) {
+	t.Helper()
+	scope, err := timerobligation.Run(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := selected.(timerobligation.Reader).ReadTimerObligations(ctx, scope, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, found := snapshot.Run(runID)
+	if !found || run.Totals().ActiveCount != active || run.Summary(snapshot.ObservedAt).BlocksCompletion() != (active > 0) {
+		t.Fatalf("canonical timer retention: active=%d snapshot=%+v", active, snapshot)
 	}
 }
 
