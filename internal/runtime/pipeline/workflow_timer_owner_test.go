@@ -191,9 +191,13 @@ func TestWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRestartOnBo
 				bundle := &runtimecontracts.WorkflowContractBundle{
 					Events: map[string]runtimecontracts.EventCatalogEntry{"timer.a": {}, "timer.b": {}},
 					Semantics: runtimecontracts.WorkflowSemanticView{
-						Name: "workflow-timer-sibling-identity", Version: "1.0.0", InitialStage: "waiting",
-						FlowInitial: map[string]string{"a": "waiting", "b": "waiting"},
-						Timers:      timers,
+						Name: "workflow-timer-sibling-identity", Version: "1.0.0",
+						StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+							".": runtimecontracts.BuildWorkflowStageTopology(".", "waiting", []string{"waiting"}, nil, nil, nil, nil),
+							"a": runtimecontracts.BuildWorkflowStageTopology("a", "waiting", []string{"waiting"}, nil, nil, nil, nil),
+							"b": runtimecontracts.BuildWorkflowStageTopology("b", "waiting", []string{"waiting"}, nil, nil, nil, nil),
+						},
+						Timers: timers,
 					},
 				}
 				source := semanticview.Wrap(bundle)

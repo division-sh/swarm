@@ -48,7 +48,7 @@ func TestCompiledTransitionSourceAuthoredExactRelation(t *testing.T) {
 							if stage.Initial {
 								initial = stage.ID
 							}
-							if stage.Terminal {
+							if stage.Final {
 								terminal = append(terminal, stage.ID)
 							}
 						}
@@ -136,11 +136,11 @@ func TestCompiledTransitionSourceAuthoredExactRelation(t *testing.T) {
 func authoredTransitionStages(family string) []authoringview.StageGraphNodeView {
 	switch family {
 	case "ordinary":
-		return []authoringview.StageGraphNodeView{{ID: "ready", Initial: true}, {ID: "working"}, {ID: "awaiting"}, {ID: "done", Terminal: true}}
+		return []authoringview.StageGraphNodeView{{ID: "ready", Initial: true}, {ID: "working"}, {ID: "awaiting"}, {ID: "done", Final: true}}
 	case "loop":
-		return []authoringview.StageGraphNodeView{{ID: "waiting", Initial: true}, {ID: "drafting"}, {ID: "review"}, {ID: "done", Terminal: true}, {ID: "escaped", Terminal: true}}
+		return []authoringview.StageGraphNodeView{{ID: "waiting", Initial: true}, {ID: "drafting"}, {ID: "review"}, {ID: "done", Final: true}, {ID: "escaped", Final: true}}
 	case "gate":
-		return []authoringview.StageGraphNodeView{{ID: "ready", Initial: true}, {ID: "waiting"}, {ID: "done", Terminal: true}}
+		return []authoringview.StageGraphNodeView{{ID: "ready", Initial: true}, {ID: "waiting"}, {ID: "done", Final: true}}
 	default:
 		panic("unknown relation fixture " + family)
 	}

@@ -167,8 +167,9 @@ func TestCompiledTransitionRootGateUsesScopedStageMetadata(t *testing.T) {
 		gate := &bundle.Semantics.Gates[0]
 		// A sibling may terminate at the root's live gate stage and declare other stages.
 		bundle.Semantics.Stages = append(bundle.Semantics.Stages, runtimecontracts.WorkflowStageContract{ID: "child_only", Phase: "child"})
-		bundle.Semantics.FlowStates["child"] = []string{gate.Stage, "child_only"}
-		bundle.Semantics.FlowTerminal["child"] = []string{gate.Stage}
+		bundle.FlowSchemas["child"] = runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{
+			Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: gate.Stage, Final: true}, {ID: "child_only"}},
+		}}
 		if foreignSource {
 			gate.Stage = "child_only"
 		}
