@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -227,7 +228,7 @@ func TestCanceledOriginWaitsForEveryCapturedProviderTailBothStores(t *testing.T)
 				t.Fatalf("tail %d recovery admitted an incomplete physical set: count=%d err=%v", index, len(pending), err)
 			}
 		}
-		settleRecoveredCanceledTurnForTest(t, fixture, first.Attempt())
+		settleRecoveredCanceledTurnForTest(t, fixture, second.Attempt(), clock)
 	})
 }
 
@@ -259,7 +260,7 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 				}
 				requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
-				settleRecoveredCanceledTurnForTest(t, fixture, handle.Attempt())
+				settleRecoveredCanceledTurnForTest(t, fixture, handle.Attempt(), clock)
 				if kind == "delivery" {
 					snapshot, err := fixture.store.(deliverylifecycle.Store).Snapshot(ctx, fixture.origin.DeliveryID())
 					if err != nil || snapshot.Status != deliverylifecycle.StatusCanceled {
@@ -281,7 +282,7 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 	}
 }
 
-func settleRecoveredCanceledTurnForTest(t *testing.T, fixture completionSettlementFixture, original runtimeeffects.Attempt) {
+func settleRecoveredCanceledTurnForTest(t *testing.T, fixture completionSettlementFixture, original runtimeeffects.Attempt, clock runtimeeffects.LogicalTurnClock) {
 	t.Helper()
 	// No previous runtime/controller/handle is carried into this recovery read.
 	ctx := testAuthorActivityContext()
@@ -292,7 +293,9 @@ func settleRecoveredCanceledTurnForTest(t *testing.T, fixture completionSettleme
 		t.Fatalf("recover exact canceled origin: count=%d err=%v", len(turns), err)
 	}
 	turn := turns[0]
-	if turn.Attempt.AttemptID != original.AttemptID || turn.Clock.FirstAttempt != original.AttemptID ||
+	if turn.Clock == nil || turn.Attempt.AttemptID != original.AttemptID || turn.Clock.FirstAttempt != clock.FirstAttempt ||
+		!turn.Clock.LaunchedAt.Equal(clock.LaunchedAt) || !turn.Clock.DeadlineAt.Equal(clock.DeadlineAt) ||
+		turn.Clock.TimeoutEvent != clock.TimeoutEvent || !reflect.DeepEqual(turn.Clock.Timeout, clock.Timeout) ||
 		!turn.Attempt.Origin.Same(original.Origin) || turn.Attempt.Authority.Normal != original.Authority.Normal ||
 		turn.Cancellation.ValidateIntent() != nil || turn.Cancellation.OriginSettled {
 		t.Fatalf("recovery substituted original execution evidence: %+v", turn)
@@ -398,7 +401,7 @@ func TestCompletionReportsCanceledOriginWithoutDroppingAcceptedResponseBothStore
 			t.Fatalf("logical owner missed committed cancellation: %+v err=%v", turn, err)
 		}
 		requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)
-		settleRecoveredCanceledTurnForTest(t, fixture, handle.Attempt())
+		settleRecoveredCanceledTurnForTest(t, fixture, handle.Attempt(), clock)
 		requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)
 	})
 }
