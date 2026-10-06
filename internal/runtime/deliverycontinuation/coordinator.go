@@ -276,18 +276,29 @@ func (c *Coordinator) Synchronize(ctx context.Context) error {
 	}
 }
 
-func (c *Coordinator) Retire(ctx context.Context) error {
+// BeginRetirement closes admission and cancels dispatch without joining. A
+// dependency owner can withdraw authority under its lock, then join outside it.
+func (c *Coordinator) BeginRetirement() {
 	if c == nil {
-		return nil
+		return
 	}
 	c.mu.Lock()
 	c.retired = true
 	cancel := c.cancel
-	started := c.started
 	c.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (c *Coordinator) Retire(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	c.BeginRetirement()
+	c.mu.Lock()
+	started := c.started
+	c.mu.Unlock()
 	if !started {
 		return nil
 	}
