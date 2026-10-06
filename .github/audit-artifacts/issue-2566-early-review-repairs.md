@@ -1,0 +1,74 @@
+# #2566 Early Review Repairs
+
+Supersedes the incomplete consumer/proof inventory at review pin
+`8781de3d251227f4b3db233a8c37802f61c98b67`. Binding Gate D6019841561 and
+review6024587950 remain unchanged. This is checkpoint evidence, not the final
+Post-Implementation Proof Audit, a core qualification receipt, or merge readiness.
+
+## Owners And Cut
+
+- `pinrouting.AdmitDeploymentFeedDeclaration` now returns the existing typed
+  `SourceEvent` after exact importable-declaration/output-pin admission. API
+  import and pin admission passes those facts to `runstart.ValidateFinite`;
+  `CompiledConnectGraph.MatchingSourceEvent` selects the exact receivers.
+  Producer publication does not construct the producer. Receiver closure still
+  uses the same eager keyless selector as manager construction. Both atomic
+  creation callers were changed; classifier and bus consumers were adapted to
+  the same return contract, not a second reader or compatibility overload.
+- The compiled stage-topology owner excludes final explicit sources and retains
+  their named errors for `state_machine_coherence`. It covers loop operations,
+  escape, and arrival-join completion/deadline overrides. Removing an executable
+  edge cannot silently make the authored declaration valid. No new runtime
+  refusal owner or accepted-work disposition was introduced.
+- Permanent goldens cover all 553 independently reviewed positive source sites,
+  not only 204 disk schemas. Go literal selectors come from the immutable
+  pre-rewrite source, and expected entry/order/finals from the reviewed ledger.
+  Tests admit the actual current literals. Actual generator outputs, the two
+  moved gate/join families, retained logical reconstruction, selected-store
+  reload, and selected-fork source loading have distinct proof rows.
+- The reported compile consumers now use `Final`. Complexity repair factors
+  preparation/file application and accepted timer retention without changing
+  the grammar, accepted cancellation policy, or numeric ceilings.
+
+## Manifestation Proofs
+
+| Manifestation | Exact proof / currently achieved receipt |
+| --- | --- |
+| Independently selected nested feed bypasses root-only closure | `TestReviewer2566NestedFeedReceiverMustEnterFiniteClosure`; race/count-three pass |
+| Feed-only and event+data imports/pins, multiple selected feeds, no-final worker, refusal leaves all 13 durable tables unchanged | `TestReviewer2566FeedOnlyRejectsNestedServiceBothStores`; both stores, race/count-three pass; includes event-only unselected-service and receipt replay preservation |
+| Exact selected output versus unrelated output; keyed service producer is not constructed; recursive keyless receiver children | `TestFiniteStartSelectedFeedsUseExactRoutesAndRecursiveConstructors`; race/count-three pass |
+| Final loop source passes verifier but runtime refuses | `TestReviewer2566LoopStartFromFinalIsRejectedBeforeRuntime`; race/count-three pass |
+| Loop start/admit/repeat/close/escape and join completion/deadline source restrictions | `TestFinalStageExplicitLoopAndJoinSourcesCannotWidenEligibility`; final/non-final controls and exact carrier admission, race/count-three pass |
+| Missing non-disk permanent entry oracles | `TestRewrite2566EntryGoldenMatchesTypedCorpus`, `TestRewrite2566EntryGoldenInventoryCoversEveryReviewedSite`; 553 independently reviewed selectors, including catalog fixture/spec embeddings |
+| Generated versus lexer-only evidence | `TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens`, `TestWorkflowEntryGoldensProtectMovedGateAndJoinGeneratedSources`; actual generated/loaded output, race/count-three pass |
+| Sorted, still-reachable source silently selects another entry | `TestRewrite2566EntryGoldenRejectsSortedDumpWithoutStranding`; retained hostile control |
+| Retained source order/finals lost on new store reader or selected fork load | `TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores`; independent accepted SQLite pool/PostgreSQL facade and actual selected-fork source loader, both stores race/count-three pass |
+| Materialized selected fork source changes its stage catalog | `assertRetainedStageCatalogsForFork` in `stageForkContentionFixtureAt`; `TestSelectedBranchPointActivationAtomicityBothStores`, event/deployment-revision and running/cancelled cases, both stores race/count-three pass |
+| Two test interfaces fail to compile | Exact managed `core-structural-owner-guards` unit: all four packages pass |
+| Rewrite/runtime complexity introduces hotspots | Independent base/head measurement at `4c53d2712`: cognitive >=30 561/561, >=50 192/192; cyclomatic >=30 261/261, >=50 58/58; unchanged maxima/policy |
+
+Whole-corpus replay remains 417 exact files / 553 decisions / byte-idempotent.
+This one-time evidence does not substitute for the permanent semantic oracles.
+Census and generated OpenRPC checks pass without raised ceilings.
+
+## Failed Receipts And Qualification Boundary
+
+The combined selected-store race/count-three command hit its 300-second aggregate
+limit in the pre-existing contention matrix. It also exposed a test setup error:
+a freshly rebuilt store facade had not passed canonical schema acceptance. The
+fixture now uses existing canonical bootstrap owners; independent accepted
+reload/source tests and branch-point materialization pass separately. The isolated
+SQLite activation-first commit contention control passes without a timeout change.
+The full combined contention command is not reported green or waived. Its complete
+qualification remains due under the reviewer-bound tier.
+
+All prior failed logs are retained in `test-results/agent-d-2566-cheap/`; none is
+treated as a passing receipt. Server2 remains user-controlled. Core, lifecycle and
+named supplements, hosted full, ten-family completion, and composed A/E supported
+proof remain outstanding. No CI/PR was opened for these local repairs.
+
+Existing watchlist mappings remain
+`canonical_authored_grammar_effective_semantics_ownership` and
+`workflow_stage_lifecycle_identity_carriage`; reviewer-d already refined their
+selected-feed, explicit-source and non-disk-oracle manifestations. No new issue,
+compatibility, migration, alternate router or semantic owner is introduced.
