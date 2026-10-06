@@ -10,7 +10,36 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/lib/pq"
 )
+
+// Only native settlement owners may mint this evidence, after explicit
+// pre-COMMIT rollback and clean connection/session disposition.
+type rolledBackSerializationConflict struct{ cause error }
+
+func (e *rolledBackSerializationConflict) Error() string { return e.cause.Error() }
+func (e *rolledBackSerializationConflict) Unwrap() error { return e.cause }
+
+// IsRolledBackSerializationConflict accepts only sealed native evidence, not a
+// SQLSTATE found somewhere in an error tree or a join with independent failure.
+func IsRolledBackSerializationConflict(err error) bool {
+	_, ok := err.(*rolledBackSerializationConflict)
+	return ok
+}
+
+func exactSerializationConflict(err error) bool {
+	for err != nil {
+		if pgErr, ok := err.(*pq.Error); ok {
+			return pgErr.Code == "40001"
+		}
+		wrapped, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		err = wrapped.Unwrap()
+	}
+	return false
+}
 
 func (b *Backend) RunTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) (err error) {
 	_, err = b.RunTransactionOutcome(ctx, operation)
@@ -72,15 +101,18 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	}
 	poolWait := time.Since(poolStarted)
 	discard := false
+	serializationConflict := false
 	var tx *sql.Tx
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
 	defer func() {
 		cleanupStarted := time.Now()
 		var cleanupErr error
+		rolledBack := false
 		if tx != nil {
 			probe.RollbackAttempted()
 			rollbackErr := tx.Rollback()
+			rolledBack = rollbackErr == nil
 			if rollbackErr != nil {
 				discard = true
 				if rollbackErr != sql.ErrTxDone {
@@ -103,6 +135,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		if cleanupErr != nil {
 			slog.Error("postgres transaction cleanup failed", "error", cleanupErr)
 			err = errors.Join(err, cleanupErr)
+		}
+		if serializationConflict && rolledBack && cleanupErr == nil && ctx.Err() == nil {
+			err = &rolledBackSerializationConflict{cause: err}
 		}
 		probe.RecordCleanup(time.Since(cleanupStarted))
 	}()
@@ -133,6 +168,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		if callerErr := ctx.Err(); callerErr != nil {
 			return false, errors.Join(callerErr, operationErr)
 		}
+		serializationConflict = drain && (opts == nil || !opts.ReadOnly) && exactSerializationConflict(operationErr)
 		return false, operationErr
 	}
 	if err := ctx.Err(); err != nil {
