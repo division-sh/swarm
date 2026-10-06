@@ -30484,6 +30484,26 @@
       }
     },
     {
+      "path": "platform.platform_tables.destructive_reset_cleanup_policy.classifications.delete_by_run_id[28]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.destructive_reset_cleanup_policy.classifications.delete_by_run_id[29]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "platform.platform_tables.destructive_reset_cleanup_policy.classifications.delete_by_run_id[2]",
       "provenance": {
         "origin": "authored",
@@ -31185,6 +31205,16 @@
     },
     {
       "path": "platform.platform_tables.destructive_reset_cleanup_policy.classifications.preserve[47]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.destructive_reset_cleanup_policy.classifications.preserve[48]",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
@@ -36164,6 +36194,36 @@
       }
     },
     {
+      "path": "platform.platform_tables.tables.runtime_agent_turn_lifetimes",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.runtime_agent_turn_lifetimes.ddl",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.runtime_agent_turn_lifetimes.description",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "platform.platform_tables.tables.runtime_effect_budget_reservations",
       "provenance": {
         "origin": "authored",
@@ -36734,6 +36794,36 @@
       }
     },
     {
+      "path": "platform.platform_tables.tables.workflow_handler_stage_receipts",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.workflow_handler_stage_receipts.ddl",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.workflow_handler_stage_receipts.description",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "platform.platform_tables.tables.workflow_instance_initial_materializations",
       "provenance": {
         "origin": "authored",
@@ -36755,6 +36845,36 @@
     },
     {
       "path": "platform.platform_tables.tables.workflow_instance_initial_materializations.description",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.workflow_publication_stage_receipts",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.workflow_publication_stage_receipts.ddl",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.tables.workflow_publication_stage_receipts.description",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",

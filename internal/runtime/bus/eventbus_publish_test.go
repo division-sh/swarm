@@ -1167,7 +1167,7 @@ func (s *descriptorAwareEventStore) CommitPublication(_ context.Context, command
 			s.deliveries = append(s.deliveries, route.Recipient.LocalID())
 		}
 	}
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+	return (runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}).WithCommitAcknowledgment(), nil
 }
 
 func (s *descriptorAwareEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -1197,7 +1197,7 @@ func (s *routeSetEventStore) CommitPublication(_ context.Context, command runtim
 		s.routes = map[string][]events.DeliveryRoute{}
 	}
 	s.routes[command.Commit.Event.ID()] = events.NormalizeDeliveryRoutes(command.Commit.DeliveryRoutes)
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+	return (runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}).WithCommitAcknowledgment(), nil
 }
 
 func (s *routeSetEventStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
@@ -1210,7 +1210,7 @@ func (s *replayCapableAtomicStoreMissingScope) CommitPublication(_ context.Conte
 	if command.Commit.ReplayScope != "" {
 		return runtimebus.CommittedPublication{}, runtimepipelineobligation.ErrMissingScope
 	}
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+	return (runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}).WithCommitAcknowledgment(), nil
 }
 
 func (s *replayCapableAtomicStoreMissingScope) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

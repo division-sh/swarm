@@ -224,7 +224,7 @@ func (s *recordingEventStore) CommitPublication(_ context.Context, command runti
 	s.mu.Lock()
 	s.events = append(s.events, command.Commit.Event.Event())
 	s.mu.Unlock()
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+	return (runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}).WithCommitAcknowledgment(), nil
 }
 
 func (*recordingEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -317,8 +317,11 @@ func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Contex
 		return runtimebus.CommittedPublication{}, err
 	}
 	outcome, err := s.beginPreparedPublish(ctx, command.Commit.Event)
-	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
+	if err != nil {
 		return runtimebus.CommittedPublication{AppendOutcome: outcome}, err
+	}
+	if outcome == runtimebus.EventAppendExactDuplicate {
+		return (runtimebus.CommittedPublication{AppendOutcome: outcome}).WithCommitAcknowledgment(), nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -355,7 +358,7 @@ func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Contex
 	if len(s.active) > 0 {
 		s.active = s.active[:len(s.active)-1]
 	}
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+	return (runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}).WithCommitAcknowledgment(), nil
 }
 
 func commitEnginePublicationsForTest(
