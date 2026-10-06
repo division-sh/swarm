@@ -45,9 +45,7 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 		return fmt.Errorf("only the mandatory soak or exact served reporter may set a timeout; only the soak may filter a backend")
 	}
 	if skip != "" && (skip != SoakRun || len(packages) != 1 || packages[0] != SoakPackage) {
-		if skip != ServedPreservationRun || len(packages) != 1 || packages[0] != ServedReporterPackage || count != "count-1" || budget != "full" {
-			return fmt.Errorf("only the exact separately executed soak or served preservation root may be excluded")
-		}
+		return fmt.Errorf("only the exact separately executed soak may be excluded")
 	}
 	return nil
 }
