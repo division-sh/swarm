@@ -3,7 +3,6 @@ package serveapp
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Reconstructed equivalent H1, NOT the unchanged/unavailable original archive.
@@ -194,9 +194,9 @@ func issue2564H1WriteCorpus(t *testing.T, files map[string]string) string {
 	return root
 }
 
-func issue2564H1StartServed(t *testing.T, backend, root string, provider *issue2564H1Provider) servedControlProofRuntime {
+func issue2564H1StartServed(t *testing.T, backend, root string, provider *issue2564H1Provider) issue2564ServedFixture {
 	t.Helper()
-	opts, start := lifecycleRestartHarness(t, backend, root)
+	opts, start := issue2564ServeHarness(t, backend, root, false)
 	server := httptest.NewServer(provider)
 	t.Cleanup(server.Close)
 	setDoctorProviderSecret(t, "OPENAI_COMPATIBLE_API_KEY", "issue2564-h1-proof-key")
@@ -438,14 +438,15 @@ func issue2564H1Publish(t *testing.T, ctx context.Context, endpoint string, para
 	return result
 }
 
-func issue2564H1WaitQuiescence(t *testing.T, ctx context.Context, rt servedControlProofRuntime, run string, provider *issue2564H1Provider) {
+func issue2564H1WaitQuiescence(t *testing.T, ctx context.Context, rt issue2564ServedFixture, run string, provider *issue2564H1Provider) {
 	t.Helper()
 	stable, nextLog := 0, time.Now()
 	for {
-		var active int
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress')`, run).Scan(&active); err != nil {
+		summary, err := rt.selected.SummarizeRun(ctx, run)
+		if err != nil {
 			t.Fatalf("H1 durable delivery progress: %v", err)
 		}
+		active := summary.Pending + summary.InProgress
 		if active == 0 {
 			stable++
 			if stable == 4 {
@@ -472,7 +473,7 @@ func issue2564H1WaitQuiescence(t *testing.T, ctx context.Context, rt servedContr
 	}
 }
 
-func issue2564H1PublishBumps(t *testing.T, ctx context.Context, rt servedControlProofRuntime, runID, sourceEvent string) {
+func issue2564H1PublishBumps(t *testing.T, ctx context.Context, rt issue2564ServedFixture, runID, sourceEvent string) {
 	t.Helper()
 	var workers sync.WaitGroup
 	start := make(chan struct{})
@@ -508,51 +509,58 @@ func issue2564H1PublishBumps(t *testing.T, ctx context.Context, rt servedControl
 	}
 }
 
-func issue2564H1Count(t *testing.T, db *sql.DB, query, runID string) int {
-	t.Helper()
-	var n int
-	if err := db.QueryRow(query, runID).Scan(&n); err != nil {
-		t.Fatalf("H1 count: %v query=%s", err, query)
-	}
-	return n
-}
-
-func issue2564H1AssertStore(t *testing.T, rt servedControlProofRuntime, runID, mode string, acks map[string]issue2564H1Ack) {
+func issue2564H1AssertStore(t *testing.T, rt issue2564ServedFixture, runID, mode string, acks map[string]issue2564H1Ack) {
 	t.Helper()
 	issue2564H1LogFailureWitnesses(t, rt, runID, acks)
 	issue2564H1AssertSameEntityOverlap(t, rt, runID, mode)
-	for query, want := range map[string]int{
-		`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='.' AND entity_type IS NULL`:                                                                                                                                             1,
-		`SELECT COUNT(*) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.entity_id=f.entity_id WHERE f.run_id=$1 AND f.flow_template='.'`:                                                                                          0,
-		`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='hub' AND mode='template' AND current_state='active' AND status='active'`:                                                                                                6,
-		`SELECT COUNT(*) FROM (SELECT DISTINCT agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance FROM agent_turns WHERE run_id=$1 AND execution_mode='live' AND parse_ok=TRUE) identities`: 12,
-		`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND execution_mode='live' AND parse_ok=TRUE`:                                                                                                                                                  96,
-		`SELECT COUNT(DISTINCT session_id) FROM agent_turns WHERE run_id=$1 AND execution_mode='live' AND parse_ok=TRUE`:                                                                                                                                12,
-		`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND (execution_mode<>'live' OR parse_ok=FALSE OR retry_count<>0 OR failure IS NOT NULL)`:                                                                                                      0,
-		`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='hub.bump'`:                                                                                                                                                                         600,
-		`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND d.subscriber_type='node' AND e.event_name='hub.bump' AND d.status='delivered'`:                                                            600,
-		`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND status='delivered'`:                                                                                                                                      12,
-		`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status<>'delivered'`:                                                                                                                                                                 0,
-		`SELECT COALESCE(SUM(retry_count),0) FROM event_deliveries WHERE run_id=$1`:                                                                                                                                                                     0,
-		`SELECT COUNT(*) FROM dead_letters l JOIN events e ON e.event_id=l.original_event_id WHERE e.run_id=$1`:                                                                                                                                         0,
-		`SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND (a.claim_version<>1 OR a.closure_kind<>'settled' OR a.outcome<>'delivered')`:                                       0,
+	flows, err := storetest.ObserveH1FlowAccounting(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turns, err := storetest.ObserveH1TurnAccounting(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := storetest.ObserveH1BumpAccounting(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveries, err := storetest.ObserveH1DeliveryAccounting(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range []struct {
+		name      string
+		got, want int
+	}{
+		{"fieldless root", flows.FieldlessRoots, 1},
+		{"root entities", flows.RootEntities, 0},
+		{"active template hubs", flows.ActiveHubs, 6},
+		{"live parsed identities", turns.Identities, 12},
+		{"live parsed turns", turns.Turns, 96},
+		{"live parsed sessions", turns.Sessions, 12},
+		{"failed/retried/non-live turns", turns.Failed, 0},
+		{"bump events", events.Bumps, 600},
+		{"delivered node bumps", deliveries.DeliveredBumps, 600},
+		{"delivered agents", deliveries.DeliveredAgents, 12},
+		{"undelivered", deliveries.Undelivered, 0},
+		{"delivery retries", deliveries.Retries, 0},
+		{"dead letters", deliveries.DeadLetters, 0},
+		{"unsettled/reclaimed/non-delivered attempts", deliveries.BadAttempts, 0},
 	} {
-		if got := issue2564H1Count(t, rt.DB, query, runID); got != want {
-			t.Errorf("H1 store accounting=%d want=%d query=%s", got, want, query)
+		if fact.got != fact.want {
+			t.Errorf("H1 store accounting=%d want=%d fact=%s", fact.got, fact.want, fact.name)
 		}
 	}
-	rows, err := rt.DB.Query(`SELECT f.entity_id,f.revision,CAST(e.fields AS TEXT) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.entity_id=f.entity_id WHERE f.run_id=$1 AND f.flow_template='hub'`, runID)
+	h1HubFields, err := storetest.ObserveH1HubFields(context.Background(), rt.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	counts, lost := 0, 0
 	losses := []string{}
-	for rows.Next() {
-		var entity, raw string
-		var revision int
-		if err := rows.Scan(&entity, &revision, &raw); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range h1HubFields {
+		entity, raw := row.Entity, row.Fields
+		revision := row.Revision
 		var fields map[string]any
 		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 			t.Fatal(err)
@@ -573,10 +581,6 @@ func issue2564H1AssertStore(t *testing.T, rt servedControlProofRuntime, runID, m
 			}
 		}
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
 	t.Logf("H1_FIELD_RECEIPT acknowledgments=%d lost=%d count=%d planned_bumps=600", len(acks), lost, counts)
 	if lost != 0 {
 		t.Errorf("lost/reverted H1 acknowledged scalars=%d: %s", lost, strings.Join(losses, "; "))
@@ -585,17 +589,14 @@ func issue2564H1AssertStore(t *testing.T, rt servedControlProofRuntime, runID, m
 		t.Errorf("H1 total count=%d, want exact600", counts)
 	}
 	issue2564H1AssertBumpHistory(t, rt, runID)
-	rows, err = rt.DB.Query(`SELECT m.entity_id,m.path,m.writer_type,m.writer_id,m.handler_step,CAST(m.old_value AS TEXT),CAST(m.new_value AS TEXT),e.event_name,COALESCE(a.agent_name_owner,'') FROM entity_mutations m JOIN events e ON e.event_id=m.caused_by_event LEFT JOIN agents a ON a.run_id=m.run_id AND a.agent_id=m.writer_id AND a.entity_id=m.entity_id AND a.flow_scope_key='hub' AND a.agent_name_source='declared' AND a.agent_route_presence='present' AND a.lifecycle_bundle_hash=$2 WHERE m.run_id=$1 AND m.domain='authored_field' AND (m.path LIKE 'a%' OR m.path LIKE 'b%')`, runID, rt.BundleHash)
+	h1AttributedMutations, err := storetest.ObserveH1AttributedMutations(context.Background(), rt.selected, runID, rt.BundleHash)
 	if err != nil {
 		t.Fatal(err)
 	}
 	mutations, writers := map[string]bool{}, map[string]int{}
 	initials := map[string]bool{}
-	for rows.Next() {
-		var entity, field, kind, writer, step, before, after, event, owner string
-		if err := rows.Scan(&entity, &field, &kind, &writer, &step, &before, &after, &event, &owner); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range h1AttributedMutations {
+		entity, field, kind, writer, step, before, after, event, owner := row.Entity, row.Field, row.Kind, row.Writer, row.Step, row.Before, row.After, row.Event, row.Owner
 		key := entity + "/" + field
 		var old, value any
 		if err := json.Unmarshal([]byte(before), &old); err != nil {
@@ -617,10 +618,6 @@ func issue2564H1AssertStore(t *testing.T, rt servedControlProofRuntime, runID, m
 		mutations[key] = true
 		writers[entity+"/"+writer]++
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
 	if len(mutations) != 720 || len(writers) != 12 {
 		t.Fatalf("H1 exact agent mutation corpus=%d writers=%v", len(mutations), writers)
 	}
@@ -630,36 +627,26 @@ func issue2564H1AssertStore(t *testing.T, rt servedControlProofRuntime, runID, m
 		}
 	}
 	// Keep the run-wide control too; the same-entity witness is checked above.
-	var overlap int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations m JOIN events e ON e.event_id=m.caused_by_event WHERE m.run_id=$1 AND m.path='count' AND e.event_name='hub.bump' AND m.created_at>=(SELECT MIN(created_at) FROM entity_mutations WHERE run_id=$1 AND writer_type='agent') AND m.created_at<=(SELECT MAX(created_at) FROM entity_mutations WHERE run_id=$1 AND writer_type='agent')`, runID).Scan(&overlap); err != nil {
+	overlapEvidence, err := storetest.ObserveH1RunOverlap(context.Background(), rt.selected, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	overlap := overlapEvidence.Bumps
 	if mode == "overlap" && overlap == 0 || mode == "no_overlap" && overlap != 0 {
 		t.Fatalf("H1 actual committed overlap=%d mode=%s", overlap, mode)
 	}
 	t.Logf("H1 run-wide mutation-time overlap bumps=%d; constructor initial receipts=%d; per-agent mutation counts=%v", overlap, len(initials), writers)
 }
 
-func issue2564H1AssertSameEntityOverlap(t *testing.T, rt servedControlProofRuntime, runID, mode string) {
+func issue2564H1AssertSameEntityOverlap(t *testing.T, rt issue2564ServedFixture, runID, mode string) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT f.entity_id,f.instance_path,CAST(s.fields AS TEXT),
-		(SELECT COUNT(*) FROM entity_mutations m JOIN events e ON e.event_id=m.caused_by_event
-		 WHERE m.run_id=f.run_id AND m.entity_id=f.entity_id AND m.domain='authored_field' AND m.path='count' AND e.event_name='hub.bump'
-		 AND m.created_at>=(SELECT MIN(a.created_at) FROM entity_mutations a WHERE a.run_id=f.run_id AND a.entity_id=f.entity_id AND a.domain='authored_field' AND a.writer_type='agent')
-		 AND m.created_at<=(SELECT MAX(a.created_at) FROM entity_mutations a WHERE a.run_id=f.run_id AND a.entity_id=f.entity_id AND a.domain='authored_field' AND a.writer_type='agent'))
-		FROM flow_instances f JOIN entity_state s ON s.run_id=f.run_id AND s.entity_id=f.entity_id
-		WHERE f.run_id=$1 AND f.flow_template='hub' ORDER BY f.instance_path`, runID)
+	h1SameEntityOverlap, err := storetest.ObserveH1SameEntityOverlap(context.Background(), rt.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	hubs, overlappingHubs, bumps := 0, 0, 0
-	for rows.Next() {
-		var entity, route, raw string
-		var count int
-		if err := rows.Scan(&entity, &route, &raw, &count); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range h1SameEntityOverlap {
+		entity, route, raw, count := row.Entity, row.Route, row.Fields, row.Count
 		var fields map[string]any
 		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 			t.Fatal(err)
@@ -670,9 +657,6 @@ func issue2564H1AssertSameEntityOverlap(t *testing.T, rt servedControlProofRunti
 			overlappingHubs++
 		}
 		t.Logf("H1_SAME_ENTITY_OVERLAP hub=%v entity=%s route=%s count_mutations_between_agent_times=%d", fields["hub_id"], entity, route, count)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	t.Logf("H1_SAME_ENTITY_OVERLAP_TOTAL mode=%s hubs=%d overlapping_hubs=%d count_mutations=%d", mode, hubs, overlappingHubs, bumps)
 	if hubs != issue2564H1Hubs || mode == "overlap" && overlappingHubs == 0 || mode == "no_overlap" && overlappingHubs != 0 {
@@ -686,25 +670,17 @@ type issue2564H1MutationEvidence struct {
 
 // Read all failure witnesses before any fatal acceptance assertion can hide a
 // baseline agent acknowledgment followed by its real platform overwrite.
-func issue2564H1LogFailureWitnesses(t *testing.T, rt servedControlProofRuntime, runID string, acks map[string]issue2564H1Ack) {
+func issue2564H1LogFailureWitnesses(t *testing.T, rt issue2564ServedFixture, runID string, acks map[string]issue2564H1Ack) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT m.mutation_id,m.entity_id,m.path,m.writer_type,m.writer_id,COALESCE(m.handler_step,''),
-		COALESCE(CAST(m.old_value AS TEXT),'null'),COALESCE(CAST(m.new_value AS TEXT),'null'),
-		COALESCE(CAST(m.caused_by_event AS TEXT),''),COALESCE(e.event_name,''),CAST(m.created_at AS TEXT)
-		FROM entity_mutations m LEFT JOIN events e ON e.event_id=m.caused_by_event
-		WHERE m.run_id=$1 AND m.domain='authored_field' AND (m.path LIKE 'a%' OR m.path LIKE 'b%')
-		ORDER BY m.entity_id,m.path,m.created_at,m.mutation_id`, runID)
+	h1FailureMutations, err := storetest.ObserveH1FailureMutations(context.Background(), rt.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agents := map[string][]issue2564H1MutationEvidence{}
 	var reversions []issue2564H1MutationEvidence
 	agentMutations := 0
-	for rows.Next() {
-		var m issue2564H1MutationEvidence
-		if err := rows.Scan(&m.id, &m.entity, &m.field, &m.kind, &m.writer, &m.step, &m.before, &m.after, &m.event, &m.eventName, &m.recordedAt); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range h1FailureMutations {
+		m := issue2564H1MutationEvidence{id: row.ID, entity: row.Entity, field: row.Field, kind: row.Kind, writer: row.Writer, step: row.Step, before: row.Before, after: row.After, event: row.Event, eventName: row.EventName, recordedAt: row.RecordedAt}
 		var before, after any
 		if err := json.Unmarshal([]byte(m.before), &before); err != nil {
 			t.Fatal(err)
@@ -724,85 +700,49 @@ func issue2564H1LogFailureWitnesses(t *testing.T, rt servedControlProofRuntime, 
 			reversions = append(reversions, m)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
 	for _, m := range reversions {
 		key := m.entity + "/" + m.field
 		t.Logf("H1_PLATFORM_REVERSION ack=%+v agent_mutations=%+v overwrite=%+v", acks[key], agents[key], m)
 	}
 	t.Logf("H1_EARLY_MUTATION_RECEIPT acknowledgments=%d agent_mutations=%d platform_reversions=%d", len(acks), agentMutations, len(reversions))
-	rows, err = rt.DB.Query(`SELECT d.delivery_id,e.event_id,e.event_name,d.status,d.retry_count,COALESCE(d.reason_code,''),COALESCE(CAST(d.failure AS TEXT),'null')
-		FROM event_deliveries d JOIN events e ON e.event_id=d.event_id
-		WHERE d.run_id=$1 AND d.subscriber_type='node' AND (d.retry_count<>0 OR d.status='dead_letter' OR d.failure IS NOT NULL)
-		ORDER BY d.created_at,d.delivery_id`, runID)
+	h1NodeFailures, err := storetest.ObserveH1NodeFailures(context.Background(), rt.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for rows.Next() {
-		var delivery, event, name, status, reason, failure string
-		var retries int
-		if err := rows.Scan(&delivery, &event, &name, &status, &retries, &reason, &failure); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range h1NodeFailures {
+		delivery, event, name, status, reason, failure := row.Delivery, row.Event, row.Name, row.Status, row.Reason, row.Failure
+		retries := row.Retries
 		t.Logf("H1_NODE_FAILURE delivery=%s event=%s name=%s status=%s retry_count=%d reason=%s failure=%s", delivery, event, name, status, retries, reason, failure)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	rows, err = rt.DB.Query(`SELECT d.delivery_id,e.event_id,e.event_name,a.claim_version,a.closure_kind,COALESCE(a.outcome,''),COALESCE(a.reason_code,''),COALESCE(CAST(a.failure AS TEXT),'null')
-		FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id JOIN events e ON e.event_id=d.event_id
-		WHERE d.run_id=$1 AND d.subscriber_type='node' AND (a.outcome IN ('retry_scheduled','dead_letter') OR a.failure IS NOT NULL)
-		ORDER BY d.delivery_id,a.claim_version`, runID)
+	h1AttemptFailures, err := storetest.ObserveH1AttemptFailures(context.Background(), rt.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for rows.Next() {
-		var delivery, event, name, closure, outcome, reason, failure string
-		var version int
-		if err := rows.Scan(&delivery, &event, &name, &version, &closure, &outcome, &reason, &failure); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range h1AttemptFailures {
+		delivery, event, name, closure, outcome, reason, failure := row.Delivery, row.Event, row.Name, row.Closure, row.Outcome, row.Reason, row.Failure
+		version := row.Version
 		t.Logf("H1_NODE_ATTEMPT_FAILURE delivery=%s event=%s name=%s claim_version=%d closure=%s outcome=%s reason=%s failure=%s", delivery, event, name, version, closure, outcome, reason, failure)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	rows, err = rt.DB.Query(`SELECT l.dead_letter_id,e.event_id,e.event_name,COALESCE(CAST(l.delivery_id AS TEXT),''),COALESCE(l.claim_version,0),l.retry_count,COALESCE(l.handler_node,''),CAST(l.failure AS TEXT)
-		FROM dead_letters l JOIN events e ON e.event_id=l.original_event_id WHERE e.run_id=$1 ORDER BY l.created_at,l.dead_letter_id`, runID)
+	h1DeadLetters, err := storetest.ObserveH1DeadLetters(context.Background(), rt.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for rows.Next() {
-		var id, event, name, delivery, node, failure string
-		var version, retries int
-		if err := rows.Scan(&id, &event, &name, &delivery, &version, &retries, &node, &failure); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range h1DeadLetters {
+		id, event, name, delivery, node, failure := row.ID, row.Event, row.Name, row.Delivery, row.Node, row.Failure
+		version, retries := row.Version, row.Retries
 		t.Logf("H1_DEAD_LETTER id=%s event=%s name=%s delivery=%s claim_version=%d retry_count=%d node=%s failure=%s", id, event, name, delivery, version, retries, node, failure)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
 }
 
-func issue2564H1AssertBumpHistory(t *testing.T, rt servedControlProofRuntime, runID string) {
+func issue2564H1AssertBumpHistory(t *testing.T, rt issue2564ServedFixture, runID string) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT m.entity_id,m.caused_by_event,CAST(m.old_value AS TEXT),CAST(m.new_value AS TEXT) FROM entity_mutations m JOIN events e ON e.event_id=m.caused_by_event JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=m.run_id AND d.subscriber_type='node' WHERE m.run_id=$1 AND m.domain='authored_field' AND m.path='count' AND e.event_name='hub.bump' AND d.status='delivered'`, runID)
+	h1BumpHistory, err := storetest.ObserveH1BumpHistory(context.Background(), rt.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	chains, events := map[string]map[int]bool{}, map[string]bool{}
-	for rows.Next() {
-		var entity, event, before, after string
-		if err := rows.Scan(&entity, &event, &before, &after); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range h1BumpHistory {
+		entity, event, before, after := row.Entity, row.Event, row.Before, row.After
 		var old, next float64
 		if err := json.Unmarshal([]byte(before), &old); err != nil {
 			t.Fatal(err)
@@ -817,9 +757,6 @@ func issue2564H1AssertBumpHistory(t *testing.T, rt servedControlProofRuntime, ru
 			t.Fatalf("H1 counter reversion/repeated effect: entity=%s event=%s %s -> %s", entity, event, before, after)
 		}
 		chains[entity][int(old)], events[event] = true, true
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if len(events) != issue2564H1Bumps || len(chains) != issue2564H1Hubs {
 		t.Fatalf("H1 exact retained bump history=%d hubs=%d", len(events), len(chains))
