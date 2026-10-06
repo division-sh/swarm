@@ -452,6 +452,34 @@ func TestPersistenceAuthorityDebtExcludedInheritedReceiver(t *testing.T) {
 	}
 }
 
+func TestPersistenceAuthorityDebtExcludedTypedRefusalForwarder(t *testing.T) {
+	root := t.TempDir()
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/probe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "active.go", "package probe;type refusal struct{message string};func(*refusal)Error()string{return \"\"}\n")
+	prefix := "//go:build never_swarm_authority\n\npackage probe\n"
+	helper := "func reject(string)(any,error){return nil,&refusal{message:\"unsupported\"}}\n"
+	for _, test := range []struct {
+		name, helper, wrapper string
+		benign                bool
+	}{
+		{"literal-typed-refusal", helper, "func observe()(bool,error){_,err:=reject(\"\");return false,err}\n", true},
+		{"helper-performs-work", "func reject(string)(any,error){unknownWork();return nil,&refusal{message:\"unsupported\"}}\n", "func observe()(bool,error){_,err:=reject(\"\");return false,err}\n", false},
+		{"argument-performs-work", helper, "func observe()(bool,error){_,err:=reject(unknownArgument());return false,err}\n", false},
+		{"callback-shadows-helper", helper, "func observe(reject func(string)(any,error))(bool,error){_,err:=reject(\"\");return false,err}\n", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			debtWriteModuleSource(t, root, "hidden.go", prefix+test.helper+test.wrapper)
+			uncertain := false
+			for _, site := range authorityDebtSites(debtLoadPersistenceAuthorityFindings(t, root)) {
+				uncertain = uncertain || site.File == "hidden.go" && site.Declaration == "observe" && site.Kind == "unresolved-excluded-source"
+			}
+			if uncertain == test.benign {
+				t.Fatalf("typed refusal classification lost its exact source cut: benign=%v uncertain=%v", test.benign, uncertain)
+			}
+		})
+	}
+}
+
 func TestPersistenceAuthorityDebtCensusFailsClosedOnMissingAndTypeFailedSource(t *testing.T) {
 	const probe = "SWARM_DEBT_CENSUS_HOSTILE_SOURCE"
 	if root := os.Getenv(probe); root != "" {

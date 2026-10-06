@@ -320,9 +320,17 @@ func debtExcludedSourceFindings(t *testing.T, path string, file *ast.File, info 
 	}
 	sort.Strings(context)
 	contextDigest := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(context, "\n"))))
+	refusals := map[types.Object]bool{}
+	for _, declaration := range file.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && debtExcludedTypedRefusal(function, info) {
+			if object := info.Defs[function.Name]; object != nil {
+				refusals[object] = true
+			}
+		}
+	}
 	var findings []authorityFinding
 	record := func(node ast.Node, enclosing string) {
-		if debtExcludedDeclarationIsLiteralOnly(node, info) {
+		if debtExcludedDeclarationIsLiteralOnly(node, info) || debtExcludedRefusalForwarder(node, info, refusals) {
 			return
 		}
 		// Comments and source positions do not define a permission or occurrence.
@@ -369,6 +377,94 @@ func debtExcludedSourceFindings(t *testing.T, path string, file *ast.File, info 
 		}
 	}
 	return findings
+}
+
+func debtExcludedConstant(expr ast.Expr, info *types.Info) bool {
+	switch expr := expr.(type) {
+	case *ast.BasicLit:
+		return true
+	case *ast.Ident:
+		_, constant := info.Uses[expr].(*types.Const)
+		return constant || info.Uses[expr] == types.Universe.Lookup("nil")
+	case *ast.SelectorExpr:
+		_, constant := info.Uses[expr.Sel].(*types.Const)
+		return constant
+	}
+	return false
+}
+
+func debtExcludedTypedRefusal(function *ast.FuncDecl, info *types.Info) bool {
+	if function.Recv != nil || function.Body == nil || len(function.Body.List) != 1 {
+		return false
+	}
+	ret, ok := function.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 2 || !debtExcludedConstant(ret.Results[0], info) {
+		return false
+	}
+	pointer, ok := ret.Results[1].(*ast.UnaryExpr)
+	if !ok || pointer.Op != token.AND {
+		return false
+	}
+	literal, ok := pointer.X.(*ast.CompositeLit)
+	object := info.Defs[function.Name]
+	if !ok || object == nil || info.TypeOf(pointer) == nil || debtContainsRawAuthoritySignature(object.Type()) || debtContainsRawAuthoritySignature(info.TypeOf(pointer)) {
+		return false
+	}
+	errorType := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
+	if !types.Implements(info.TypeOf(pointer), errorType) {
+		return false
+	}
+	for _, element := range literal.Elts {
+		if pair, ok := element.(*ast.KeyValueExpr); ok {
+			element = pair.Value
+		}
+		if !debtExcludedConstant(element, info) {
+			return false
+		}
+	}
+	return true
+}
+
+func debtExcludedRefusalForwarder(node ast.Node, info *types.Info, refusals map[types.Object]bool) bool {
+	function, ok := node.(*ast.FuncDecl)
+	if !ok || function.Recv != nil || function.Body == nil || len(function.Body.List) != 2 {
+		return false
+	}
+	object := info.Defs[function.Name]
+	if object == nil || debtContainsRawAuthoritySignature(object.Type()) {
+		return false
+	}
+	assignment, ok := function.Body.List[0].(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 2 || len(assignment.Rhs) != 1 {
+		return false
+	}
+	discard, ok := assignment.Lhs[0].(*ast.Ident)
+	if !ok || discard.Name != "_" {
+		return false
+	}
+	errName, ok := assignment.Lhs[1].(*ast.Ident)
+	if !ok || errName.Name == "_" {
+		return false
+	}
+	call, ok := assignment.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	callee, ok := call.Fun.(*ast.Ident)
+	if !ok || !refusals[info.Uses[callee]] {
+		return false
+	}
+	for _, arg := range call.Args {
+		if !debtExcludedConstant(arg, info) {
+			return false
+		}
+	}
+	ret, ok := function.Body.List[1].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 2 || !debtExcludedConstant(ret.Results[0], info) {
+		return false
+	}
+	returned, ok := ret.Results[1].(*ast.Ident)
+	return ok && info.Defs[errName] != nil && info.Uses[returned] == info.Defs[errName]
 }
 
 func debtExcludedDeclarationIsLiteralOnly(node ast.Node, info *types.Info) bool {
