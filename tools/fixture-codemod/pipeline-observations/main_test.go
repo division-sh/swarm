@@ -15,7 +15,7 @@ func TestReviewedSnapshotsAreFiniteAndIdempotent(t *testing.T) {
 	if err := json.Unmarshal(recipeBytes, &recipes); err != nil {
 		t.Fatal(err)
 	}
-	if len(recipes) != 53 {
+	if len(recipes) != 61 {
 		t.Fatalf("recipe count=%d", len(recipes))
 	}
 	for _, row := range recipes {
@@ -30,6 +30,19 @@ func TestReviewedSnapshotsAreFiniteAndIdempotent(t *testing.T) {
 				t.Fatalf("idempotence: changed=%t err=%v", changed, err)
 			}
 		})
+	}
+}
+
+func TestRenamedSnapshotRejectsAmbiguousAndAlteredReplacements(t *testing.T) {
+	row := recipe{Function: "original", Before: "func original() { proof() }", After: "func native() { proof() }"}
+	for _, source := range []string{
+		"func original() { proof() }; func native() { proof() }",
+		"func native() { other() }",
+		"func native() { proof() }; func native() { proof() }",
+	} {
+		if _, changed, err := rewriteFunction("proof.go", []byte("package proof\n"+source), row); err == nil || changed {
+			t.Fatalf("ambiguous or altered renamed proof admitted: %s", source)
+		}
 	}
 }
 

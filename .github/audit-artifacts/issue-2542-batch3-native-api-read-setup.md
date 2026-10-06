@@ -82,7 +82,7 @@ and reproduces the candidate files byte-for-byte. Candidate repetition is empty.
 - Descriptive registry unchanged: 12,377 resolved findings verified. No source
   role, ordinary-site permission, collector policy or global allowance changed.
 - New completed-family guard PASS11.40s; actual predecessor negative FAIL12.013s.
-- Existing closed-delivery, revision accessor, retired-builder exact inventory,
+- Existing closed-delivery, revision accessor, exact retirement inventory,
   retirement negative control and release public-process boundary roots PASS.
 - Codemod snapshot, complete-statement equivalence, unknown binding/work,
   idempotence and atomic preflight controls PASS.

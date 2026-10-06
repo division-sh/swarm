@@ -996,8 +996,9 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 	}
 }
 
-func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentials(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentialsForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1010,27 +1011,14 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 		_ = json.NewEncoder(w).Encode(map[string]any{"echoed_authorization": r.Header.Get("Authorization")})
 	}))
 	defer server.Close()
-
 	credentialStore := testActivityCredentialStore(t, "provider_token", "provider-secret")
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
-				Method:  "POST",
-				URL:     server.URL,
-				Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"},
-				Body:    map[string]any{"url": "{{input.url}}"},
-			}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...)),
-		},
-	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}, Body: map[string]any{"url": "{{input.url}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))}})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-		Credentials:         credentialStore,
-	})
+	store := fixture.Persistence.store
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), Credentials: credentialStore})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	request, err := activityRequestEmitIntent(intent)
 	if err != nil {
@@ -1061,7 +1049,6 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 	if got := result["echoed_authorization"]; got != "Bearer [REDACTED]" {
 		t.Fatalf("redacted result authorization = %#v", got)
 	}
-
 	handled, _, err = pc.handleEventResult(ctx, request.Event)
 	if err != nil {
 		t.Fatalf("duplicate handleEventResult: %v", err)
@@ -1349,8 +1336,9 @@ func TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP(t *te
 	}
 }
 
-func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	artifacts, err := providerconnectors.GenerateCatalog(os.DirFS("../../providerconnectors"))
 	if err != nil {
 		t.Fatalf("GenerateCatalog: %v", err)
@@ -1365,7 +1353,6 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 	if _, ok := tool.HTTP(); !ok {
 		t.Fatal("generated synthetic connector acme.create_widget is missing")
 	}
-
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -1387,7 +1374,6 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "widget-1"})
 	}))
 	defer server.Close()
-
 	httpSpec, ok := tool.HTTP()
 	if !ok {
 		t.Fatal("generated connector tool has no HTTP contract")
@@ -1397,21 +1383,16 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 	if err != nil {
 		t.Fatalf("replace generated connector HTTP endpoint: %v", err)
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
-		"acme.create_widget": tool,
-	}})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"acme.create_widget": tool}})
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
-	db, store := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
+	store := fixture.Persistence.store
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
 	bus := &recordingPipelineBus{}
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-		Credentials:         testActivityCredentialStore(t, "acme_api_key", "acme-secret"),
-	})
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), Credentials: testActivityCredentialStore(t, "acme_api_key", "acme-secret")})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	intent.Tool = "acme.create_widget"
 	intent.ActivityID = "acme_create_widget"
@@ -1420,7 +1401,6 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-
 	for attempt := 1; attempt <= 2; attempt++ {
 		handled, _, err := pc.handleEventResult(ctx, request.Event)
 		if err != nil {
@@ -1585,8 +1565,9 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 	}
 }
 
-func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyPipelineActivityRequestNonIdempotentFailureDoesNotRetryForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1596,20 +1577,13 @@ func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 		http.Error(w, "temporary", http.StatusInternalServerError)
 	}))
 	defer server.Close()
-
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
-		},
-	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-	})
+	store := fixture.Persistence.store
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store)})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	intent.RetryMaxAttempts = 3
 	request, err := activityRequestEmitIntent(intent)
@@ -1634,25 +1608,20 @@ func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 	}
 }
 
-func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyPipelineActivityRequestNonIdempotentTransportErrorMarksUncertainForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
 	var calls int
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.test/write"})),
-		},
-	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.test/write"}))}})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-	})
+	store := fixture.Persistence.store
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store)})
 	client := &http.Client{Transport: activityRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
 		if got := req.URL.String(); got != "https://provider.test/write" {
@@ -1696,8 +1665,9 @@ func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *tes
 	}
 }
 
-func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTerminalizing(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTerminalizingForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1707,20 +1677,13 @@ func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTer
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
-
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
-		},
-	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-	})
+	store := fixture.Persistence.store
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store)})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	if _, inserted, err := store.StartActivityAttempt(ctx, activityAttemptStartRecord(intent, activityInputHash(intent.Input))); err != nil {
 		t.Fatalf("StartActivityAttempt: %v", err)
@@ -1830,8 +1793,9 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 	return nil
 }
 
-func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResult(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResultForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1853,20 +1817,13 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 	}))
 	defer server.Close()
 	defer release()
-
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
-		},
-	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-	})
+	store := fixture.Persistence.store
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store)})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	request, err := activityRequestEmitIntent(intent)
 	if err != nil {
@@ -1878,7 +1835,6 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 		firstDone <- err
 	}()
 	<-providerEntered
-
 	if _, _, err := pc.handleEventResult(ctx, request.Event); err != nil {
 		t.Fatalf("duplicate handleEventResult: %v", err)
 	}
@@ -1895,7 +1851,6 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 	if len(bus.publishes) != 0 {
 		t.Fatalf("publishes before release = %#v, want duplicate to avoid terminalizing active attempt", bus.publishes)
 	}
-
 	release()
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first handleEventResult: %v", err)
@@ -1915,8 +1870,9 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 	}
 }
 
-func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatchForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1926,26 +1882,14 @@ func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
-
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
-				Method:  "POST",
-				URL:     server.URL,
-				Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"},
-			}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...)),
-		},
-	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))}})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
+	store := fixture.Persistence.store
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
 	emptyCredentials := testActivityCredentialStore(t, "", "")
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-		Credentials:         emptyCredentials,
-	})
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), Credentials: emptyCredentials})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	request, err := activityRequestEmitIntent(intent)
 	if err != nil {
@@ -1971,8 +1915,9 @@ func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t
 	}
 }
 
-func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBeforeDispatch(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBeforeDispatchForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1982,21 +1927,13 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBefo
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
-
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": testTelegramConnectorTool(server.URL),
-		},
-	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": testTelegramConnectorTool(server.URL)}})
 	bus := &recordingPipelineBus{}
-	db, store := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-		Credentials:         testActivityCredentialStore(t, "", ""),
-	})
+	store := fixture.Persistence.store
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), Credentials: testActivityCredentialStore(t, "", "")})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	intent.Tool = "telegram.send_message"
 	intent.ActivityID = "telegram_send_message"
