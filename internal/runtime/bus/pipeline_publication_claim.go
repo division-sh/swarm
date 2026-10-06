@@ -18,6 +18,7 @@ type pipelinePublicationClaim struct {
 	opMu     sync.Mutex
 	released atomic.Bool
 	retired  atomic.Bool
+	outcome  runtimepipelineobligation.SettlementOutcome
 }
 
 func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string) (*pipelinePublicationClaim, error) {
@@ -102,6 +103,7 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 		return fmt.Errorf("pipeline publication claim owner is required")
 	}
 	outcome, err := c.bus.settlePipelineObligationOutcome(ctx, c.claim, disposition)
+	c.outcome = outcome
 	if err != nil {
 		if outcome.Committed() {
 			return fmt.Errorf("settle pipeline publication %s: %w", c.eventID, err)
@@ -113,6 +115,12 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 		return errors.Join(fmt.Errorf("settle pipeline publication %s: %w", c.eventID, err), releaseErr)
 	}
 	return nil
+}
+
+func (c *pipelinePublicationClaim) settlementOutcome() runtimepipelineobligation.SettlementOutcome {
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	return c.outcome
 }
 
 func (eb *EventBus) settlePipelineObligationOutcome(

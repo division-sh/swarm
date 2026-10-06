@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
@@ -83,6 +84,10 @@ func (o *DeliveryContinuationOwner) Release(deliveryID string) error {
 }
 
 func (*DeliveryContinuationOwner) OwnsPersistedRecovery() bool { return false }
+
+func (*DeliveryContinuationOwner) DispatchPublished(events.Event, []events.DeliveryRoute) error {
+	return errors.New("published delivery dispatch is unsupported by nonpersistent test delivery owner")
+}
 
 func (*DeliveryContinuationOwner) Signal() {}
 
