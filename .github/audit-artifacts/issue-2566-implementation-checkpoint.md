@@ -7,6 +7,10 @@ overlapping schemas; those removals were preserved.
 
 This is progress evidence, **not a Post-Implementation Proof Audit or a
 merge-readiness/parent-closure claim**. Gate D6019841561 remains binding.
+The original review at `8781de3d2` found incomplete selected-feed, explicit-source
+and non-disk coverage. The current correction/proof inventory is recorded in
+`issue-2566-early-review-repairs.md`; original receipts below are historical,
+not an assertion that the reviewed head closed those missing manifestations.
 
 ## Implemented Owners
 
@@ -36,8 +40,10 @@ dispositions across417 files. `-prove` replays each file from the recorded Git b
 proves byte equality and second-application idempotence. That is a one-time
 receipt, not a perpetual checksum freeze on unrelated future fixture changes.
 
-204 permanent disk source/flow/entry/end goldens derive from the independently
-reviewed pre-change decisions. A hostile sorted dump remains fully reachable
+The original 204 disk source/flow/entry/end goldens have been expanded to all 553
+reviewed sites, including embedded/generated inputs and actual generator-output
+controls. They derive from the independently reviewed pre-change decisions,
+not candidate-derived expectations. A hostile sorted dump remains fully reachable
 but fails the entry guard. The two original reviewed declaration moves remain
 explicit; generated starting-stage variants move exact declarations rather
 than restoring markers. Entity-field initial values remain independent.

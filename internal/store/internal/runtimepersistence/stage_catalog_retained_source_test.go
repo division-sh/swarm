@@ -69,11 +69,19 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 			if err := os.WriteFile(path, []byte("name: ordered-retained\nstages: {cooling: {}, Done: {final: true}, registered: {}}\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			var reloaded selectedSourceArtifactStore
+			var reloaded interface {
+				selectedSourceArtifactStore
+				runforkexecution.SourceArtifactSelectedContractSourceStore
+			}
 			if backend.name == "sqlite" {
-				reloaded = NewSQLiteRuntimeStoreForTest(fixture.db)
+				var sequence int
+				var name, databasePath string
+				if err := fixture.db.QueryRow(`PRAGMA database_list`).Scan(&sequence, &name, &databasePath); err != nil {
+					t.Fatal(err)
+				}
+				reloaded = newBootstrappedSQLiteRuntimeStoreForPath(t, databasePath)
 			} else {
-				reloaded = newPostgresStoreWithBackend(mustPostgresBackend(fixture.db))
+				reloaded = newTestPostgresStore(t, fixture.db)
 			}
 			persisted, err := reloaded.GetSourceArtifact(context.Background(), bundle.SourceArtifact.BundleHash())
 			if err != nil {
@@ -95,7 +103,7 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 			if !ok || graph.InitialStage != "registered" || !reflect.DeepEqual(graph.StageIDs(), []string{"registered", "cooling", "Done"}) || !reflect.DeepEqual(graph.FinalStageIDs(), []string{"Done"}) {
 				t.Fatalf("retained read changed reviewed entry: %+v", graph)
 			}
-			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected}
+			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: reloaded}
 			forkSource, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}})
 			if err != nil {
 				t.Fatal(err)
