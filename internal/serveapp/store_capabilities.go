@@ -117,7 +117,7 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 			},
 		}
 		caps.SelectedForkRecovery = runtimerunforkexecution.SelectedForkRecoveryEnvironment{
-			SourceLoader: loader, AgentRuntime: executor.AgentRuntime,
+			SourceLoader: loader, SourceInspector: loader, AgentRuntime: executor.AgentRuntime,
 		}
 		caps.RunForkAvailability = family.Availability()
 		caps.RunForkOperations = family.Operations()

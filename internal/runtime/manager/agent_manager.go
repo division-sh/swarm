@@ -196,7 +196,7 @@ func NewAgentManager(bus Bus, factory AgentFactory, stores ...ManagerPersistence
 }
 
 func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
-	if err := opts.ReceiverExecution.Validate(); err != nil {
+	if err := opts.ReceiverExecution.ValidateExecutable(); err != nil {
 		panic(fmt.Sprintf("agent manager receiver execution: %v", err))
 	}
 	var store ManagerPersistence

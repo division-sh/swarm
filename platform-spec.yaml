@@ -16927,6 +16927,16 @@ platform_tables:
         completes. Exact retry preserves the original launch clock and cancellation
         cause, and does not repeatedly advance the predecessor fence. Normal
         cancellation inventory never acquires selected-fork possession.
+        Selected timeout preparation inspects the exact immutable selected source
+        without allocating its execution projection. A publication-only recovery
+        posture retains the recorded predecessor identity, admits only that turn's
+        timeout producer/run/mode, and cannot bind a receiver or launch work. It
+        neither issues managed provider admission nor restores an executable grant.
+        Startup inventory locking ends before source preparation, settlement and
+        cleanup joins; process possession and exact preparation cleanup ownership
+        remain held until their acknowledgments. Concurrent startup recovery is
+        refused. Any unexpectedly allocated inspection resource remains owned by
+        the existing preparation retirement path until cleanup succeeds.
         Startup commits the canceled origin and reaction atomically, releases the
         preparation claim, and defers execution to the existing durable pipeline
         recovery after startup admission. Failure before this commit leaves the
@@ -39995,6 +40005,7 @@ agent_lifecycle_authority:
     receiver_execution_variant:
       variants: [normal, selected_contract_fork]
       rule: AgentManager receives one explicit closed variant at construction. Normal turns install the acting lifecycle token and receiver-owned normal admission/controller state. Selected-contract turns install the exact selected authority, admission, controller, and lineage supplied by the selected runtime owner. No variant is inferred from delivery-context values.
+      selected_recovery_publication: EventBus alone may prepare an exact fenced-predecessor timeout reaction with a non-executable publication posture. AgentManager, executable Pipeline composition and receiver binding reject this posture; it carries no managed admission, controller or receiver occurrence. The selected cancellation transaction still validates its exact intent and original clock, and execution is deferred until ordinary startup admission.
     replace:
       rule: Start, restart, reconfigure, recovery, flow activation, and spawn-during-run enumerate agent IDs only and select the current projection after acquiring the per-agent operation lock. Replacement fences new leases and serializes against provider-attempt launch in the selected-store lifecycle transaction. Every authorized attempt for which transition wins is terminally abandoned with its reservation and exact typed origin settled before return. Every already-launched or response-observed predecessor attempt for which launch wins is captured into one exact durable drain in that transaction. Only after commit may the runtime cancel the predecessor generation, remove its exact route, await generation-owned work, install one successor projection, and start that successor.
       same_current: Reconfigure compares the validated candidate revision with the authoritative locked current revision before invoking the Agent factory. Same-current preserves Agent/config identity, loop, route channel/token, generation, sessions, and factory count.

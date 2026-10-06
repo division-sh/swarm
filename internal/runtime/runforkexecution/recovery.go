@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -18,8 +17,13 @@ import (
 // SelectedForkRecoveryEnvironment is supplied by serve composition, never
 // reconstructed from a selected run's loaded runtime.
 type SelectedForkRecoveryEnvironment struct {
-	SourceLoader SelectedContractSourceLoader
-	AgentRuntime SelectedContractAgentRuntimeOptions
+	SourceLoader    SelectedContractSourceLoader
+	SourceInspector SelectedContractSourceInspector
+	AgentRuntime    SelectedContractAgentRuntimeOptions
+}
+
+type SelectedContractSourceInspector interface {
+	InspectRunForkSelectedContractSourceForRequest(context.Context, SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error)
 }
 
 // RecoverSelectedForkContexts classifies durable bindings before admitting
@@ -40,25 +44,27 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 			contexts.mu.Unlock()
 		}
 	}()
-	if contexts.retired || contexts.recovered || contexts.process == nil || contexts.capability == nil || len(contexts.entries) != 0 || len(contexts.stops) != 0 {
+	if contexts.retired || contexts.recovered || contexts.recovering || contexts.process == nil || contexts.capability == nil || len(contexts.entries) != 0 || len(contexts.stops) != 0 {
 		return nil, errors.New("selected recovery requires fresh bound process composition")
 	}
 	lease, err := contexts.process.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
+	contexts.recovering = true
 	admissionFailed := true
 	defer func() {
 		leaseErr := lease.Done()
 		finalErr = errors.Join(finalErr, leaseErr)
+		if !locked {
+			contexts.mu.Lock()
+		}
+		contexts.recovering = false
 		if admissionFailed || leaseErr != nil {
-			if !locked {
-				contexts.mu.Lock()
-			}
 			contexts.retired = true
-			if !locked {
-				contexts.mu.Unlock()
-			}
+		}
+		if !locked {
+			contexts.mu.Unlock()
 		}
 	}()
 	ctx = lease.Context()
@@ -73,6 +79,8 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 	if err != nil {
 		return nil, err
 	}
+	contexts.mu.Unlock()
+	locked = false
 	results := make([]runfork.SelectedForkRecoveryResult, 0, len(entries))
 	finite := make([]runfork.SelectedForkRecoveryResult, 0)
 	var diagnostics error
@@ -97,25 +105,9 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 			if err != nil {
 				return results, errors.Join(diagnostics, err)
 			}
-			commands := make([]effects.CanceledTurnCommand, 0, len(result.PendingCancellations))
-			for _, turn := range result.PendingCancellations {
-				if turn.Cancellation.Reason != deliverylifecycle.CancellationTerminate {
-					return results, errors.New("selected timeout recovery requires its exact admitted reaction publication")
-				}
-				command := effects.CanceledTurnCommand{Origin: turn.Cancellation.Origin}
-				if turn.Attempt.AttemptID != "" {
-					command.Attempt = &turn.Attempt
-				}
-				commands = append(commands, command)
-			}
-			result, err = ports.fork.RecoverSelectedFork(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process, Effects: req, Cancellations: commands})
-			if len(result.CanceledTurns) != len(commands) {
-				return results, errors.Join(err, errors.New("selected cancellation recovery lacks exact acknowledged settlements"))
-			}
-			for _, committed := range result.CanceledTurns {
-				if validation := committed.Validate(); validation != nil || committed.Publication != nil {
-					return results, errors.Join(err, validation, errors.New("selected terminate recovery returned invalid settlement evidence"))
-				}
+			result, err = o.settleRecoveredSelectedCancellations(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process, Effects: req}, result, environment)
+			if err != nil {
+				return append(results, result), errors.Join(diagnostics, err)
 			}
 			action, actionErr = selectedRecoveryActionFor(result, entry)
 			if actionErr != nil {
@@ -142,9 +134,13 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 	if len(finite) != 0 && (environment.SourceLoader == nil || environment.AgentRuntime.ProcessCapability == nil) {
 		return results, errors.New("selected finite-feed recovery requires source loader and bound process capability")
 	}
+	contexts.mu.Lock()
+	if contexts.retired {
+		contexts.mu.Unlock()
+		return results, errors.Join(diagnostics, errors.New("selected recovery owner retired during startup"))
+	}
 	contexts.recovered = true
 	contexts.mu.Unlock()
-	locked = false
 	request := SelectedContractExecutionRequest{SourceLoader: environment.SourceLoader, AgentRuntime: environment.AgentRuntime}
 	for _, result := range finite {
 		if err := ctx.Err(); err != nil {
@@ -199,6 +195,10 @@ func selectedRecoveryActionFor(result runfork.SelectedForkRecoveryResult, entry 
 		return 0, fmt.Errorf("selected recovery result differs from its fork binding")
 	}
 	if len(result.PendingCancellations) != 0 {
+		id, err := uuid.Parse(result.ExecutionID)
+		if err != nil || id == uuid.Nil || id.String() != result.ExecutionID {
+			return 0, errors.New("selected pending cancellation lacks exact predecessor execution")
+		}
 		if result.Disposition != runfork.SelectedForkRecoveryFailed && result.Disposition != runfork.SelectedForkRecoveryControlOnly && result.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed && result.Disposition != runfork.SelectedForkRecoveryActivateFiniteFeed {
 			return 0, errors.New("selected pending cancellation contradicts its recovery disposition")
 		}

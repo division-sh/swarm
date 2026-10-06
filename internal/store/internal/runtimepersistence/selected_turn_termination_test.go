@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -36,52 +37,12 @@ func TestSelectedTurnTerminationPreservesExactOriginBothStores(t *testing.T) {
 			ctx = withManagedCompletionTestSurface(t, managedSelectedExecutionStoreTestContext(t, ctx, authority), authority, "anthropic_api")
 			handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "selected-terminate")
 
-			cause := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, fixture.forkRun, events.EventEnvelope{}, time.Now().UTC())
-			node, err := identity.AdmitExecutableNodeDeclaration("global", "router")
-			if err != nil {
-				t.Fatal(err)
-			}
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
-				FlowID: "global", FlowInstance: plan.Identity.Route().InstancePath, EntityID: plan.Instance.EntityID,
-			})}
-			cause = eventtest.TargetRouted(cause, route.Target.Route())
 			actual := selected.(deliverylifecycle.Store)
 			origin, err := actual.Snapshot(ctx, handle.Attempt().Origin.Delivery.DeliveryID())
 			if err != nil {
 				t.Fatal(err)
 			}
-			commitSelectedReceiverClaimEvent(t, ctx, selected.(agentFixtureFlowStore), cause, route, origin.Authority)
-			claimed, err := actual.ClaimDelivery(ctx, origin.Authority, cause, route)
-			work, acquired := claimed.Acquired()
-			if err != nil || !acquired {
-				t.Fatalf("claim selected transition: %+v %v", claimed, err)
-			}
-			record, err := plan.PersistenceRecord()
-			if err != nil {
-				t.Fatal(err)
-			}
-			command := turnTerminationCommandForClaim(t, record.State, cause, work.Claim, cause.CreatedAt())
-			entry, enters, err := command.Lifecycle.TurnTermination.Cause().StageEntry(command.State.Identity)
-			if err != nil || !enters {
-				t.Fatalf("selected authored stage entry: %t %v", enters, err)
-			}
-			var bookkeeping map[string]any
-			if err := json.Unmarshal(command.State.Bookkeeping, &bookkeeping); err != nil {
-				t.Fatal(err)
-			}
-			if err := workflowlifecycle.StoreStageEntry(bookkeeping, entry); err != nil {
-				t.Fatal(err)
-			}
-			command.State.Bookkeeping, err = json.Marshal(bookkeeping)
-			if err != nil {
-				t.Fatal(err)
-			}
-			command.Lifecycle.StageEntry = &entry
-			committed, err := selected.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, command)
-			if err != nil || !committed.Committed || len(committed.Lifecycle.TurnCancellations) != 1 ||
-				!committed.Lifecycle.TurnCancellations[0].Origin.Same(handle.Attempt().Origin) {
-				t.Fatalf("selected guarded termination lost its actual origin: %+v %v", committed, err)
-			}
+			requestSelectedTurnTerminationForTest(t, ctx, selected, fixture, plan, handle.Attempt().Origin)
 			before, err := actual.Snapshot(ctx, origin.DeliveryID)
 			if err != nil || before.Status != deliverylifecycle.StatusInProgress {
 				t.Fatalf("intent settled unjoined provider work: %+v %v", before, err)
@@ -97,5 +58,54 @@ func TestSelectedTurnTerminationPreservesExactOriginBothStores(t *testing.T) {
 				t.Fatalf("repeat selected cancellation changed evidence: %+v %v", repeated, err)
 			}
 		})
+	}
+}
+
+func requestSelectedTurnTerminationForTest(t *testing.T, ctx context.Context, selected selectedForkDiscardStore, fixture selectedCompletionFixture, plan pipeline.FlowInstanceActivationPlan, origin effects.CompletionOrigin) {
+	t.Helper()
+	cause := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, fixture.forkRun, events.EventEnvelope{}, time.Now().UTC())
+	node, err := identity.AdmitExecutableNodeDeclaration("global", "router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID: "global", FlowInstance: plan.Identity.Route().InstancePath, EntityID: plan.Instance.EntityID,
+	})}
+	cause = eventtest.TargetRouted(cause, route.Target.Route())
+	actual := selected.(deliverylifecycle.Store)
+	original, err := actual.Snapshot(ctx, origin.Delivery.DeliveryID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitSelectedReceiverClaimEvent(t, ctx, selected.(agentFixtureFlowStore), cause, route, original.Authority)
+	claimed, err := actual.ClaimDelivery(ctx, original.Authority, cause, route)
+	work, acquired := claimed.Acquired()
+	if err != nil || !acquired {
+		t.Fatalf("claim selected transition: %+v %v", claimed, err)
+	}
+	record, err := plan.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := turnTerminationCommandForClaim(t, record.State, cause, work.Claim, cause.CreatedAt())
+	entry, enters, err := command.Lifecycle.TurnTermination.Cause().StageEntry(command.State.Identity)
+	if err != nil || !enters {
+		t.Fatalf("selected authored stage entry: %t %v", enters, err)
+	}
+	var bookkeeping map[string]any
+	if err := json.Unmarshal(command.State.Bookkeeping, &bookkeeping); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowlifecycle.StoreStageEntry(bookkeeping, entry); err != nil {
+		t.Fatal(err)
+	}
+	command.State.Bookkeeping, err = json.Marshal(bookkeeping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.Lifecycle.StageEntry = &entry
+	committed, err := selected.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, command)
+	if err != nil || !committed.Committed || len(committed.Lifecycle.TurnCancellations) != 1 || !committed.Lifecycle.TurnCancellations[0].Origin.Same(origin) {
+		t.Fatalf("selected guarded termination lost its actual origin: %+v %v", committed, err)
 	}
 }

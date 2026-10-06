@@ -281,8 +281,14 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) (runfork.SelectedForkRecoveryResult, error) {
 	record, err := loadSelectedRecoveryRecordTx(ctx, tx, snapshot, req.Entry, sqlite, true)
 	result := record.SelectedForkRecoveryResult
-	if err != nil || !record.hasExecution {
+	if err != nil {
 		return result, err
+	}
+	if !record.hasExecution {
+		if len(req.Cancellations) != 0 {
+			return result, fmt.Errorf("selected cancellation recovery lacks predecessor execution")
+		}
+		return result, nil
 	}
 	runID, binding, preparation := result.RunID, record.binding, record.preparation
 	state, failure := record.state, record.failure
@@ -299,6 +305,9 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		return result, err
 	}
 	if current {
+		if len(req.Cancellations) != 0 {
+			return result, fmt.Errorf("selected cancellation recovery cannot acquire a current process origin")
+		}
 		result.Disposition = runfork.SelectedForkRecoveryCurrent
 		return result, nil
 	}

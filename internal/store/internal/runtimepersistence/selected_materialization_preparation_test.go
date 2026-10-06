@@ -84,6 +84,11 @@ func prepareSelectedStoreForkForTest(t *testing.T, ctx context.Context, selected
 
 func selectedStorePreparationOwnerForTest(t testing.TB, selected any) runforkexecution.SelectedContractExecutionOwner {
 	t.Helper()
+	return selectedStorePreparationOwnerWithForkForTest(t, selected, selected.(runforkexecution.SelectedContractForkLifecycle))
+}
+
+func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fork runforkexecution.SelectedContractForkLifecycle) runforkexecution.SelectedContractExecutionOwner {
+	t.Helper()
 	switch selected := selected.(type) {
 	case *PostgresStore:
 		durable := runtimebus.DurableDependencies{
@@ -98,7 +103,7 @@ func selectedStorePreparationOwnerForTest(t testing.TB, selected any) runforkexe
 			FlowRoutes: selected, StandingRestarts: selected,
 		}
 		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
-			runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
+			runtimepipeline.NewWorkflowPersistence(selected), fork, selected, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 		)
@@ -119,7 +124,7 @@ func selectedStorePreparationOwnerForTest(t testing.TB, selected any) runforkexe
 			FlowRoutes: selected, StandingRestarts: selected,
 		}
 		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
-			runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
+			runtimepipeline.NewWorkflowPersistence(selected), fork, selected, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 		)

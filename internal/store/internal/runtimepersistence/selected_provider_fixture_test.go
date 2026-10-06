@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -32,7 +34,16 @@ func newSelectedProviderCompletionFixture(t *testing.T, store selectedCompletion
 
 func newSelectedProviderCompletionFixtureWithProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process startupownership.ProcessCapability) selectedCompletionFixture {
 	t.Helper()
-	source := grantReceiverEntitySource(t)
+	root := t.TempDir()
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: grant-receiver-root\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "name: global\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/entities.yaml"), "receiver: {}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "events.yaml"), "test.grant_receiver:\n")
+	compiled, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(compiled)
 	bundle, _ := semanticview.Bundle(source)
 	f := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, process, bundle.SourceArtifact)
 	f.providerSource = source

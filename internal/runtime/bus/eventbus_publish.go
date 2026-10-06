@@ -591,6 +591,12 @@ func (eb *EventBus) finalizeCommittedAgentReadiness(ctx context.Context, event e
 }
 
 func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication eventBusCommitPublishPlan) (PreparedPublish, PublicationCommand, error) {
+	if eb.receiverExecution.Kind() == eventreceiver.ExecutionSelectedRecoveryPublication {
+		event := publication.event
+		if err := eb.receiverExecution.ValidateTurnTimeoutRecoveryPublication(event.RunID(), event.Producer().ID(), event.ExecutionMode()); err != nil {
+			return PreparedPublish{}, PublicationCommand{}, err
+		}
+	}
 	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
 		return PreparedPublish{}, PublicationCommand{}, err
 	}
@@ -728,6 +734,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if publication.dynamicFlowCreation != nil && publication.dynamicFlowCreation.DispatchMode == runtimepipeline.DynamicFlowRuntimeCreationDispatchStartupRecovery {
 		prepared.dispatchQueued = true
 		prepared.queueReason = dispatchQueueStartupCreationRecovery
+	}
+	if eb.receiverExecution.Kind() == eventreceiver.ExecutionSelectedRecoveryPublication {
+		prepared.dispatchQueued = true
+		prepared.queueReason = "startup_turn_cancellation_recovery"
 	}
 	if prepared.requiresReceiver() {
 		receiver, receiverErr := eb.receiverProjection(ctx, evt.DeliveryContext())

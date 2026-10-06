@@ -321,7 +321,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		return nil
 	}
 	if requireObligationOwner {
-		if err := opts.ReceiverExecution.Validate(); err != nil {
+		if err := opts.ReceiverExecution.ValidateExecutable(); err != nil {
 			return nil
 		}
 		if !opts.ExecutionPosture.Valid() {

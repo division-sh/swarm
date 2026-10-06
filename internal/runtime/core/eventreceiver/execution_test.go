@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -14,6 +15,48 @@ import (
 )
 
 const receiverTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+func TestSelectedRecoveryPublicationNeverBindsExecution(t *testing.T) {
+	authority, admission, controller := selectedReceiverState(t, executionmode.Live)
+	actor := agentidentitytest.RootRuntimeForRun(t, authority.SelectedFork.ForkRunID, "recovered", "receiver-test")
+	authority.Target = runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(),
+		RunID: actor.RunID, AgentID: actor.AgentID(), AgentIdentity: actor, SessionID: uuid.NewString()}
+	variant, err := SelectedRecoveryPublication(authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := variant.ValidateTurnTimeoutRecoveryPublication(authority.Target.RunID, runtimeeffects.TurnTimeoutProducerID(), executionmode.Live); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []struct {
+		run, producer string
+		mode          executionmode.Mode
+	}{
+		{uuid.NewString(), runtimeeffects.TurnTimeoutProducerID(), executionmode.Live},
+		{authority.Target.RunID, "foreign", executionmode.Live},
+		{authority.Target.RunID, runtimeeffects.TurnTimeoutProducerID(), executionmode.Mock},
+	} {
+		if err := variant.ValidateTurnTimeoutRecoveryPublication(input.run, input.producer, input.mode); err == nil {
+			t.Fatal("foreign publication accepted")
+		}
+	}
+	if _, err := variant.Bind(context.Background(), executionmode.Live); err == nil {
+		t.Fatal("recovery bound executable receiver")
+	}
+	if err := variant.ValidateExecutable(); err == nil {
+		t.Fatal("publication-only posture admitted executable composition")
+	}
+	if err := variant.ValidateBound(context.Background(), executionmode.Live); err == nil {
+		t.Fatal("recovery validated executable receiver")
+	}
+	if _, err := variant.WithSelectedAdmission(admission); err == nil {
+		t.Fatal("recovery promoted through managed admission")
+	}
+	variant.controller = controller
+	if err := variant.Validate(); err == nil {
+		t.Fatal("recovery accepted provider controller")
+	}
+}
 
 type receiverContextKey struct{}
 
