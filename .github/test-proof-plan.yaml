@@ -92,6 +92,7 @@ profiles:
     - persistence-authority-debt-census
     - store-runtime-full-01
     - store-runtime-full-02
+    - store-runtime-flow-lifecycle
     - store-runtime-fanout
     - store-runtime-fanout-process
     - store-runtime-fork-generation
@@ -163,6 +164,7 @@ profiles:
     - persistence-authority-debt-census
     - store-runtime-full-01
     - store-runtime-full-02
+    - store-runtime-flow-lifecycle
     - store-runtime-fanout
     - store-runtime-fanout-process
     - store-runtime-fork-generation
@@ -817,17 +819,27 @@ units:
   store-runtime-full-02:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    # Positive RE2 complement of TestFanOut and TestForkG within D-F.
-    run: '^Test([D-E].*|F($|[^ao].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
+    # Positive RE2 complement of TestFanOut, TestFlow and TestForkG within D-F.
+    run: '^Test([D-E].*|F($|[^alo].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|l($|[^o].*|o($|[^w].*))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
     required_children:
       TestDormantStandingPreparationDoesNotConstructBothStores: [sqlite, postgres]
       TestForkActivationInventoriesConstructedHeadersBothStores: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields]
-      TestFlowActivationSourceSetRebindBothStores: [sqlite/planned, sqlite/agents_registered, sqlite/route_installed, sqlite/timers_armed, sqlite/ready, postgres/planned, postgres/agents_registered, postgres/route_installed, postgres/timers_armed, postgres/ready]
-      TestFlowAttachmentNativeLostAckAfterRebindBothStores: [sqlite, postgres]
       TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores: [postgres/creation_wins, postgres/terminal_wins, sqlite/creation_wins, sqlite/terminal_wins]
       TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores: [sqlite, postgres]
       TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores: [sqlite, postgres]
       TestDynamicFlowCreationSourceSetRebindBothStores: [sqlite/pending, sqlite/emitted, postgres/pending, postgres/emitted]
+      TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores: [postgres/inert, postgres/staged, sqlite/inert, sqlite/staged]
+      TestDeploymentConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-flow-lifecycle:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: '^TestFlow.*$'
+    required_children:
+      TestFlowActivationSourceSetRebindBothStores: [sqlite/planned, sqlite/agents_registered, sqlite/route_installed, sqlite/timers_armed, sqlite/ready, postgres/planned, postgres/agents_registered, postgres/route_installed, postgres/timers_armed, postgres/ready]
+      TestFlowAttachmentNativeLostAckAfterRebindBothStores: [sqlite, postgres]
       TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores: [postgres/acknowledged, postgres/unacknowledged, sqlite/acknowledged, sqlite/unacknowledged]
       TestFlowConstructorReplayAndRefusalBothStores: [postgres/foreign_fields, postgres/foreign_header, postgres/missing_fields, postgres/missing_header, postgres/missing_readiness, postgres/missing_receipt, postgres/progress, postgres/wrong_receipt_clock, sqlite/foreign_fields, sqlite/foreign_header, sqlite/missing_fields, sqlite/missing_header, sqlite/missing_readiness, sqlite/missing_receipt, sqlite/progress, sqlite/wrong_receipt_clock]
       TestFlowConstructorImmutableReplayConflictBothStores: [postgres/accumulator, postgres/attempt_limit, postgres/bookkeeping, postgres/entity_contract, postgres/fields, postgres/flow_path, postgres/initial_stage, postgres/instance_id, postgres/nullable, postgres/occurrence, postgres/policy, postgres/workflow_version, sqlite/accumulator, sqlite/attempt_limit, sqlite/bookkeeping, sqlite/entity_contract, sqlite/fields, sqlite/flow_path, sqlite/initial_stage, sqlite/instance_id, sqlite/nullable, sqlite/occurrence, sqlite/policy, sqlite/workflow_version]
@@ -843,7 +855,6 @@ units:
       TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores: [sqlite, postgres]
       TestFlowConstructorDescendantFaultRollsBackTreeBothStores: [postgres/entity_state, postgres/flow_instance_runtime_readiness, postgres/flow_instances, postgres/workflow_instance_initial_materializations, sqlite/entity_state, sqlite/flow_instance_runtime_readiness, sqlite/flow_instances, sqlite/workflow_instance_initial_materializations]
       TestFlowConstructorDescendantCancellationAndCorruptionBothStores: [sqlite, postgres]
-      TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores: [postgres/inert, postgres/staged, sqlite/inert, sqlite/staged]
       TestFlowAttachmentPhaseFailureRetainsConstructionBothStores: [postgres/agents_registered/acknowledged_error, postgres/agents_registered/before_commit, postgres/agents_registered/panic_after_commit, postgres/agents_registered/unacknowledged_response, postgres/planned/acknowledged_error, postgres/planned/before_commit, postgres/planned/panic_after_commit, postgres/planned/unacknowledged_response, postgres/route_installed/acknowledged_error, postgres/route_installed/before_commit, postgres/route_installed/panic_after_commit, postgres/route_installed/unacknowledged_response, postgres/timers_armed/acknowledged_error, postgres/timers_armed/before_commit, postgres/timers_armed/panic_after_commit, postgres/timers_armed/unacknowledged_response, sqlite/agents_registered/acknowledged_error, sqlite/agents_registered/before_commit, sqlite/agents_registered/panic_after_commit, sqlite/agents_registered/unacknowledged_response, sqlite/planned/acknowledged_error, sqlite/planned/before_commit, sqlite/planned/panic_after_commit, sqlite/planned/unacknowledged_response, sqlite/route_installed/acknowledged_error, sqlite/route_installed/before_commit, sqlite/route_installed/panic_after_commit, sqlite/route_installed/unacknowledged_response, sqlite/timers_armed/acknowledged_error, sqlite/timers_armed/before_commit, sqlite/timers_armed/panic_after_commit, sqlite/timers_armed/unacknowledged_response]
       TestFlowAttachmentCleanupRetainsExactPredecessorBothStores: [postgres/abandonment/fail_once, postgres/abandonment/persistent, postgres/abandonment_response_loss/fail_once, postgres/abandonment_response_loss/persistent, postgres/agent_join/fail_once, postgres/agent_join/persistent, postgres/route/fail_once, postgres/route/persistent, postgres/timer/fail_once, postgres/timer/persistent, sqlite/abandonment/fail_once, sqlite/abandonment/persistent, sqlite/abandonment_response_loss/fail_once, sqlite/abandonment_response_loss/persistent, sqlite/agent_join/fail_once, sqlite/agent_join/persistent, sqlite/route/fail_once, sqlite/route/persistent, sqlite/timer/fail_once, sqlite/timer/persistent]
       TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores: [sqlite, postgres]
@@ -851,7 +862,6 @@ units:
       TestFlowAttachmentAgentAcquisitionCutsBothStores: [postgres/after_publish/caller_cancel, postgres/after_publish/error, postgres/after_publish/panic, postgres/before_publish/caller_cancel, postgres/before_publish/error, postgres/before_publish/panic, sqlite/after_publish/caller_cancel, sqlite/after_publish/error, sqlite/after_publish/panic, sqlite/before_publish/caller_cancel, sqlite/before_publish/error, sqlite/before_publish/panic]
       TestFlowAttachmentRouteAcquisitionCutsBothStores: [postgres/after_publish/caller_cancel, postgres/after_publish/error, postgres/after_publish/panic, postgres/before_publish/caller_cancel, postgres/before_publish/error, postgres/before_publish/panic, sqlite/after_publish/caller_cancel, sqlite/after_publish/error, sqlite/after_publish/panic, sqlite/before_publish/caller_cancel, sqlite/before_publish/error, sqlite/before_publish/panic]
       TestFlowAttachmentNativeCommitAcknowledgmentBothStores: [postgres/aborted/commit_before_lost_ack, postgres/aborted/rollback_before_ack, postgres/first/commit_before_lost_ack, postgres/first/rollback_before_ack, postgres/retired/commit_before_lost_ack, postgres/retired/rollback_before_ack, sqlite/aborted/commit_before_lost_ack, sqlite/aborted/rollback_before_ack, sqlite/first/commit_before_lost_ack, sqlite/first/rollback_before_ack, sqlite/retired/commit_before_lost_ack, sqlite/retired/rollback_before_ack]
-      TestDeploymentConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
