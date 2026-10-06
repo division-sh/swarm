@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
@@ -112,11 +111,26 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	absent := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
 		"verify", contracts, "--config", configPath, "--json")
 	var incomplete struct {
-		OK                bool                              `json:"ok"`
-		ValidationScope   string                            `json:"validation_scope"`
-		AdmissionComplete bool                              `json:"admission_complete"`
-		LiveReadiness     string                            `json:"live_readiness"`
-		Observations      []bootverify.AdmissionObservation `json:"observations"`
+		OK                bool   `json:"ok"`
+		ValidationScope   string `json:"validation_scope"`
+		AdmissionComplete bool   `json:"admission_complete"`
+		LiveReadiness     string `json:"live_readiness"`
+		Observations      []struct {
+			CheckID      string    `json:"check_id"`
+			Owner        string    `json:"owner"`
+			Subject      string    `json:"subject"`
+			Class        string    `json:"class"`
+			Status       string    `json:"status"`
+			Reason       string    `json:"reason"`
+			StartedAt    time.Time `json:"started_at"`
+			FinishedAt   time.Time `json:"finished_at"`
+			Dependencies []string  `json:"dependencies"`
+			FailureClass string    `json:"failure_class"`
+			NotRunCause  *struct {
+				Kind string `json:"kind"`
+				Path string `json:"path"`
+			} `json:"not_run_cause"`
+		} `json:"observations"`
 	}
 	if err := json.Unmarshal([]byte(absent.output), &incomplete); absent.err != nil || err != nil || !incomplete.OK ||
 		incomplete.ValidationScope != "deployment" || incomplete.AdmissionComplete || incomplete.LiveReadiness != "not_evaluated" {
@@ -134,12 +148,12 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 			continue
 		}
 		seen, known := expected[observation.CheckID]
-		if !known || seen || observation.Class != bootverify.AdmissionDeploymentObservation || observation.Status != bootverify.AdmissionNotRun || observation.Reason == "" || observation.FailureClass != "" {
+		if !known || seen || observation.Class != "deployment" || observation.Status != "not_run" || observation.Reason == "" || observation.FailureClass != "" {
 			t.Fatalf("invalid fresh-store observation: %+v", observation)
 		}
 		expected[observation.CheckID] = true
 		if observation.CheckID == "selected_store_access" {
-			if observation.NotRunCause == nil || observation.NotRunCause.Kind != bootverify.AdmissionAbsentSQLiteStore || observation.NotRunCause.Path != store.inspectionSQLitePath {
+			if observation.NotRunCause == nil || observation.NotRunCause.Kind != "absent_sqlite_store" || observation.NotRunCause.Path != store.inspectionSQLitePath {
 				t.Fatalf("fresh-store absence root: %+v", observation)
 			}
 		} else if observation.NotRunCause != nil || !reflect.DeepEqual(observation.Dependencies, []string{"selected_store_access"}) {

@@ -116,6 +116,9 @@ func TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning(t *testing.T)
 		{"process_harness_test.go", "github.com/division-sh/swarm/internal/store", "", false},
 		{"process_harness_test.go", "github.com/division-sh/swarm/internal/serveapp", "", false},
 		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/runtime/llm", "", false},
+		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/runtime/bootverify", "", false},
+		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/runtime/bootverify", "bootverify", false},
+		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/runtime/bootverify", ".", false},
 		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/cliapp", "", false},
 		{"other_test.go", "net/http", "", true},
 	} {
