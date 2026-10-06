@@ -16061,6 +16061,12 @@ platform_tables:
         interface and plan-generation provenance determine destination through the immutable
         compiled onboarding.learned_destination relation; destination is not a separate mutable
         durable owner and must not be recovered from the current identity binding.
+        Activation publication, including reconnect/rebind retirement and successor insertion,
+        preserves binding confirmation's onboarding-parent-before-principal order and acquires
+        the canonical selected-principal transaction fence before activation row locks.
+        Channel delivery authorization acquires that same fence before activation. Explicit
+        and foreign-key principal locks therefore cannot invert the
+        principal-before-activation order; the fence remains held through commit or rollback.
       ddl: |
         CREATE TABLE connected_channel_activations (
             activation_id UUID PRIMARY KEY,
