@@ -41,6 +41,12 @@ type CanceledTurnStore interface {
 	CommitCanceledTurn(context.Context, CanceledTurnCommand) (CanceledTurnCommit, error)
 }
 
+// Startup reconstructs the immutable first physical attempt, not a new turn
+// or a current-generation token. The atomic commit revalidates this evidence.
+type CanceledTurnRecoveryStore interface {
+	ListCanceledTurnRecoveries(context.Context, RecoveryRequest) ([]TurnExecutionResult, error)
+}
+
 func TurnTimeoutProducerID() string { return "agent-turn-timeout" }
 
 type TurnTimeoutReactionOwner interface {

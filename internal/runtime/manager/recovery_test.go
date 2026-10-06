@@ -182,6 +182,10 @@ func (s *startupRecoveryOrderStore) ReconcileExternalEffectAttempts(context.Cont
 	return runtimeeffects.RecoverySummary{}, s.effectsErr
 }
 
+func (*startupRecoveryOrderStore) ListCanceledTurnRecoveries(context.Context, runtimeeffects.RecoveryRequest) ([]runtimeeffects.TurnExecutionResult, error) {
+	return nil, nil
+}
+
 func (s *startupRecoveryOrderStore) LoadAgents(ctx context.Context) ([]PersistedAgent, error) {
 	*s.order = append(*s.order, "agents")
 	return s.recoveryTestStore.LoadAgents(ctx)

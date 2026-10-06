@@ -725,7 +725,7 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		if turn.Attempt.Origin.Kind != runtimeeffects.CompletionOriginDirective || !turn.Attempt.Origin.Directive.Same(directiveOrigin) {
 			return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, errors.New("canceled directive substituted its admitted operation"))
 		}
-		canceled, settleErr := am.settleCanceledDirective(directiveCtx, turn)
+		canceled, settleErr := am.settleCanceledDirective(directiveCtx, turn, providerSettlement)
 		if !canceled.Acknowledged || canceled.Validate() != nil {
 			return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, settleErr)
 		}
@@ -1102,6 +1102,9 @@ func (am *AgentManager) reconcileExternalEffectsForStartup(ctx context.Context) 
 		request := runtimeeffects.NewRecoveryRequest(time.Now().UTC(), am.executionPosture)
 		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, request); err != nil {
 			return fmt.Errorf("reconcile external effect attempts: %w", err)
+		}
+		if err := am.reconcileCanceledTurnsForStartup(ctx, request); err != nil {
+			return fmt.Errorf("reconcile canceled agent turns: %w", err)
 		}
 	}
 	am.startupEffectsReconciled = true

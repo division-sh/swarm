@@ -36,6 +36,64 @@ func turnExecutionClockForOrigin(t *testing.T, origin CompletionOrigin) (Logical
 	return clock, Attempt{AttemptID: clock.FirstAttempt, OperationID: uuid.NewString(), Origin: origin, TurnTimeout: timeridentity.CloneTurnTimeout(bound)}
 }
 
+func TestTurnExecutionObservesOnlyExactCommittedCompletionCancellation(t *testing.T) {
+	for _, mode := range []string{"timeout", "timestamp_precision", "terminate", "missing_ack", "foreign_origin", "foreign_timeout", "premature_timeout", "changed_intent", "closed"} {
+		t.Run(mode, func(t *testing.T) {
+			clock, attempt := turnExecutionClock(t)
+			if mode == "timestamp_precision" {
+				clock.LaunchedAt = clock.LaunchedAt.Truncate(time.Microsecond)
+				clock.Timeout.After = time.Nanosecond
+				clock.DeadlineAt = clock.LaunchedAt.Add(time.Nanosecond)
+			}
+			wake := make(chan time.Time)
+			ctx, owner := newTurnExecution(context.Background(), func(time.Time) (<-chan time.Time, func()) { return wake, func() {} })
+			defer func() { _, _ = owner.Finish() }()
+			probe := &turnExecutionProbe{launchClockProbe: launchClockProbe{result: ExternalAttemptLaunch{Committed: true, Turn: &clock}}}
+			handle := &Handle{controller: NewController(probe), attempt: attempt}
+			if err := handle.MarkLaunched(ctx); err != nil {
+				t.Fatal(err)
+			}
+			intent := TurnCancellation{Committed: true, Requested: true, Origin: attempt.Origin, Reason: deliverylifecycle.CancellationTurnTimeout, CauseEvent: clock.TimeoutEvent, RequestedAt: clock.DeadlineAt}
+			switch mode {
+			case "timestamp_precision":
+				intent.RequestedAt = clock.DeadlineAt.Truncate(time.Microsecond)
+			case "terminate":
+				intent.Reason = deliverylifecycle.CancellationTerminate
+				intent.CauseEvent = uuid.NewString()
+			case "missing_ack":
+				intent.Committed = false
+			case "foreign_origin":
+				intent.Origin.Directive.OperationID = uuid.NewString()
+			case "foreign_timeout":
+				intent.CauseEvent = uuid.NewString()
+			case "premature_timeout":
+				intent.RequestedAt = clock.LaunchedAt.Add(-time.Second)
+			case "changed_intent":
+				if err := observeTurnCancellation(ctx, intent); err != nil {
+					t.Fatal(err)
+				}
+				intent.RequestedAt = intent.RequestedAt.Add(time.Second)
+			case "closed":
+				_, _ = owner.Finish()
+			}
+			err := observeTurnCancellation(ctx, intent)
+			if mode == "timeout" || mode == "terminate" || mode == "timestamp_precision" {
+				var authored *AuthoredTurnCancellationError
+				if err != nil || !errors.As(context.Cause(ctx), &authored) || authored.Cancellation.Reason != intent.Reason {
+					t.Fatalf("exact completion cancellation lost: cause=%v err=%v", context.Cause(ctx), err)
+				}
+				intent.CauseEvent = uuid.NewString()
+				result, err := owner.Finish()
+				if err != nil || result.Cancellation.CauseEvent == intent.CauseEvent {
+					t.Fatalf("owner exposed mutable cancellation: %+v err=%v", result, err)
+				}
+			} else if err == nil {
+				t.Fatalf("%s completion gained cancellation authority", mode)
+			}
+		})
+	}
+}
+
 func TestTurnExecutionStartsOnlyOnAcknowledgedLaunchAndNeverResets(t *testing.T) {
 	clock, attempt := turnExecutionClock(t)
 	wake := make(chan time.Time, 1)

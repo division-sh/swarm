@@ -57,6 +57,13 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 			} else {
 				outcome.disposition = runtimeeffects.CompletionSettlementCurrent
 			}
+			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+				// Timeout admission locks origin before physical attempt. Keep
+				// that order while retaining the lifecycle permit above.
+				if _, err := providerTurnPendingTx(txctx, tx, attempt, s.delivery, s.directives); err != nil {
+					return err
+				}
+			}
 			if err := requireCompletionAttemptPostgres(txctx, tx, attempt, attemptSettlement); err != nil {
 				return err
 			}
@@ -104,7 +111,14 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 			if err != nil {
 				return err
 			}
-			if attemptSettlement.Settlement.CompletionProjectionPhase == runtimeeffects.CompletionProjectionResponseSettled {
+			if permit.Kind != completionSettlementDrained && attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+				cancellation, err := observeCanceledProviderOrigin(txctx, tx, true, attempt, s.delivery, s.directives)
+				if err != nil {
+					return err
+				}
+				outcome.cancellation = cancellation.intent
+			}
+			if outcome.cancellation == nil && attemptSettlement.Settlement.CompletionProjectionPhase == runtimeeffects.CompletionProjectionResponseSettled {
 				admitted, err := loadSettledCompletionContinuationPostgres(txctx, tx, attempt)
 				if err != nil {
 					return err
@@ -118,6 +132,11 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 					return err
 				}
 				outcome.finalization, outcome.originSettled, outcome.cancellation = drain.finalization, drain.originSettled, drain.cancellation
+			}
+			if outcome.cancellation != nil {
+				if err := deactivateCanceledDeliveryContinuationsTx(txctx, tx, true, attempt.Origin); err != nil {
+					return err
+				}
 			}
 			if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
 				terminal, err := externalEffectRunTerminal(txctx, tx, true, attempt.Authority.Target.RunID)
@@ -188,6 +207,11 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 			} else {
 				outcome.disposition = runtimeeffects.CompletionSettlementCurrent
 			}
+			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+				if _, err := providerTurnPendingTx(txctx, tx, attempt, s.delivery, s.directives); err != nil {
+					return err
+				}
+			}
 			if err := requireCompletionAttemptSQLite(txctx, tx, attempt, attemptSettlement); err != nil {
 				return err
 			}
@@ -235,7 +259,14 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 			if err != nil {
 				return err
 			}
-			if attemptSettlement.Settlement.CompletionProjectionPhase == runtimeeffects.CompletionProjectionResponseSettled {
+			if permit.Kind != completionSettlementDrained && attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+				cancellation, err := observeCanceledProviderOrigin(txctx, tx, false, attempt, s.delivery, s.directives)
+				if err != nil {
+					return err
+				}
+				outcome.cancellation = cancellation.intent
+			}
+			if outcome.cancellation == nil && attemptSettlement.Settlement.CompletionProjectionPhase == runtimeeffects.CompletionProjectionResponseSettled {
 				admitted, err := loadSettledCompletionContinuationSQLite(txctx, tx, attempt)
 				if err != nil {
 					return err
@@ -249,6 +280,11 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 					return err
 				}
 				outcome.finalization, outcome.originSettled, outcome.cancellation = drain.finalization, drain.originSettled, drain.cancellation
+			}
+			if outcome.cancellation != nil {
+				if err := deactivateCanceledDeliveryContinuationsTx(txctx, tx, false, attempt.Origin); err != nil {
+					return err
+				}
 			}
 			if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
 				terminal, err := externalEffectRunTerminal(txctx, tx, false, attempt.Authority.Target.RunID)

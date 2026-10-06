@@ -36,14 +36,21 @@ func settleCanceledDeliveryTurn(ctx context.Context, mutation *mutationprotocol.
 		}
 		// The recorded response remains immutable history, but canceled work
 		// cannot remain an executable completion continuation.
-		query := `UPDATE runtime_external_effect_attempts SET completion_continuation_active=FALSE WHERE origin_delivery_id=$1::uuid AND completion_continuation_active=TRUE`
-		if !postgres {
-			query = `UPDATE runtime_external_effect_attempts SET completion_continuation_active=0 WHERE origin_delivery_id=? AND completion_continuation_active=1`
-		}
-		_, err = tx.ExecContext(ctx, query, attempt.Origin.Delivery.DeliveryID())
-		return err
+		return deactivateCanceledDeliveryContinuationsTx(ctx, tx, postgres, attempt.Origin)
 	})
 	return snapshot, err
+}
+
+func deactivateCanceledDeliveryContinuationsTx(ctx context.Context, tx *sql.Tx, postgres bool, origin runtimeeffects.CompletionOrigin) error {
+	if origin.Kind != runtimeeffects.CompletionOriginDelivery {
+		return nil
+	}
+	query := `UPDATE runtime_external_effect_attempts SET completion_continuation_active=FALSE WHERE origin_delivery_id=$1::uuid AND completion_continuation_active=TRUE`
+	if !postgres {
+		query = `UPDATE runtime_external_effect_attempts SET completion_continuation_active=0 WHERE origin_delivery_id=? AND completion_continuation_active=1`
+	}
+	_, err := tx.ExecContext(ctx, query, origin.Delivery.DeliveryID())
+	return err
 }
 
 type canceledTurnSettlementFacts struct {

@@ -514,6 +514,10 @@ func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context) ([]budg
 	return s.budgetPostgresOwner.ListBudgetProjectionTargets(ctx)
 }
 
+func (s *PostgresStore) ListCanceledTurnRecoveries(ctx context.Context, request effects.RecoveryRequest) ([]effects.TurnExecutionResult, error) {
+	return s.effectPostgresOwner.ListCanceledTurnRecoveries(ctx, request)
+}
+
 func (s *PostgresStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
 	return s.channelOnboardingPostgresOwner.ListChannelOnboardingOperations(ctx)
 }
@@ -1768,6 +1772,10 @@ func (s *SQLiteRuntimeStore) ListAuthorActivity(ctx context.Context, opts author
 
 func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context) ([]budgetspend.ProjectionTarget, error) {
 	return s.budgetSQLiteOwner.ListBudgetProjectionTargets(ctx)
+}
+
+func (s *SQLiteRuntimeStore) ListCanceledTurnRecoveries(ctx context.Context, request effects.RecoveryRequest) ([]effects.TurnExecutionResult, error) {
+	return s.effectSQLiteOwner.ListCanceledTurnRecoveries(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {

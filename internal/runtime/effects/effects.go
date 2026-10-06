@@ -1367,6 +1367,9 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 			AttemptID: result.AttemptID, Disposition: result.Disposition, Origin: result.Origin,
 			OriginSettled: result.OriginSettled, Cancellation: result.Cancellation, Finalization: result.Finalization,
 		})
+		if result.Cancellation != nil {
+			err = errors.Join(err, observeTurnCancellation(ctx, *result.Cancellation))
+		}
 	}
 	if result.Committed && result.SpendRecorded && h.controller.completionSpendProjector != nil {
 		h.controller.completionSpendProjector.ProjectCommittedCompletionSpend(context.WithoutCancel(ctx), CompletionSpendProjection{

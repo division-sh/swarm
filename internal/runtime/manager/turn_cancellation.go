@@ -46,10 +46,15 @@ func (am *AgentManager) prepareCanceledTurn(ctx context.Context, turn effects.Tu
 	return store, publication, command, nil
 }
 
-func (am *AgentManager) settleCanceledDelivery(ctx context.Context, event events.Event, heartbeat *deliverylifecycle.ClaimHeartbeat, turn effects.TurnExecutionResult) (result effects.CanceledTurnCommit, err error) {
+func (am *AgentManager) settleCanceledDelivery(ctx context.Context, event events.Event, heartbeat *deliverylifecycle.ClaimHeartbeat, turn effects.TurnExecutionResult, observed effects.CompletionSettlementObservation) (result effects.CanceledTurnCommit, err error) {
 	claim, ok := deliverylifecycle.ClaimFromContext(ctx)
 	if !ok || turn.Attempt.Origin.Kind != effects.CompletionOriginDelivery || !claim.Same(turn.Attempt.Origin.Delivery) {
 		return result, fmt.Errorf("canceled delivery requires its exact claimed execution")
+	}
+	captured := observed.Disposition == effects.CompletionSettlementDrained
+	ctx, err = canceledTurnSettlementContext(ctx, turn, observed)
+	if err != nil {
+		return result, err
 	}
 	store, publication, command, err := am.prepareCanceledTurn(ctx, turn)
 	if err != nil {
@@ -60,16 +65,28 @@ func (am *AgentManager) settleCanceledDelivery(ctx context.Context, event events
 			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(context.WithoutCancel(ctx), command.Publication))
 		}()
 	}
-	guard, err := heartbeat.BeginSettlement()
-	if err != nil {
-		return result, err
+	var guard *deliverylifecycle.ClaimSettlementGuard
+	var heartbeatErr error
+	if captured {
+		// Captured evidence retains settlement rights, not predecessor renewal
+		// rights. Join the old renewal owner before the native atomic commit.
+		heartbeatErr = heartbeat.Stop()
+	} else {
+		guard, err = heartbeat.BeginSettlement()
+		if err != nil {
+			return result, err
+		}
+		ctx = guard.Context()
 	}
-	result, err = store.CommitCanceledTurn(guard.Context(), command)
+	result, err = store.CommitCanceledTurn(ctx, command)
 	exact := result.Acknowledged && result.Validate() == nil && result.Origin.Same(turn.Attempt.Origin)
 	if !exact && err == nil {
 		err = fmt.Errorf("canceled delivery returned no exact settlement acknowledgment")
 	}
-	err = errors.Join(err, guard.Finish(exact))
+	if guard != nil {
+		heartbeatErr = guard.Finish(exact)
+	}
+	err = errors.Join(err, heartbeatErr)
 	if !exact {
 		return result, err
 	}
@@ -87,9 +104,13 @@ func (am *AgentManager) settleCanceledDelivery(ctx context.Context, event events
 	return result, err
 }
 
-func (am *AgentManager) settleCanceledDirective(ctx context.Context, turn effects.TurnExecutionResult) (result effects.CanceledTurnCommit, err error) {
+func (am *AgentManager) settleCanceledDirective(ctx context.Context, turn effects.TurnExecutionResult, observed effects.CompletionSettlementObservation) (result effects.CanceledTurnCommit, err error) {
 	if turn.Attempt.Origin.Kind != effects.CompletionOriginDirective {
 		return result, fmt.Errorf("canceled directive requires its exact operation origin")
+	}
+	ctx, err = canceledTurnSettlementContext(ctx, turn, observed)
+	if err != nil {
+		return result, err
 	}
 	store, publication, command, err := am.prepareCanceledTurn(ctx, turn)
 	if err != nil {
@@ -111,4 +132,65 @@ func (am *AgentManager) settleCanceledDirective(ctx context.Context, turn effect
 		err = errors.Join(err, publication.DispatchTurnTimeoutReaction(context.WithoutCancel(ctx), result.Publication))
 	}
 	return result, err
+}
+
+func canceledTurnSettlementContext(ctx context.Context, turn effects.TurnExecutionResult, observed effects.CompletionSettlementObservation) (context.Context, error) {
+	if observed.Disposition != effects.CompletionSettlementDrained {
+		return ctx, nil
+	}
+	if observed.AttemptID == "" || !observed.Origin.Same(turn.Attempt.Origin) || observed.Cancellation == nil ||
+		observed.Cancellation.ValidateIntent() != nil || !observed.Cancellation.Origin.Same(turn.Attempt.Origin) ||
+		observed.Cancellation.CauseEvent != turn.Cancellation.CauseEvent || observed.Cancellation.Reason != turn.Cancellation.Reason ||
+		!observed.Cancellation.RequestedAt.Equal(turn.Cancellation.RequestedAt) {
+		return nil, fmt.Errorf("captured cancellation requires exact committed physical-tail evidence")
+	}
+	return context.WithoutCancel(ctx), nil
+}
+
+func (am *AgentManager) reconcileCanceledTurnsForStartup(ctx context.Context, request effects.RecoveryRequest) error {
+	recovery, ok := am.roles.EffectsRecovery.(effects.CanceledTurnRecoveryStore)
+	if !ok {
+		return fmt.Errorf("effect recovery requires its exact canceled-turn snapshot owner")
+	}
+	for {
+		turns, err := recovery.ListCanceledTurnRecoveries(ctx, request)
+		if err != nil {
+			return err
+		}
+		if len(turns) == 0 {
+			return nil
+		}
+		for _, turn := range turns {
+			if err := am.commitRecoveredCanceledTurn(ctx, turn); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (am *AgentManager) commitRecoveredCanceledTurn(ctx context.Context, turn effects.TurnExecutionResult) (err error) {
+	store, publication, command, err := am.prepareCanceledTurn(ctx, turn)
+	if err != nil {
+		return err
+	}
+	if command.Publication != nil {
+		defer func() {
+			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(context.WithoutCancel(ctx), command.Publication))
+		}()
+	}
+	result, err := store.CommitCanceledTurn(ctx, command)
+	if !result.Acknowledged || result.Validate() != nil || !result.Origin.Same(turn.Attempt.Origin) {
+		return errors.Join(err, fmt.Errorf("recovered cancellation has no exact atomic acknowledgment"))
+	}
+	if result.Origin.Kind == effects.CompletionOriginDelivery {
+		if am.roles.DeliveryRuntime == nil {
+			return errors.Join(err, fmt.Errorf("recovered cancellation lacks its continuation owner"))
+		}
+		err = errors.Join(err, am.roles.DeliveryRuntime.ReleaseDeliveryContinuation(result.Origin.Delivery.DeliveryID()))
+		am.logDeliveryLifecycle(ctx, result.Delivery)
+	}
+	// The same transaction persisted the reaction and its pipeline obligations.
+	// Startup must not execute them before agent/runtime admission; the existing
+	// RecoverAfterStartupAdmission pass takes their released publication claims.
+	return err
 }

@@ -921,6 +921,14 @@ units:
     # TestC moves here after full01 exceeded its unchanged command budget.
     run: '^Test(C.*|[G-H].*)$'
     required_children:
+      TestCanceledTurnPreservesCapturedProviderDrainBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]
+      TestCanceledOriginWaitsForEveryCapturedProviderTailBothStores: [sqlite, postgres]
+      TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]
+      TestCanceledTurnRecoveryRejectsCorruptFirstOriginBothStores: [missing_first_attempt/sqlite, missing_first_attempt/postgres, foreign_run/sqlite, foreign_run/postgres, foreign_cause/sqlite, foreign_cause/postgres, before_first_launch/sqlite, before_first_launch/postgres]
+      TestCanceledTurnReactionCommitsAtomicallyBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]
+      TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores: [sqlite, postgres]
+      TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores: [sqlite, postgres]
+      TestCompletionReportsCanceledOriginWithoutDroppingAcceptedResponseBothStores: [sqlite, postgres]
       TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores: [sqlite, postgres]
       TestChannelDeliveryEffectCurrentnessSelectedStoreParity: [sqlite/eligibility_before_authorize, sqlite/eligibility_before_launch, sqlite/eligibility_after_launch, sqlite/eligibility_after_observation, sqlite/eligibility_edit, sqlite/eligibility_uncertain, sqlite/eligibility_recover_authorized, sqlite/eligibility_recover_launched, sqlite/eligibility_recover_observed, postgres/eligibility_before_authorize, postgres/eligibility_before_launch, postgres/eligibility_after_launch, postgres/eligibility_after_observation, postgres/eligibility_edit, postgres/eligibility_uncertain, postgres/eligibility_recover_authorized, postgres/eligibility_recover_launched, postgres/eligibility_recover_observed]
       TestConstructedHeaderGateSummaryBothStores: [sqlite, postgres]
@@ -934,6 +942,9 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[I-O].*$
     required_children:
+      TestManagerOwnsDirectiveLaunchTimeoutAndReactionBothStores: [sqlite, postgres]
+      TestLogicalTurnExecutionCancelsAndSettlesRealDeliveryOriginBothStores: [sqlite, postgres]
+      TestLogicalTurnExecutionCancelsRealDirectiveWithoutDeliveryBothStores: [sqlite, postgres]
       TestOrdinaryHandlerRequiresCanonicalConstructionBothStores: [postgres/fielded_accumulation/absent, postgres/fielded_accumulation/constructed, postgres/fielded_stage/absent, postgres/fielded_stage/constructed, postgres/fieldless_emit/absent, postgres/fieldless_emit/constructed, postgres/fieldless_gate/absent, postgres/fieldless_gate/constructed, postgres/fieldless_stage/absent, postgres/fieldless_stage/constructed, sqlite/fielded_accumulation/absent, sqlite/fielded_accumulation/constructed, sqlite/fielded_stage/absent, sqlite/fielded_stage/constructed, sqlite/fieldless_emit/absent, sqlite/fieldless_emit/constructed, sqlite/fieldless_gate/absent, sqlite/fieldless_gate/constructed, sqlite/fieldless_stage/absent, sqlite/fieldless_stage/constructed]
       TestOrdinaryReplayInitializedReceiversBothStores: [sqlite/wrong_path, sqlite/wrong_run, sqlite/foreign_template, sqlite/wrong_stage, sqlite/malformed_bookkeeping, sqlite/state_only_receiver, sqlite/missing_declared_fields, postgres/wrong_path, postgres/wrong_run, postgres/foreign_template, postgres/wrong_stage, postgres/malformed_bookkeeping, postgres/state_only_receiver, postgres/missing_declared_fields]
       TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores: [sqlite, postgres]

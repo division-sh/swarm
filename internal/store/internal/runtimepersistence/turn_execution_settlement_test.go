@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -135,7 +136,7 @@ func TestCanceledTurnPreservesCapturedProviderDrainBothStores(t *testing.T) {
 					ctx = providerDirectiveContext(t, fixture, origin, event, "canceled-drain")
 					directiveEvent = event
 				}
-				ctx = runtimeeffects.WithTurnTimeout(ctx, &timeridentity.TurnTimeout{After: time.Minute, Emit: "investigation.aborted"})
+				ctx = runtimeeffects.WithTurnTimeout(ctx, &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
 				handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "canceled-drain")
 				clock, found := handle.LogicalTurnClock()
 				if !found {
@@ -158,9 +159,16 @@ func TestCanceledTurnPreservesCapturedProviderDrainBothStores(t *testing.T) {
 				settlement.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateOutcomeUncertain, Failure: &failure, Evidence: map[string]any{"physical_joined": true}}
 				settlement.AgentTurn.Failure = &failure
 				result, err := handle.SettleCompletion(ctx, settlement)
-				if err != nil || !result.Committed || !result.OriginSettled {
+				if err != nil || !result.Committed || result.OriginSettled {
 					t.Fatalf("authored cancellation blocked accepted captured-tail settlement: %+v err=%v", result, err)
 				}
+				assertCanceledReactionCount(t, ctx, fixture, clock.TimeoutEvent, 0)
+				command := runtimeeffects.CanceledTurnCommand{Attempt: handle.Attempt(), Publication: prepareCanceledReactionForTest(t, ctx, fixture, clock, intent.RequestedAt)}
+				commit, err := fixture.store.(runtimeeffects.CanceledTurnStore).CommitCanceledTurn(ctx, command)
+				if err != nil || !commit.Acknowledged || commit.Validate() != nil {
+					t.Fatalf("captured origin and reaction did not settle atomically: %+v err=%v", commit, err)
+				}
+				assertCanceledReactionCount(t, ctx, fixture, clock.TimeoutEvent, 1)
 				requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
 				requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateOutcomeUncertain, 1, 0)
 				if kind == "delivery" {
@@ -181,12 +189,12 @@ func TestCanceledTurnPreservesCapturedProviderDrainBothStores(t *testing.T) {
 
 func TestCanceledOriginWaitsForEveryCapturedProviderTailBothStores(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
-		ctx := runtimeeffects.WithTurnTimeout(providerDrainContext(t, fixture, "canceled-two-tails"), &timeridentity.TurnTimeout{After: time.Minute, Emit: "investigation.aborted"})
+		ctx := runtimeeffects.WithTurnTimeout(providerDrainContext(t, fixture, "canceled-two-tails"), &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
 		first := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "canceled-two-tails-first")
 		authority := fixture.authority
 		authority.Target.ID = uuid.NewString()
 		authority.BudgetScopes = nil
-		secondCtx := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Minute, Emit: "investigation.aborted"})
+		secondCtx := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
 		secondCtx = runtimeeffects.WithLogicalOperationIdentity(secondCtx, "canceled-two-tails-second")
 		second := beginObservedCompletionForSettlementTest(t, secondCtx, "anthropic_api", "canceled-two-tails-second")
 		clock, _ := first.LogicalTurnClock()
@@ -205,23 +213,24 @@ func TestCanceledOriginWaitsForEveryCapturedProviderTailBothStores(t *testing.T)
 			settlement.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateOutcomeUncertain, Failure: &failure, Evidence: map[string]any{"physical_joined": true}}
 			settlement.AgentTurn.Failure = &failure
 			result, err := handle.SettleCompletion(ctx, settlement)
-			if err != nil || !result.Committed || result.Cancellation == nil || result.Cancellation.ValidateIntent() != nil || result.OriginSettled != (index == 1) {
+			if err != nil || !result.Committed || result.Cancellation == nil || result.Cancellation.ValidateIntent() != nil || result.OriginSettled {
 				t.Fatalf("tail %d origin ownership: %+v err=%v", index, result, err)
 			}
 			if index == 0 && result.Finalization != nil {
 				t.Fatal("first physical tail prematurely finalized the captured set")
 			}
 			snapshot, err := fixture.store.(deliverylifecycle.Store).Snapshot(ctx, fixture.origin.DeliveryID())
-			want := deliverylifecycle.StatusInProgress
-			if index == 1 {
-				want = deliverylifecycle.StatusCanceled
-			}
-			if err != nil || snapshot.Status != want {
+			if err != nil || snapshot.Status != deliverylifecycle.StatusInProgress {
 				t.Fatalf("tail %d snapshot: %+v err=%v", index, snapshot, err)
 			}
 			requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
 			requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateOutcomeUncertain, 1, 0)
+			pending, err := fixture.store.(runtimeeffects.CanceledTurnRecoveryStore).ListCanceledTurnRecoveries(ctx, liveExternalEffectRecoveryRequest(time.Now().UTC()))
+			if err != nil || len(pending) != index {
+				t.Fatalf("tail %d recovery admitted an incomplete physical set: count=%d err=%v", index, len(pending), err)
+			}
 		}
+		settleRecoveredCanceledTurnForTest(t, fixture, first.Attempt())
 	})
 }
 
@@ -236,7 +245,7 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 					ctx = providerDirectiveContext(t, fixture, origin, event, "canceled-recovery")
 				}
 				before := providerDirectiveDeliveryCount(t, fixture)
-				ctx = runtimeeffects.WithTurnTimeout(ctx, &timeridentity.TurnTimeout{After: time.Minute, Emit: "investigation.aborted"})
+				ctx = runtimeeffects.WithTurnTimeout(ctx, &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
 				handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "canceled-recovery")
 				clock, _ := handle.LogicalTurnClock()
 				intent, err := fixture.store.(runtimeeffects.TurnLifetimeStore).RequestTurnTimeout(ctx, handle.Attempt(), clock.DeadlineAt)
@@ -253,6 +262,7 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 				}
 				requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+				settleRecoveredCanceledTurnForTest(t, fixture, handle.Attempt())
 				if kind == "delivery" {
 					snapshot, err := fixture.store.(deliverylifecycle.Store).Snapshot(ctx, fixture.origin.DeliveryID())
 					if err != nil || snapshot.Status != deliverylifecycle.StatusCanceled {
@@ -272,4 +282,126 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 			})
 		})
 	}
+}
+
+func settleRecoveredCanceledTurnForTest(t *testing.T, fixture completionSettlementFixture, original runtimeeffects.Attempt) {
+	t.Helper()
+	// No previous runtime/controller/handle is carried into this recovery read.
+	ctx := testAuthorActivityContext()
+	recovery := fixture.store.(runtimeeffects.CanceledTurnRecoveryStore)
+	request := liveExternalEffectRecoveryRequest(time.Now().UTC())
+	turns, err := recovery.ListCanceledTurnRecoveries(ctx, request)
+	if err != nil || len(turns) != 1 {
+		t.Fatalf("recover exact canceled origin: count=%d err=%v", len(turns), err)
+	}
+	turn := turns[0]
+	if turn.Attempt.AttemptID != original.AttemptID || turn.Clock.FirstAttempt != original.AttemptID ||
+		!turn.Attempt.Origin.Same(original.Origin) || turn.Attempt.Authority.Normal != original.Authority.Normal ||
+		turn.Cancellation.ValidateIntent() != nil || turn.Cancellation.OriginSettled {
+		t.Fatalf("recovery substituted original execution evidence: %+v", turn)
+	}
+	assertCanceledReactionCount(t, ctx, fixture, turn.Cancellation.CauseEvent, 0)
+	command := runtimeeffects.CanceledTurnCommand{Attempt: turn.Attempt, Publication: prepareCanceledReactionForTest(t, ctx, fixture, *turn.Clock, turn.Cancellation.RequestedAt)}
+	store := fixture.store.(runtimeeffects.CanceledTurnStore)
+	installCanceledReactionCut(t, ctx, fixture)
+	if result, err := store.CommitCanceledTurn(ctx, command); err == nil || result.Acknowledged {
+		t.Fatalf("recovered reaction failure committed partial origin: %+v err=%v", result, err)
+	}
+	stillPending, err := recovery.ListCanceledTurnRecoveries(ctx, request)
+	if err != nil || len(stillPending) != 1 {
+		t.Fatalf("reaction rollback lost recovery responsibility: count=%d err=%v", len(stillPending), err)
+	}
+	removeCanceledReactionCut(t, ctx, fixture)
+	for i := 0; i < 2; i++ {
+		result, err := store.CommitCanceledTurn(ctx, command)
+		if err != nil || !result.Acknowledged || result.Validate() != nil {
+			t.Fatalf("recovered atomic settlement/retry %d: %+v err=%v", i, result, err)
+		}
+	}
+	assertCanceledReactionCount(t, ctx, fixture, turn.Cancellation.CauseEvent, 1)
+	remaining, err := recovery.ListCanceledTurnRecoveries(ctx, request)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("settled cancellation remained executable: count=%d err=%v", len(remaining), err)
+	}
+}
+
+func TestCanceledTurnRecoveryRejectsCorruptFirstOriginBothStores(t *testing.T) {
+	for _, corruption := range []string{"missing_first_attempt", "foreign_run", "foreign_cause", "before_first_launch"} {
+		t.Run(corruption, func(t *testing.T) {
+			forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+				ctx := runtimeeffects.WithTurnTimeout(providerDrainContext(t, fixture, "corrupt-canceled-recovery"), &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
+				handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "corrupt-canceled-recovery")
+				clock, _ := handle.LogicalTurnClock()
+				intent, err := fixture.store.(runtimeeffects.TurnLifetimeStore).RequestTurnTimeout(ctx, handle.Attempt(), clock.DeadlineAt)
+				if err != nil || intent.ValidateIntent() != nil {
+					t.Fatalf("intent: %+v err=%v", intent, err)
+				}
+				failure := runtimefailures.FromError(context.Canceled, "provider-test", "physical_join").Failure
+				if err := handle.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{"physical_joined": true}); err != nil {
+					t.Fatal(err)
+				}
+				column, value := "first_attempt_id", any(uuid.NewString())
+				switch corruption {
+				case "foreign_run":
+					column = "run_id"
+				case "foreign_cause":
+					column = "cancel_cause_event_id"
+				case "before_first_launch":
+					column = "cancel_requested_at"
+					value = clock.LaunchedAt.Add(-time.Second)
+				}
+				query := "UPDATE runtime_agent_turn_lifetimes SET " + column + "=$1 WHERE origin_id=$2"
+				if _, err := fixture.db.ExecContext(ctx, query, value, handle.Attempt().Origin.Delivery.DeliveryID()); err != nil {
+					t.Fatal(err)
+				}
+				turns, err := fixture.store.(runtimeeffects.CanceledTurnRecoveryStore).ListCanceledTurnRecoveries(ctx, liveExternalEffectRecoveryRequest(time.Now().UTC()))
+				if err == nil || len(turns) != 0 {
+					t.Fatalf("corruption %s returned cancellation authority: count=%d err=%v", corruption, len(turns), err)
+				}
+				assertCanceledReactionCount(t, ctx, fixture, clock.TimeoutEvent, 0)
+				snapshot, err := fixture.store.(deliverylifecycle.Store).Snapshot(ctx, fixture.origin.DeliveryID())
+				if err != nil || snapshot.Status != deliverylifecycle.StatusInProgress {
+					t.Fatalf("failed recovery mutated origin: %+v err=%v", snapshot, err)
+				}
+			})
+		})
+	}
+}
+
+func TestCompletionReportsCanceledOriginWithoutDroppingAcceptedResponseBothStores(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+		parent := runtimeeffects.WithTurnTimeout(providerDrainContext(t, fixture, "late-canceled-response"), &timeridentity.TurnTimeout{After: time.Hour, Emit: "test.node_emitted"})
+		ctx, owner := runtimeeffects.WithTurnExecution(parent)
+		defer func() { _, _ = owner.Finish() }()
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "late-canceled-response")
+		clock, _ := handle.LogicalTurnClock()
+		intent, err := fixture.store.(runtimeeffects.TurnLifetimeStore).RequestTurnTimeout(parent, handle.Attempt(), clock.DeadlineAt)
+		if err != nil || intent.ValidateIntent() != nil {
+			t.Fatalf("intent: %+v err=%v", intent, err)
+		}
+		settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "", "")
+		settlement.ProviderHead = nil
+		if err := runtimeeffects.AttachCompletionContinuationEvidence(settlement.Settlement.Evidence, []byte("late-canceled-response"), json.RawMessage(`{"version":"late-result","response":"kept"}`)); err != nil {
+			t.Fatal(err)
+		}
+		result, err := handle.SettleCompletion(ctx, settlement)
+		if err != nil || !result.Committed || result.Cancellation == nil || result.Cancellation.ValidateIntent() != nil || result.OriginSettled {
+			t.Fatalf("current completion lost cancellation intent or physical evidence: %+v err=%v", result, err)
+		}
+		if _, executable := handle.Attempt().CompletionContinuation(); executable {
+			t.Fatal("canceled late response became executable continuation")
+		}
+		var active bool
+		if err := fixture.db.QueryRowContext(parent, `SELECT completion_continuation_active FROM runtime_external_effect_attempts WHERE attempt_id=$1`, handle.Attempt().AttemptID).Scan(&active); err != nil || active {
+			t.Fatalf("canceled response persisted executable continuation: active=%t err=%v", active, err)
+		}
+		requireAuthoredTurnTimeout(t, ctx)
+		turn, err := owner.Finish()
+		if err != nil || turn.Cancellation.ValidateIntent() != nil || !turn.Cancellation.Origin.Same(handle.Attempt().Origin) {
+			t.Fatalf("logical owner missed committed cancellation: %+v err=%v", turn, err)
+		}
+		requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)
+		settleRecoveredCanceledTurnForTest(t, fixture, handle.Attempt())
+		requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)
+	})
 }

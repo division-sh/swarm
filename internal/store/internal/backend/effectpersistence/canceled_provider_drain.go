@@ -3,16 +3,15 @@ package effectpersistence
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 // A captured physical tail still records its immutable effects when authored
-// cancellation owns the origin. Only the final physical tail may settle it.
+// cancellation owns the origin. The origin/reaction commit is separate from
+// physical settlement and must wait for the complete accepted physical set.
 type providerOriginCancellationDisposition uint8
 
 const (
@@ -26,7 +25,7 @@ type providerOriginCancellation struct {
 	intent      *runtimeeffects.TurnCancellation
 }
 
-func settleCanceledProviderDrainOrigin(ctx context.Context, tx *sql.Tx, mutation *mutationprotocol.Attempt, postgres bool, attempt runtimeeffects.Attempt, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner) (providerOriginCancellation, error) {
+func observeCanceledProviderOrigin(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner) (providerOriginCancellation, error) {
 	pending, err := providerTurnPendingTx(ctx, tx, attempt, delivery, directives)
 	if err != nil {
 		return providerOriginCancellation{}, err
@@ -64,25 +63,8 @@ func settleCanceledProviderDrainOrigin(ctx context.Context, tx *sql.Tx, mutation
 		intent.OriginSettled = true
 		return result, nil
 	}
-	_, err = prepareCanceledTurnSettlementTx(ctx, tx, postgres, attempt)
-	if err != nil {
-		var remaining *pendingCanceledTurnEffects
-		if errors.As(err, &remaining) {
-			return result, nil
-		}
-		return result, err
-	}
-	switch attempt.Origin.Kind {
-	case runtimeeffects.CompletionOriginDelivery:
-		_, err = settleCanceledDeliveryTurn(ctx, mutation, postgres, delivery, attempt)
-	case runtimeeffects.CompletionOriginDirective:
-		_, err = settleCanceledDirectiveTurn(ctx, mutation, postgres, directives, attempt)
-	default:
-		err = fmt.Errorf("captured canceled turn origin %q is invalid", attempt.Origin.Kind)
-	}
-	if err == nil {
-		result.disposition = providerOriginCancelSettled
-		intent.OriginSettled = true
-	}
-	return result, err
+	// Physical-tail settlement is immutable evidence, not authority to cancel
+	// the business origin without its reaction. Manager or startup consumes the
+	// same CommitCanceledTurn operation after the complete physical set joins.
+	return result, nil
 }

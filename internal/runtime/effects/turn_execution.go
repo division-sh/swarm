@@ -108,6 +108,34 @@ func observeTurnLaunch(ctx context.Context, handle *Handle, clock LogicalTurnClo
 	return nil
 }
 
+func observeTurnCancellation(ctx context.Context, intent TurnCancellation) error {
+	owner, _ := ctx.Value(turnExecutionContextKey{}).(*TurnExecution)
+	if owner == nil {
+		return nil
+	}
+	if err := intent.ValidateIntent(); err != nil {
+		return err
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if owner.closed || owner.clock == nil || !owner.clock.Origin.Same(intent.Origin) {
+		return fmt.Errorf("completion cancellation lacks its owned logical execution")
+	}
+	// Admission already compared the exact deadline. The persisted intent time
+	// can have lower precision; it is not a second deadline decision.
+	if intent.Reason == deliverylifecycle.CancellationTurnTimeout && (owner.clock.Timeout == nil ||
+		intent.CauseEvent != owner.clock.TimeoutEvent || intent.RequestedAt.Before(owner.clock.LaunchedAt)) {
+		return fmt.Errorf("completion cancellation contradicts its first-launch bound")
+	}
+	previous := owner.result.Cancellation
+	if previous.Requested && (previous.Reason != intent.Reason || previous.CauseEvent != intent.CauseEvent || !previous.RequestedAt.Equal(intent.RequestedAt)) {
+		return fmt.Errorf("completion changed its acknowledged cancellation intent")
+	}
+	owner.result.Cancellation = intent
+	owner.cancel(&AuthoredTurnCancellationError{Cancellation: intent})
+	return nil
+}
+
 func (o *TurnExecution) awaitTimeout(store TurnLifetimeStore, attempt Attempt, wake <-chan time.Time, stopTimer func()) {
 	defer close(o.done)
 	defer stopTimer()

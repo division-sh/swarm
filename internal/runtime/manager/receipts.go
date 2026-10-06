@@ -185,7 +185,7 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	turn, finishErr := turnOwner.Finish()
 	err = errors.Join(err, finishErr)
 	if turn.Cancellation.Requested {
-		canceled, settleErr := am.settleCanceledDelivery(attemptCtx, evt, heartbeat, turn)
+		canceled, settleErr := am.settleCanceledDelivery(attemptCtx, evt, heartbeat, turn, completionSettlement())
 		record.Outcome = startupManagerReplayOutcomeDropped
 		record.ReasonCode = startupManagerReplayReasonProcessFailed
 		if canceled.Acknowledged && canceled.Validate() == nil {

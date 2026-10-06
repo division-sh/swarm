@@ -16839,8 +16839,8 @@ platform_tables:
         return typed canceled operation evidence instead of a second ordinary
         failure write. Reaction production preserves the constructed source
         coordinate and never turns that source into an explicit target. The
-        settlement-only canceled-delivery/directive ports are retired; normal
-        foreground cancellation consumes CommitCanceledTurn.
+        settlement-only canceled-delivery/directive ports are retired; both
+        foreground and captured-origin cancellation consume CommitCanceledTurn.
         Immutable response, spend and uncertainty evidence survive; cancellation
         does not become retry or dead-letter failure. Lost acknowledgment retries
         return the exact existing outcome. Canceled source history is lineage only,
@@ -16851,11 +16851,27 @@ platform_tables:
         execution context; shutdown, stale authority and unrelated context
         cancellation retain their distinct meanings. Finishing the carrier stops
         and joins any in-flight timeout mutation before origin settlement.
-        Captured lifecycle provider tails and startup reconciliation consume the
-        same canceled-origin owner. An earlier physical tail cannot settle the
-        origin while another remains open, and retirement finalization retains
-        the complete captured set. Completion results preserve typed cancellation
-        evidence separately from the actual origin-settled acknowledgment.
+        Captured lifecycle provider tails record and close their immutable physical
+        evidence, without independently settling a canceled business origin. The
+        original carrier or startup uses CommitCanceledTurn only after the complete
+        physical set has closed. Retirement finalization retains the complete
+        captured set; completion results report cancellation intent separately from
+        an actual origin-settled acknowledgment. Normal startup reads bounded,
+        consistent ListCanceledTurnRecoveries snapshots of unresolved authored
+        cancellation, reconstructing the persisted first physical attempt and exact
+        original authority, origin, launch clock and declaration. It never mints a
+        turn, chooses a latest attempt, or readmits physical work. Corrupt or foreign
+        evidence fails closed. Selected-fork recovery remains possession-scoped.
+        Startup commits the canceled origin and reaction atomically, releases the
+        preparation claim, and defers execution to the existing durable pipeline
+        recovery after startup admission. Failure before this commit leaves the
+        unresolved intent discoverable; acknowledged cleanup errors retain committed
+        evidence and never justify repeating business work.
+        Current completion settlement also returns acknowledged authored intent to
+        its exact process-owned logical carrier. A retained late response and spend
+        remain immutable physical facts; canceled response projection is not an
+        executable completion continuation. This observation neither invents intent
+        for stage movement nor independently settles the canceled business origin.
       ddl: |
         CREATE TABLE runtime_agent_turn_lifetimes (
             turn_id UUID PRIMARY KEY,

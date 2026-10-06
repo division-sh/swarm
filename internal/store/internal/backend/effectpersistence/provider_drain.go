@@ -479,7 +479,7 @@ func (s *EffectPostgresOwner) settleProviderDrainTx(
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
 ) (providerDrainSettlementOutcome, error) {
-	cancellation, err := settleCanceledProviderDrainOrigin(ctx, tx, mutation, true, attempt, s.delivery, s.directives)
+	cancellation, err := observeCanceledProviderOrigin(ctx, tx, true, attempt, s.delivery, s.directives)
 	if err != nil {
 		return providerDrainSettlementOutcome{}, err
 	}
@@ -506,7 +506,7 @@ func (s *EffectSQLiteOwner) settleProviderDrainTx(
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
 ) (providerDrainSettlementOutcome, error) {
-	cancellation, err := settleCanceledProviderDrainOrigin(ctx, tx, mutation, false, attempt, s.delivery, s.directives)
+	cancellation, err := observeCanceledProviderOrigin(ctx, tx, false, attempt, s.delivery, s.directives)
 	if err != nil {
 		return providerDrainSettlementOutcome{}, err
 	}
@@ -537,7 +537,7 @@ func settleProviderDrainRecovery(
 	delivery providerDrainDeliveryOwner,
 	directives providerDrainDirectiveOwner,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	cancellation, err := settleCanceledProviderDrainOrigin(ctx, tx, mutation, postgres, attempt, delivery, directives)
+	cancellation, err := observeCanceledProviderOrigin(ctx, tx, postgres, attempt, delivery, directives)
 	if err != nil {
 		return nil, err
 	}
