@@ -11,8 +11,10 @@ CI-Tier: full
 Local-Tier: core
 ```
 
-1. Exact-head `go run ./cmd/swarm-test` core at normal capacity4 on server2,
+1. Exact-head `go run ./cmd/swarm-test --tier core` at normal capacity4 on server2,
    after the user grants a slot. It must not overlap another lane's quiet run.
+   Explicit tier selection is required for a reviewer-bound clean-source
+   receipt; the default core feedback command is not qualification.
 2. Exact-head uninstrumented full numeric root through the admission wrapper:
    `SWARM_TEST_RUN_SLOTS=1 go run ./cmd/swarm-test -- github.com/division-sh/swarm/internal/releasee2e -run '^TestGoldenNumericDataScatterParkRestartBothStores$' -count=1 -json`.
    Both SQLite and PostgreSQL leaves must actually run in the same command.
