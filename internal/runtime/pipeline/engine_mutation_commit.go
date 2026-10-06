@@ -366,6 +366,9 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		}
 	}
 	if deactivation := c.PostCommit.FlowDeactivation; deactivation != nil {
+		if c.State.Status != "terminated" {
+			return fmt.Errorf("stage mutation cannot declare operational flow retirement")
+		}
 		identity := deactivation.Identity.Normalize()
 		if identity.Validate() != nil || identity != c.State.Identity || strings.TrimSpace(deactivation.EntityID) != c.State.EntityID || strings.TrimSpace(deactivation.NextState) == "" {
 			return fmt.Errorf("workflow engine post-commit flow deactivation requires exact state identity")

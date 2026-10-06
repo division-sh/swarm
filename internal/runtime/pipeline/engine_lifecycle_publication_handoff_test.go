@@ -66,7 +66,7 @@ func TestCommittedEngineTransfersDeclaredLifecyclePublications(t *testing.T) {
 							storeOwner.afterCommit = cancel
 						}
 						owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
-						result, err := owner.commitPreparedEngineMutation(ctx, mutation, command, command.Publications, nil)
+						result, err := owner.commitPreparedEngineMutation(ctx, mutation, command, command.Publications)
 						if !result.Committed || planner.finalizes != 1 || planner.releases != 0 {
 							t.Fatalf("lost committed ownership: result=%+v err=%v finalizes=%d releases=%d", result, err, planner.finalizes, planner.releases)
 						}
@@ -126,7 +126,7 @@ func TestCommittedEngineRejectsChangedPublicationReceipts(t *testing.T) {
 			store := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Publications: committed, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}}
 			planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}}
 			owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: store}, publication: planner}
-			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, command.Publications, nil)
+			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, command.Publications)
 			if !result.Committed || err == nil || len(result.EmitIntents) != 0 || len(result.ActivityRequestIntents) != 0 || planner.finalizes != 1 || planner.releases != 0 {
 				t.Fatalf("invalid receipt authorized dispatch or lost acknowledged cleanup: result=%+v err=%v planner=%+v", result, err, planner)
 			}

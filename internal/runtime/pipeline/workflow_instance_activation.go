@@ -453,8 +453,6 @@ type PreparedFlowInstanceDeactivation interface {
 	Abort() error
 }
 
-type FlowInstanceDeactivationPreparer func(context.Context, FlowInstanceDeactivationRequest) (PreparedFlowInstanceDeactivation, error)
-
 func DeriveFlowInstancePath(source semanticview.Source, templateID, instanceID string) string {
 	return runtimeflowidentity.InstancePath(source, templateID, instanceID)
 }

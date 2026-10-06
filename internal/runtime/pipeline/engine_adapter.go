@@ -209,7 +209,7 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			if !found {
 				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("accepted-event preservation requires admitted source authority")
 			}
-			return o.commitPreparedEngineMutation(ctx, mutation, WorkflowEngineMutationCommand{State: state, AcceptedEvent: &cause, AcceptedEventSource: fact, Lifecycle: lifecycle.Commit}, nil, nil)
+			return o.commitPreparedEngineMutation(ctx, mutation, WorkflowEngineMutationCommand{State: state, AcceptedEvent: &cause, AcceptedEventSource: fact, Lifecycle: lifecycle.Commit}, nil)
 		}
 		state, err := preparedState.record()
 		if err != nil {
@@ -270,23 +270,13 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 				return runtimeengine.CommittedEngineMutation{}, err
 			}
 		}
-		postCommit := WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{
-			Identity: state.Identity, EntityID: mutation.Address.EntityID.String(), NextState: state.CurrentState,
-		}}
-		terminal, err := o.state.coordinator.prepareTerminalFlowInstanceDeactivation(ctx, state.Identity, mutation.Address.EntityID, state.CurrentState)
-		if err != nil {
-			if o.publication != nil {
-				err = errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
-			}
-			return runtimeengine.CommittedEngineMutation{}, err
-		}
 		return o.commitPreparedEngineMutation(ctx, mutation, WorkflowEngineMutationCommand{
 			State: state, Lifecycle: lifecycle.Commit,
-			ProposedEffects: proposedEffects, Publications: publications, PostCommit: postCommit,
+			ProposedEffects: proposedEffects, Publications: publications,
 			FanOutIntent:            mutation.FanOutIntent,
 			FanOutBarrier:           mutation.FanOutBarrier,
 			FanOutBarrierCompletion: mutation.FanOutBarrierCompletion,
-		}, publications, terminal)
+		}, publications)
 	}
 	commit := func(txctx context.Context) error {
 		if mutation.PreserveConstructedState != nil {
@@ -341,15 +331,10 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	mutation runtimeengine.EngineMutation,
 	command WorkflowEngineMutationCommand,
 	publications []runtimeengine.DurablePublicationPlan,
-	terminal PreparedFlowInstanceDeactivation,
 ) (result runtimeengine.CommittedEngineMutation, resultErr error) {
-	terminalPending := terminal != nil
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			resultErr = errors.Join(resultErr, fmt.Errorf("workflow engine mutation panic: %v", recovered))
-		}
-		if terminalPending {
-			resultErr = errors.Join(resultErr, abortPreparedFlowDeactivation(terminal))
 		}
 	}()
 	moveOrReleasePlans := func(err error) error {
@@ -374,10 +359,6 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 		return runtimeengine.CommittedEngineMutation{}, moveOrReleasePlans(commitErr)
 	}
 	result.Committed = true
-	if terminal != nil && committed.PostCommit.FlowDeactivation != nil {
-		result.FlowDeactivation = committedEngineFlowDeactivation{owner: o, terminal: terminal}
-		terminalPending = false
-	}
 	resultErr = commitErr
 	// Retain the whole declared follow-up before any acknowledged cleanup hook.
 	emissions, requests, publicationErr := committedEnginePublicationIntents(command.Publications, committed.Publications, mutation.ActivityIntents)
@@ -402,15 +383,6 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	}
 	resultErr = errors.Join(resultErr, o.finishCommittedWorkflowLifecycle(ctx, committed.Lifecycle))
 	return result, resultErr
-}
-
-type committedEngineFlowDeactivation struct {
-	owner    pipelineEngineMutationOwner
-	terminal PreparedFlowInstanceDeactivation
-}
-
-func (d committedEngineFlowDeactivation) FinalizeFlowDeactivation(ctx context.Context) error {
-	return d.owner.finishCommittedFlowDeactivation(ctx, d.terminal)
 }
 
 func committedEnginePublicationIntents(planned []runtimeengine.DurablePublicationPlan, committed []runtimeengine.CommittedDurablePublication, activities []runtimeengine.ActivityIntent) ([]runtimeengine.EmitIntent, []runtimeengine.EmitIntent, error) {
@@ -494,37 +466,6 @@ func committedActivityRequestIntents(publications []runtimeengine.CommittedDurab
 		requests = append(requests, request)
 	}
 	return requests, nil
-}
-
-func (o pipelineEngineMutationOwner) finishCommittedFlowDeactivation(ctx context.Context, terminal PreparedFlowInstanceDeactivation) (err error) {
-	notifyErr := func() (err error) {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				err = fmt.Errorf("workflow terminal notification panic: %v", recovered)
-			}
-		}()
-		o.state.coordinator.notifyTestWorkflowTerminalCommitted(ctx)
-		return nil
-	}()
-	return errors.Join(notifyErr, commitPreparedFlowDeactivation(terminal))
-}
-
-func commitPreparedFlowDeactivation(terminal PreparedFlowInstanceDeactivation) (err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = errors.Join(err, fmt.Errorf("workflow terminal finalization panic: %v", recovered), abortPreparedFlowDeactivation(terminal))
-		}
-	}()
-	return terminal.Commit()
-}
-
-func abortPreparedFlowDeactivation(terminal PreparedFlowInstanceDeactivation) (err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = errors.Join(err, fmt.Errorf("workflow terminal reservation abort panic: %v", recovered))
-		}
-	}()
-	return terminal.Abort()
 }
 
 func (o pipelineEngineMutationOwner) finishCommittedEnginePublications(ctx context.Context, publications []runtimeengine.CommittedDurablePublication) (err error) {
@@ -1298,58 +1239,6 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		instance.StateBuckets = mutation.StateCarrier.PersistedStateBuckets()
 	}
 	return nil
-}
-
-func (pc *PipelineCoordinator) prepareTerminalFlowInstanceDeactivation(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, nextState string) (PreparedFlowInstanceDeactivation, error) {
-	if pc == nil || pc.instanceDeactivationPreparer == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
-		return nil, nil
-	}
-	nextState = strings.TrimSpace(nextState)
-	entityID = identity.NormalizeEntityID(entityID.String())
-	if nextState == "" || entityID.IsZero() {
-		return nil, nil
-	}
-	flowIdentity = flowIdentity.Normalize()
-	if err := flowIdentity.Validate(); err != nil {
-		return nil, fmt.Errorf("flow deactivation requires an exact workflow instance route")
-	}
-	route := flowIdentity.Route
-	instance, ok, err := pc.workflowStore.Load(ctx, flowIdentity)
-	if err != nil || !ok {
-		return nil, err
-	}
-	templateID := strings.TrimSpace(instance.WorkflowName)
-	if templateID == "" || !pc.isTerminalFlowState(templateID, nextState) {
-		return nil, nil
-	}
-	instanceIdentity, err := requireWorkflowInstanceIdentity(route, entityID, instance)
-	if err != nil {
-		return nil, fmt.Errorf("validate terminal workflow instance owner: %w", err)
-	}
-	source := pc.SemanticSource()
-	if source != nil {
-		schema, ok := source.FlowSchemaByID(templateID)
-		if !ok || !strings.EqualFold(strings.TrimSpace(schema.EffectiveMode()), "template") {
-			return nil, nil
-		}
-	}
-	return pc.instanceDeactivationPreparer(ctx, FlowInstanceDeactivationRequest{
-		ContractBundle: source,
-		Instance:       instanceIdentity,
-		FinalState:     nextState,
-	})
-}
-
-func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
-	if pc == nil {
-		return false
-	}
-	graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), flowID)
-	if !ok || graph.FlowID != flowID {
-		return false
-	}
-	ref, err := graph.ResolveStoredStage(state)
-	return err == nil && ref.IsTerminal()
 }
 
 func cloneEvent(evt events.Event) events.Event {

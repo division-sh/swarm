@@ -58,34 +58,33 @@ type PipelineCoordinator struct {
 	entityLockMu sync.Mutex
 	entityLocks  map[string]*sync.Mutex
 
-	module                       WorkflowModule
-	workflowStore                *workflowInstanceStore
-	expressionEval               *workflowExpressionEvaluator
-	instanceDeactivationPreparer FlowInstanceDeactivationPreparer
-	timerScheduler               *Scheduler
-	genericSchedules             GenericScheduleWakeupOwner
-	workflowTimers               *WorkflowTimerLifecycle
-	timerCancellations           *runtimetimercancellation.Reconciler
-	decisionCards                decisioncard.Store
-	proposedEffects              decisioncard.ProposedEffectStore
-	humanTasks                   decisioncard.HumanTaskStore
-	decisionDraftExpiry          DecisionCardDraftExpiry
-	humanTaskExpiry              HumanTaskExpiry
-	deliveryStore                runtimedelivery.Store
-	deadLetters                  runtimedeadletters.AcknowledgedRecorder
-	deliveryRuntime              WorkflowDeliveryRuntime
-	flowRoutes                   FlowInstanceRouteOwner
-	credentials                  runtimecredentials.Store
-	providerCredentials          runtimecredentials.Store
-	managedCredentials           runtimemanagedcredentials.Store
-	mockConnectorResponses       *providerconnectors.MockResponsePlan
-	scenarioProfiles             ScenarioExecutionProfileReader
-	effectiveSource              scenarioexecution.EffectiveSourceIdentity
-	channelActivations           *runtimechannelactivation.Owner
-	sourceArtifactFact           runtimecorrelation.SourceArtifactFact
-	runBundleAvailability        RunBundleAvailabilityReader
-	decisionCardCadence          decisioncard.CadencePolicy
-	executionPosture             executionposture.Posture
+	module                 WorkflowModule
+	workflowStore          *workflowInstanceStore
+	expressionEval         *workflowExpressionEvaluator
+	timerScheduler         *Scheduler
+	genericSchedules       GenericScheduleWakeupOwner
+	workflowTimers         *WorkflowTimerLifecycle
+	timerCancellations     *runtimetimercancellation.Reconciler
+	decisionCards          decisioncard.Store
+	proposedEffects        decisioncard.ProposedEffectStore
+	humanTasks             decisioncard.HumanTaskStore
+	decisionDraftExpiry    DecisionCardDraftExpiry
+	humanTaskExpiry        HumanTaskExpiry
+	deliveryStore          runtimedelivery.Store
+	deadLetters            runtimedeadletters.AcknowledgedRecorder
+	deliveryRuntime        WorkflowDeliveryRuntime
+	flowRoutes             FlowInstanceRouteOwner
+	credentials            runtimecredentials.Store
+	providerCredentials    runtimecredentials.Store
+	managedCredentials     runtimemanagedcredentials.Store
+	mockConnectorResponses *providerconnectors.MockResponsePlan
+	scenarioProfiles       ScenarioExecutionProfileReader
+	effectiveSource        scenarioexecution.EffectiveSourceIdentity
+	channelActivations     *runtimechannelactivation.Owner
+	sourceArtifactFact     runtimecorrelation.SourceArtifactFact
+	runBundleAvailability  RunBundleAvailabilityReader
+	decisionCardCadence    decisioncard.CadencePolicy
+	executionPosture       executionposture.Posture
 
 	testEntityStateHook              func(entityID, state string)
 	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
@@ -109,7 +108,6 @@ type PipelineCoordinatorOptions struct {
 	DeliveryStore                    runtimedelivery.Store
 	DeadLetters                      runtimedeadletters.AcknowledgedRecorder
 	PipelineObligations              runtimepipelineobligation.Store
-	InstanceDeactivationPreparer     FlowInstanceDeactivationPreparer
 	TimerScheduler                   *Scheduler
 	GenericSchedules                 GenericScheduleWakeupOwner
 	TimerObligationReader            runtimetimerobligation.Reader
@@ -351,7 +349,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		bus:                              bus,
 		module:                           module,
 		expressionEval:                   newWorkflowExpressionEvaluator(),
-		instanceDeactivationPreparer:     opts.InstanceDeactivationPreparer,
 		timerScheduler:                   opts.TimerScheduler,
 		genericSchedules:                 opts.GenericSchedules,
 		decisionCards:                    opts.DecisionCards,

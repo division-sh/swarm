@@ -75,7 +75,7 @@ func TestCommittedLifecycleAttemptsCancellationAndActivationAfterPanic(t *testin
 	}}
 	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner},
 		state: pipelineEngineStateRepo{coordinator: &PipelineCoordinator{genericSchedules: schedules}}}
-	result, err := owner.commitPreparedEngineMutation(context.Background(), runtimeengine.EngineMutation{}, WorkflowEngineMutationCommand{}, nil, nil)
+	result, err := owner.commitPreparedEngineMutation(context.Background(), runtimeengine.EngineMutation{}, WorkflowEngineMutationCommand{}, nil)
 	if !result.Committed || err == nil {
 		t.Fatalf("acknowledged result=%+v error=%v", result, err)
 	}
@@ -297,7 +297,7 @@ func TestReview2460LifecycleContinuesIndependentCommittedSchedules(t *testing.T)
 	}}
 	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner},
 		state: pipelineEngineStateRepo{coordinator: &PipelineCoordinator{genericSchedules: schedules}}}
-	result, err := owner.commitPreparedEngineMutation(context.Background(), runtimeengine.EngineMutation{}, WorkflowEngineMutationCommand{}, nil, nil)
+	result, err := owner.commitPreparedEngineMutation(context.Background(), runtimeengine.EngineMutation{}, WorkflowEngineMutationCommand{}, nil)
 	if !result.Committed || !errors.Is(err, fault) {
 		t.Fatalf("result=%+v error=%v", result, err)
 	}
