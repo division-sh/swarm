@@ -69,6 +69,11 @@ func loadYAML(t testing.TB, path string, out any) {
 	if err := yaml.Unmarshal(b, out); err != nil {
 		t.Fatalf("unmarshal %s: %v", path, err)
 	}
+	if expected, ok := out.(*catalogExpectedDocument); ok {
+		if err := validateFlowInstanceCreatedExpectation(expected.Expected.FlowInstanceCreated); err != nil {
+			t.Fatalf("admit %s: %v", path, err)
+		}
+	}
 }
 
 func newFixtureWorkflowModule(bundle *runtimecontracts.WorkflowContractBundle) (runtimepipeline.WorkflowModule, error) {

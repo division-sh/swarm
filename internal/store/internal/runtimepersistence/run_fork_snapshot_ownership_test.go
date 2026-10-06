@@ -236,8 +236,15 @@ func readSnapshotOwnershipEntity(t *testing.T, f snapshotOwnershipFixture, runID
 	}
 	row := snapshotOwnershipEntityRow{Flow: flow, EntityType: entityType, Slug: slug, Name: name, State: state, Revision: revision, Entered: entered}
 	for i, raw := range [][]byte{fields, gates, bookkeeping, accumulator} {
-		if err := json.Unmarshal(raw, &row.Buckets[i]); err != nil {
+		if err := canonicaljson.DecodePreservingNumberLexemes(raw, &row.Buckets[i]); err != nil {
 			t.Fatal(err)
+		}
+		for key, value := range row.Buckets[i] {
+			cloned, err := canonicaljson.CloneRuntimeValue(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row.Buckets[i][key] = cloned
 		}
 	}
 	return row

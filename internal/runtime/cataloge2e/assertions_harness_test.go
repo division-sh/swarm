@@ -22,6 +22,9 @@ func catalogRuntimeContext() context.Context {
 
 func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catalogExpectedDocument) {
 	t.Helper()
+	if len(expected.Expected.FlowInstanceCreated) > 0 {
+		assertFlowInstanceCreated(t, h.db, h.startedAt, expected.Expected.FlowInstanceCreated)
+	}
 	flowPrefix := expected.triggerFlowPrefix()
 	if len(expected.Expected.Entities) > 0 {
 		assertCatalogRuntimeEntities(t, h, expected.Expected.Entities, flowPrefix)
@@ -53,9 +56,6 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		assertChainDepthExceeded(t, h.db, entityID, expected.Expected.ChainDepthExceeded)
 	}
 	assertAgentReceived(t, h.db, h.startedAt, expected.Expected.AgentReceived)
-	if len(expected.Expected.FlowInstanceCreated) > 0 {
-		assertFlowInstanceCreated(t, h.db, h.startedAt, expected.Expected.FlowInstanceCreated)
-	}
 	if expected.Expected.TemplateInstances != nil {
 		assertFlowInstanceCount(t, h.db, h.startedAt, *expected.Expected.TemplateInstances)
 	}
@@ -850,8 +850,46 @@ func assertAgentReceived(t testing.TB, db *sql.DB, since time.Time, want map[str
 	}
 }
 
+func validateFlowInstanceCreatedExpectation(want map[string]any) error {
+	for key, value := range want {
+		switch key {
+		case "template", "instance_id", "auto_emitted":
+			text, ok := value.(string)
+			if !ok || strings.TrimSpace(text) == "" {
+				return fmt.Errorf("flow_instance_created.%s must be a nonempty string", key)
+			}
+		case "fields":
+			fields, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("flow_instance_created.fields must be an object")
+			}
+			for name, field := range fields {
+				if strings.TrimSpace(name) == "" {
+					return fmt.Errorf("flow_instance_created.fields has an empty field name")
+				}
+				if _, err := canonicalJSONValue(field); err != nil {
+					return fmt.Errorf("flow_instance_created.fields.%s: %w", name, err)
+				}
+			}
+		default:
+			return fmt.Errorf("unknown key flow_instance_created.%s", key)
+		}
+	}
+	if len(want) != 0 {
+		template, _ := want["template"].(string)
+		instance, _ := want["instance_id"].(string)
+		if template == "" || instance == "" {
+			return fmt.Errorf("flow_instance_created requires template and instance_id")
+		}
+	}
+	return nil
+}
+
 func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want map[string]any) {
 	t.Helper()
+	if err := validateFlowInstanceCreatedExpectation(want); err != nil {
+		t.Fatal(err)
+	}
 	if db == nil {
 		t.Fatal("database is required for flow_instance_created assertions")
 	}
@@ -884,7 +922,7 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 	if instanceCount != 1 {
 		t.Fatalf("flow instance %q count = %d, want 1", instancePath, instanceCount)
 	}
-	if config, ok := want["fields"].(map[string]any); ok && len(config) > 0 {
+	if fields, ok := want["fields"].(map[string]any); ok && len(fields) > 0 {
 		var raw []byte
 		err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 			SELECT e.fields
@@ -903,11 +941,7 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 		if err := json.Unmarshal(raw, &got); err != nil {
 			t.Fatalf("decode flow instance fields: %v", err)
 		}
-		for key, wantValue := range config {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
+		for key, wantValue := range fields {
 			gotValue, ok := got[key]
 			if !ok {
 				t.Fatalf("flow instance fields missing %q; have keys=%v", key, metadataKeys(got))

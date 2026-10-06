@@ -17,7 +17,7 @@ expected:
   flow_instance_created:
     template: worker
     instance_id: ti-7f54a49b1f8b8765cb7c40ef
-    config:
+    fields:
       instance_id: worker-001
   flow_entities:
     worker:

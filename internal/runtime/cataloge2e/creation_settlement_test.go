@@ -37,7 +37,7 @@ func TestCatalogDynamicCreationSettlesInEitherHandlerOrder(t *testing.T) {
 	requireCatalogCreationHandlerOrders(t, "test-dynamic-flow-instance", "worker/ti-7561254fcace846571c87052", "worker.requested", "work.setup", "idle", "idle")
 }
 
-func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, creating, completing, afterCreating, afterCompleting string) {
+func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, creating, completing, afterCreating, afterCompleting string, mutations ...func(*catalogExpectedDocument)) {
 	t.Helper()
 	claim := "catalog.runtime.flow_lifecycle"
 	if fixtureName == "test-dynamic-flow-instance" {
@@ -104,6 +104,9 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 				}
 				h.waitForExpectedEmittedEvents(transcript.expected, catalogRuntimePublishTimeout)
 				h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+				for _, mutate := range mutations {
+					mutate(&transcript.expected)
+				}
 				assertCatalogRuntimeOutcome(t, h, transcript.expected)
 				assertCatalogReplayFixtureOutcome(t, fixture, h, transcript)
 				select {
