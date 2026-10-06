@@ -6,7 +6,9 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,12 +16,36 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
+
+type receiverForkPublicationBarrier struct {
+	*lifecycleprobe.Probe
+	entered chan struct{}
+	release chan struct{}
+	start   sync.Once
+	finish  sync.Once
+}
+
+func (b *receiverForkPublicationBarrier) unblock() { b.finish.Do(func() { close(b.release) }) }
+
+func (b *receiverForkPublicationBarrier) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
+	b.Probe.NotifyLifecycle(ctx, signal)
+	if signal.Kind != lifecycleprobe.PostCommitDispatchStarted || signal.EventType != "work.requested" {
+		return
+	}
+	b.start.Do(func() { close(b.entered) })
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+	}
+}
 
 func TestReceiverCompositionForkBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
@@ -39,7 +65,13 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					root = canonicalrouting.CopyReceiverFieldlessFork(t)
 				}
 				reached, release := make(chan struct{}, 1), make(chan struct{})
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root, func(ctx context.Context, _ string, evt events.Event) error {
+				probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+				publication := &receiverForkPublicationBarrier{Probe: probe.Raw(), entered: make(chan struct{}), release: make(chan struct{})}
+				var observer lifecycleprobe.Observer = probe
+				if surface == "pending_refusal" {
+					observer = publication
+				}
+				rt := startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, root, false, observer, func(ctx context.Context, _ string, evt events.Event) error {
 					if surface != "pending_refusal" || evt.Type() != "work.requested" {
 						return nil
 					}
@@ -52,9 +84,12 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					}
 				})
 				t.Cleanup(func() { close(release) })
+				t.Cleanup(publication.unblock)
+				var seedEventID string
 				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				if !fieldless {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
+					seedEventID = seed.EventID
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
 					if admitted {
 						waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
@@ -72,6 +107,11 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					case <-reached:
 					case <-time.After(10 * time.Second):
 						t.Fatal("missing fork frontier barrier")
+					}
+					select {
+					case <-publication.entered:
+					case <-time.After(10 * time.Second):
+						t.Fatal("missing source publication barrier")
 					}
 				} else if !admitted {
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, request.RunID)
@@ -129,6 +169,18 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						time.Sleep(25 * time.Millisecond)
 					}
 				}
+				if surface == "pending_refusal" {
+					// Join only the source publications, not the still-blocked node.
+					// Their diagnostic tails must finish before freezing the fingerprint.
+					publication.unblock()
+					deadline := time.Now().Add(servedEventPublishLifecycleProbeWaitTimeout)
+					probe.Expect(seedEventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
+					remaining := time.Until(deadline)
+					if remaining <= 0 {
+						t.Fatal("source publication consumed the complete fingerprint deadline")
+					}
+					probe.Expect(request.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
+				}
 				before := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)
 				checkSource := func(boundary string) {
 					after := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)
@@ -136,6 +188,11 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						for table, rows := range before {
 							if !reflect.DeepEqual(rows, after[table]) {
 								t.Errorf("source %s changed at %s", table, boundary)
+								for _, row := range after[table] {
+									if !slices.ContainsFunc(rows, func(previous []string) bool { return reflect.DeepEqual(previous, row) }) {
+										t.Logf("source %s added row at %s: %#v", table, boundary, row)
+									}
+								}
 							}
 						}
 						t.Fatal("fork mutated source headers, fields, events or settlement evidence")
