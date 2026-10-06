@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -18,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // This is retained H composition with actual Docker/MCP execution, not public
@@ -71,70 +73,81 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 				owner.SetSemanticSource(source)
 				return &activationGatewayDockerWorkspace{DockerManager: owner, fault: activationFault, network: cfg.WorkspaceNetwork}, nil
 			}
-			rt := startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t, backend, root, true, workspace.BackendDocker, factory, "0.0.0.0:0")
+			rt := startWorkspaceGatewayProofRuntime(t, backend, root, workspace.BackendDocker, factory, "0.0.0.0:0")
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "items.ready", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"items": []string{"container-emitted"}}, "idempotency_key": "normal-docker-emission",
 			})
 			deadline := time.Now().Add(servedProofPollDeadline)
 			for {
-				var settled int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND subscriber_id='item-worker' AND status='delivered'`, published.RunID).Scan(&settled); err != nil {
+				settled, err := storetest.ReadManagedDeliveryStorage(context.Background(), rt.Events, published.RunID, "item-worker")
+				if err != nil {
 					t.Fatal(err)
 				}
-				if settled == 1 {
+				if settled.Delivered == 1 {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("normal container agent failed settlement: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, published.RunID))
+					t.Fatalf("normal container agent failed settlement: %s", workspaceProofDebugSummary(t, rt, published.RunID))
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			var callsRaw, emittedRaw, triggerID string
-			if err := rt.DB.QueryRow(`SELECT CAST(tool_calls AS TEXT), CAST(emitted_events AS TEXT), trigger_event_id FROM agent_turns WHERE run_id=$1 AND agent_id='item-worker' AND execution_mode='mock'`, published.RunID).Scan(&callsRaw, &emittedRaw, &triggerID); err != nil {
-				t.Fatal(err)
+			turnRows, err := storetest.ReadManagedAgentTurnStorage(context.Background(), rt.Events, published.RunID, "item-worker")
+			if err != nil || len(turnRows) != 1 || turnRows[0].ExecutionMode != "mock" {
+				t.Fatalf("exact normal model turn: count=%d err=%v", len(turnRows), err)
+			}
+			callsRaw, emittedRaw, triggerID := turnRows[0].ToolCalls, turnRows[0].EmittedEvents, turnRows[0].TriggerEventID
+			if triggerID == "" {
+				t.Fatal("normal model turn lost its triggering event")
 			}
 			var calls []llm.ToolCall
-			if err := json.Unmarshal([]byte(callsRaw), &calls); err != nil || len(calls) != 1 || calls[0].Name != "emit_items_processed" {
+			if err := json.Unmarshal(callsRaw, &calls); err != nil || len(calls) != 1 || calls[0].Name != "emit_items_processed" {
 				t.Fatalf("normal container tool call: %s, err=%v", callsRaw, err)
 			}
 			var emitted []json.RawMessage
 			// Provider completion commits before Conversation executes its tool
-			// output. Prove that output at its event and consumed receipt, not by
-			// attributing a later emit to this earlier model-completion snapshot.
-			if err := json.Unmarshal([]byte(emittedRaw), &emitted); err != nil || len(emitted) != 0 {
+			// output. Keep the original earlier-snapshot assertion separate.
+			if err := json.Unmarshal(emittedRaw, &emitted); err != nil || len(emitted) != 0 {
 				t.Fatalf("model completion claimed a later emission: %s, err=%v", emittedRaw, err)
 			}
-			var marker string
-			var events, turns, failures, consumed int
-			if err := rt.DB.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name='items.processed' AND source_event_id=$2`, published.RunID, triggerID).Scan(&marker); err != nil {
-				t.Fatal(err)
+			page, err := rt.Observability.ListOperatorEvents(context.Background(), operatorread.OperatorEventListOptions{
+				Filter: operatorread.OperatorEventListFilter{RunID: published.RunID, EventName: "items.processed"}, Limit: 2,
+			})
+			if err != nil || len(page.Events) != 1 || page.NextCursor != "" {
+				t.Fatalf("exact gateway emission: page=%+v err=%v", page, err)
 			}
+			record := storetest.LoadCanonicalEventRecord(t, context.Background(), rt.Events, page.Events[0].EventID)
+			if record.RunID() != published.RunID || record.ParentEventID() != triggerID {
+				t.Fatalf("gateway emission lost its exact run/cause: %s %s, want %s %s", record.RunID(), record.ParentEventID(), published.RunID, triggerID)
+			}
+			marker := record.Payload()
 			var payload struct {
 				Value          string `json:"value"`
 				RequestEventID string `json:"request_event_id"`
 			}
-			if err := json.Unmarshal([]byte(marker), &payload); err != nil || payload.Value != "container-emitted" || payload.RequestEventID != triggerID {
+			if err := json.Unmarshal(marker, &payload); err != nil || payload.Value != "container-emitted" || payload.RequestEventID != triggerID {
 				t.Fatalf("gateway emission lost the exact native call: %s, err=%v", marker, err)
 			}
-			for query, destination := range map[string]*int{
-				`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='items.processed'`:                          &events,
-				`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND agent_id='item-worker'`:                           &turns,
-				`SELECT COUNT(*) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE e.run_id=$1`: &failures,
-				`SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id WHERE t.run_id=$1 AND t.agent_id='item-worker' AND a.state='settled' AND a.completion_projection_phase='response_consumed'`: &consumed,
-			} {
-				if err := rt.DB.QueryRow(query, published.RunID).Scan(destination); err != nil {
-					t.Fatal(err)
-				}
+			events, err := storetest.ReadLifecycleEventCardinality(context.Background(), rt.Events, published.RunID, "items.processed")
+			if err != nil {
+				t.Fatal(err)
 			}
-			if events != 1 || turns != 1 || failures != 0 || consumed != 1 {
-				t.Fatalf("normal Docker cardinality: events=%d turns=%d failures=%d consumed=%d", events, turns, failures, consumed)
+			reply, err := storetest.ReadReplyReturnStorage(context.Background(), rt.Events, published.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			completion, err := storetest.ReadManagedTurnEffectStorage(context.Background(), rt.Events, published.RunID, "item-worker")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if events != 1 || len(turnRows) != 1 || reply.EventLinkedDeadLetters != 0 || completion.ResponseConsumed != 1 {
+				t.Fatalf("normal Docker cardinality: events=%d turns=%d failures=%d consumed=%d", events, len(turnRows), reply.EventLinkedDeadLetters, completion.ResponseConsumed)
 			}
 			for _, actor := range rt.Runtime.Manager.ListAgentConfigs() {
 				if actor.ID != "item-worker" || actor.Identity.RunID != published.RunID {
 					continue
 				}
-				ctx := correlation.WithRunID(servedControlProofAuthorActivityContext(t, rt), published.RunID)
+				ctx := correlation.WithRunID(workspaceProofAuthorActivityContext(t, rt), published.RunID)
 				target, err := owner.ResolveWorkspace(ctx, actor)
 				if err != nil || target == nil || target.ExecutionTarget().Container == "" {
 					t.Fatalf("normal agent lost its exact container: %+v, %v", target, err)

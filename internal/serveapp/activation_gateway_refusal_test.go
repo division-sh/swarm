@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type activationGatewayFault struct {
@@ -56,19 +57,12 @@ func (w *activationGatewayDockerWorkspace) ResolveWorkspaceForCapabilityAdmissio
 	return target, nil
 }
 
-func proveDockerActivationRefusalRetry(t *testing.T, rt servedControlProofRuntime, owner *workspace.DockerManager, fault *activationGatewayFault, actor actors.AgentConfig) {
+func proveDockerActivationRefusalRetry(t *testing.T, rt servedWorkspaceProofRuntime, owner *workspace.DockerManager, fault *activationGatewayFault, actor actors.AgentConfig) {
 	t.Helper()
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := workspaceProofAuthorActivityContext(t, rt)
 	load := func() manager.AgentLifecycleState {
 		t.Helper()
-		var state manager.AgentLifecycleState
-		var found bool
-		var err error
-		if rt.SQLite != nil {
-			state, found, err = rt.SQLite.LoadAgentLifecycleState(ctx, actor.Identity)
-		} else {
-			state, found, err = rt.Postgres.LoadAgentLifecycleState(ctx, actor.Identity)
-		}
+		state, found, err := rt.Lifecycle.LoadAgentLifecycleState(ctx, actor.Identity)
 		if err != nil || !found {
 			t.Fatalf("exact activation lifecycle read: found=%v err=%v", found, err)
 		}
@@ -110,11 +104,8 @@ func proveDockerActivationRefusalRetry(t *testing.T, rt servedControlProofRuntim
 	if rt.Runtime.Manager.ProveUnpublishedActivation(token) == nil {
 		t.Fatal("compensated generation retained executable admission")
 	}
-	var compensation int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_operations o JOIN agent_lifecycle_transition_facts f ON f.operation_id=o.operation_id
-		WHERE o.run_id=$1 AND o.agent_id=$2 AND o.flow_instance=$3 AND o.operation_kind='self_release' AND o.target_generation=$4
-		AND o.target_phase='registered' AND o.run_mode='stopped' AND o.state='succeeded' AND f.trigger='start_failed'
-		AND f.previous_generation=$4 AND f.next_generation=$4`, actor.Identity.RunID, actor.ID, actor.Identity.FlowInstance(), token.Generation).Scan(&compensation); err != nil || compensation != 1 {
+	compensation, err := storetest.ReadStartFailedCompensationCount(ctx, rt.Events, token)
+	if err != nil || compensation != 1 {
 		t.Fatalf("exact merged compensation operation missing: count=%d err=%v", compensation, err)
 	}
 	top, err := owner.RunDocker(ctx, "top", container, "-eo", "pid,args")
@@ -139,11 +130,12 @@ func proveDockerActivationRefusalRetry(t *testing.T, rt servedControlProofRuntim
 	if probes != beforeProbes+2 {
 		t.Fatalf("refusal/retry did not observe exactly once per new attempt: before=%d after=%d", beforeProbes, probes)
 	}
-	var turns, completions int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND agent_id=$2`, actor.Identity.RunID, actor.ID).Scan(&turns); err != nil {
+	turns, err := storetest.ReadManagedAgentTurnStorage(ctx, rt.Events, actor.Identity.RunID, actor.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='items.processed'`, actor.Identity.RunID).Scan(&completions); err != nil || turns != 1 || completions != 1 {
-		t.Fatalf("activation retry replayed committed model/output work: turns=%d events=%d err=%v", turns, completions, err)
+	completions, err := storetest.ReadLifecycleEventCardinality(ctx, rt.Events, actor.Identity.RunID, "items.processed")
+	if err != nil || len(turns) != 1 || completions != 1 {
+		t.Fatalf("activation retry replayed committed model/output work: turns=%d events=%d err=%v", len(turns), completions, err)
 	}
 }
