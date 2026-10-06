@@ -1460,12 +1460,34 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 		return releaseOnFailure(err)
 	}
 	if eb.canTransferPreparedNodeDeliveries(prepared) {
-		defer closeDispatchContext()
-		defer func() { _ = lease.Done() }()
+		receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(dispatchCtx, prepared.receiver, prepared.Event)
+		if err != nil {
+			closeDispatchContext()
+			_ = lease.Done()
+			return releaseOnFailure(err)
+		}
+		dispatchCtx = receiverCtx.Context
+		eb.notifyTestPostCommitDispatchStarted(dispatchCtx, prepared.Event)
 		// Finish the fenced handoff before returning durable acceptance. Moving
 		// this settlement to another goroutine would retain the same unbounded
 		// post-ACK publication-session backlog; node execution is still queued.
-		return eb.transferPreparedNodeDeliveries(dispatchCtx, prepared)
+		handoffErr := eb.transferPreparedNodeDeliveries(dispatchCtx, prepared)
+		if prepared.publicationClaim.settlementOutcome().DeliveryHandoffCommitted() {
+			handoffErr = errors.Join(handoffErr, eb.DeliveryContinuationOwner().DispatchPublished(prepared.Event, prepared.plan.DeliveryRoutes()))
+		}
+		go func() {
+			defer closeDispatchContext()
+			defer func() { _ = lease.Done() }()
+			defer eb.notifyTestPostCommitDispatchCompleted(dispatchCtx, prepared.Event)
+			defer func() {
+				if err := closeReceiver(); err != nil {
+					eb.reportLocalDispatchFailure("publication_diagnostic_cleanup_failed", prepared.Event, err)
+				}
+			}()
+			// Publication evidence retains the admitted occurrence, not its SQL claim.
+			eb.logPublished(dispatchCtx, prepared.Event, 0)
+		}()
+		return handoffErr
 	}
 	go func() {
 		defer closeDispatchContext()
@@ -1492,18 +1514,9 @@ func (eb *EventBus) transferPreparedNodeDeliveries(ctx context.Context, prepared
 	if !eb.canTransferPreparedNodeDeliveries(prepared) {
 		return errors.New("committed publication is not eligible for node continuation handoff")
 	}
-	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(ctx, prepared.receiver, prepared.Event)
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, closeReceiver()) }()
-	ctx = receiverCtx.Context
-	eb.notifyTestPostCommitDispatchStarted(ctx, prepared.Event)
-	defer eb.notifyTestPostCommitDispatchCompleted(ctx, prepared.Event)
 	if err := eb.AcceptCommittedDeliveryHandoffs(prepared.committedHandoffs); err != nil {
 		return err
 	}
-	eb.logPublished(ctx, prepared.Event, 0)
 	// Pipeline acknowledgement enables exact durable deliveries atomically. A
 	// pending node retains its continuation, not a publication SQL session.
 	return prepared.publicationClaim.Settle(ctx, runtimepipelineobligation.Acknowledged("pipeline_persisted"))

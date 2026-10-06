@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
@@ -57,6 +58,10 @@ func (permissiveTestDeliveryOwner) Release(string) error { return nil }
 
 func (permissiveTestDeliveryOwner) OwnsPersistedRecovery() bool { return false }
 
+func (permissiveTestDeliveryOwner) DispatchPublished(events.Event, []events.DeliveryRoute) error {
+	return errors.New("published delivery dispatch is unsupported by nonpersistent permissive test delivery owner")
+}
+
 func (permissiveTestDeliveryOwner) Signal() {}
 
 type permissiveTestDeliveryContinuation struct {
@@ -106,6 +111,10 @@ func (*controlledTestDeliveryOwner) Retain(snapshot runtimedelivery.Snapshot) er
 func (*controlledTestDeliveryOwner) Release(string) error { return nil }
 
 func (*controlledTestDeliveryOwner) OwnsPersistedRecovery() bool { return false }
+
+func (*controlledTestDeliveryOwner) DispatchPublished(events.Event, []events.DeliveryRoute) error {
+	return errors.New("published delivery dispatch is unsupported by nonpersistent controlled test delivery owner")
+}
 
 func (o *controlledTestDeliveryOwner) Signal() {
 	o.mu.Lock()

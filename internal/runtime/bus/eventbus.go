@@ -156,6 +156,7 @@ type DeliveryContinuationOwner interface {
 	Retain(runtimedelivery.Snapshot) error
 	Release(string) error
 	OwnsPersistedRecovery() bool
+	DispatchPublished(events.Event, []events.DeliveryRoute) error
 	Signal()
 }
 

@@ -46,10 +46,13 @@ func (o *issue2564HandoffPipelineOwner) Settle(ctx context.Context, claim pipeli
 
 type issue2564HandoffContinuation struct {
 	permissiveTestDeliveryOwner
-	mu       sync.Mutex
-	proofs   []runtimedelivery.DurableHandoffProof
-	signals  int
-	signaled chan struct{}
+	mu              sync.Mutex
+	proofs          []runtimedelivery.DurableHandoffProof
+	signals         int
+	signaled        chan struct{}
+	dispatches      int
+	publishedEvent  events.Event
+	publishedRoutes []events.DeliveryRoute
 }
 
 func (*issue2564HandoffContinuation) OwnsPersistedRecovery() bool { return true }
@@ -60,6 +63,14 @@ func (o *issue2564HandoffContinuation) AcceptCommitted(proofs []runtimedelivery.
 	o.mu.Lock()
 	o.proofs = append(o.proofs, proofs...)
 	o.mu.Unlock()
+	return nil
+}
+func (o *issue2564HandoffContinuation) DispatchPublished(event events.Event, routes []events.DeliveryRoute) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.dispatches++
+	o.publishedEvent = event
+	o.publishedRoutes = append([]events.DeliveryRoute(nil), routes...)
 	return nil
 }
 func (o *issue2564HandoffContinuation) Signal() {
@@ -328,6 +339,11 @@ func TestIssue2564AsyncNodeHandoffPreservesPublicationDiagnostic(t *testing.T) {
 			if name == "success" && err != nil || name != "success" && !errors.Is(err, fault) {
 				t.Fatalf("dispatch error=%v, case=%s", err, name)
 			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := bus.WaitForQuiescence(ctx); err != nil {
+				t.Fatal(err)
+			}
 			// Publication was already acknowledged, independently of handoff or
 			// node execution. Do not replace that fact with a delivered story.
 			if len(logger.actions) != 1 || logger.actions[0] != "published" {
@@ -336,8 +352,6 @@ func TestIssue2564AsyncNodeHandoffPreservesPublicationDiagnostic(t *testing.T) {
 			if logger.runIDs[0] != prepared.Event.RunID() || logger.eventIDs[0] != prepared.Event.ID() {
 				t.Fatalf("publication diagnostics borrowed caller scope: runs=%v events=%v", logger.runIDs, logger.eventIDs)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
 			_, cursor, err := probe.WaitAfter(ctx, lifecycleprobe.Cursor{}, lifecycleprobe.Signal{Kind: lifecycleprobe.PostCommitDispatchStarted, EventID: prepared.Event.ID()})
 			if err != nil {
 				t.Fatal(err)
