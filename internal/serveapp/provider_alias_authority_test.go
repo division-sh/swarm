@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -85,7 +83,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			}
 			root := writeProviderAliasAuthorityFixture(t, scenario)
-			rt := startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, root, scenario.agents)
+			rt := startWorkspaceGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
 			requireIndependentStandingRootTrees(t, rt, scenario)
 			baseURL := strings.TrimSuffix(rt.Endpoint, "/v1/rpc")
 			for aliasIndex, alias := range []string{"alpha", "beta"} {
@@ -118,11 +116,9 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 								t.Fatalf("committed retry status=%d body=%s", status, response)
 							}
 						} else if status != http.StatusAccepted {
-							var runID string
-							if err := rt.DB.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_bundle_hash=$1 AND flow_path=$2`, rt.BundleHash, scenario.source(alias)).Scan(&runID); err != nil {
-								t.Fatalf("authenticated %s status=%d body=%s; read diagnostic run: %v", alias, status, response, err)
-							}
-							t.Fatalf("authenticated %s status=%d body=%s\n%s", alias, status, response, servedEventPublishDebugQuery(t, rt.DB, rt.Backend, "runtime_logs", runID))
+							runID := requireProviderAliasStandingRun(t, rt, scenario.source(alias))
+							summary, err := storetest.ReadServedRunDebugSummary(context.Background(), rt.Events, runID)
+							t.Fatalf("authenticated %s status=%d body=%s\n%s diagnostic_error=%v", alias, status, response, summary, err)
 						}
 						var receipt struct {
 							PublicationID     string   `json:"publication_id"`
@@ -187,54 +183,35 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 	}
 }
 
-func requireProviderAliasActionIntent(t *testing.T, rt servedControlProofRuntime, publicationID, entityID, flow string, updateID int) {
+func requireProviderAliasActionIntent(t *testing.T, rt servedWorkspaceProofRuntime, publicationID, entityID, flow string, updateID int) {
 	t.Helper()
-	var reader interface {
-		LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error)
-	}
-	if rt.SQLite != nil {
-		reader = rt.SQLite
-	} else {
-		reader = rt.Postgres
-	}
-	record, found, err := reader.LoadInboundPublicationByIdentity(context.Background(), "telegram", entityID, fmt.Sprint(updateID))
+	record, found, err := rt.Inbound.LoadInboundPublicationByIdentity(context.Background(), "telegram", entityID, fmt.Sprint(updateID))
 	if err != nil || !found {
 		t.Fatalf("read callback publication: found=%t err=%v", found, err)
 	}
 	if record.PublicationID != publicationID || record.FlowPath != flow || record.EntityID != entityID || record.OutputCount != 0 || len(record.Events) != 0 {
 		t.Fatalf("callback lost exact provider alias or published business events: %+v", record)
 	}
-	query := `SELECT interface_key, state, disposition FROM operator_channel_action_intents WHERE publication_id=?`
-	if rt.Postgres != nil {
-		query = `SELECT interface_key, state, disposition FROM operator_channel_action_intents WHERE publication_id=$1::uuid`
-	}
-	var interfaceKey, state string
-	var disposition sql.NullString
-	if err := rt.DB.QueryRowContext(context.Background(), query, publicationID).Scan(&interfaceKey, &state, &disposition); err != nil {
+	snapshot := readWorkspaceProofApplication(t, rt.Events)
+	intent, err := providerAliasActionIntentStorage(snapshot["operator_channel_action_intents"], publicationID)
+	if err != nil {
 		t.Fatalf("read callback action intent: %v", err)
 	}
-	if interfaceKey == "" || (state != "pending" && state != "settled") || (state == "settled" && (!disposition.Valid || disposition.String != "rejected")) {
-		t.Fatalf("callback action intent interface=%q state=%q disposition=%v", interfaceKey, state, disposition)
+	if intent.InterfaceKey == "" || (intent.State != "pending" && intent.State != "settled") || (intent.State == "settled" && (!intent.DispositionPresent || intent.Disposition != "rejected")) {
+		t.Fatalf("callback action intent: %+v", intent)
 	}
 }
 
-func requireIndependentStandingRootTrees(t *testing.T, rt servedControlProofRuntime, scenario providerAliasScenario) {
+func requireIndependentStandingRootTrees(t *testing.T, rt servedWorkspaceProofRuntime, scenario providerAliasScenario) {
 	t.Helper()
 	source := rt.Runtime.Options.WorkflowModule.SemanticSource()
 	bundle, found := semanticview.Bundle(source)
 	if !found {
 		t.Fatal("standing tree proof requires admitted source")
 	}
-	var reader pipeline.WorkflowTargetPersistenceReader = rt.SQLite
-	if rt.Postgres != nil {
-		reader = rt.Postgres
-	}
 	seen := map[string]bool{}
 	for _, alias := range []string{"alpha", "beta"} {
-		var runID string
-		if err := rt.DB.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_bundle_hash=$1 AND flow_path=$2`, rt.BundleHash, scenario.source(alias)).Scan(&runID); err != nil {
-			t.Fatal(err)
-		}
+		runID := requireProviderAliasStandingRun(t, rt, scenario.source(alias))
 		if seen[runID] {
 			t.Fatal("independent standing services shared a generation run")
 		}
@@ -251,7 +228,7 @@ func requireIndependentStandingRootTrees(t *testing.T, rt servedControlProofRunt
 			if err != nil {
 				t.Fatal(err)
 			}
-			target, err := reader.LoadWorkflowTargetPersistence(context.Background(), owner, identity.NormalizeEntityID(expected.EntityID))
+			target, err := rt.WorkflowTargets.LoadWorkflowTargetPersistence(context.Background(), owner, identity.NormalizeEntityID(expected.EntityID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -294,7 +271,7 @@ func (s providerAliasScenario) receiver(alias string) string {
 	return "beta-receiver"
 }
 
-func requireProviderAliasRootConnection(t *testing.T, rt servedControlProofRuntime, receiver string) {
+func requireProviderAliasRootConnection(t *testing.T, rt servedWorkspaceProofRuntime, receiver string) {
 	t.Helper()
 	for _, name := range []string{"inbound.telegram.text_message", "inbound.telegram.callback_action"} {
 		payload := map[string]any{
@@ -313,13 +290,7 @@ func requireProviderAliasRootConnection(t *testing.T, rt servedControlProofRunti
 		requireProviderAliasDeliveries(t, rt, published.EventID, ".", name, receiver, false, false, false)
 		// A public root event must not borrow the provider's authenticated
 		// declaring-flow source or acquire either standing provider's consumers.
-		var stored operatorread.OperatorEventFull
-		var err error
-		if rt.SQLite != nil {
-			stored, err = rt.SQLite.LoadOperatorEvent(context.Background(), published.EventID)
-		} else {
-			stored, err = rt.Postgres.LoadOperatorEvent(context.Background(), published.EventID)
-		}
+		stored, err := rt.Observability.LoadOperatorEvent(context.Background(), published.EventID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -356,7 +327,7 @@ func postProviderAliasUpdate(t *testing.T, baseURL, alias, secret, body string) 
 	return response.StatusCode, raw
 }
 
-func requireProviderAliasDeliveries(t *testing.T, rt servedControlProofRuntime, eventID, alias, normalized, receiver string, agents, rawConnected, noLocalConsumers bool) string {
+func requireProviderAliasDeliveries(t *testing.T, rt servedWorkspaceProofRuntime, eventID, alias, normalized, receiver string, agents, rawConnected, noLocalConsumers bool) string {
 	t.Helper()
 	type readback struct {
 		EventName  string `json:"event_name"`
@@ -375,6 +346,7 @@ func requireProviderAliasDeliveries(t *testing.T, rt servedControlProofRuntime, 
 		var event readback
 		requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
 		last = event
+		physical := readWorkspaceProofApplication(t, rt.Events)
 		want := []string{identitytest.FlowNode(t, alias, "observer").Key()}
 		if noLocalConsumers {
 			want = []string{}
@@ -411,7 +383,7 @@ func requireProviderAliasDeliveries(t *testing.T, rt servedControlProofRuntime, 
 					t.Fatalf("declaration-owned static agent borrowed an entity: %#v", delivery.Target)
 				}
 			} else {
-				requireProviderAliasConstructedNodeTarget(t, rt, event.RunID, eventID, wantFlow, delivery.Target)
+				requireProviderAliasConstructedNodeTarget(t, rt, physical, event.RunID, eventID, wantFlow, delivery.Target)
 			}
 			complete = complete && delivery.Status == "delivered"
 		}
@@ -420,22 +392,7 @@ func requireProviderAliasDeliveries(t *testing.T, rt servedControlProofRuntime, 
 		if !reflect.DeepEqual(got, want) {
 			summary, summaryErr := rt.Runtime.Bus.PipelineObligationOwner().SummarizeRun(context.Background(), event.RunID)
 			t.Logf("provider recipient readback publication settlement: %+v err=%v", summary, summaryErr)
-			rows, err := rt.DB.Query(`SELECT agent_id,flow_instance,CAST(entity_id AS TEXT),status,lifecycle_phase,CAST(subscriptions AS TEXT) FROM agents WHERE run_id=$1 ORDER BY agent_id`, event.RunID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for rows.Next() {
-				var agent, path, status, phase, subscriptions string
-				var entity sql.NullString
-				if err := rows.Scan(&agent, &path, &entity, &status, &phase, &subscriptions); err != nil {
-					t.Fatal(err)
-				}
-				t.Logf("provider agent %s path=%s entity=%s status=%s phase=%s subscriptions=%s", agent, path, entity.String, status, phase, subscriptions)
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatal(err)
-			}
-			rows.Close()
+			t.Logf("provider agent physical storage: columns=%v rows=%v", physical["agents"].Columns, physical["agents"].Rows)
 			t.Fatalf("%s %s recipients=%v want=%v; root, other alias and unwired consumers must be absent", alias, event.EventName, got, want)
 		}
 		if len(want) == 0 && event.EventName == "inbound.telegram" &&
@@ -451,7 +408,7 @@ func requireProviderAliasDeliveries(t *testing.T, rt servedControlProofRuntime, 
 	return ""
 }
 
-func requireProviderAliasConstructedNodeTarget(t *testing.T, rt servedControlProofRuntime, runID, eventID, flow string, target operatorread.OperatorDeliveryTarget) {
+func requireProviderAliasConstructedNodeTarget(t *testing.T, rt servedWorkspaceProofRuntime, physical map[string]storetest.SelectedForkStorageTableSnapshot, runID, eventID, flow string, target operatorread.OperatorDeliveryTarget) {
 	t.Helper()
 	wantPath := flow
 	if flow == "." {
@@ -460,25 +417,29 @@ func requireProviderAliasConstructedNodeTarget(t *testing.T, rt servedControlPro
 	if runID == "" || target.EntityID == "" || target.FlowInstance != wantPath {
 		t.Fatalf("node target lost its exact constructed owner in run %s: %#v", runID, target)
 	}
-	var entityID, template, mode string
-	var entityType sql.NullString
-	if err := rt.DB.QueryRow(`SELECT entity_id, entity_type, flow_template, mode FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, wantPath).Scan(&entityID, &entityType, &template, &mode); err != nil {
-		t.Fatalf("read exact constructed node target: %v", err)
-	}
-	if entityID != target.EntityID || template != flow || mode != "static" {
-		t.Fatalf("target=%#v header entity=%s template=%s mode=%s", target, entityID, template, mode)
+	physicalHeader, err := providerAliasConstructedHeaderStorage(physical["flow_instances"], runID, wantPath)
+	if err != nil || physicalHeader.EntityID != target.EntityID || physicalHeader.Template != flow || physicalHeader.Mode != "static" {
+		t.Fatalf("target=%#v physical header=%+v err=%v", target, physicalHeader, err)
 	}
 	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flow, "", wantPath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var reader pipeline.WorkflowTargetPersistenceReader = rt.SQLite
-	if rt.Postgres != nil {
-		reader = rt.Postgres
-	}
-	construction, err := storetest.ReadReceiverConstructionPublication(context.Background(), reader, owner, entityID)
+	persisted, err := rt.WorkflowTargets.LoadWorkflowTargetPersistence(context.Background(), owner, identity.NormalizeEntityID(target.EntityID))
 	if err != nil {
-		snapshot, inspectErr := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), reader)
+		t.Fatalf("read exact constructed node target: %v", err)
+	}
+	if err := persisted.Validate(owner.Route, identity.NormalizeEntityID(target.EntityID)); err != nil || !persisted.Presence.Constructed() {
+		t.Fatalf("constructed node target lost its admitted header: %+v err=%v", persisted, err)
+	}
+	header := persisted.Lifecycle
+	entityID, entityType := physicalHeader.EntityID, physicalHeader.EntityType
+	if header.State.EntityID != entityID || header.State.EntityType != entityType || header.WorkflowName != flow || header.Mode != "static" {
+		t.Fatalf("target=%#v header=%+v", target, header)
+	}
+	construction, err := storetest.ReadReceiverConstructionPublication(context.Background(), rt.Events, owner, entityID)
+	if err != nil {
+		snapshot, inspectErr := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), rt.Events)
 		t.Logf("immutable receipt identity evidence: owner=%+v entity=%s receipts=%+v inspection_error=%v", owner, entityID, snapshot["workflow_instance_initial_materializations"], inspectErr)
 		t.Fatalf("read exact immutable node construction receipt: %v", err)
 	}
@@ -490,16 +451,15 @@ func requireProviderAliasConstructedNodeTarget(t *testing.T, rt servedControlPro
 		t.Fatalf("node target kind=%s want=%s from its exact creating publication", target.Kind, wantKind)
 	}
 	// Even a fieldless node has a constructed header, not a business-field row.
-	var fields int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, wantPath).Scan(&fields); err != nil {
+	fields, exact, err := providerAliasFieldRowCounts(physical["entity_state"], runID, wantPath, entityID, entityType)
+	if err != nil {
 		t.Fatal(err)
 	}
 	wantFields := 0
-	if entityType.Valid {
+	if physicalHeader.EntityTypePresent {
 		wantFields = 1
-		var exact int
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND flow_instance=$2 AND entity_id=$3 AND entity_type=$4`, runID, wantPath, entityID, entityType.String).Scan(&exact); err != nil || exact != 1 {
-			t.Fatalf("declared fields lost header identity: count=%d err=%v", exact, err)
+		if exact != 1 {
+			t.Fatalf("declared fields lost header identity: count=%d", exact)
 		}
 	}
 	if fields != wantFields {
@@ -640,24 +600,9 @@ func (f *providerPublicationAckLoss) CommitInboundPublication(ctx context.Contex
 	return runtimeinbound.CommitResult{}, errors.New("injected loss after complete provider batch commit")
 }
 
-func requireProviderAliasStoredSource(t *testing.T, rt servedControlProofRuntime, eventID, flow string) {
+func requireProviderAliasStoredSource(t *testing.T, rt servedWorkspaceProofRuntime, eventID, flow string) {
 	t.Helper()
-	var reader interface {
-		LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
-	}
-	if rt.SQLite != nil {
-		reader = rt.SQLite
-	} else {
-		reader = rt.Postgres
-	}
-	stored, err := reader.LoadOperatorEvent(context.Background(), eventID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	event, err := stored.EventSnapshot()
-	if err != nil {
-		t.Fatal(err)
-	}
+	event := storetest.LoadCanonicalEventRecord(t, context.Background(), rt.Events, eventID)
 	source := event.RoutingSource()
 	if source.Kind() != events.RoutingSourceExternalIngress || source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan ||
 		source.Route().FlowID != flow || source.Route().EntityID == "" || source.Route().FlowInstance != "" {
@@ -666,7 +611,7 @@ func requireProviderAliasStoredSource(t *testing.T, rt servedControlProofRuntime
 	requireProviderAliasPipelineSettlement(t, rt, event.RunID())
 }
 
-func requireProviderAliasPipelineSettlement(t *testing.T, rt servedControlProofRuntime, runID string) {
+func requireProviderAliasPipelineSettlement(t *testing.T, rt servedWorkspaceProofRuntime, runID string) {
 	t.Helper()
 	// Delivery readback precedes final publication settlement. The typed owner,
 	// not an empty delivery count or sleep, proves the fixture is fully settled.
@@ -693,7 +638,7 @@ func requireProviderAliasPipelineSettlement(t *testing.T, rt servedControlProofR
 	}
 }
 
-func requireProviderAliasAgentReplay(t *testing.T, rt servedControlProofRuntime, eventID, alias string) {
+func requireProviderAliasAgentReplay(t *testing.T, rt servedWorkspaceProofRuntime, eventID, alias string) {
 	t.Helper()
 	deniedKey := "unrelated-replay-" + eventID
 	denied := requireServedJSONRPCError(t, rt.Endpoint, "event.replay", map[string]any{
@@ -702,7 +647,12 @@ func requireProviderAliasAgentReplay(t *testing.T, rt servedControlProofRuntime,
 	if denied.Data["code"] != "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL" {
 		t.Fatalf("non-original root replay was not refused: %#v", denied)
 	}
-	if count := servedEventPublishAPIIdempotencyCount(t, rt.DB, rt.Backend, "event.replay", deniedKey); count != 0 {
+	snapshot := readWorkspaceProofApplication(t, rt.Events)
+	count, err := providerAliasReplayCompletionCount(snapshot["api_idempotency"], deniedKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
 		t.Fatalf("denied replay wrote %d completion rows", count)
 	}
 	params := map[string]any{
