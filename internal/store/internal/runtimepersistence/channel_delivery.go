@@ -468,7 +468,7 @@ func (s *PostgresStore) PlanChannelActionResponse(ctx context.Context, action op
 	return deliveryID, err
 }
 
-func (s *PostgresStore) AdvanceChannelActionPage(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) error {
+func (s *PostgresStore) AdvanceChannelActionPage(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, mode render.ControlPageMode) error {
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("postgres channel delivery store is unavailable")
 	}
@@ -476,7 +476,7 @@ func (s *PostgresStore) AdvanceChannelActionPage(ctx context.Context, action ope
 		return err
 	}
 	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.AdvanceActionPageTx(txctx, tx, action, resolved, true)
+		return channeldelivery.AdvanceActionPageTx(txctx, tx, action, resolved, mode, true)
 	})
 }
 
@@ -934,7 +934,7 @@ func (s *SQLiteRuntimeStore) PlanChannelActionResponse(ctx context.Context, acti
 	return deliveryID, err
 }
 
-func (s *SQLiteRuntimeStore) AdvanceChannelActionPage(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) error {
+func (s *SQLiteRuntimeStore) AdvanceChannelActionPage(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, mode render.ControlPageMode) error {
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("sqlite channel delivery store is unavailable")
 	}
@@ -942,7 +942,7 @@ func (s *SQLiteRuntimeStore) AdvanceChannelActionPage(ctx context.Context, actio
 		return err
 	}
 	return s.backend.RunTransaction(ctx, "advance channel card action page", func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.AdvanceActionPageTx(txctx, tx, action, resolved, false)
+		return channeldelivery.AdvanceActionPageTx(txctx, tx, action, resolved, mode, false)
 	})
 }
 

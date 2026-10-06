@@ -11030,6 +11030,10 @@ tool_model:
         computes controls, pages and the text budget including the reference and visible words. Control pages respect
         both the admitted count and text limits; a content excerpt adds the exact View full control, whose requested
         continuation pages reserve their own reference and Next page space without losing source bytes.
+        More choices uses edit only when declared. Without edit, the verified explicit request atomically creates
+        one linked next-control-page copy and settles the request; the original receipt, source identity and uncertain
+        history are retained. This is not automatic resend or capability fallback. The fresh copy traverses the same
+        current-source, audience, activation and managed-effect admission, and cannot borrow obsolete source authority.
       input_prompts: >
         A channel input start, partial answer, partial skip or chosen-draft advancement commits a distinct requested
         prompt in the same selected-store transaction as that accepted progress. The prompt freezes only the card and
@@ -34157,24 +34161,38 @@ api_specification:
       ChannelOnboardingCandidate:
         type: object
         additionalProperties: false
-        required: [provider, interface, coordinate, target, activation_posture, identity_ceremony, provider_credential_role, confirmation_operation]
+        required: [provider, interface, coordinate, target, activation_posture, identity_ceremony, provider_credential_role, confirmation_operation, capabilities]
         properties:
           provider: {type: string, minLength: 1}
+          capabilities: {$ref: '#/components/schemas/ChannelCapabilityVector'}
           interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
           coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
           target: {$ref: '#/components/schemas/ChannelOnboardingCandidateTarget'}
           activation_posture: {type: string, enum: [webhook_registration, session_connection]}
           identity_ceremony: {type: string, enum: [authenticated_text_challenge]}
-          provider_credential_role: {type: string, minLength: 1}
+          provider_credential_role: {type: string}
           signing_credential_role: {type: string}
           confirmation_operation: {type: string, minLength: 1}
           connection_health: {type: string}
+      ChannelCapabilityVector:
+        type: object
+        additionalProperties: false
+        required: [card_render, reply_to_reference, actions_as_buttons, actions_as_text, edit, acknowledgment, inbox_listing]
+        properties:
+          card_render: {type: boolean}
+          reply_to_reference: {type: boolean}
+          actions_as_buttons: {type: boolean}
+          actions_as_text: {type: boolean}
+          edit: {type: boolean}
+          acknowledgment: {type: boolean}
+          inbox_listing: {type: boolean}
       ConnectedChannelReadiness:
         type: object
         additionalProperties: false
-        required: [ready, reason, coordinate, activation_revision, binding_revision, observed_at]
+        required: [ready, reason, coordinate, activation_revision, binding_revision, observed_at, native_inbox_required]
         properties:
           native_inbox: {$ref: '#/components/schemas/NativeInboxQualification'}
+          native_inbox_required: {type: boolean}
           ready: {type: boolean}
           reason: {type: string, enum: [ready, runtime_context_coordinate_invalid, channel_plan_unavailable, activation_not_current, binding_not_current, proof_not_current, credentials_not_current, confirmation_not_terminal_success, target_not_current, exposure_not_current, registration_not_current, session_not_current]}
           coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}

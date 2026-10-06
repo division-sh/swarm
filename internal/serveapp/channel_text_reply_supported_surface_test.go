@@ -73,7 +73,7 @@ func TestChannelTextReplyBaselinePublicJourneyBothStores(t *testing.T) {
 				t.Cleanup(server.Close)
 				redirectExternalHosts(t, map[string]string{"mock.example.test": server.URL})
 				h.opts.SourceRoot = writeObjectChannelPacksWithBodies(t, h.opts.ConfigPath,
-					canonicalrouting.CopyChannelLearnedObjectOptionalInputJourney(t, true), textReplyChannelPackBodies(t))
+					canonicalrouting.CopyChannelLearnedObjectControlPagesJourney(t), textReplyChannelPackBodies(t))
 				h.opts.AbandonActiveRuns = false
 				h.start(t)
 				t.Cleanup(func() { h.stop(t) })
@@ -144,10 +144,34 @@ func TestChannelTextReplyBaselinePublicJourneyBothStores(t *testing.T) {
 				})
 				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				message := waitObjectCardReceipt(t, db, card)
-				waitTextReplyMessage(t, provider, "Action: reject")
+				firstCopy := message
+				waitTextReplyMessage(t, provider, "Action: More choices")
+				h.stop(t)
+				h.start(t)
+				postText("control-page", "operator-a", "More choices", message, false)
+				postText("control-page", "operator-a", "More choices", message, false)
+				waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "control-page", "navigation")
+				message = waitTextReplyMessage(t, provider, "Action: reject")
+				if message == firstCopy {
+					t.Fatal("no-edit navigation modified or borrowed the original physical copy")
+				}
+				var requestedCopyID string
+				if err := db.QueryRow(`SELECT p.delivery_id FROM channel_delivery_plans p
+					JOIN operator_channel_action_intents a ON a.publication_id=p.resend_action_publication_id
+					WHERE a.provider_event_id='control-page' AND p.source_kind='card' AND p.source_id=$1`, card).Scan(&requestedCopyID); err != nil {
+					t.Fatal(err)
+				}
+				waitObjectDeliveryState(t, db, requestedCopyID, "sent")
+				var copies, sent int
+				if err := db.QueryRow(`SELECT COUNT(*), SUM(CASE WHEN state='sent' THEN 1 ELSE 0 END)
+					FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, card).Scan(&copies, &sent); err != nil || copies != 2 || sent != 2 {
+					t.Fatalf("requested page did not retain exactly two accepted copies: %d/%d: %v", copies, sent, err)
+				}
 				postText("customer-action", "customer-b", "reject", message, false)
 				waitObjectChannelDisposition(t, db, "operator_channel_text_intents", "customer-action", "rejected")
 				postText("no-quote", "operator-a", "reject", "", false)
+				postText("old-page-request", "operator-a", "More choices", firstCopy, false)
+				waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "old-page-request", "stale")
 				postText("input-begin", "operator-a", "reject", message, false)
 				postText("input-begin", "operator-a", "reject", message, false)
 				waitObjectChannelDisposition(t, db, "operator_channel_action_intents", "input-begin", "input_started")
@@ -186,7 +210,15 @@ func waitTextReplyMessage(t *testing.T, provider *objectChannelProvider, contain
 	for time.Now().Before(deadline) {
 		provider.mu.Lock()
 		for index, delivery := range provider.deliveries {
-			if strings.Contains(fmt.Sprint(delivery["body"]), contains) {
+			body := fmt.Sprint(delivery["body"])
+			if strings.HasPrefix(contains, "Action: ") {
+				if reference := strings.LastIndex(body, "\nReference: "); reference >= 0 {
+					body = body[reference:]
+				} else {
+					continue
+				}
+			}
+			if strings.Contains(body, contains) {
 				provider.mu.Unlock()
 				return fmt.Sprintf("delivery-%d", index+1)
 			}
