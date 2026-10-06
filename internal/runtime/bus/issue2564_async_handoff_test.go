@@ -356,6 +356,75 @@ func TestIssue2564AsyncNodeHandoffDoesNotJoinDiagnosticPersistence(t *testing.T)
 	}
 }
 
+type issue2564BlockedDispatchProbe struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (p issue2564BlockedDispatchProbe) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
+	if signal.Kind != lifecycleprobe.PostCommitDispatchStarted {
+		return
+	}
+	close(p.entered)
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+	}
+}
+
+func TestIssue2564AsyncNodeHandoffDoesNotJoinDispatchProbe(t *testing.T) {
+	bus, prepared, owner, continuations := issue2564PreparedHandoff(t)
+	probe := issue2564BlockedDispatchProbe{entered: make(chan struct{}), release: make(chan struct{})}
+	release := sync.OnceFunc(func() { close(probe.release) })
+	bus.testLifecycleProbe = probe
+	returned := make(chan error, 1)
+	go func() { returned <- bus.DispatchPreparedPublishAsync(context.Background(), prepared) }()
+	t.Cleanup(func() {
+		release()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := bus.WaitForQuiescence(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	select {
+	case <-probe.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("asynchronous dispatch probe was never entered")
+	}
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("asynchronous publication waited for its dispatch probe")
+	}
+	owner.mu.Lock()
+	retained := len(owner.current)
+	owner.mu.Unlock()
+	if retained != 0 || owner.settlements != 1 {
+		t.Fatalf("blocked probe retained publication authority: claims=%d settlements=%d", retained, owner.settlements)
+	}
+	continuations.mu.Lock()
+	dispatches := continuations.dispatches
+	continuations.mu.Unlock()
+	if dispatches != 1 {
+		t.Fatalf("initial dispatch lost behind diagnostic probe: %d, want one", dispatches)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := bus.WaitForQuiescence(ctx); err == nil {
+		t.Fatal("blocked dispatch probe escaped runtime quiescence")
+	}
+	release()
+	ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := bus.WaitForQuiescence(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIssue2564AsyncNodeHandoffPreservesPublicationDiagnostic(t *testing.T) {
 	fault := errors.New("injected handoff settlement failure")
 	for _, name := range []string{"success", "uncommitted_settlement_failure", "acknowledged_cleanup_error"} {
