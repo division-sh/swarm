@@ -2333,14 +2333,14 @@ func (c *serveStandingServiceController) publishActiveService(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	targets, _, err := owner.EnsureStandingServiceTargets(prepared.WorkContext(ctx), serviceID)
+	targets, activations, err := owner.EnsureStandingServiceTargets(prepared.WorkContext(ctx), serviceID)
 	if err != nil {
 		return errors.Join(err, prepared.Discard())
 	}
-	if err := prepared.Publish(targets); err != nil {
+	if err := prepared.Publish(targets, activations); err != nil {
 		return errors.Join(err, prepared.Discard())
 	}
-	return nil
+	return owner.ArmDeclaredFlowClocks(ctx, activations, c.manager)
 }
 
 type standingServiceStatusReader interface {
@@ -2607,7 +2607,12 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 		if err != nil {
 			return nil, err
 		}
-		releases = append(releases, func() error { return release.Start(completeStanding) })
+		releases = append(releases, func() error {
+			if err := release.Start(completeStanding); err != nil {
+				return err
+			}
+			return contextDef.runtime.ArmDeclaredFlowClocks(ctx, activations, manager)
+		})
 		if manager != nil {
 			contextTargets := serveRuntimeContextStandingTargets(targets, contextDef.startupStandingTargets, activations)
 			for _, activation := range activations {
@@ -2626,6 +2631,7 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 				Runtime:                    contextDef.runtime,
 				WorkOwner:                  contextDef.runtime.WorkOccurrence(),
 				StandingTargets:            contextTargets,
+				StandingActivations:        activations,
 				ProviderTriggerGeneration:  contextDef.providerTriggerGeneration,
 				InstalledTriggerSubjects:   contextDef.installedTriggerSubjects,
 				PackInventoryDigest:        contextDef.packInventoryDigest,
@@ -2668,7 +2674,7 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 
 type serveStartupStandingRecoveryOwner struct {
 	workOwner *worklifetime.RuntimeOccurrence
-	byRunID   map[string]runtime.StandingTarget
+	byRunID   map[string]worklifetime.StandingIdentity
 }
 
 func newServeStartupStandingRecoveryOwner(
@@ -2682,18 +2688,22 @@ func newServeStartupStandingRecoveryOwner(
 			active[activation.ServiceID] = struct{}{}
 		}
 	}
-	byRunID := make(map[string]runtime.StandingTarget, len(targets))
+	var admittedTargets []runtime.StandingTarget
 	for _, target := range targets {
-		if _, ok := active[target.ServiceID]; !ok {
-			continue
+		if _, enabled := active[target.ServiceID]; enabled {
+			admittedTargets = append(admittedTargets, target)
 		}
-		if existing, ok := byRunID[target.RunID]; ok {
-			if existing.ServiceID != target.ServiceID || existing.Generation != target.Generation {
-				return nil, fmt.Errorf("standing startup run %s has conflicting exact owners", target.RunID)
-			}
-			continue
+	}
+	identities, err := runtime.StandingExecutionIdentities(admittedTargets, activations)
+	if err != nil {
+		return nil, err
+	}
+	byRunID := make(map[string]worklifetime.StandingIdentity, len(identities))
+	for _, identity := range identities {
+		if prior, exists := byRunID[identity.RunID]; exists && prior != identity {
+			return nil, fmt.Errorf("standing startup run %s has conflicting exact owners", identity.RunID)
 		}
-		byRunID[target.RunID] = target
+		byRunID[identity.RunID] = identity
 	}
 	if len(byRunID) == 0 {
 		return nil, nil
@@ -2718,7 +2728,7 @@ func (o *serveStartupStandingRecoveryOwner) BeginStandingRunRecovery(
 	}
 	if origin.Kind() != runtimerunlifecycle.OriginStandingGeneration ||
 		origin.ServiceID() != target.ServiceID ||
-		origin.Generation() != target.Generation {
+		uint64(origin.Generation()) != target.Generation {
 		return nil, fmt.Errorf("standing startup recovery run %s conflicts with prepared owner", runID)
 	}
 	return o.workOwner.BeginStanding(ctx)

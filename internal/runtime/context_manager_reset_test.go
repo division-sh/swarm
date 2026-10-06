@@ -19,7 +19,7 @@ func TestResetStandingPreparationFailureDoesNotRetainPrecedingOccurrence(t *test
 	_, err := manager.newStandingOccurrencesLocked(owner, []StandingTarget{
 		{ServiceID: "first", RunID: "run-first", Generation: 1},
 		{ServiceID: "invalid", RunID: "run-invalid", Generation: 0},
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("accepted invalid standing generation")
 	}

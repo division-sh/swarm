@@ -237,6 +237,16 @@ func (l *Lifecycle) Cancel(ctx context.Context, command CancelCommand) (CancelRe
 }
 
 func (l *Lifecycle) Restore(ctx context.Context) (int, error) {
+	return l.restore(ctx, false)
+}
+
+// Business clocks require their deployment binding's exact execution owner.
+// Ordinary runtime startup restores only the distinct control families.
+func (l *Lifecycle) RestoreControlSchedules(ctx context.Context) (int, error) {
+	return l.restore(ctx, true)
+}
+
+func (l *Lifecycle) restore(ctx context.Context, controlsOnly bool) (int, error) {
 	if l == nil {
 		return 0, nil
 	}
@@ -246,6 +256,9 @@ func (l *Lifecycle) Restore(ctx context.Context) (int, error) {
 	}
 	reconciled := 0
 	for _, activation := range activations {
+		if controlsOnly && activation.Command.OwnerKind == OwnerInstance {
+			continue
+		}
 		if depth, err := catchupDepth(activation, time.Now()); err != nil {
 			return 0, err
 		} else if depth > catchupWarningThreshold && l.logger != nil {

@@ -493,7 +493,7 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 		successorTargets[i].RunID = successorRunID
 		successorTargets[i].Generation = successorGeneration
 	}
-	if err := prepared.Publish(successorTargets); err != nil {
+	if err := prepared.Publish(successorTargets, nil); err != nil {
 		t.Fatalf("publish standing successor: %v", err)
 	}
 	successor := manager.contexts[runtimeContextTestHashA].standing[serviceID]

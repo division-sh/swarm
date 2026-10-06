@@ -33,6 +33,7 @@ type StandingTargetDeclaration struct {
 	FlowPath   string
 	Alias      string
 	Ingress    []StandingIngressBinding
+	Clocks     []semanticview.ClockSchedule
 }
 
 type StandingTarget struct {
@@ -121,6 +122,10 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 	}
 	declarations := make([]StandingTargetDeclaration, 0)
 	aliases := map[string]string{}
+	clocks := make(map[string][]semanticview.ClockSchedule)
+	for _, declaration := range semanticview.ClockSchedules(source) {
+		clocks[declaration.FlowID] = append(clocks[declaration.FlowID], declaration)
+	}
 	for _, view := range bundle.FlowViews() {
 		flowID := strings.TrimSpace(view.Paths.FlowPath)
 		activation := strings.ToLower(strings.TrimSpace(view.Schema.Activation))
@@ -134,7 +139,7 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 		if view.Schema.Ingress != nil && activation != runtimecontracts.FlowActivationStanding {
 			return nil, fmt.Errorf("%s ingress requires activation: standing", location)
 		}
-		if activation != runtimecontracts.FlowActivationStanding {
+		if activation != runtimecontracts.FlowActivationStanding && len(clocks[flowID]) == 0 {
 			continue
 		}
 		if flowID == "" {
@@ -146,6 +151,7 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 		decl := StandingTargetDeclaration{
 			SourcePath: location,
 			FlowPath:   strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
+			Clocks:     clocks[flowID],
 		}
 		if flowID == "." {
 			decl.FlowPath = "."
@@ -674,7 +680,7 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	for _, declaration := range declarations {
 		serviceID := runtimeflowidentity.StandingServiceID(declaration.FlowPath)
 		instance := runtimeflowidentity.StandingForService(source, declaration.FlowPath, serviceID)
-		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, instance: instance, bindingEnabled: len(declaration.Ingress) == 0}
+		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, instance: instance, bindingEnabled: len(declaration.Ingress) == 0 || len(declaration.Clocks) > 0}
 		for _, binding := range declaration.Ingress {
 			credentials := admission.bindings[standingIngressSelector(declaration.FlowPath, binding.Provider)]
 			if !credentials.enabled {

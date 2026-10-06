@@ -463,7 +463,7 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 					t.Fatalf("sibling preflight reached standing mutation: %v", recovered)
 				}
 			}()
-			if _, err := rt.AdmitChannelStandingTarget(ctx, operation, candidate); err == nil {
+			if _, _, err := rt.AdmitChannelStandingTarget(ctx, operation, candidate); err == nil {
 				t.Fatal("explicit admission adopted unrequested sibling authority")
 			}
 			if rt.standingCredentialAdmission != frozen {

@@ -1,6 +1,8 @@
 package genericschedule
 
 import (
+	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -8,9 +10,38 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
+
+func TestRuntimeControlRestorationDoesNotArmInstanceClocks(t *testing.T) {
+	command := instanceScheduleCommand(t, ".")
+	admittedAt := time.Now().UTC().Truncate(time.Microsecond)
+	due, err := command.Due.FirstDue(admittedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := command.ImmutableHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation := Activation{ID: uuid.NewString(), Command: command, ImmutableHash: hash,
+		AdmittedAt: admittedAt, InitialDueAt: due, CurrentDueAt: due, Status: StatusActive}
+	store := &restoreStore{activation: activation}
+	scheduler := &restoreScheduler{}
+	lifecycle, err := NewLifecycle(store, scheduler, restorePlanner{}, restoreDispatcher{}, nil, executionposture.Live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := lifecycle.RestoreControlSchedules(context.Background())
+	if err != nil || restored != 0 || len(scheduler.registered) != 0 {
+		t.Fatalf("ordinary runtime startup armed deployment clock: restored=%d registered=%+v err=%v", restored, scheduler.registered, err)
+	}
+	if !reflect.DeepEqual(store.activation, activation) {
+		t.Fatal("non-arming restoration mutated durable clock evidence")
+	}
+}
 
 func instanceScheduleCommand(t *testing.T, flow string) AdmissionCommand {
 	t.Helper()

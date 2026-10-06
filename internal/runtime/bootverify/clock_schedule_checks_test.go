@@ -17,12 +17,12 @@ func TestClockScheduleBareEventAndConsumerLaw(t *testing.T) {
 	for _, tc := range []struct {
 		name, fields, pins, nodes, want string
 	}{
-		{name: "root export", pins: "pins:\n  outputs:\n    events: [poll.tick]\n"},
+		{name: "root export", pins: "pins:\n  outputs: [poll.tick]\n"},
 		{name: "actual local handler", nodes: "observer:\n  event_handlers:\n    poll.tick: {}\n"},
 		{name: "dangling emission", want: "actual consumer"},
-		{name: "input is not consumer", pins: "pins:\n  inputs:\n    events: [poll.tick]\n", want: "actual consumer"},
-		{name: "required field", fields: "  reason: text\n", pins: "pins:\n  outputs:\n    events: [poll.tick]\n", want: "bare event"},
-		{name: "optional field", fields: "  reason: text?\n", pins: "pins:\n  outputs:\n    events: [poll.tick]\n", want: "bare event"},
+		{name: "input is not consumer", pins: "pins:\n  inputs: [poll.tick]\n", want: "actual consumer"},
+		{name: "required field", fields: "  reason: text\n", pins: "pins:\n  outputs: [poll.tick]\n", want: "bare event"},
+		{name: "optional field", fields: "  reason: text?\n", pins: "pins:\n  outputs: [poll.tick]\n", want: "bare event"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
