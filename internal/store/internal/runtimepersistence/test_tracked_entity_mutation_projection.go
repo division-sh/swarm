@@ -29,7 +29,7 @@ func ReadTrackedEntityMutationProjectionStorageForTest(ctx context.Context, sele
 	var read func(context.Context, func(context.Context, *sql.Tx) error) error
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		if owner == nil || owner.backend == nil || !owner.backend.Valid() {
+		if owner == nil || owner.backend == nil || owner.pipelinePostgresOwner == nil || !owner.backend.Valid() {
 			return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("observation requires an initialized postgres read owner")
 		}
 		if err := owner.requireCurrentSchema(); err != nil {
@@ -37,7 +37,7 @@ func ReadTrackedEntityMutationProjectionStorageForTest(ctx context.Context, sele
 		}
 		read = owner.backend.RunReadTransaction
 	case *SQLiteRuntimeStore:
-		if owner == nil || owner.backend == nil || !owner.backend.Valid() {
+		if owner == nil || owner.backend == nil || owner.pipelineSQLiteOwner == nil || !owner.backend.Valid() {
 			return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("observation requires an initialized sqlite read owner")
 		}
 		if err := owner.requireCurrentSchema(); err != nil {
