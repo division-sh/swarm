@@ -10,9 +10,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -115,13 +117,13 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 				return event
 			}
 			publish("seed")
-			var initialFields []byte
-			if err := selected.db.QueryRow(`SELECT fields FROM entity_state WHERE run_id=$1`, runID).Scan(&initialFields); err != nil {
+			owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(".", runID, runID))
+			if err != nil {
 				t.Fatal(err)
 			}
-			var initial map[string]any
-			if err := json.Unmarshal(initialFields, &initial); err != nil || initial["marker"] != "first" {
-				t.Fatalf("seed state=%s err=%v", initialFields, err)
+			initial, found, err := selected.persistence.LoadWorkflowInstance(ctx, owner)
+			if err != nil || !found || initial.Fields["marker"] != "first" {
+				t.Fatalf("seed state=%+v found=%v err=%v", initial, found, err)
 			}
 			event := publish("select")
 			failure, typed := failures.EnvelopeFromError(fault.err)
@@ -155,8 +157,20 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			if err := bus.PublishAcknowledged(ctx, event); err != nil {
 				t.Fatal(err)
 			}
-			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='ack'`, runID).Scan(&count); err != nil || count != 1 {
-				t.Fatalf("duplicate final effect: %d %v", count, err)
+			report, err := selected.events.(interface {
+				LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
+			}).LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			count = 0
+			for _, row := range report.EventCounts {
+				if row.EventName == "ack" {
+					count += row.Count
+				}
+			}
+			if count != 1 {
+				t.Fatalf("duplicate final effect: %d", count)
 			}
 		})
 	}
