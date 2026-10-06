@@ -10831,7 +10831,7 @@
     {
       "file": "platform-spec.yaml",
       "before_hash": "1053af933001000d2d017ea7b8b0b6e151b850fa20042e6f255a618ea16f65cc",
-      "after_hash": "650dbbff8aaeef07c6241c00b9ea471e8eed7cb77f3254be376bf05e7b99abc0",
+      "after_hash": "34f1e053a8b0e43b39026511882e08f531535f253ddd7f605b4a97107de59697",
       "edits": [
         {
           "offset": 33293,
@@ -10881,7 +10881,7 @@
         {
           "offset": 270011,
           "before": "",
-          "after": "    entry_and_final_authority: |\n      Entry is the first effective node-backed stages declaration, never a\n      sorted map or a mutable projection. Optional final: true is the explicit\n      end choice; omission or false is non-final. No handler executes and no\n      new timer arms there. Explicit loop and join source restrictions cannot\n      widen this eligibility: an authored final source is rejected during\n      verification and is excluded from executable topology. Final entry alone\n      cancels no accepted work, revokes no acknowledged writes, and creates no\n      resource-cleanup authority. No-final flows are valid services that never\n      complete; finite run.start rejects their selected constructor/route\n      closure before creation, including independently selected feed receivers.\n"
+          "after": "    entry_and_final_authority: |\n      Entry is the first effective node-backed stages declaration, never a\n      sorted map or a mutable projection. Optional final: true is the explicit\n      end choice; omission or false is non-final. No handler executes and no\n      new timer arms there. Explicit loop and join source restrictions cannot\n      widen this eligibility: an authored final source is rejected during\n      verification and is excluded from executable topology. Arrival-join\n      stage applicability is checked once for the declaration, whether its\n      outcomes advance, emit, or write data and whether it owns a deadline;\n      stage-free fan-out delivery joins retain their separate semantics. Final entry alone\n      cancels no accepted work, revokes no acknowledged writes, and creates no\n      resource-cleanup authority. No-final flows are valid services that never\n      complete; finite run.start rejects their selected constructor/route\n      closure before creation, including independently selected feed receivers.\n"
         },
         {
           "offset": 776716,
