@@ -43,24 +43,11 @@ func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailu
 		name        string
 		disposition runtimeruncontrol.RecoveryDisposition
 		diagnostic  string
-	}{
-		{name: "pending", disposition: runtimeruncontrol.RecoveryPending, diagnostic: "post-commit timer retirement queued"},
-		{name: "failed", disposition: runtimeruncontrol.RecoveryFailed, diagnostic: "post-commit timer retirement failed"},
-	} {
+	}{{name: "pending", disposition: runtimeruncontrol.RecoveryPending, diagnostic: "post-commit timer retirement queued"}, {name: "failed", disposition: runtimeruncontrol.RecoveryFailed, diagnostic: "post-commit timer retirement failed"}} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			controller := &committedStopRecoveryProbe{recovery: runtimeruncontrol.PostCommitRecovery{
-				Disposition: tc.disposition, Err: errors.New(tc.diagnostic),
-			}}
-			handler := testHandler(t, Options{
-				AuthTokens: []string{testToken},
-				Handlers: OperatorRunControlHandlers(RunControlHandlerOptions{
-					Idempotency: pg,
-					Controller:  controller,
-				}),
-			})
+			pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+			controller := &committedStopRecoveryProbe{recovery: runtimeruncontrol.PostCommitRecovery{Disposition: tc.disposition, Err: errors.New(tc.diagnostic)}}
+			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorRunControlHandlers(RunControlHandlerOptions{Idempotency: pg, Controller: controller})})
 			runID := uuid.NewString()
 			body := runControlBody("run.stop", runID, "committed-stop-recovery")
 			for attempt := 0; attempt < 2; attempt++ {
@@ -185,23 +172,14 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 }
 
 func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
 	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	controller := runtimeruncontrol.NewController(pg, bus, runtimeruncontrol.Options{})
 	bus.SetRunDispatchGate(controller)
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			Idempotency: pg,
-			RunControl:  controller,
-		}),
-	})
-
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Idempotency: pg, RunControl: controller})})
 	missingRunID := uuid.NewString()
 	for _, method := range []string{"run.stop", "run.pause", "run.continue"} {
 		resp := rpcCall(t, handler, runControlBody(method, missingRunID, ""))
@@ -212,13 +190,8 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 			t.Fatalf("%s missing data = %#v, want %s", method, data, RunNotFoundCode)
 		}
 	}
-
 	materializedLikePausedRunID := uuid.NewString()
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID:      materializedLikePausedRunID,
-		State:      storerunlifecycle.StatePaused,
-		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
-	})
+	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: materializedLikePausedRunID, State: storerunlifecycle.StatePaused, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
 	resp := rpcCall(t, handler, runControlBody("run.continue", materializedLikePausedRunID, ""))
 	if resp.Error == nil {
 		t.Fatal("run.continue without operator pause owner error = nil")

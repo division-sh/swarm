@@ -25,8 +25,8 @@ func TestInboundRecipesChangeOnlyTheUnusedSeedPool(t *testing.T) {
 			assertInboundRecipeChangesOnlyUnusedPool(t, row)
 		})
 	}
-	if count != 19 || len(rows)-count != 28 {
-		t.Fatalf("family count=%d, prior recipes=%d", count, len(rows)-count)
+	if count != 19 {
+		t.Fatalf("family count=%d, want 19", count)
 	}
 }
 

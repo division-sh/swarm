@@ -591,8 +591,7 @@ func TestInvalidEventTypeMappersSeparateRootInputFromCatalogFailures(t *testing.
 }
 
 func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -603,13 +602,7 @@ func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.
 	cases := []struct {
 		method string
 		params string
-	}{
-		{method: "run.stop", params: fmt.Sprintf(`{"run_id":%q,"idempotency_key":"idem-stop"}`, runID)},
-		{method: "run.pause", params: fmt.Sprintf(`{"run_id":%q,"idempotency_key":"idem-pause"}`, runID)},
-		{method: "run.continue", params: fmt.Sprintf(`{"run_id":%q,"idempotency_key":"idem-continue"}`, runID)},
-		{method: "runtime.pause", params: `{"idempotency_key":"idem-runtime-pause"}`},
-		{method: "runtime.resume", params: `{"idempotency_key":"idem-runtime-resume"}`},
-	}
+	}{{method: "run.stop", params: fmt.Sprintf(`{"run_id":%q,"idempotency_key":"idem-stop"}`, runID)}, {method: "run.pause", params: fmt.Sprintf(`{"run_id":%q,"idempotency_key":"idem-pause"}`, runID)}, {method: "run.continue", params: fmt.Sprintf(`{"run_id":%q,"idempotency_key":"idem-continue"}`, runID)}, {method: "runtime.pause", params: `{"idempotency_key":"idem-runtime-pause"}`}, {method: "runtime.resume", params: `{"idempotency_key":"idem-runtime-resume"}`}}
 	for _, tc := range cases {
 		t.Run(tc.method, func(t *testing.T) {
 			resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"control","method":%q,"params":%s}`, tc.method, tc.params))

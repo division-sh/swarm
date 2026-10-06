@@ -222,7 +222,7 @@ func checkTypes(root string, files []pendingFile) error {
 	pkgs, err := packages.Load(&packages.Config{
 		Dir: root, Tests: true, Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedTypes | packages.NeedImports,
-	}, "./internal/runtime", "./internal/runtime/pipeline")
+	}, "./internal/runtime", "./internal/runtime/pipeline", "./internal/apiv1")
 	if err != nil {
 		return err
 	}
