@@ -62,8 +62,7 @@ func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel
 	if err != nil {
 		return err
 	}
-	if !found || plan.SourceKind != expected.SourceKind || plan.State != "sent" ||
-		plan.CurrentRenderID != resolved.RenderID || plan.CurrentReceiptID != resolved.ReceiptOperationID {
+	if !found || !exactSentActionPlan(plan, resolved) {
 		return fmt.Errorf("card action page has no exact sent plan")
 	}
 	if err := requireCurrentActionPageTx(ctx, tx, resolved, plan, postgres); err != nil {
@@ -111,6 +110,11 @@ func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel
 		return err
 	}
 	return settleControlNavigationTx(ctx, tx, action, postgres)
+}
+
+func exactSentActionPlan(plan Plan, resolved render.ResolvedAction) bool {
+	return plan.SourceKind == resolved.SourceKind && plan.State == "sent" &&
+		plan.CurrentRenderID == resolved.RenderID && plan.CurrentReceiptID == resolved.ReceiptOperationID
 }
 
 func settleControlNavigationTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, postgres bool) error {

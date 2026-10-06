@@ -545,32 +545,9 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	if err := d.reconcileNativeInboxActivation(ctx, selected); err != nil {
 		return fmt.Errorf("channel delivery recovery entry is unavailable: %w", err)
 	}
-	presentation, err := runtimechanneldelivery.TextReplyPresentation(prepared.Frozen, prepared.Actions)
+	semanticInput, err := channelDeliverySemanticInput(plan, prepared, operation, previousReference)
 	if err != nil {
 		return err
-	}
-	actions := make([]any, 0, len(prepared.Actions))
-	for _, action := range prepared.Actions {
-		if action.Token == "" || action.Label == "" {
-			return fmt.Errorf("channel delivery action is incomplete")
-		}
-		actions = append(actions, map[string]any{"label": action.Label, "token": action.Token})
-	}
-	bounds, err := plan.PresentationBounds()
-	if err != nil {
-		return err
-	}
-	if len(actions) > bounds.Actions || prepared.Frozen.ActionPage == nil || prepared.Frozen.Bounds != bounds {
-		return fmt.Errorf("channel delivery actions exceed selected compiled capacity")
-	}
-	semanticInput := map[string]any{
-		"presentation": map[string]any{"text": presentation}, "actions": actions,
-	}
-	if !plan.Capabilities().Vector().ActionsAsButtons {
-		semanticInput = map[string]any{"presentation": map[string]any{"text": presentation}}
-	}
-	if operation == "edit" {
-		semanticInput["delivery_reference"] = previousReference
 	}
 	_, input, err := plan.PrepareOperation(operation, semanticInput)
 	if err != nil {
@@ -625,6 +602,33 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		map[string]string{"delivery_id": candidate.DeliveryID, "render_id": prepared.RenderID}, projection.Project,
 	)
 	return err
+}
+
+func channelDeliverySemanticInput(plan packs.OutboundBindingPlan, prepared runtimechanneldelivery.PreparedRender,
+	operation string, previousReference any) (map[string]any, error) {
+	presentation, err := runtimechanneldelivery.TextReplyPresentation(prepared.Frozen, prepared.Actions)
+	if err != nil {
+		return nil, err
+	}
+	bounds, err := plan.PresentationBounds()
+	if err != nil {
+		return nil, err
+	}
+	if len(prepared.Actions) > bounds.Actions || prepared.Frozen.ActionPage == nil || prepared.Frozen.Bounds != bounds {
+		return nil, fmt.Errorf("channel delivery actions exceed selected compiled capacity")
+	}
+	semanticInput := map[string]any{"presentation": map[string]any{"text": presentation}}
+	if plan.Capabilities().Vector().ActionsAsButtons {
+		actions := make([]any, 0, len(prepared.Actions))
+		for _, action := range prepared.Actions {
+			actions = append(actions, map[string]any{"label": action.Label, "token": action.Token})
+		}
+		semanticInput["actions"] = actions
+	}
+	if operation == "edit" {
+		semanticInput["delivery_reference"] = previousReference
+	}
+	return semanticInput, nil
 }
 
 func resolveChannelDeliveryCredentials(ctx context.Context, owner *runtimecredentials.SnapshotOwner, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission, tool runtimecontracts.ToolSchemaEntry) (map[string]any, error) {
