@@ -1818,7 +1818,14 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 
 	requireMutationSurface(t, selected)
 
-	_, err := exec.Execute(ctx, "create_entity", map[string]any{
+	retirementActor, ok := runtimetools.ActorFromContext(ctx)
+	if !ok {
+		t.Fatal("tool reconstruction proof requires its constructed actor")
+	}
+	// Keep the original trusted internal probes distinct from generated writes.
+	retirementActor.Type = "internal"
+	retirementActor.Tools = append(append([]string(nil), retirementActor.Tools...), "create_entity", "save_entity_field")
+	_, err := exec.Execute(runtimetools.WithActor(ctx, retirementActor), "create_entity", map[string]any{
 		"flow_instance": runID,
 		"fields": map[string]any{
 			"status": "open",
@@ -1829,12 +1836,20 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 		t.Fatalf("retired create_entity must refuse: %v", err)
 	}
 	entityID := runID
-	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+	if _, err := exec.Execute(runtimetools.WithActor(ctx, retirementActor), "save_entity_field", map[string]any{
 		"entity_id": entityID,
 		"field":     "status",
 		"value":     "closed",
 	}); err != nil {
 		t.Fatalf("save_entity_field: %v", err)
+	}
+	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
+		t.Fatalf("trackedMutationStateMatchesEntityState(tool): %v", err)
+	}
+	if _, err := exec.Execute(ctx, "save_accounts_status", map[string]any{
+		"value": "rechecked",
+	}); err != nil {
+		t.Fatalf("save_accounts_status: %v", err)
 	}
 
 	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
@@ -2089,6 +2104,8 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	fixtureRoot := t.TempDir()
 	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n")
 	writeConformanceSnapshotFixture(t, fixtureRoot, "entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "events.yaml", "accounts.updated:\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "agents.yaml", "tester:\n  role: operator\n  intent: {inline: 'Persist the supplied account status.'}\n  model: regular\n  subscriptions: [accounts.updated]\n  entity_writes: {accounts: {save: [status]}}\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("load entity tool source: %v", err)
@@ -2107,20 +2124,34 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	}); err != nil {
 		t.Fatalf("construct tool mutation target: %v", err)
 	}
+	declaration, ok := runtimesemanticview.ResolveAgentDeclaration(source, runtimeactors.AgentConfig{ID: "tester", FlowID: "."})
+	if !ok {
+		t.Fatal("tool mutation fixture requires its exact tester declaration")
+	}
+	namePlan, err := runtimesemanticview.ScopedAgentNamePlan(source, declaration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := namePlan.Materialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := construction.manager.ResolveAgentFrameConfig(runID, name.AgentID, "", true)
+	if err != nil {
+		t.Fatalf("resolve constructed tool mutation actor: %v", err)
+	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
+		EntityWriter:                   construction.pipeline,
 		HumanTaskStore:                 pg,
-		AllowInternalLegacyEntityTools: true,
 		WorkflowSource:                 source,
+		AllowInternalLegacyEntityTools: true,
 	})
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	ctx = runtimetools.WithActor(ctx, runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "tester",
-		Type:          "internal",
-		Role:          "operator",
-		Tools:         []string{"create_entity", "save_entity_field"},
-	})
+	ctx = runtimetools.WithActor(runtimecorrelation.WithRunID(ctx, runID), frame.Config)
+	inbound := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("accounts.updated"), "", "", nil, 0, runID,
+		events.EnvelopeForEntityID(events.EventEnvelope{}, runID), time.Now().UTC())
+	storetest.CommitSemanticEvent(t, ctx, pg, inbound)
+	ctx = runtimebus.WithInboundEvent(ctx, inbound)
 	return ctx, exec, pg, runID
 }
 
