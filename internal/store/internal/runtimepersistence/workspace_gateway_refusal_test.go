@@ -62,8 +62,18 @@ func TestWorkspaceGatewayRefusalBeforeProviderTurnBothStores(t *testing.T) {
 					store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 					selected, db = store, store.backend.ConstructionHandle()
 				} else {
-					_, db, _ = testutil.StartPostgres(t)
-					selected = admitTestPostgresStore(t, db)
+					dsn, _, _ := testutil.StartPostgres(t)
+					store, err := NewPostgresStore(dsn)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := store.Close(); err != nil {
+							t.Errorf("close gateway-refusal selected owner: %v", err)
+						}
+					})
+					bootstrapTestPostgresStore(t, store)
+					selected, db = store, store.backend.ConstructionHandle()
 				}
 				source := []byte("def handle(input):\n    raise Exception('MODEL LAUNCHED AFTER REFUSAL')\n")
 				actor := models.AgentConfig{ExecutionMode: effects.ExecutionModeMock, LLMBackend: "mock", ResolvedLLMBackend: "mock", Mock: mockperformance.Performance{
