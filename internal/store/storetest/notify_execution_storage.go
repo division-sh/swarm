@@ -33,3 +33,7 @@ func ReadNotifyFirstRunFailure(ctx context.Context, selected any, runID string) 
 func ReadNotifyFanOutWork(ctx context.Context, selected any, runID string) (NotifyFanOutWorkStorage, error) {
 	return private.ReadNotifyFanOutWorkForTest(ctx, selected, runID)
 }
+
+func ReadNotifyAgentDeliveryStatus(ctx context.Context, selected any, runID, agentID, instance string) (string, error) {
+	return private.ReadNotifyAgentDeliveryStatusForTest(ctx, selected, runID, agentID, instance)
+}
