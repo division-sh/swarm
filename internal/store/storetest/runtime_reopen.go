@@ -50,10 +50,18 @@ func StartPostgresRuntimeStoreWithReopen(t *testing.T, locations ...string) (*st
 	return open(), open
 }
 
-func StartSQLiteRuntimeStoreWithReopen(t testing.TB, ctx context.Context) (*store.SQLiteRuntimeStore, func() *store.SQLiteRuntimeStore) {
+func StartSQLiteRuntimeStoreWithReopen(t testing.TB, ctx context.Context, locations ...string) (*store.SQLiteRuntimeStore, func() *store.SQLiteRuntimeStore) {
 	t.Helper()
+	if len(locations) > 1 || (len(locations) == 1 && locations[0] == "") {
+		t.Fatal("native sqlite fixture requires at most one nonempty file location")
+	}
 	spec, plans := canonicalPlatformPlans(t)
-	path := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	var path string
+	if len(locations) == 1 {
+		path = locations[0]
+	} else {
+		path = filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	}
 	request := store.SchemaBootstrapRequest{
 		PlatformPlans: plans,
 		Origin: store.RuntimeStoreOrigin{

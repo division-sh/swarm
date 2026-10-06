@@ -39,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -65,9 +66,10 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 		{
 			name: "sqlite",
 			start: func(t *testing.T) gatewayStorySelectedStore {
-				backend, reopen := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
+				backend, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
+				location := backend.Path()
 				return gatewayStorySelectedStore{backend: backend, close: backend.Close, reopen: func() gatewayStorySelectedStore {
-					next := reopen()
+					next, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), location)
 					return gatewayStorySelectedStore{backend: next, close: next.Close}
 				}}
 			},
@@ -75,9 +77,10 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 		{
 			name: "postgres",
 			start: func(t *testing.T) gatewayStorySelectedStore {
-				backend, reopen := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				location := testutil.StartPostgresDSN(t)
+				backend, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, location)
 				return gatewayStorySelectedStore{backend: backend, close: backend.Close, reopen: func() gatewayStorySelectedStore {
-					next := reopen()
+					next, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, location)
 					return gatewayStorySelectedStore{backend: next, close: next.Close}
 				}}
 			},
