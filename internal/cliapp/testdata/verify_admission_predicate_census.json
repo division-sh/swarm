@@ -63,7 +63,7 @@
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retainedCredentialEvidence",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "6729fd53a30ef06561e3ba0f14c0cef15169e322eb5297a8d555ed62d97d1d25"
+    "body_sha256": "abaffb91dc8f240f951ac8084e2796c1b9d91165929c0c3b953500ec85a0e905"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retireAuthority",
@@ -2505,7 +2505,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.DispatchChannelConfirmation",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "8e69d19fd614bbeee4104b9aebda966cb952a5318ec31f0ba7c66f82d9d68aa4"
+    "body_sha256": "be24567a9ca61f5dd63885bfa75a62775baa4ffaba9687c39e57722797e58ef2"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.ReconcileChannelEffectsBeforeRebind",
@@ -2517,7 +2517,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.ProjectConnectedChannelReadiness",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "f093bbdee8c9a08e43ab2102b806a2a9de8eaf5791dce698e6f9ba01d15730a6"
+    "body_sha256": "acc15f8fb05e2ddb500b234b2586404a1be7f309a90cb59c649b283ff74c7ef0"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observedAt",
@@ -2637,7 +2637,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelCandidatesForPlan",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "88e2051cf9e4e7fbee8b1fdce006ee62422ef0493eb7d0933551f2cdaf073ee6"
+    "body_sha256": "8dafbb1f2c92b5ea6ae5dd8fe6f40bdb6c1936ec7c14847a8ac459ebd01c129c"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelDeclarationTarget",
