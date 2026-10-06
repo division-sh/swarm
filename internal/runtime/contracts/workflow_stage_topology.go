@@ -124,6 +124,25 @@ func (t WorkflowStageTopology) SameStageCatalog(other WorkflowStageTopology) boo
 	return t.ValidStageCatalog() && other.ValidStageCatalog() && t.stageCatalog == other.stageCatalog
 }
 
+// HandlerSourceErrors retains invalid explicit restrictions for verification;
+// excluding them from executable scope must not silently admit the declaration.
+func (t WorkflowStageTopology) HandlerSourceErrors() []string {
+	return append([]string(nil), t.handlerSourceErrors...)
+}
+
+func (t *WorkflowStageTopology) explicitHandlerSources(stages []string, site string) []string {
+	var eligible []string
+	for _, stage := range normalizedStrings(stages) {
+		ref, err := t.ResolveStage(stage)
+		if err == nil && ref.IsFinal() {
+			t.handlerSourceErrors = append(t.handlerSourceErrors, fmt.Sprintf("flow %s %s cannot execute from final stage %s", t.FlowID, site, stage))
+			continue
+		}
+		eligible = append(eligible, stage)
+	}
+	return eligible
+}
+
 func (t WorkflowStageTopology) InitialStageRef() (StageRef, error) {
 	if !t.ValidStageCatalog() {
 		return StageRef{}, fmt.Errorf("flow %q has no compiled stage catalog", t.FlowID)
@@ -186,7 +205,7 @@ func BuildWorkflowStageTopology(
 		if transition.Loop != nil {
 			if kind, id, err := transition.Loop.Operation(); err == nil {
 				loopKind, loopID = kind, strings.TrimSpace(id)
-				handlerStages = []string{strings.TrimSpace(transition.Loop.From)}
+				handlerStages = topology.explicitHandlerSources([]string{transition.Loop.From}, "loop."+string(kind)+" "+transition.Node.Key()+" "+transition.EventType)
 			}
 		}
 		topology.Handlers = append(topology.Handlers, WorkflowHandlerStageScope{
@@ -226,11 +245,11 @@ func BuildWorkflowStageTopology(
 				switch carrier.Kind {
 				case HandlerAdvanceCarrierJoinOnComplete:
 					if transition.Loop == nil {
-						from = []string{strings.TrimSpace(transition.Join.Stage)}
+						from = topology.explicitHandlerSources([]string{transition.Join.Stage}, carrier.Source()+" "+transition.Node.Key()+" "+transition.EventType)
 					}
 				case HandlerAdvanceCarrierJoinOnDeadline:
 					if transition.Loop == nil {
-						from = []string{strings.TrimSpace(transition.Join.Stage)}
+						from = topology.explicitHandlerSources([]string{transition.Join.Stage}, carrier.Source()+" "+transition.Node.Key()+" "+transition.EventType)
 					}
 					eventType = "platform.join_timeout"
 					timed = true
@@ -261,6 +280,9 @@ func BuildWorkflowStageTopology(
 		}
 		for _, operation := range plan.Operations {
 			if operation.Kind != LoopOperationRepeat {
+				continue
+			}
+			if len(topology.explicitHandlerSources([]string{operation.From}, "loop.escape "+plan.ID)) == 0 {
 				continue
 			}
 			topology.Edges = appendTopologyEdge(topology.Edges, stageSet, WorkflowStageTopologyEdge{

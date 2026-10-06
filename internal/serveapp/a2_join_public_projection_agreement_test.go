@@ -286,7 +286,7 @@ func a2RequireJoinPublicGraph(t *testing.T, rt servedControlProofRuntime, root s
 	for _, stage := range graph.Nodes {
 		if stage.ID == entity.Entity.CurrentState {
 			currentFound = true
-			if stage.Terminal != arm.OutcomeFired {
+			if stage.Final != arm.OutcomeFired {
 				t.Fatalf("CLI stage graph/public lifecycle disagree: stage=%+v entity=%+v arm=%+v", stage, entity.Entity, arm)
 			}
 		}

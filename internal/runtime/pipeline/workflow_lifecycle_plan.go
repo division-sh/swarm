@@ -467,21 +467,9 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, runI
 	if err != nil {
 		return err
 	}
-	activeByDeclaration := make(map[string]WorkflowTimerActivation, len(active))
-	for _, activation := range active {
-		declaration, found := workflowTimerDeclarationForInstance(source, instance, activation.Ref.DeclarationKey)
-		if !found {
-			return fmt.Errorf("active workflow timer %s references unknown declaration %s", activation.Ref.ActivationID, activation.Ref.DeclarationKey)
-		}
-		if err := validateWorkflowTimerTopology(source, declaration); err != nil {
-			return err
-		}
-		if workflowTimerShouldCancelOnTransition(declaration, currentState, nextState, cause.EventType) {
-			plan.Timers = append(plan.Timers, WorkflowTimerMutation{Kind: WorkflowTimerMutationCancel, Activation: activation})
-			plan.RequestCompletionCandidate = true
-			continue
-		}
-		activeByDeclaration[workflowTimerGenerationKey(activation.Ref.DeclarationKey, activation.Ref.Generation)] = activation
+	activeByDeclaration, err := retainWorkflowTimerActivations(source, instance, active, currentState, nextState, cause.EventType, plan)
+	if err != nil {
+		return err
 	}
 
 	generationStage := firstNonEmptyString(nextState, currentState, instance.CurrentState)
@@ -524,6 +512,26 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, runI
 		plan.Timers = append(plan.Timers, WorkflowTimerMutation{Kind: WorkflowTimerMutationInsert, Activation: activation})
 	}
 	return nil
+}
+
+func retainWorkflowTimerActivations(source semanticview.Source, instance WorkflowInstance, active []WorkflowTimerActivation, currentState, nextState, eventType string, plan *WorkflowLifecycleMutationPlan) (map[string]WorkflowTimerActivation, error) {
+	retained := make(map[string]WorkflowTimerActivation, len(active))
+	for _, activation := range active {
+		declaration, found := workflowTimerDeclarationForInstance(source, instance, activation.Ref.DeclarationKey)
+		if !found {
+			return nil, fmt.Errorf("active workflow timer %s references unknown declaration %s", activation.Ref.ActivationID, activation.Ref.DeclarationKey)
+		}
+		if err := validateWorkflowTimerTopology(source, declaration); err != nil {
+			return nil, err
+		}
+		if workflowTimerShouldCancelOnTransition(declaration, currentState, nextState, eventType) {
+			plan.Timers = append(plan.Timers, WorkflowTimerMutation{Kind: WorkflowTimerMutationCancel, Activation: activation})
+			plan.RequestCompletionCandidate = true
+			continue
+		}
+		retained[workflowTimerGenerationKey(activation.Ref.DeclarationKey, activation.Ref.Generation)] = activation
+	}
+	return retained, nil
 }
 
 func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID string, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentStage, nextStage string, mode executionmode.Mode, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {

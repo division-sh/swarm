@@ -10354,12 +10354,17 @@
     {
       "file": "internal/store/internal/runtimepersistence/run_fork_activation_contention_test.go",
       "before_hash": "5399a897951a7eaf234a8000b1a698fdcb872921625b0a35d3958fb3ace7de5f",
-      "after_hash": "4713dfa6e495d52c7adc0c7575eca04ac4edb22e2360597b44283bfce0e34c61",
+      "after_hash": "a420961bd34039415aab967e8b9b289daa541dc5d2aee130e7109f8913ace071",
       "edits": [
         {
           "offset": 15716,
           "before": "\t\t\"schema.yaml\":   \"name: generic-frontier\\nstages:\\n  pending: {initial: true}\\n  done: {}\\n\",\n",
           "after": "\t\t\"schema.yaml\":   \"name: generic-frontier\\nstages:\\n  pending: {}\\n  done: {}\\n\",\n"
+        },
+        {
+          "offset": 27521,
+          "before": "",
+          "after": "\tassertRetainedStageCatalogsForFork(t, f.source, loaded.Source)\n"
         }
       ],
       "equivalence": [
@@ -10826,7 +10831,7 @@
     {
       "file": "platform-spec.yaml",
       "before_hash": "1053af933001000d2d017ea7b8b0b6e151b850fa20042e6f255a618ea16f65cc",
-      "after_hash": "62bca3231b29b5015a7caae4462b952639566b9cb53246763d85a53bb2b3df40",
+      "after_hash": "650dbbff8aaeef07c6241c00b9ea471e8eed7cb77f3254be376bf05e7b99abc0",
       "edits": [
         {
           "offset": 33293,
@@ -10874,6 +10879,11 @@
           "after": "    schema_yaml: \"stages:\\n  waiting: {}\\n  done: {final: true}\\npins:\\n  inputs: [hello.requested]\\n  outputs: [hello.completed]\"\n"
         },
         {
+          "offset": 270011,
+          "before": "",
+          "after": "    entry_and_final_authority: |\n      Entry is the first effective node-backed stages declaration, never a\n      sorted map or a mutable projection. Optional final: true is the explicit\n      end choice; omission or false is non-final. No handler executes and no\n      new timer arms there. Explicit loop and join source restrictions cannot\n      widen this eligibility: an authored final source is rejected during\n      verification and is excluded from executable topology. Final entry alone\n      cancels no accepted work, revokes no acknowledged writes, and creates no\n      resource-cleanup authority. No-final flows are valid services that never\n      complete; finite run.start rejects their selected constructor/route\n      closure before creation, including independently selected feed receivers.\n"
+        },
+        {
           "offset": 776716,
           "before": "      \\      - after: \\\"{{marginal_park_days}}d\\\"\\n        advances_to: expired\\n  expired:\\n    terminal: true\\n\\\n",
           "after": "      \\      - after: \\\"{{marginal_park_days}}d\\\"\\n        advances_to: expired\\n  expired:\\n    final: true\\n\\\n"
@@ -10884,6 +10894,26 @@
           "after": "        the declaration-order entry is missing from its compiled catalog, or final-stage gate/exit restrictions\n        are violated. No-final flows are valid services; finite completion admission belongs to run.start.\n        Retired lifecycle fields fail during source admission before boot.\n"
         },
         {
+          "offset": 1629684,
+          "before": "          full public summary and snapshot reads remain strict. The entity projection consumes the admitted terminal\n          catalog; a missing, malformed, or nonterminal entity is never guessed terminal. Once those blocking\n",
+          "after": "          full public summary and snapshot reads remain strict. The entity projection consumes the admitted final-stage\n          catalog; a missing, malformed, or non-final entity is never guessed final. Once those blocking\n"
+        },
+        {
+          "offset": 1630384,
+          "before": "          subordinate reservation ownership. Entity ownership resolves exact terminal descriptors through the admitted\n          terminal catalog. Constructed headers use the exact authored template '.', including a fieldless root;\n",
+          "after": "          subordinate reservation ownership. Entity ownership resolves exact final-stage descriptors through the admitted\n          final-stage catalog. Constructed headers use the exact authored template '.', including a fieldless root;\n"
+        },
+        {
+          "offset": 1970562,
+          "before": "        rule: Handlers source from all non-terminal declared states of their already-constructed instance;\n",
+          "after": "        rule: Handlers source from all non-final declared stages of their already-constructed instance;\n"
+        },
+        {
+          "offset": 1970752,
+          "before": "      terminal_states:\n        rule: terminal states are sinks in this slice.\n",
+          "after": "      final_stages:\n        rule: Optional authored final stages admit no handler execution or exit. Their membership\n          is not inferred from outdegree; a no-final service is structurally valid. Explicit loop\n          sources and arrival-join outcome sources cannot override final exclusion and must reject\n          on authored final-source presence rather than silently removing the offending declaration.\n"
+        },
+        {
           "offset": 2686761,
           "before": "",
           "after": "      RUN_NEVER_COMPLETES:\n        type: object\n        additionalProperties: false\n        required: [flow_id, detail]\n        properties:\n          flow_id: {type: string}\n          detail: {type: string}\n        description: Finite run.start requires an explicit final stage in every instance-bearing flow of its canonical constructor/routing closure. A no-final service remains valid for serve.\n"
@@ -10891,7 +10921,7 @@
         {
           "offset": 2721182,
           "before": "",
-          "after": "        Before either atomic creation owner, require an explicit final stage for the selected root,\n        eagerly constructed keyless descendants, and possible compiled routing receivers/templates and\n        their constructor children. Unknown or contradictory catalog evidence fails closed. Do not\n        infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or\n        treat stateless instances as exempt containers. A no-final service is structurally valid but\n        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow. Committed\n        idempotency replay/conflicts retain their existing owners; existing-run event.publish and\n        standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,\n        resource, feed and permanent-receipt effects.\n\n"
+          "after": "        Before either atomic creation owner, require an explicit final stage for the selected root,\n        eagerly constructed keyless descendants, and possible compiled routing receivers/templates and\n        their constructor children. Independently selected nested imports and pins seed this closure\n        with the exact receivers matched by their already-admitted declaration/routing evidence;\n        they do not instantiate the source producer or select its unrelated output routes.\n        Unknown or contradictory catalog evidence fails closed. Do not\n        infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or\n        treat stateless instances as exempt containers. A no-final service is structurally valid but\n        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow. Committed\n        idempotency replay/conflicts retain their existing owners; existing-run event.publish and\n        standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,\n        resource, feed and permanent-receipt effects.\n\n"
         },
         {
           "offset": 2723961,

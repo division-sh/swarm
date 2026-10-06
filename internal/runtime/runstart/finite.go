@@ -19,7 +19,7 @@ func (e *FiniteStartError) Error() string {
 // ValidateFinite checks a necessary completion condition, not eventual
 // termination. Constructor children and possible compiled connections count;
 // CEL results, filesystem membership and retaining configuration do not.
-func ValidateFinite(source semanticview.Source) error {
+func ValidateFinite(source semanticview.Source, selectedFeeds []pinrouting.SourceEvent) error {
 	if source == nil {
 		return fmt.Errorf("finite start requires the selected semantic source")
 	}
@@ -29,6 +29,13 @@ func ValidateFinite(source semanticview.Source) error {
 	}
 	root := semanticview.RootExecutionFlowID(source)
 	pending := []string{root}
+	// A feed publishes a declared output without constructing its producer.
+	// Its exact compiled receivers are independent activation roots.
+	for _, feed := range selectedFeeds {
+		for _, plan := range connections.MatchingSourceEvent(feed) {
+			pending = append(pending, plan.ReceiverEndpoint().FlowID())
+		}
+	}
 	seen := map[string]bool{}
 	for len(pending) != 0 {
 		flowID := pending[0]

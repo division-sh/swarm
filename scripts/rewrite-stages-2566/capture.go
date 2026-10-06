@@ -58,38 +58,12 @@ func refreshLedger(root, ledger, baseline, reviewedRevision string) error {
 		if !candidate || (!positive && strings.HasPrefix(name, "scripts/")) {
 			continue
 		}
-		command = exec.Command("git", "show", p.Baseline+":"+name)
-		command.Dir = root
-		before, err := command.Output()
+		c, captured, err := captureReviewedChange(root, p.Baseline, name, c, positive)
 		if err != nil {
 			return err
 		}
-		after, err := os.ReadFile(filepath.Join(root, name))
-		if err != nil {
-			return err
-		}
-		text := string(before)
-		yamlStage := strings.Contains(text, "stages:") && (strings.Contains(text, "initial:") || strings.Contains(text, "terminal:"))
-		typedStage := (strings.Contains(text, "FlowStageDeclaration") || strings.Contains(text, "StageGraphNodeView")) && (strings.Contains(text, "Initial:") || strings.Contains(text, "Terminal:"))
-		if !positive && !yamlStage && !typedStage {
+		if !captured {
 			continue
-		}
-		command = exec.Command("git", "diff", "--no-ext-diff", "--no-color", "--unified=0", p.Baseline, "--", name)
-		command.Dir = root
-		diff, err := command.Output()
-		if err != nil {
-			return err
-		}
-		c.File, c.BeforeHash, c.AfterHash = name, digest(before), digest(after)
-		c.Edits, err = captureLineEdits(before, after, string(diff))
-		if err != nil {
-			return fmt.Errorf("%s: %w", name, err)
-		}
-		if !positive {
-			c.Review = "generated/partial source or source-admission oracle; no standalone whole-file entry claim; preserve branch assertions and qualify the enclosing named test family"
-		}
-		if _, err := rewrite(c, before); err != nil {
-			return fmt.Errorf("%s: captured edit reproduction: %w", name, err)
 		}
 		changes = append(changes, c)
 	}
@@ -144,4 +118,41 @@ func captureLineEdits(before, after []byte, diff string) ([]edit, error) {
 		edits = append(edits, edit{Offset: start, Before: string(before[start:end]), After: string(after[newStart:newEnd])})
 	}
 	return edits, nil
+}
+
+func captureReviewedChange(root, baseline, name string, c change, positive bool) (change, bool, error) {
+	command := exec.Command("git", "show", baseline+":"+name)
+	command.Dir = root
+	before, err := command.Output()
+	if err != nil {
+		return change{}, false, err
+	}
+	after, err := os.ReadFile(filepath.Join(root, name))
+	if err != nil {
+		return change{}, false, err
+	}
+	text := string(before)
+	yamlStage := strings.Contains(text, "stages:") && (strings.Contains(text, "initial:") || strings.Contains(text, "terminal:"))
+	typedStage := (strings.Contains(text, "FlowStageDeclaration") || strings.Contains(text, "StageGraphNodeView")) && (strings.Contains(text, "Initial:") || strings.Contains(text, "Terminal:"))
+	if !positive && !yamlStage && !typedStage {
+		return change{}, false, nil
+	}
+	command = exec.Command("git", "diff", "--no-ext-diff", "--no-color", "--unified=0", baseline, "--", name)
+	command.Dir = root
+	diff, err := command.Output()
+	if err != nil {
+		return change{}, false, err
+	}
+	c.File, c.BeforeHash, c.AfterHash = name, digest(before), digest(after)
+	c.Edits, err = captureLineEdits(before, after, string(diff))
+	if err != nil {
+		return change{}, false, fmt.Errorf("%s: %w", name, err)
+	}
+	if !positive {
+		c.Review = "generated/partial source or source-admission oracle; no standalone whole-file entry claim; preserve branch assertions and qualify the enclosing named test family"
+	}
+	if _, err := rewrite(c, before); err != nil {
+		return change{}, false, fmt.Errorf("%s: captured edit reproduction: %w", name, err)
+	}
+	return c, true, nil
 }

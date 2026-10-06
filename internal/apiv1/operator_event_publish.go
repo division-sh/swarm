@@ -213,8 +213,10 @@ func executeOperatorEventPublication(
 		if params.DataPresent && !params.NewRunCreated {
 			return apiidempotency.Completion{}, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{"run_id": params.RunID})
 		}
+		var selectedFeeds []runtimepinrouting.SourceEvent
 		if req.Method == "run.start" && params.DataPresent {
-			if err := admitRunStartDeploymentFeeds(selectedOpts.Source, params.Data); err != nil {
+			selectedFeeds, err = admitRunStartDeploymentFeeds(selectedOpts.Source, params.Data)
+			if err != nil {
 				return apiidempotency.Completion{}, err
 			}
 		}
@@ -242,7 +244,7 @@ func executeOperatorEventPublication(
 			return apiidempotency.Completion{}, err
 		}
 		if cfg.rootInputOnly && params.NewRunCreated {
-			if err := runtimerunstart.ValidateFinite(selectedOpts.Source); err != nil {
+			if err := runtimerunstart.ValidateFinite(selectedOpts.Source, selectedFeeds); err != nil {
 				return apiidempotency.Completion{}, finiteRunStartApplicationError(err)
 			}
 		}

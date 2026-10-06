@@ -85,6 +85,134 @@
     ]
   },
   {
+    "file": "internal/apiv1/operator_entity_test.go",
+    "source": "internal/apiv1/operator_entity_test.go",
+    "flow": "operatorReadbackBundle/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "operatorReadbackBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/apiv1/operator_entity_test.go",
+    "source": "internal/apiv1/operator_entity_test.go",
+    "flow": "operatorReadbackBundle/literal-6",
+    "entry": "discovered",
+    "order": [
+      "discovered",
+      "pending"
+    ],
+    "finals": [],
+    "function": "operatorReadbackBundle",
+    "literal": 6
+  },
+  {
+    "file": "internal/apiv1/operator_mailbox_proposed_effect_supported_surface_test.go",
+    "source": "internal/apiv1/operator_mailbox_proposed_effect_supported_surface_test.go",
+    "flow": "proposedEffectSupportedSurfaceBundle/literal-2",
+    "entry": "new",
+    "order": [
+      "new",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "proposedEffectSupportedSurfaceBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/cliapp/main_test.go",
+    "source": "internal/cliapp/main_test.go",
+    "flow": "writeVerifyBootTimerCommandFixture/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeVerifyBootTimerCommandFixture",
+    "literal": 2
+  },
+  {
+    "file": "internal/cliapp/main_test.go",
+    "source": "internal/cliapp/main_test.go",
+    "flow": "TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites/literal-5",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites",
+    "literal": 5
+  },
+  {
+    "file": "internal/cliapp/main_test.go",
+    "source": "internal/cliapp/main_test.go",
+    "flow": "writeVerifyAccumulatorSafetyCommandFixture/literal-1",
+    "entry": "collecting",
+    "order": [
+      "collecting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeVerifyAccumulatorSafetyCommandFixture",
+    "literal": 1
+  },
+  {
+    "file": "internal/cliapp/verify_first_use_test.go",
+    "source": "internal/cliapp/verify_first_use_test.go",
+    "flow": "issue2567VerifySource/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "issue2567VerifySource",
+    "literal": 2
+  },
+  {
+    "file": "internal/providerconnectors/providerconnectors_test.go",
+    "source": "internal/providerconnectors/providerconnectors_test.go",
+    "flow": "loadNestedProviderConnectorAgentSource/literal-18",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "loadNestedProviderConnectorAgentSource",
+    "literal": 18
+  },
+  {
+    "file": "internal/releasee2e/run_observer_overflow_test.go",
+    "source": "internal/releasee2e/run_observer_overflow_test.go",
+    "flow": "writeReleaseObserverOverflowFixture/literal-20",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeReleaseObserverOverflowFixture",
+    "literal": 20
+  },
+  {
     "file": "internal/releasee2e/testdata/claude_cli_managed_lifecycle/worker/schema.yaml",
     "source": "internal/releasee2e/testdata/claude_cli_managed_lifecycle",
     "flow": "worker",
@@ -271,6 +399,527 @@
     ]
   },
   {
+    "file": "internal/runtime/accprojection/resolver_test.go",
+    "source": "internal/runtime/accprojection/resolver_test.go",
+    "flow": "loadProjectionFlowBundle/literal-5",
+    "entry": "discovered",
+    "order": [
+      "discovered",
+      "scored"
+    ],
+    "finals": [
+      "scored"
+    ],
+    "function": "loadProjectionFlowBundle",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/bootverify/flow_data_access_test.go",
+    "source": "internal/runtime/bootverify/flow_data_access_test.go",
+    "flow": "writeNestedBootFlowDataAccessFixture/literal-7",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "writeNestedBootFlowDataAccessFixture",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/bootverify/node_fan_in_presence_test.go",
+    "source": "internal/runtime/bootverify/node_fan_in_presence_test.go",
+    "flow": "writeJoinRetirementSource/literal-3",
+    "entry": "awaiting",
+    "order": [
+      "awaiting",
+      "done",
+      "failed"
+    ],
+    "finals": [
+      "done",
+      "failed"
+    ],
+    "function": "writeJoinRetirementSource",
+    "literal": 3
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier/literal-36",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier",
+    "literal": 36
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "TestRun_AcceptsExplicitFlowAgentMemoryDeclarations/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [],
+    "function": "TestRun_AcceptsExplicitFlowAgentMemoryDeclarations",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "TestRun_AcceptsPackageBackedFlowAgentMemoryDeclarations/literal-1",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [],
+    "function": "TestRun_AcceptsPackageBackedFlowAgentMemoryDeclarations",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "writeSelectEntityInputPinFixture/literal-7",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "writeSelectEntityInputPinFixture",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "writeCrossFlowPinAmbiguityFixture/literal-9",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeCrossFlowPinAmbiguityFixture",
+    "literal": 9
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "writeCrossFlowPinAmbiguityFixture/literal-16",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeCrossFlowPinAmbiguityFixture",
+    "literal": 16
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "writeStateReachabilityFixtureWithClosedHandler/literal-5",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "review",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeStateReachabilityFixtureWithClosedHandler",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "writeStagedReachabilityFixture/literal-1",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "review",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeStagedReachabilityFixture",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "writeWave1RootReaderCoverageFixture/literal-7",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeWave1RootReaderCoverageFixture",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "writePromptWriterCoverageFixture/literal-5",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writePromptWriterCoverageFixture",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/bootverify/report_test.go",
+    "source": "internal/runtime/bootverify/report_test.go",
+    "flow": "writeDeadEventSchemaFixture/literal-22",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeDeadEventSchemaFixture",
+    "literal": 22
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_entity_assignment_checks_test.go",
+    "source": "internal/runtime/bootverify/workflow_entity_assignment_checks_test.go",
+    "flow": "TestEntityDefiniteAssignmentStages/literal-16",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "assess",
+      "consume",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestEntityDefiniteAssignmentStages",
+    "literal": 16
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_guard_reachability_test.go",
+    "source": "internal/runtime/bootverify/workflow_guard_reachability_test.go",
+    "flow": "TestRunGuardTerminationReachabilityThroughSourceAdmission/literal-44",
+    "entry": "ready",
+    "order": [
+      "ready"
+    ],
+    "finals": [],
+    "function": "TestRunGuardTerminationReachabilityThroughSourceAdmission",
+    "literal": 44
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_join_checks_test.go",
+    "source": "internal/runtime/bootverify/workflow_join_checks_test.go",
+    "flow": "TestRun_JoinValidationPreservesDuplicateScopedNodeIDs/literal-3",
+    "entry": "active",
+    "order": [
+      "active",
+      "done",
+      "failed"
+    ],
+    "finals": [],
+    "function": "TestRun_JoinValidationPreservesDuplicateScopedNodeIDs",
+    "literal": 3
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_primary_entity_checks_test.go",
+    "source": "internal/runtime/bootverify/workflow_primary_entity_checks_test.go",
+    "flow": "TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow/literal-1",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_primary_entity_checks_test.go",
+    "source": "internal/runtime/bootverify/workflow_primary_entity_checks_test.go",
+    "flow": "TestRun_AllowsFieldlessStagedStaticFlow/literal-1",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestRun_AllowsFieldlessStagedStaticFlow",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_primary_entity_checks_test.go",
+    "source": "internal/runtime/bootverify/workflow_primary_entity_checks_test.go",
+    "flow": "TestRun_AllowsFieldlessExpandedStages/literal-1",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestRun_AllowsFieldlessExpandedStages",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_primary_entity_checks_test.go",
+    "source": "internal/runtime/bootverify/workflow_primary_entity_checks_test.go",
+    "flow": "TestRun_RequiresPrimaryEntityForActualOperation/literal-7",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestRun_RequiresPrimaryEntityForActualOperation",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go",
+    "source": "internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go",
+    "flow": "TestBuildSingletonCoordinatorDemandProjection_CoversScopedReadersWithoutIntrinsicJoins/literal-11",
+    "entry": "active",
+    "order": [
+      "active",
+      "done",
+      "failed"
+    ],
+    "finals": [
+      "done",
+      "failed"
+    ],
+    "function": "TestBuildSingletonCoordinatorDemandProjection_CoversScopedReadersWithoutIntrinsicJoins",
+    "literal": 11
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go",
+    "source": "internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go",
+    "flow": "TestBuildSingletonCoordinatorDemandProjection_TreatsLoopFromAsStageIdentifier/literal-1",
+    "entry": "entity.verticals",
+    "order": [
+      "entity.verticals",
+      "review",
+      "exhausted"
+    ],
+    "finals": [
+      "exhausted"
+    ],
+    "function": "TestBuildSingletonCoordinatorDemandProjection_TreatsLoopFromAsStageIdentifier",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go",
+    "source": "internal/runtime/bootverify/workflow_singleton_coordinator_checks_test.go",
+    "flow": "TestRun_CountArrivalJoinDoesNotRequireContainedCoordinatorState/literal-1",
+    "entry": "active",
+    "order": [
+      "active",
+      "done",
+      "failed"
+    ],
+    "finals": [
+      "done",
+      "failed"
+    ],
+    "function": "TestRun_CountArrivalJoinDoesNotRequireContainedCoordinatorState",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_stage_topology_consumption_test.go",
+    "source": "internal/runtime/bootverify/workflow_stage_topology_consumption_test.go",
+    "flow": "TestRunAcceptsTimerOnlyReachableTerminalStage/literal-5",
+    "entry": "active",
+    "order": [
+      "active",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ],
+    "function": "TestRunAcceptsTimerOnlyReachableTerminalStage",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_stage_topology_consumption_test.go",
+    "source": "internal/runtime/bootverify/workflow_stage_topology_consumption_test.go",
+    "flow": "TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage/literal-6",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_transition_consumer_test.go",
+    "source": "internal/runtime/bootverify/workflow_transition_consumer_test.go",
+    "flow": "testCompiledOrdinaryConsumerAgreement/literal-5",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "working",
+      "awaiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "testCompiledOrdinaryConsumerAgreement",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_transition_relation_test.go",
+    "source": "internal/runtime/bootverify/workflow_transition_relation_test.go",
+    "flow": "transitionRelationDeclarations/literal-2",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "working",
+      "awaiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "transitionRelationDeclarations",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_transition_relation_test.go",
+    "source": "internal/runtime/bootverify/workflow_transition_relation_test.go",
+    "flow": "transitionRelationDeclarations/literal-6",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "drafting",
+      "review",
+      "done",
+      "escaped"
+    ],
+    "finals": [
+      "done",
+      "escaped"
+    ],
+    "function": "transitionRelationDeclarations",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/bootverify/workflow_transition_relation_test.go",
+    "source": "internal/runtime/bootverify/workflow_transition_relation_test.go",
+    "flow": "transitionRelationDeclarations/literal-10",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "transitionRelationDeclarations",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/bus/eventbus_publish_test.go",
+    "source": "internal/runtime/bus/eventbus_publish_test.go",
+    "flow": "mixedNodeRouteWorkflowModule/literal-39",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "mixedNodeRouteWorkflowModule",
+    "literal": 39
+  },
+  {
+    "file": "internal/runtime/bus/eventbus_publish_test.go",
+    "source": "internal/runtime/bus/eventbus_publish_test.go",
+    "flow": "mixedNodeRouteWorkflowModule/literal-43",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "mixedNodeRouteWorkflowModule",
+    "literal": 43
+  },
+  {
+    "file": "internal/runtime/bus/publication_candidate_identity_test.go",
+    "source": "internal/runtime/bus/publication_candidate_identity_test.go",
+    "flow": "TestPublicationDiagnosticDoesNotInventReceiverLocalIdentity/literal-4",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestPublicationDiagnosticDoesNotInventReceiverLocalIdentity",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/bus/routing_derivation_test.go",
+    "source": "internal/runtime/bus/routing_derivation_test.go",
+    "flow": "loadNestedPhysicalAgentRouteSource/literal-12",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "loadNestedPhysicalAgentRouteSource",
+    "literal": 12
+  },
+  {
+    "file": "internal/runtime/bus/routing_derivation_test.go",
+    "source": "internal/runtime/bus/routing_derivation_test.go",
+    "flow": "loadPackageCollisionRouteSource/literal-20",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "loadPackageCollisionRouteSource",
+    "literal": 20
+  },
+  {
     "file": "internal/runtime/cataloge2e/testdata/scatter-gather-safety/collector/schema.yaml",
     "source": "internal/runtime/cataloge2e/testdata/scatter-gather-safety",
     "flow": "collector",
@@ -315,6 +964,90 @@
     ]
   },
   {
+    "file": "internal/runtime/cataloge2e/testdata/terminal-retirement/inspect-loop-schema.yaml",
+    "source": "internal/runtime/cataloge2e/testdata/terminal-retirement",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "working",
+      "executing",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "internal/runtime/cataloge2e/testdata/terminal-retirement/timer-schema.yaml",
+    "source": "internal/runtime/cataloge2e/testdata/terminal-retirement",
+    "flow": ".",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
+    "file": "internal/runtime/channel_runtime_supported_surface_test.go",
+    "source": "internal/runtime/channel_runtime_supported_surface_test.go",
+    "flow": "configuredChannelAgentBundle/literal-4",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "configuredChannelAgentBundle",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/conformance/persisted_surfaces_test.go",
+    "source": "internal/runtime/conformance/persisted_surfaces_test.go",
+    "flow": "TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites/literal-4",
+    "entry": "done",
+    "order": [
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/conformance/persisted_surfaces_test.go",
+    "source": "internal/runtime/conformance/persisted_surfaces_test.go",
+    "flow": "newEntityToolConformanceHarness/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "newEntityToolConformanceHarness",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/conformance/primary_entity_conformance_test.go",
+    "source": "internal/runtime/conformance/primary_entity_conformance_test.go",
+    "flow": "primaryEntityConformanceSchema/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "primaryEntityConformanceSchema",
+    "literal": 2
+  },
+  {
     "file": "internal/runtime/conformance/testdata/stage-lifecycle-identity/scout/schema.yaml",
     "source": "internal/runtime/conformance/testdata/stage-lifecycle-identity",
     "flow": "scout",
@@ -332,6 +1065,1131 @@
     ]
   },
   {
+    "file": "internal/runtime/contracts/agent_declaration_records_test.go",
+    "source": "internal/runtime/contracts/agent_declaration_records_test.go",
+    "flow": "TestAgentDeclarationRecordsCanonicalizeDeepFilesystemFlowProjection/literal-6",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestAgentDeclarationRecordsCanonicalizeDeepFilesystemFlowProjection",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/contracts/load_validation_test.go",
+    "source": "internal/runtime/contracts/load_validation_test.go",
+    "flow": "TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOwners/literal-5",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOwners",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/contracts/load_validation_test.go",
+    "source": "internal/runtime/contracts/load_validation_test.go",
+    "flow": "TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOwners/literal-14",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOwners",
+    "literal": 14
+  },
+  {
+    "file": "internal/runtime/contracts/optional_declaration_admission_test.go",
+    "source": "internal/runtime/contracts/optional_declaration_admission_test.go",
+    "flow": "TestOptionalDeclarationAdmissionIsConsumedAtSupportedScopes/literal-14",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestOptionalDeclarationAdmissionIsConsumedAtSupportedScopes",
+    "literal": 14
+  },
+  {
+    "file": "internal/runtime/contracts/optional_declaration_admission_test.go",
+    "source": "internal/runtime/contracts/optional_declaration_admission_test.go",
+    "flow": "writeMergeProjectionBundleSkeleton/literal-5",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "writeMergeProjectionBundleSkeleton",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contract_wave1_test.go",
+    "source": "internal/runtime/contracts/workflow_contract_wave1_test.go",
+    "flow": "TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments/literal-8",
+    "entry": "discovered",
+    "order": [
+      "discovered",
+      "shortlisted"
+    ],
+    "finals": [
+      "shortlisted"
+    ],
+    "function": "TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contract_wave1_test.go",
+    "source": "internal/runtime/contracts/workflow_contract_wave1_test.go",
+    "flow": "TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes/literal-4",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contract_wave1_test.go",
+    "source": "internal/runtime/contracts/workflow_contract_wave1_test.go",
+    "flow": "TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+    "source": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+    "flow": "TestFlowSchemaDocumentDecodeStagesKeyedMap/literal-1",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "approved"
+    ],
+    "finals": [
+      "approved"
+    ],
+    "function": "TestFlowSchemaDocumentDecodeStagesKeyedMap",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+    "source": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+    "flow": "TestFlowSchemaDocumentDecodeTypedStageGate/literal-1",
+    "entry": "awaiting_launch_approval",
+    "order": [
+      "awaiting_launch_approval",
+      "building",
+      "operating"
+    ],
+    "finals": [
+      "operating"
+    ],
+    "function": "TestFlowSchemaDocumentDecodeTypedStageGate",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+    "source": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+    "flow": "TestFlowSchemaDocumentDecodeBoundedLoopCanonicalSyntax/literal-1",
+    "entry": "drafting",
+    "order": [
+      "drafting",
+      "review",
+      "exhausted"
+    ],
+    "finals": [
+      "exhausted"
+    ],
+    "function": "TestFlowSchemaDocumentDecodeBoundedLoopCanonicalSyntax",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+    "source": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+    "flow": "TestFlowPinsDecode_PreservesCanonicalScalarEventEntries/literal-1",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowPinsDecode_PreservesCanonicalScalarEventEntries",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "source": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "flow": "TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler/literal-7",
+    "entry": "discovered",
+    "order": [
+      "discovered",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "source": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "flow": "TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler/literal-16",
+    "entry": "researching",
+    "order": [
+      "researching",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler",
+    "literal": 16
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "source": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "flow": "TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules/literal-7",
+    "entry": "discovered",
+    "order": [
+      "discovered",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "source": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "flow": "TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules/literal-16",
+    "entry": "researching",
+    "order": [
+      "researching",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules",
+    "literal": 16
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "source": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+    "flow": "currentWorkflowContractsDirForTest/literal-4",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "currentWorkflowContractsDirForTest",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_transition_root_scope_test.go",
+    "source": "internal/runtime/contracts/workflow_transition_root_scope_test.go",
+    "flow": "TestCompiledTransitionRootTopologyUsesExactSchema/literal-1",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "shared",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestCompiledTransitionRootTopologyUsesExactSchema",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/contracts/workflow_transition_root_scope_test.go",
+    "source": "internal/runtime/contracts/workflow_transition_root_scope_test.go",
+    "flow": "TestCompiledTransitionRootTopologyUsesExactSchema/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "shared",
+      "child_only",
+      "killed"
+    ],
+    "finals": [
+      "shared",
+      "killed"
+    ],
+    "function": "TestCompiledTransitionRootTopologyUsesExactSchema",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/core/pinrouting/pinrouting_test.go",
+    "source": "internal/runtime/core/pinrouting/pinrouting_test.go",
+    "flow": "loadFilesystemAgentOwnedByFlowSource/literal-19",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "loadFilesystemAgentOwnedByFlowSource",
+    "literal": 19
+  },
+  {
+    "file": "internal/runtime/engine/executor_test.go",
+    "source": "internal/runtime/engine/executor_test.go",
+    "flow": "loadEngineProjectionFlowBundle/literal-5",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "scored"
+    ],
+    "finals": [
+      "scored"
+    ],
+    "function": "loadEngineProjectionFlowBundle",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/engine/executor_test.go",
+    "source": "internal/runtime/engine/executor_test.go",
+    "flow": "loadEngineSingletonCoordinatorFlowBundle/literal-5",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "loadEngineSingletonCoordinatorFlowBundle",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/eventbus_receiver_authority_e2e_test.go",
+    "source": "internal/runtime/eventbus_receiver_authority_e2e_test.go",
+    "flow": "closedReceiverAuthorityFixtureFiles/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "closedReceiverAuthorityFixtureFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/flowdata/flowdata_test.go",
+    "source": "internal/runtime/flowdata/flowdata_test.go",
+    "flow": "writeNestedFlowDataFixture/literal-5",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "writeNestedFlowDataFixture",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/inbound_postgres_test.go",
+    "source": "internal/runtime/inbound_postgres_test.go",
+    "flow": "boundedInboundTestSource/literal-4",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "boundedInboundTestSource",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/manager/flow_activation_test.go",
+    "source": "internal/runtime/manager/flow_activation_test.go",
+    "flow": "loadFilesystemStaticAgentSource/literal-11",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [],
+    "function": "loadFilesystemStaticAgentSource",
+    "literal": 11
+  },
+  {
+    "file": "internal/runtime/mcp/gateway_story_selected_store_test.go",
+    "source": "internal/runtime/mcp/gateway_story_selected_store_test.go",
+    "flow": "loadGatewayStorySource/literal-5",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "loadGatewayStorySource",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/pipeline/a2_accumulator_persistence_external_test.go",
+    "source": "internal/runtime/pipeline/a2_accumulator_persistence_external_test.go",
+    "flow": "newA2AccumulatorPersistenceProof/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "newA2AccumulatorPersistenceProof",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/a2_activation_join_seam_external_test.go",
+    "source": "internal/runtime/pipeline/a2_activation_join_seam_external_test.go",
+    "flow": "a2ActivationJoinFiles/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "a2ActivationJoinFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/a2_activation_join_seam_external_test.go",
+    "source": "internal/runtime/pipeline/a2_activation_join_seam_external_test.go",
+    "flow": "a2ActivationJoinFiles/literal-4",
+    "entry": "awaiting",
+    "order": [
+      "awaiting"
+    ],
+    "finals": [],
+    "function": "a2ActivationJoinFiles",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/a2_count_join_execution_external_test.go",
+    "source": "internal/runtime/pipeline/a2_count_join_execution_external_test.go",
+    "flow": "a2CountJoinFiles/literal-2",
+    "entry": "awaiting",
+    "order": [
+      "awaiting",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "a2CountJoinFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/a2_join_result_types_external_test.go",
+    "source": "internal/runtime/pipeline/a2_join_result_types_external_test.go",
+    "flow": "a2JoinResultTypeFiles/literal-2",
+    "entry": "awaiting",
+    "order": [
+      "awaiting",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "a2JoinResultTypeFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/a2_known_target_binding_external_test.go",
+    "source": "internal/runtime/pipeline/a2_known_target_binding_external_test.go",
+    "flow": "a2KnownTargetBindingFiles/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "a2KnownTargetBindingFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/a2_known_target_binding_external_test.go",
+    "source": "internal/runtime/pipeline/a2_known_target_binding_external_test.go",
+    "flow": "a2KnownTargetBindingFiles/literal-6",
+    "entry": "dispatching",
+    "order": [
+      "dispatching",
+      "awaiting",
+      "ready",
+      "attention"
+    ],
+    "finals": [
+      "ready",
+      "attention"
+    ],
+    "function": "a2KnownTargetBindingFiles",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go",
+    "source": "internal/runtime/pipeline/a2_map_fan_out_execution_external_test.go",
+    "flow": "a2MapFanOutFiles/literal-2",
+    "entry": "active",
+    "order": [
+      "active",
+      "awaiting",
+      "ready",
+      "attention"
+    ],
+    "finals": [
+      "ready",
+      "attention"
+    ],
+    "function": "a2MapFanOutFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/a2_same_commit_join_binding_external_test.go",
+    "source": "internal/runtime/pipeline/a2_same_commit_join_binding_external_test.go",
+    "flow": "a2SameCommitJoinBindingFiles/literal-2",
+    "entry": "dispatching",
+    "order": [
+      "dispatching",
+      "awaiting",
+      "ready",
+      "attention"
+    ],
+    "finals": [
+      "ready",
+      "attention"
+    ],
+    "function": "a2SameCommitJoinBindingFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/activity_boring_proof_test.go",
+    "source": "internal/runtime/pipeline/activity_boring_proof_test.go",
+    "flow": "activityBoringFullFlowBundle/literal-4",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "activityBoringFullFlowBundle",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/authored_rule_receiver_retry_test.go",
+    "source": "internal/runtime/pipeline/authored_rule_receiver_retry_test.go",
+    "flow": "TestAuthoredRuleReceiverPreparationRetryBothStores/literal-6",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestAuthoredRuleReceiverPreparationRetryBothStores",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/pipeline/authored_selection_changed_state_retry_test.go",
+    "source": "internal/runtime/pipeline/authored_selection_changed_state_retry_test.go",
+    "flow": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores/literal-12",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores",
+    "literal": 12
+  },
+  {
+    "file": "internal/runtime/pipeline/composition_receiver_business_test.go",
+    "source": "internal/runtime/pipeline/composition_receiver_business_test.go",
+    "flow": "TestCompositionReceiverInitializationAndRepeatedBusinessWritesBothStores/literal-4",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestCompositionReceiverInitializationAndRepeatedBusinessWritesBothStores",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/constructed_source_journey_external_test.go",
+    "source": "internal/runtime/pipeline/constructed_source_journey_external_test.go",
+    "flow": "a2ConstructedDescendantJoinFiles/literal-8",
+    "entry": "awaiting",
+    "order": [
+      "awaiting"
+    ],
+    "finals": [],
+    "function": "a2ConstructedDescendantJoinFiles",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/pipeline/constructed_source_journey_external_test.go",
+    "source": "internal/runtime/pipeline/constructed_source_journey_external_test.go",
+    "flow": "a2ConstructedDescendantJoinFiles/literal-15",
+    "entry": "awaiting",
+    "order": [
+      "awaiting",
+      "approved"
+    ],
+    "finals": [],
+    "function": "a2ConstructedDescendantJoinFiles",
+    "literal": 15
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID/literal-2",
+    "entry": "ready",
+    "order": [
+      "ready"
+    ],
+    "finals": [],
+    "function": "TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID/literal-4",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPrepareTerminalFlowInstanceDeactivationPassesTerminalState/literal-4",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "completed"
+    ],
+    "finals": [
+      "completed"
+    ],
+    "function": "TestPrepareTerminalFlowInstanceDeactivationPassesTerminalState",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults/literal-4",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSurface/literal-2",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSurface",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSurface/literal-6",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ],
+    "function": "TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSurface",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput/literal-2",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput/literal-6",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ],
+    "function": "TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarativeSurface/literal-2",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarativeSurface",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarativeSurface/literal-6",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ],
+    "function": "TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarativeSurface",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface/literal-2",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface/literal-8",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ],
+    "function": "TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput/literal-2",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput/literal-8",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "processed"
+    ],
+    "finals": [
+      "processed"
+    ],
+    "function": "TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/pipeline/engine_adapter_test.go",
+    "source": "internal/runtime/pipeline/engine_adapter_test.go",
+    "flow": "TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
+    "source": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
+    "flow": "TestEntityLastFieldClearAndColdReloadBothStores/literal-4",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestEntityLastFieldClearAndColdReloadBothStores",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
+    "source": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
+    "flow": "TestSelectedHandlerSparsePresenceWriteAndEmitBothStores/literal-4",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestSelectedHandlerSparsePresenceWriteAndEmitBothStores",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
+    "source": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
+    "flow": "TestSelectedHandlerSparseEqualityMutationsBothStores/literal-12",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestSelectedHandlerSparseEqualityMutationsBothStores",
+    "literal": 12
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_committed_cleanup_test.go",
+    "source": "internal/runtime/pipeline/handler_committed_cleanup_test.go",
+    "flow": "TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_committed_cleanup_test.go",
+    "source": "internal/runtime/pipeline/handler_committed_cleanup_test.go",
+    "flow": "TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "handlerEngineProjectNodeModule/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "handlerEngineProjectNodeModule",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "TestExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmit/literal-4",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "TestExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmit",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "handlerDataAccumulationModule/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "handlerDataAccumulationModule",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "newEmitPersistenceTestCoordinator/literal-2",
+    "entry": "researching",
+    "order": [
+      "researching",
+      "mvp_speccing"
+    ],
+    "finals": [],
+    "function": "newEmitPersistenceTestCoordinator",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads/literal-4",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext/literal-4",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity/literal-4",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue/literal-4",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "additiveOnSuccessContractBundle/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "additiveOnSuccessContractBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "rulesEmitTemplateContractBundle/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "rulesEmitTemplateContractBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "source": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+    "flow": "declarativeEmitContractTestBundleWithEntry/literal-9",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "declarativeEmitContractTestBundleWithEntry",
+    "literal": 9
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_entity_requirement_execution_test.go",
+    "source": "internal/runtime/pipeline/handler_entity_requirement_execution_test.go",
+    "flow": "TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgres/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgres",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/handler_entity_requirement_execution_test.go",
+    "source": "internal/runtime/pipeline/handler_entity_requirement_execution_test.go",
+    "flow": "TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/reviewer_2460_finalization_test.go",
+    "source": "internal/runtime/pipeline/reviewer_2460_finalization_test.go",
+    "flow": "TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/reviewer_2460_finalization_test.go",
+    "source": "internal/runtime/pipeline/reviewer_2460_finalization_test.go",
+    "flow": "TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/sqlite_dynamic_activation_test.go",
+    "source": "internal/runtime/pipeline/sqlite_dynamic_activation_test.go",
+    "flow": "sqliteDynamicActivationBundle/literal-10",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "sqliteDynamicActivationBundle",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/pipeline/supported_handler_effects_test.go",
+    "source": "internal/runtime/pipeline/supported_handler_effects_test.go",
+    "flow": "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores/literal-8",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/pipeline/testdata/diagnostics/authored_rule_receiver_retry_test.go",
+    "source": "internal/runtime/pipeline/testdata/diagnostics/authored_rule_receiver_retry_test.go",
+    "flow": "TestAuthoredRuleReceiverPreparationRetryDiagnosticBothStores/literal-6",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestAuthoredRuleReceiverPreparationRetryDiagnosticBothStores",
+    "literal": 6
+  },
+  {
     "file": "internal/runtime/pipeline/testdata/entity-requirement-execution/schema.yaml",
     "source": "internal/runtime/pipeline/testdata/entity-requirement-execution",
     "flow": ".",
@@ -345,6 +2203,542 @@
     ]
   },
   {
+    "file": "internal/runtime/pipeline/workflow_compiled_adapter_test.go",
+    "source": "internal/runtime/pipeline/workflow_compiled_adapter_test.go",
+    "flow": "compiledAdapterSourceWithKillStages/literal-2",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "Ready",
+      "working",
+      "shared",
+      "done"
+    ],
+    "finals": [
+      "Ready",
+      "done"
+    ],
+    "function": "compiledAdapterSourceWithKillStages",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_compiled_adapter_test.go",
+    "source": "internal/runtime/pipeline/workflow_compiled_adapter_test.go",
+    "flow": "compiledAdapterSourceWithKillStages/literal-10",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "shared",
+      "foreign_only",
+      "done",
+      "killed"
+    ],
+    "finals": [
+      "shared",
+      "done",
+      "killed"
+    ],
+    "function": "compiledAdapterSourceWithKillStages",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_compiled_adapter_test.go",
+    "source": "internal/runtime/pipeline/workflow_compiled_adapter_test.go",
+    "flow": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores/literal-88",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "drafting",
+      "review",
+      "escaped"
+    ],
+    "finals": [
+      "escaped"
+    ],
+    "function": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores",
+    "literal": 88
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_compiled_lifecycle_evidence_test.go",
+    "source": "internal/runtime/pipeline/workflow_compiled_lifecycle_evidence_test.go",
+    "flow": "TestAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStores/literal-37",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "active"
+    ],
+    "finals": [],
+    "function": "TestAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStores",
+    "literal": 37
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_compiled_loop_evidence_test.go",
+    "source": "internal/runtime/pipeline/workflow_compiled_loop_evidence_test.go",
+    "flow": "compiledLoopEvidenceSource/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "drafting",
+      "review",
+      "done",
+      "escaped"
+    ],
+    "finals": [
+      "done",
+      "escaped"
+    ],
+    "function": "compiledLoopEvidenceSource",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_expression_flow_identity_test.go",
+    "source": "internal/runtime/pipeline/workflow_expression_flow_identity_test.go",
+    "flow": "TestPipelineExpressionPreservesExactExecutionFlowOnBothStores/literal-2",
+    "entry": "ready",
+    "order": [
+      "ready"
+    ],
+    "finals": [],
+    "function": "TestPipelineExpressionPreservesExactExecutionFlowOnBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_expression_flow_identity_test.go",
+    "source": "internal/runtime/pipeline/workflow_expression_flow_identity_test.go",
+    "flow": "TestPipelineExpressionPreservesExactExecutionFlowOnBothStores/literal-8",
+    "entry": "ready",
+    "order": [
+      "ready"
+    ],
+    "finals": [],
+    "function": "TestPipelineExpressionPreservesExactExecutionFlowOnBothStores",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_first_event_materialization_test.go",
+    "source": "internal/runtime/pipeline/workflow_first_event_materialization_test.go",
+    "flow": "TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_gate_lifecycle_test.go",
+    "source": "internal/runtime/pipeline/workflow_gate_lifecycle_test.go",
+    "flow": "gateLifecycleBundle/literal-2",
+    "entry": "awaiting_review",
+    "order": [
+      "awaiting_review",
+      "drafting",
+      "operating"
+    ],
+    "finals": [],
+    "function": "gateLifecycleBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
+    "source": "internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
+    "flow": "proposedEffectProofBundle/literal-2",
+    "entry": "drafting",
+    "order": [
+      "drafting"
+    ],
+    "finals": [],
+    "function": "proposedEffectProofBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_guard_cause_hostility_test.go",
+    "source": "internal/runtime/pipeline/workflow_guard_cause_hostility_test.go",
+    "flow": "TestPipelineRejectsFabricatedGuardCauseOnBothStores/literal-2",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done",
+      "killed"
+    ],
+    "finals": [
+      "done",
+      "killed"
+    ],
+    "function": "TestPipelineRejectsFabricatedGuardCauseOnBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_guard_reachability_proof_test.go",
+    "source": "internal/runtime/pipeline/workflow_guard_reachability_proof_test.go",
+    "flow": "TestGuardTerminationVerifiedExecutionAndRestartBothStores/literal-39",
+    "entry": "ready",
+    "order": [
+      "ready"
+    ],
+    "finals": [],
+    "function": "TestGuardTerminationVerifiedExecutionAndRestartBothStores",
+    "literal": 39
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_instance_activation_test.go",
+    "source": "internal/runtime/pipeline/workflow_instance_activation_test.go",
+    "flow": "TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey/literal-4",
+    "entry": "initializing",
+    "order": [
+      "initializing",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_join_constructor_identity_external_test.go",
+    "source": "internal/runtime/pipeline/workflow_join_constructor_identity_external_test.go",
+    "flow": "TestWorkflowJoinConstructedDescendantAdmissionOnBothStores/literal-4",
+    "entry": "awaiting",
+    "order": [
+      "awaiting"
+    ],
+    "finals": [],
+    "function": "TestWorkflowJoinConstructedDescendantAdmissionOnBothStores",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_join_constructor_identity_test.go",
+    "source": "internal/runtime/pipeline/workflow_join_constructor_identity_test.go",
+    "flow": "TestWorkflowJoinAdmissionUsesConstructedDescendantCoordinate/literal-3",
+    "entry": "awaiting",
+    "order": [
+      "awaiting",
+      "ready",
+      "attention"
+    ],
+    "finals": [
+      "ready",
+      "attention"
+    ],
+    "function": "TestWorkflowJoinAdmissionUsesConstructedDescendantCoordinate",
+    "literal": 3
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_join_lifecycle_test.go",
+    "source": "internal/runtime/pipeline/workflow_join_lifecycle_test.go",
+    "flow": "workflowJoinLifecycleFixtureFiles/literal-6",
+    "entry": "awaiting",
+    "order": [
+      "awaiting",
+      "dispatching",
+      "ready",
+      "attention"
+    ],
+    "finals": [
+      "ready",
+      "attention"
+    ],
+    "function": "workflowJoinLifecycleFixtureFiles",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_node_delivery_authority_test.go",
+    "source": "internal/runtime/pipeline/workflow_node_delivery_authority_test.go",
+    "flow": "TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_node_delivery_authority_test.go",
+    "source": "internal/runtime/pipeline/workflow_node_delivery_authority_test.go",
+    "flow": "newDeliveryAuthorityCoordinator/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "newDeliveryAuthorityCoordinator",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_terminal_test.go",
+    "source": "internal/runtime/pipeline/workflow_terminal_test.go",
+    "flow": "terminalOwnershipSource/literal-2",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done",
+      "reopened"
+    ],
+    "finals": [],
+    "function": "terminalOwnershipSource",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_terminal_test.go",
+    "source": "internal/runtime/pipeline/workflow_terminal_test.go",
+    "flow": "terminalOwnershipSource/literal-8",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done",
+      "reopened",
+      "child_only"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "terminalOwnershipSource",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_cause_native_proof_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_cause_native_proof_test.go",
+    "flow": "VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest/literal-15",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "VerifyWorkflowTimerCauseReplayEngineConsumersOnBothStoresForTest",
+    "literal": 15
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_diagnostic_proof_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_diagnostic_proof_test.go",
+    "flow": "VerifyWorkflowHandlerFailureDiagnosticPersistsOnBothStoresForTest/literal-4",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "VerifyWorkflowHandlerFailureDiagnosticPersistsOnBothStoresForTest",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "flow": "workflowTimerOwnerSourceFiles/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [],
+    "function": "workflowTimerOwnerSourceFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "flow": "workflowTimerFirstDeclarationRevisionBundle/literal-1",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "workflowTimerFirstDeclarationRevisionBundle",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "flow": "workflowTimerProgressedSourceRevisionBundle/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [],
+    "function": "workflowTimerProgressedSourceRevisionBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "flow": "workflowTimerInitialAndEventBundle/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "workflowTimerInitialAndEventBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "flow": "workflowTimerEventOnlyStateTriggerBundle/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "workflowTimerEventOnlyStateTriggerBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "flow": "workflowTimerLoopEventBundle/literal-2",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "waiting",
+      "escaped"
+    ],
+    "finals": [],
+    "function": "workflowTimerLoopEventBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_owner_test.go",
+    "flow": "workflowTimerHandledOutcomeBundle/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "workflowTimerHandledOutcomeBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_preserved_state_proof_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_preserved_state_proof_test.go",
+    "flow": "VerifyMutationFreeAcceptedEventTimersBothStoresForTest/literal-14",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "VerifyMutationFreeAcceptedEventTimersBothStoresForTest",
+    "literal": 14
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_supported_surface_external_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_supported_surface_external_test.go",
+    "flow": "workflowTimerServedLifecycleBundle/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "workflowTimerServedLifecycleBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_transition_hydration_proof_test.go",
+    "source": "internal/runtime/pipeline/workflow_transition_hydration_proof_test.go",
+    "flow": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores/literal-2",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_transition_mutation_test.go",
+    "source": "internal/runtime/pipeline/workflow_transition_mutation_test.go",
+    "flow": "transitionMutationSource/literal-2",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "other",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "transitionMutationSource",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/provider_trigger_registry_external_test.go",
+    "source": "internal/runtime/provider_trigger_registry_external_test.go",
+    "flow": "boundedStandingConnectorBundle/literal-4",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "boundedStandingConnectorBundle",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/runforkexecution/activity_fork_execution_test.go",
+    "source": "internal/runtime/runforkexecution/activity_fork_execution_test.go",
+    "flow": "selectedContractActivityDeclaredSource/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "selectedContractActivityDeclaredSource",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/runforkexecution/activity_fork_execution_test.go",
+    "source": "internal/runtime/runforkexecution/activity_fork_execution_test.go",
+    "flow": "selectedContractActivityDeclaredSource/literal-6",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "review",
+      "closed",
+      "exhausted"
+    ],
+    "finals": [
+      "closed",
+      "exhausted"
+    ],
+    "function": "selectedContractActivityDeclaredSource",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/runforkreadiness/constructed_projection_test.go",
+    "source": "internal/runtime/runforkreadiness/constructed_projection_test.go",
+    "flow": "TestSelectedConstructedActorProjectionCompleteCensus/literal-8",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestSelectedConstructedActorProjectionCompleteCensus",
+    "literal": 8
+  },
+  {
     "file": "internal/runtime/scenarioderivation/testdata/hostile/work/schema.yaml",
     "source": "internal/runtime/scenarioderivation/testdata/hostile",
     "flow": "work",
@@ -353,6 +2747,79 @@
       "ready"
     ],
     "finals": []
+  },
+  {
+    "file": "internal/runtime/semanticview/authored_emit_sites_test.go",
+    "source": "internal/runtime/semanticview/authored_emit_sites_test.go",
+    "flow": "loadAuthoredEmitSiteFixture/literal-20",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "loadAuthoredEmitSiteFixture",
+    "literal": 20
+  },
+  {
+    "file": "internal/runtime/semanticview/authored_emit_sites_test.go",
+    "source": "internal/runtime/semanticview/authored_emit_sites_test.go",
+    "flow": "loadAuthoredEmitSiteLoweringFixture/literal-6",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "loadAuthoredEmitSiteLoweringFixture",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/semanticview/receiver_instance_event_test.go",
+    "source": "internal/runtime/semanticview/receiver_instance_event_test.go",
+    "flow": "receiverInstanceSource/literal-16",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "receiverInstanceSource",
+    "literal": 16
+  },
+  {
+    "file": "internal/runtime/semanticview/scopes_test.go",
+    "source": "internal/runtime/semanticview/scopes_test.go",
+    "flow": "TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath/literal-11",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [],
+    "function": "TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath",
+    "literal": 11
+  },
+  {
+    "file": "internal/runtime/template_instance_delivery_test.go",
+    "source": "internal/runtime/template_instance_delivery_test.go",
+    "flow": "templateInstanceDeliveryFixtureFiles/literal-4",
+    "entry": "initializing",
+    "order": [
+      "initializing",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "templateInstanceDeliveryFixtureFiles",
+    "literal": 4
   },
   {
     "file": "internal/runtime/testdata/generic-swarm-bundle/delivery/schema.yaml",
@@ -399,6 +2866,1678 @@
     ]
   },
   {
+    "file": "internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go",
+    "flow": "arrivalJoinPayloadDirectedFiles/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "arrivalJoinPayloadDirectedFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go",
+    "flow": "arrivalJoinPayloadDirectedFiles/literal-12",
+    "entry": "awaiting",
+    "order": [
+      "awaiting",
+      "dispatching",
+      "ready",
+      "attention"
+    ],
+    "finals": [
+      "ready",
+      "attention"
+    ],
+    "function": "arrivalJoinPayloadDirectedFiles",
+    "literal": 12
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go",
+    "flow": "arrivalJoinBoundReplyFiles/literal-6",
+    "entry": "awaiting",
+    "order": [
+      "awaiting",
+      "dispatching",
+      "ready",
+      "attention"
+    ],
+    "finals": [
+      "ready",
+      "attention"
+    ],
+    "function": "arrivalJoinBoundReplyFiles",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go",
+    "flow": "arrivalJoinMultiUntilFiles/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "arrivalJoinMultiUntilFiles",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/artifact_action_result.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/artifact_action_result.go",
+    "flow": "artifactActionResultDeliveryFixtureFiles/literal-4",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "artifactActionResultDeliveryFixtureFiles",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/channel_delivery.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/channel_delivery.go",
+    "flow": "copyChannelLearnedObjectInputJourney/literal-13",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "copyChannelLearnedObjectInputJourney",
+    "literal": 13
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "flow": "CopyDeadEventSchemaExternalSource/literal-6",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyDeadEventSchemaExternalSource",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "flow": "copyTimerValidation/literal-22",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "copyTimerValidation",
+    "literal": 22
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "flow": "CopyVerifyStateSchemaFloat/literal-7",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyVerifyStateSchemaFloat",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "flow": "CopyVerifyAccumulatorEntityProjection/literal-2",
+    "entry": "collecting",
+    "order": [
+      "collecting",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ],
+    "function": "CopyVerifyAccumulatorEntityProjection",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/closure_variants.go",
+    "flow": "CopyVerifyModelAlias/literal-11",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyVerifyModelAlias",
+    "literal": 11
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/complete_observer_dependencies.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/complete_observer_dependencies.go",
+    "flow": "CopyCompleteObserverDependencies/literal-4",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyCompleteObserverDependencies",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/complete_observer_dependencies.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/complete_observer_dependencies.go",
+    "flow": "CopyCompleteObserverDependencies/literal-6",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyCompleteObserverDependencies",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/complete_observer_dependencies.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/complete_observer_dependencies.go",
+    "flow": "CopyCompleteObserverDependencies/literal-11",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyCompleteObserverDependencies",
+    "literal": 11
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/complete_observer_dependencies.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/complete_observer_dependencies.go",
+    "flow": "CopyCompleteObserverDependencies/literal-16",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyCompleteObserverDependencies",
+    "literal": 16
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/constructed_gate_fork.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/constructed_gate_fork.go",
+    "flow": "CopyConstructedGateForkControl/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyConstructedGateForkControl",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/constructor_proofs.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/constructor_proofs.go",
+    "flow": "CopyFlowConstructorSupply/literal-8",
+    "entry": "initial",
+    "order": [
+      "initial",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyFlowConstructorSupply",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/constructor_proofs.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/constructor_proofs.go",
+    "flow": "CopyFlowConstructorCandidates/literal-7",
+    "entry": "initial",
+    "order": [
+      "initial",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyFlowConstructorCandidates",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fan_out_mixed_route.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fan_out_mixed_route.go",
+    "flow": "CopyFanOutMixedRoute/literal-8",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "CopyFanOutMixedRoute",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fan_out_mixed_route.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fan_out_mixed_route.go",
+    "flow": "CopyFanOutMixedRoute/literal-14",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "CopyFanOutMixedRoute",
+    "literal": 14
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fan_out_mixed_route.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fan_out_mixed_route.go",
+    "flow": "CopyFanOutMixedRoute/literal-20",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "CopyFanOutMixedRoute",
+    "literal": 20
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fan_out_mixed_route.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fan_out_mixed_route.go",
+    "flow": "CopyFanOutMixedRoute/literal-26",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "CopyFanOutMixedRoute",
+    "literal": 26
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fixture.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fixture.go",
+    "flow": "AddRetiredStaticFlowForNegativeMutation/literal-11",
+    "entry": "active",
+    "order": [
+      "active",
+      "archived"
+    ],
+    "finals": [
+      "archived"
+    ],
+    "function": "AddRetiredStaticFlowForNegativeMutation",
+    "literal": 11
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fixture.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fixture.go",
+    "flow": "AddRootDefaultEntityIDForNegativeMutation/literal-6",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "AddRootDefaultEntityIDForNegativeMutation",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_chronological_dispatch.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_chronological_dispatch.go",
+    "flow": "CopyForkChronologicalDispatch/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processed",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyForkChronologicalDispatch",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_delivery_route_evidence.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_delivery_route_evidence.go",
+    "flow": "CopyForkDeliveryRouteEvidence/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active"
+    ],
+    "finals": [
+      "active"
+    ],
+    "function": "CopyForkDeliveryRouteEvidence",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_delivery_route_evidence.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_delivery_route_evidence.go",
+    "flow": "CopyForkDeliveryRouteEvidence/literal-10",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active"
+    ],
+    "finals": [
+      "active"
+    ],
+    "function": "CopyForkDeliveryRouteEvidence",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_fan_out_carrier.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_fan_out_carrier.go",
+    "flow": "CopyForkFanOutCarrier/literal-1",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "review",
+      "done",
+      "exhausted"
+    ],
+    "finals": [
+      "done",
+      "exhausted"
+    ],
+    "function": "CopyForkFanOutCarrier",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_loop_generation_notice.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_loop_generation_notice.go",
+    "flow": "CopyForkLoopGenerationState/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyForkLoopGenerationState",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_loop_generation_notice.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_loop_generation_notice.go",
+    "flow": "CopyForkLoopGenerationState/literal-10",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "working",
+      "reviewing",
+      "approved",
+      "exhausted"
+    ],
+    "finals": [
+      "approved",
+      "exhausted"
+    ],
+    "function": "CopyForkLoopGenerationState",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_loop_retained_join.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_loop_retained_join.go",
+    "flow": "CopyForkLoopRetainedJoin/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "working",
+      "reviewing",
+      "approved",
+      "exhausted"
+    ],
+    "finals": [
+      "approved",
+      "exhausted"
+    ],
+    "function": "CopyForkLoopRetainedJoin",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "flow": "CopyReceiverMaterializationIntoRoot/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyReceiverMaterializationIntoRoot",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "flow": "CopyForkReceiverNestedOwnership/literal-21",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyForkReceiverNestedOwnership",
+    "literal": 21
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "flow": "CopyForkReceiverOwnership/literal-22",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyForkReceiverOwnership",
+    "literal": 22
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "flow": "CopyForkReceiverOwnership/literal-53",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyForkReceiverOwnership",
+    "literal": 53
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_ownership.go",
+    "flow": "CopyForkReceiverOwnership/literal-66",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active"
+    ],
+    "finals": [
+      "active"
+    ],
+    "function": "CopyForkReceiverOwnership",
+    "literal": 66
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/guard_fork_continuation.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/guard_fork_continuation.go",
+    "flow": "CopyGuardForkContinuation/literal-3",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyGuardForkContinuation",
+    "literal": 3
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/guard_fork_continuation.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/guard_fork_continuation.go",
+    "flow": "CopyGuardForkContinuation/literal-9",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "killed"
+    ],
+    "finals": [
+      "killed"
+    ],
+    "function": "CopyGuardForkContinuation",
+    "literal": 9
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "flow": "CopyGateCompletionDiagnostic/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "review",
+      "approved",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyGateCompletionDiagnostic",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "flow": "CopyLifecycleSelectedCarriers/literal-10",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyLifecycleSelectedCarriers",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "flow": "CopyLifecycleNestedCascade/literal-45",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "review",
+      "approved"
+    ],
+    "finals": [
+      "approved"
+    ],
+    "function": "CopyLifecycleNestedCascade",
+    "literal": 45
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "flow": "CopyLifecycleNestedCascade/literal-49",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyLifecycleNestedCascade",
+    "literal": 49
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "flow": "CopyLifecycleNestedTemplates/literal-62",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyLifecycleNestedTemplates",
+    "literal": 62
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "flow": "CopyLifecycleEmitter/literal-1",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "review",
+      "approved",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyLifecycleEmitter",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "flow": "CopyLifecycleEmitter/literal-33",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "observed"
+    ],
+    "finals": [
+      "observed"
+    ],
+    "function": "CopyLifecycleEmitter",
+    "literal": 33
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "flow": "writeLifecycleLoopConnected/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "drafting",
+      "review",
+      "escaped",
+      "done"
+    ],
+    "finals": [
+      "escaped",
+      "done"
+    ],
+    "function": "writeLifecycleLoopConnected",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
+    "flow": "writeLifecycleLoopConnected/literal-10",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "writeLifecycleLoopConnected",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/mailbox_entity_filter.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/mailbox_entity_filter.go",
+    "flow": "CopyMailboxEntityFilter/literal-2",
+    "entry": "new",
+    "order": [
+      "new",
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyMailboxEntityFilter",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/materializing_sender.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/materializing_sender.go",
+    "flow": "CopyProspectiveTerminalSender/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyProspectiveTerminalSender",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/notify_all_children_nested_serving.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/notify_all_children_nested_serving.go",
+    "flow": "CopyNotifyAllChildrenNestedServing/literal-22",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "CopyNotifyAllChildrenNestedServing",
+    "literal": 22
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/notify_all_children_nested_serving.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/notify_all_children_nested_serving.go",
+    "flow": "CopyNotifyAllChildrenNestedServing/literal-28",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "completed"
+    ],
+    "finals": [
+      "completed"
+    ],
+    "function": "CopyNotifyAllChildrenNestedServing",
+    "literal": 28
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/parent_connect_timer.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/parent_connect_timer.go",
+    "flow": "CopyParentConnectTimer/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "CopyParentConnectTimer",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/pin_rewrite_syntax.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/pin_rewrite_syntax.go",
+    "flow": "PinRewriteSyntaxSource/literal-8",
+    "entry": "idle",
+    "order": [
+      "idle"
+    ],
+    "finals": [],
+    "function": "PinRewriteSyntaxSource",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "flow": "CopyReceiverOptionalChild/literal-10",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "CopyReceiverOptionalChild",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "flow": "CopyReceiverCreatingChild/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyReceiverCreatingChild",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "flow": "CopyReceiverUnavailableAfterPublish/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyReceiverUnavailableAfterPublish",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "flow": "CopyReceiverEntitylessOnward/literal-8",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyReceiverEntitylessOnward",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "flow": "CopyReceiverEntitylessLocal/literal-4",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyReceiverEntitylessLocal",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+    "flow": "CopyReceiverMixedAgent/literal-14",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyReceiverMixedAgent",
+    "literal": 14
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_config_composed_owner.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_config_composed_owner.go",
+    "flow": "CopyReceiverConfigComposedOwner/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "review",
+      "done"
+    ],
+    "finals": [],
+    "function": "CopyReceiverConfigComposedOwner",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_config_composed_owner.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_config_composed_owner.go",
+    "flow": "CopyReceiverConfigComposedOwner/literal-10",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "CopyReceiverConfigComposedOwner",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go",
+    "flow": "CopyTemplateInstanceEmpireStyle/literal-8",
+    "entry": "initializing",
+    "order": [
+      "initializing",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "CopyTemplateInstanceEmpireStyle",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go",
+    "flow": "CopyTemplateInstanceActivationConfigSubscriber/literal-8",
+    "entry": "initializing",
+    "order": [
+      "initializing",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "CopyTemplateInstanceActivationConfigSubscriber",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "flow": "CopyStaticMultiEntityRetirement/literal-9",
+    "entry": "active",
+    "order": [
+      "active",
+      "archived"
+    ],
+    "finals": [
+      "archived"
+    ],
+    "function": "CopyStaticMultiEntityRetirement",
+    "literal": 9
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "flow": "CopyRootDefaultStaticInput/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "CopyRootDefaultStaticInput",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "flow": "CopyServedJoinProof/literal-3",
+    "entry": "new",
+    "order": [
+      "new",
+      "dispatching",
+      "awaiting",
+      "ready",
+      "attention"
+    ],
+    "finals": [
+      "ready",
+      "attention"
+    ],
+    "function": "CopyServedJoinProof",
+    "literal": 3
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "flow": "CopyTestSetupValidation/literal-2",
+    "entry": "new",
+    "order": [
+      "new",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyTestSetupValidation",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "flow": "CopyTestSetupValidation/literal-8",
+    "entry": "initializing",
+    "order": [
+      "initializing",
+      "waiting",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "CopyTestSetupValidation",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "flow": "CopyTestSetupValidation/literal-18",
+    "entry": "open",
+    "order": [
+      "open",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ],
+    "function": "CopyTestSetupValidation",
+    "literal": 18
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+    "flow": "CopyTemplateInstanceEmpireOutbox/literal-16",
+    "entry": "initializing",
+    "order": [
+      "initializing",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "CopyTemplateInstanceEmpireOutbox",
+    "literal": 16
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/repeated_static_baseline_probe.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/repeated_static_baseline_probe.go",
+    "flow": "CopyRepeatedStaticBaselineProbe/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active"
+    ],
+    "finals": [
+      "active"
+    ],
+    "function": "CopyRepeatedStaticBaselineProbe",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/repeated_static_baseline_probe.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/repeated_static_baseline_probe.go",
+    "flow": "CopyRepeatedStaticBaselineProbe/literal-10",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active"
+    ],
+    "finals": [
+      "active"
+    ],
+    "function": "CopyRepeatedStaticBaselineProbe",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/run_completion.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/run_completion.go",
+    "flow": "CopyRunCompletionSystemNode/literal-4",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRunCompletionSystemNode",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/run_completion.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/run_completion.go",
+    "flow": "CopyRunCompletionSystemNode/literal-8",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRunCompletionSystemNode",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/runtime_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/runtime_variants.go",
+    "flow": "CopyPayloadNamedField/literal-2",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyPayloadNamedField",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/schema_admission_source.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/schema_admission_source.go",
+    "flow": "global/literal-1",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "global",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/schema_admission_source.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/schema_admission_source.go",
+    "flow": "global/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "global",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/selected_fork_pending_input.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/selected_fork_pending_input.go",
+    "flow": "CopySelectedForkPendingInput/literal-65",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopySelectedForkPendingInput",
+    "literal": 65
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/selected_fork_pending_input.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/selected_fork_pending_input.go",
+    "flow": "CopySelectedForkPendingInput/literal-71",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopySelectedForkPendingInput",
+    "literal": 71
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/selected_input_agent.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/selected_input_agent.go",
+    "flow": "copySelectedNestedConstructedAgentInput/literal-8",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "copySelectedNestedConstructedAgentInput",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/selected_input_agent.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/selected_input_agent.go",
+    "flow": "copySelectedNestedConstructedAgentInput/literal-25",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "copySelectedNestedConstructedAgentInput",
+    "literal": 25
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/selected_store_execution.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/selected_store_execution.go",
+    "flow": "CopySelectedStoreExecution/literal-16",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopySelectedStoreExecution",
+    "literal": 16
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/selection_retry.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/selection_retry.go",
+    "flow": "CopySelectionRetry/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopySelectionRetry",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/semantic_numeric_ingress.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/semantic_numeric_ingress.go",
+    "flow": "CopySemanticNumericIngress/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopySemanticNumericIngress",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "CopyRootIngressServedFollowUp/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processed",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRootIngressServedFollowUp",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "CopyRootIngressServedFollowUp/literal-3",
+    "entry": "new",
+    "order": [
+      "new",
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRootIngressServedFollowUp",
+    "literal": 3
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "CopyRootIngressServedDecisionControl/literal-2",
+    "entry": "new",
+    "order": [
+      "new",
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRootIngressServedDecisionControl",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "CopyRootIngressServedDecisionControl/literal-3",
+    "entry": "awaiting_review",
+    "order": [
+      "awaiting_review",
+      "waiting",
+      "rework",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRootIngressServedDecisionControl",
+    "literal": 3
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "CopyRootIngressServedConversationFork/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRootIngressServedConversationFork",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "CopyRootIngressServedSessionCleanup/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRootIngressServedSessionCleanup",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "CopyRootIngressLegacyTemplateTargetRoute/literal-2",
+    "entry": "initializing",
+    "order": [
+      "initializing",
+      "waiting",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "CopyRootIngressLegacyTemplateTargetRoute",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "CopyRootIngressLegacyTemplateAutoEmit/literal-2",
+    "entry": "initializing",
+    "order": [
+      "initializing",
+      "spawning",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "CopyRootIngressLegacyTemplateAutoEmit",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "addLegacyTemplateRoot/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "processed",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "addLegacyTemplateRoot",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+    "flow": "addLegacyTemplateRoot/literal-3",
+    "entry": "new",
+    "order": [
+      "new",
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "addLegacyTemplateRoot",
+    "literal": 3
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go",
+    "flow": "writeStatelessCountJoinSingletonCoordinatorFlow/literal-7",
+    "entry": "active",
+    "order": [
+      "active",
+      "done",
+      "failed"
+    ],
+    "finals": [
+      "done",
+      "failed"
+    ],
+    "function": "writeStatelessCountJoinSingletonCoordinatorFlow",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyOutputModeVerify/literal-9",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyOutputModeVerify",
+    "literal": 9
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyDescribeStageGraph/literal-7",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "active",
+      "review",
+      "timed_out"
+    ],
+    "finals": [
+      "review",
+      "timed_out"
+    ],
+    "function": "CopyDescribeStageGraph",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyServedTestSetup/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyServedTestSetup",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyFirstFlowTutorial/literal-2",
+    "entry": "open",
+    "order": [
+      "open",
+      "assigned",
+      "resolved"
+    ],
+    "finals": [
+      "resolved"
+    ],
+    "function": "CopyFirstFlowTutorial",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyVerifyMissingPin/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyVerifyMissingPin",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyVerifyMissingPin/literal-8",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "working",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyVerifyMissingPin",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyRunForkTarget/literal-3",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRunForkTarget",
+    "literal": 3
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyScenarioSetup/literal-5",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "ready"
+    ],
+    "finals": [
+      "ready"
+    ],
+    "function": "CopyScenarioSetup",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyScenarioRootSetup/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyScenarioRootSetup",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+    "flow": "CopyInputPinExternalScope/literal-12",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyInputPinExternalScope",
+    "literal": 12
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/stage_completion_journey.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/stage_completion_journey.go",
+    "flow": "CopyStageCompletionJourney/literal-4",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyStageCompletionJourney",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/stage_completion_journey.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/stage_completion_journey.go",
+    "flow": "CopyStageCompletionJourney/literal-10",
+    "entry": "ready",
+    "order": [
+      "ready",
+      "Ready"
+    ],
+    "finals": [
+      "Ready"
+    ],
+    "function": "CopyStageCompletionJourney",
+    "literal": 10
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/subscription_membership.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/subscription_membership.go",
+    "flow": "CopyAncestorEventWithoutReceiverMembership/literal-9",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyAncestorEventWithoutReceiverMembership",
+    "literal": 9
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/supported_surface_routing.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/supported_surface_routing.go",
+    "flow": "CopyExactJoinEventBusProofWithTimeout/literal-1",
+    "entry": "awaiting",
+    "order": [
+      "awaiting",
+      "ready",
+      "attention"
+    ],
+    "finals": [
+      "ready",
+      "attention"
+    ],
+    "function": "CopyExactJoinEventBusProofWithTimeout",
+    "literal": 1
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/supported_surface_routing.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/supported_surface_routing.go",
+    "flow": "CopyRecurringTimerCancellation/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyRecurringTimerCancellation",
+    "literal": 2
+  },
+  {
     "file": "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent/agent-only/schema.yaml",
     "source": "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent",
     "flow": "agent-only",
@@ -407,6 +4546,871 @@
       "active"
     ],
     "finals": []
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/wave1_expression.go",
+    "source": "internal/runtime/testfixtures/canonicalrouting/wave1_expression.go",
+    "flow": "CopyWave1Expression/literal-7",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "working",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "CopyWave1Expression",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/testfixtures/finalflowinstanceauthoring/fixture.go",
+    "source": "internal/runtime/testfixtures/finalflowinstanceauthoring/fixture.go",
+    "flow": "addTemplateLifecycleOverlay/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "reviewed"
+    ],
+    "finals": [
+      "reviewed"
+    ],
+    "function": "addTemplateLifecycleOverlay",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/testfixtures/templateflowpilot/fixture.go",
+    "source": "internal/runtime/testfixtures/templateflowpilot/fixture.go",
+    "flow": "addLifecycleOverlay/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "addLifecycleOverlay",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/tools/emit_test.go",
+    "source": "internal/runtime/tools/emit_test.go",
+    "flow": "TestLoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType/literal-7",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "TestLoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/tools/emit_test.go",
+    "source": "internal/runtime/tools/emit_test.go",
+    "flow": "TestLoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType/literal-16",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "TestLoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType",
+    "literal": 16
+  },
+  {
+    "file": "internal/runtime/tools/entity_sparse_mutation_test.go",
+    "source": "internal/runtime/tools/entity_sparse_mutation_test.go",
+    "flow": "TestEntitySparseGeneratedToolMutation/literal-7",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestEntitySparseGeneratedToolMutation",
+    "literal": 7
+  },
+  {
+    "file": "internal/runtime/tools/executor_entity_test.go",
+    "source": "internal/runtime/tools/executor_entity_test.go",
+    "flow": "TestRoleScopedEntityTools_EqualityUsesFinalCandidateValidation/literal-6",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ],
+    "function": "TestRoleScopedEntityTools_EqualityUsesFinalCandidateValidation",
+    "literal": 6
+  },
+  {
+    "file": "internal/runtime/tools/executor_entity_test.go",
+    "source": "internal/runtime/tools/executor_entity_test.go",
+    "flow": "TestEntityTools_RootActorImplicitReadToolsDoNotReadChildFlowRows/literal-14",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestEntityTools_RootActorImplicitReadToolsDoNotReadChildFlowRows",
+    "literal": 14
+  },
+  {
+    "file": "internal/runtime/tools/executor_entity_test.go",
+    "source": "internal/runtime/tools/executor_entity_test.go",
+    "flow": "loadRoleScopedEntityToolBundle/literal-2",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "ready",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ],
+    "function": "loadRoleScopedEntityToolBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/tools/human_task_construction_fixture_test.go",
+    "source": "internal/runtime/tools/human_task_construction_fixture_test.go",
+    "flow": "humanTaskImportedSource/literal-4",
+    "entry": "queued",
+    "order": [
+      "queued"
+    ],
+    "finals": [],
+    "function": "humanTaskImportedSource",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/tools/native_tools_validation_test.go",
+    "source": "internal/runtime/tools/native_tools_validation_test.go",
+    "flow": "sameFlowScopedNativeToolAgentFixture/literal-5",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "sameFlowScopedNativeToolAgentFixture",
+    "literal": 5
+  },
+  {
+    "file": "internal/runtime/tools/native_tools_validation_test.go",
+    "source": "internal/runtime/tools/native_tools_validation_test.go",
+    "flow": "scopedFlowWorkspaceNativeToolFixture/literal-7",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "scopedFlowWorkspaceNativeToolFixture",
+    "literal": 7
+  },
+  {
+    "file": "internal/serveapp/semantic_numeric_gate_test.go",
+    "source": "internal/serveapp/semantic_numeric_gate_test.go",
+    "flow": "TestWorkflowGateSemanticNumericOutcomeExecutionParity/literal-1",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "review",
+      "approved",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestWorkflowGateSemanticNumericOutcomeExecutionParity",
+    "literal": 1
+  },
+  {
+    "file": "internal/serveapp/semantic_numeric_schedule_test.go",
+    "source": "internal/serveapp/semantic_numeric_schedule_test.go",
+    "flow": "TestGenericScheduleSemanticPayloadExecutionParity/literal-2",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestGenericScheduleSemanticPayloadExecutionParity",
+    "literal": 2
+  },
+  {
+    "file": "internal/serveapp/startup_creation_handoff_test.go",
+    "source": "internal/serveapp/startup_creation_handoff_test.go",
+    "flow": "TestComposedStartupCreationPublicationHandoffOnBothStores/literal-14",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "spawned"
+    ],
+    "finals": [
+      "spawned"
+    ],
+    "function": "TestComposedStartupCreationPublicationHandoffOnBothStores",
+    "literal": 14
+  },
+  {
+    "file": "internal/serveapp/store_backend_selection_test.go",
+    "source": "internal/serveapp/store_backend_selection_test.go",
+    "flow": "loadStoreBackendSelectionWorkflowBundle/literal-2",
+    "entry": "idle",
+    "order": [
+      "idle"
+    ],
+    "finals": [
+      "idle"
+    ],
+    "function": "loadStoreBackendSelectionWorkflowBundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/a2_fork_entry_persistence_test.go",
+    "source": "internal/store/internal/runtimepersistence/a2_fork_entry_persistence_test.go",
+    "flow": "TestA2ForkStageEntryPersistenceOnBothStores/literal-8",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestA2ForkStageEntryPersistenceOnBothStores",
+    "literal": 8
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/a2_fork_entry_persistence_test.go",
+    "source": "internal/store/internal/runtimepersistence/a2_fork_entry_persistence_test.go",
+    "flow": "TestA2ForkStageEntryPersistenceOnBothStores/literal-16",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "TestA2ForkStageEntryPersistenceOnBothStores",
+    "literal": 16
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/agent_lifecycle_source_set_rebind_parity_test.go",
+    "source": "internal/store/internal/runtimepersistence/agent_lifecycle_source_set_rebind_parity_test.go",
+    "flow": "seedLifecycleReadinessOwner/literal-6",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "seedLifecycleReadinessOwner",
+    "literal": 6
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/dynamic_flow_creation_atomicity_test.go",
+    "source": "internal/store/internal/runtimepersistence/dynamic_flow_creation_atomicity_test.go",
+    "flow": "dynamicFlowCreationAtomicityBundle/literal-4",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "dynamicFlowCreationAtomicityBundle",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/fan_out_constructor_fixture_test.go",
+    "source": "internal/store/internal/runtimepersistence/fan_out_constructor_fixture_test.go",
+    "flow": "newFanOutConstructorFixture/literal-7",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "newFanOutConstructorFixture",
+    "literal": 7
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/fieldless_handler_construction_test.go",
+    "source": "internal/store/internal/runtimepersistence/fieldless_handler_construction_test.go",
+    "flow": "TestSelectedRunTargetOwnersUseConstructedHeadersBothStores/literal-9",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestSelectedRunTargetOwnersUseConstructedHeadersBothStores",
+    "literal": 9
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/fieldless_handler_construction_test.go",
+    "source": "internal/store/internal/runtimepersistence/fieldless_handler_construction_test.go",
+    "flow": "TestOrdinaryHandlerRequiresCanonicalConstructionBothStores/literal-22",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "reviewing"
+    ],
+    "finals": [],
+    "function": "TestOrdinaryHandlerRequiresCanonicalConstructionBothStores",
+    "literal": 22
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_admission_manager_native_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_admission_manager_native_test.go",
+    "flow": "TestManagerNativeLostAdmissionCleanupBothStores/literal-15",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestManagerNativeLostAdmissionCleanupBothStores",
+    "literal": 15
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_attachment_agent_acquisition_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_attachment_agent_acquisition_test.go",
+    "flow": "runFlowAttachmentAcquisitionCuts/literal-16",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "runFlowAttachmentAcquisitionCuts",
+    "literal": 16
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_attachment_cleanup_failure_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_attachment_cleanup_failure_test.go",
+    "flow": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores/literal-18",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+    "literal": 18
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_attachment_commit_boundary_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_attachment_commit_boundary_test.go",
+    "flow": "TestFlowAttachmentNativeLostAckAfterRebindBothStores/literal-6",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowAttachmentNativeLostAckAfterRebindBothStores",
+    "literal": 6
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_attachment_commit_boundary_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_attachment_commit_boundary_test.go",
+    "flow": "TestFlowAttachmentNativeCommitAcknowledgmentBothStores/literal-13",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowAttachmentNativeCommitAcknowledgmentBothStores",
+    "literal": 13
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_attachment_phase_failure_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_attachment_phase_failure_test.go",
+    "flow": "TestFlowAttachmentPhaseFailureRetainsConstructionBothStores/literal-13",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowAttachmentPhaseFailureRetainsConstructionBothStores",
+    "literal": 13
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_attachment_timer_acquisition_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_attachment_timer_acquisition_test.go",
+    "flow": "runFlowAttachmentTimerAcquisition/literal-5",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "runFlowAttachmentTimerAcquisition",
+    "literal": 5
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_ack_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_ack_test.go",
+    "flow": "TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores/literal-10",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores",
+    "literal": 10
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_ack_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_ack_test.go",
+    "flow": "TestFlowConstructorActivationConsumesExactInputBothStores/literal-49",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowConstructorActivationConsumesExactInputBothStores",
+    "literal": 49
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_ack_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_ack_test.go",
+    "flow": "TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores/literal-7",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores",
+    "literal": 7
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "flow": "TestFlowConstructorRootEagerTreeBothStores/literal-7",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowConstructorRootEagerTreeBothStores",
+    "literal": 7
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "flow": "TestFlowConstructorRootEagerTreeBothStores/literal-9",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowConstructorRootEagerTreeBothStores",
+    "literal": 9
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "flow": "TestFlowConstructorRootEagerTreeBothStores/literal-15",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowConstructorRootEagerTreeBothStores",
+    "literal": 15
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "flow": "newEagerFlowConstructorFixture/literal-4",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "newEagerFlowConstructorFixture",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_descendants_test.go",
+    "flow": "newEagerFlowConstructorFixture/literal-10",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "newEagerFlowConstructorFixture",
+    "literal": 10
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_historical_snapshot_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_historical_snapshot_test.go",
+    "flow": "proveFlowConstructorHistoricalSnapshot/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "proveFlowConstructorHistoricalSnapshot",
+    "literal": 2
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/flow_constructor_import_handoff_test.go",
+    "source": "internal/store/internal/runtimepersistence/flow_constructor_import_handoff_test.go",
+    "flow": "TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores/literal-4",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/generic_schedule_lifecycle_consumers_test.go",
+    "source": "internal/store/internal/runtimepersistence/generic_schedule_lifecycle_consumers_test.go",
+    "flow": "TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores/literal-4",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/receiver_config_activation_atomicity_test.go",
+    "source": "internal/store/internal/runtimepersistence/receiver_config_activation_atomicity_test.go",
+    "flow": "newReceiverConfigActivationFixtureWithTimerAndCommitter/literal-4",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "newReceiverConfigActivationFixtureWithTimerAndCommitter",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/receiver_construction_presence_test.go",
+    "source": "internal/store/internal/runtimepersistence/receiver_construction_presence_test.go",
+    "flow": "TestReceiverReadinessRequiresConstructedHeaderBothStores/literal-20",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestReceiverReadinessRequiresConstructedHeaderBothStores",
+    "literal": 20
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/receiver_grant_retirement_test.go",
+    "source": "internal/store/internal/runtimepersistence/receiver_grant_retirement_test.go",
+    "flow": "grantReceiverEntitySource/literal-2",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "grantReceiverEntitySource",
+    "literal": 2
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/receiver_grant_retirement_test.go",
+    "source": "internal/store/internal/runtimepersistence/receiver_grant_retirement_test.go",
+    "flow": "grantReceiverEntitySource/literal-4",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "grantReceiverEntitySource",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/run_fork_activation_contention_test.go",
+    "source": "internal/store/internal/runtimepersistence/run_fork_activation_contention_test.go",
+    "flow": "newForkActivationFrontierFixture/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [],
+    "function": "newForkActivationFrontierFixture",
+    "literal": 2
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
+    "source": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
+    "flow": "selectedActivityProducerSourceWithRootFields/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "selectedActivityProducerSourceWithRootFields",
+    "literal": 2
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
+    "source": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
+    "flow": "selectedActivityProducerSourceWithRootFields/literal-10",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "selectedActivityProducerSourceWithRootFields",
+    "literal": 10
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/run_fork_branch_point_activation_test.go",
+    "source": "internal/store/internal/runtimepersistence/run_fork_branch_point_activation_test.go",
+    "flow": "newBranchPointFixture/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "later"
+    ],
+    "finals": [
+      "later"
+    ],
+    "function": "newBranchPointFixture",
+    "literal": 2
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/run_fork_exact_fact_generated_writer_test.go",
+    "source": "internal/store/internal/runtimepersistence/run_fork_exact_fact_generated_writer_test.go",
+    "flow": "exactFactEntitySource/literal-2",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "exactFactEntitySource",
+    "literal": 2
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/run_fork_exact_fact_generated_writer_test.go",
+    "source": "internal/store/internal/runtimepersistence/run_fork_exact_fact_generated_writer_test.go",
+    "flow": "exactFactEntitySource/literal-4",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "exactFactEntitySource",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/run_fork_gate_activation_test.go",
+    "source": "internal/store/internal/runtimepersistence/run_fork_gate_activation_test.go",
+    "flow": "runForkRootGateBundleForTest/literal-2",
+    "entry": "awaiting_review",
+    "order": [
+      "awaiting_review",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "runForkRootGateBundleForTest",
+    "literal": 2
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/run_fork_gate_activation_test.go",
+    "source": "internal/store/internal/runtimepersistence/run_fork_gate_activation_test.go",
+    "flow": "TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority/literal-3",
+    "entry": "operating",
+    "order": [
+      "operating"
+    ],
+    "finals": [],
+    "function": "TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority",
+    "literal": 3
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/run_fork_snapshot_ownership_test.go",
+    "source": "internal/store/internal/runtimepersistence/run_fork_snapshot_ownership_test.go",
+    "flow": "newSnapshotOwnershipFixture/literal-4",
+    "entry": "active",
+    "order": [
+      "active",
+      "ready",
+      "later"
+    ],
+    "finals": [],
+    "function": "newSnapshotOwnershipFixture",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/scenario_construction_commit_test.go",
+    "source": "internal/store/internal/runtimepersistence/scenario_construction_commit_test.go",
+    "flow": "TestScenarioConstructionNativeCommitBothStores/literal-7",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestScenarioConstructionNativeCommitBothStores",
+    "literal": 7
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/scenario_construction_commit_test.go",
+    "source": "internal/store/internal/runtimepersistence/scenario_construction_commit_test.go",
+    "flow": "TestScenarioConstructionFieldlessStateBothStores/literal-4",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "TestScenarioConstructionFieldlessStateBothStores",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/sqlite_runtime_test.go",
+    "source": "internal/store/internal/runtimepersistence/sqlite_runtime_test.go",
+    "flow": "sqliteFlowActivationBundle/literal-27",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "sqliteFlowActivationBundle",
+    "literal": 27
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/sqlite_runtime_test.go",
+    "source": "internal/store/internal/runtimepersistence/sqlite_runtime_test.go",
+    "flow": "TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner/literal-5",
+    "entry": "qualified",
+    "order": [
+      "qualified"
+    ],
+    "finals": [],
+    "function": "TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner",
+    "literal": 5
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/workflow_engine_delivery_settlement_test.go",
+    "source": "internal/store/internal/runtimepersistence/workflow_engine_delivery_settlement_test.go",
+    "flow": "constructWorkflowMutationFixture/literal-5",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [],
+    "function": "constructWorkflowMutationFixture",
+    "literal": 5
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/workflow_gate_consumer_outcome_test.go",
+    "source": "internal/store/internal/runtimepersistence/workflow_gate_consumer_outcome_test.go",
+    "flow": "TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores/literal-5",
+    "entry": "awaiting_review",
+    "order": [
+      "awaiting_review",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores",
+    "literal": 5
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/workflow_header_activity_admission_test.go",
+    "source": "internal/store/internal/runtimepersistence/workflow_header_activity_admission_test.go",
+    "flow": "TestActivityAdmissionConsumesConstructedHeaderBothStores/literal-15",
+    "entry": "review",
+    "order": [
+      "review"
+    ],
+    "finals": [],
+    "function": "TestActivityAdmissionConsumesConstructedHeaderBothStores",
+    "literal": 15
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/workflow_header_fan_out_admission_test.go",
+    "source": "internal/store/internal/runtimepersistence/workflow_header_fan_out_admission_test.go",
+    "flow": "TestFanOutBarrierConsumesConstructedHeaderBothStores/literal-18",
+    "entry": "work",
+    "order": [
+      "work"
+    ],
+    "finals": [],
+    "function": "TestFanOutBarrierConsumesConstructedHeaderBothStores",
+    "literal": 18
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/workflow_target_presence_transition_test.go",
+    "source": "internal/store/internal/runtimepersistence/workflow_target_presence_transition_test.go",
+    "flow": "newWorkflowTargetConstructionFixture/literal-4",
+    "entry": "active",
+    "order": [
+      "active",
+      "done",
+      "settled"
+    ],
+    "finals": [],
+    "function": "newWorkflowTargetConstructionFixture",
+    "literal": 4
+  },
+  {
+    "file": "internal/store/internal/runtimepersistence/workflow_timer_consumer_outcome_test.go",
+    "source": "internal/store/internal/runtimepersistence/workflow_timer_consumer_outcome_test.go",
+    "flow": "TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores/literal-5",
+    "entry": "waiting",
+    "order": [
+      "waiting"
+    ],
+    "finals": [],
+    "function": "TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores",
+    "literal": 5
+  },
+  {
+    "file": "platform-spec.yaml",
+    "source": "platform-spec.yaml",
+    "flow": "hello_world_example",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "embedded_path": [
+      "contract_formats",
+      "hello_world_example",
+      "schema_yaml"
+    ]
+  },
+  {
+    "file": "scripts/rewrite-pins-2438/main_test.go",
+    "source": "scripts/rewrite-pins-2438/main_test.go",
+    "flow": "TestRewriteRetainsCommentsOnUntouchedSections/literal-4",
+    "entry": "idle",
+    "order": [
+      "idle"
+    ],
+    "finals": [],
+    "function": "TestRewriteRetainsCommentsOnUntouchedSections",
+    "literal": 4
   },
   {
     "file": "tests/conformance/entity-progressive-presence/schema.yaml",

@@ -681,11 +681,11 @@ func TestDeploymentFeedAdmissionUsesExactImportableDeclaration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := AdmitDeploymentFeedDeclaration(source, "portfolio/account.registered", routingSource); err != nil {
+	if _, err := AdmitDeploymentFeedDeclaration(source, "portfolio/account.registered", routingSource); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []events.EventType{"portfolio/portfolio.opened", "portfolio/other", "account.registered"} {
-		if err := AdmitDeploymentFeedDeclaration(source, name, routingSource); err == nil {
+		if _, err := AdmitDeploymentFeedDeclaration(source, name, routingSource); err == nil {
 			t.Fatalf("unroutable or wrong-scope deployment event %q was admitted", name)
 		}
 	}

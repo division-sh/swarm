@@ -12,7 +12,7 @@ import (
 
 type stageIdentityExactCatalog struct{}
 
-func (stageIdentityExactCatalog) Terminal(_, _, stage string) (bool, bool) {
+func (stageIdentityExactCatalog) Final(_, _, stage string) (bool, bool) {
 	switch stage {
 	case "ready":
 		return false, true

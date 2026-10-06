@@ -42,7 +42,7 @@ func TestFiniteStartIncludesEagerKeylessChildren(t *testing.T) {
 			"schema.yaml":          "stages: {waiting: {}, done: {final: true}}\n",
 			"unrouted/schema.yaml": child,
 		})
-		err := ValidateFinite(source)
+		err := ValidateFinite(source, nil)
 		if childFinal {
 			if err != nil {
 				t.Fatalf("finite keyless tree rejected: %v", err)
@@ -62,7 +62,7 @@ func TestFiniteStartStatelessRootIsNotAnExemptContainer(t *testing.T) {
 		"leaf/schema.yaml": "stages: {done: {final: true}}\n",
 	})
 	var refusal *FiniteStartError
-	if err := ValidateFinite(source); !errors.As(err, &refusal) || refusal.FlowID != "." {
+	if err := ValidateFinite(source, nil); !errors.As(err, &refusal) || refusal.FlowID != "." {
 		t.Fatalf("constructed stateless root was exempted: %v", err)
 	}
 }
@@ -73,14 +73,14 @@ func TestFiniteStartIgnoresUnrelatedDormantTemplate(t *testing.T) {
 		"dormant/schema.yaml":   "instance: item_id\nstages: {waiting: {}}\n",
 		"dormant/entities.yaml": "Item:\n  item_id: {type: text, _unused_reason: dormant constructor}\n",
 	})
-	if err := ValidateFinite(source); err != nil {
+	if err := ValidateFinite(source, nil); err != nil {
 		t.Fatalf("filesystem-only dormant template entered finite closure: %v", err)
 	}
 }
 
 func TestFiniteStartUnknownCatalogRefuses(t *testing.T) {
 	for _, source := range []semanticview.Source{nil, semanticview.Wrap(&contracts.WorkflowContractBundle{})} {
-		if err := ValidateFinite(source); err == nil {
+		if err := ValidateFinite(source, nil); err == nil {
 			t.Fatal("missing catalog accepted as absence of a service")
 		}
 	}
@@ -104,7 +104,7 @@ func TestFiniteStartIncludesConnectedTemplatesAndTheirEagerChildren(t *testing.T
 				"worker/nodes.yaml":          "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
 				"worker/support/schema.yaml": childStages,
 			})
-			err := ValidateFinite(source)
+			err := ValidateFinite(source, nil)
 			if offender == "none" {
 				if err != nil {
 					t.Fatal(err)
@@ -126,7 +126,7 @@ func TestFiniteStartRejectsContradictoryConstructorEvidence(t *testing.T) {
 	})
 	bundle, _ := semanticview.Bundle(source)
 	bundle.FlowTree.Root.Children[0].Parent = nil
-	if err := ValidateFinite(source); err == nil || !strings.Contains(err.Error(), "contradicts its admitted constructor") {
+	if err := ValidateFinite(source, nil); err == nil || !strings.Contains(err.Error(), "contradicts its admitted constructor") {
 		t.Fatalf("corrupt eager construction evidence waived finite admission: %v", err)
 	}
 }
