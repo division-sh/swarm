@@ -1133,7 +1133,7 @@
     {
       "file": "internal/runtime/bootverify/report_test.go",
       "before_hash": "c1dcd7c4a0e76f894e7154efffeea6fcf36b1b9821bec8a7b8ec19514e303892",
-      "after_hash": "d55e35675913a60dbd0a65e85a2697135e42682f13399feaf850c27ca0765af2",
+      "after_hash": "4967a6ef5d2d0bd132d4842059fe2de848348d61213c4f97c8f08c1715d0368f",
       "edits": [
         {
           "offset": 30941,
@@ -1164,6 +1164,26 @@
           "offset": 74078,
           "before": "    terminal: true\n",
           "after": "    final: true\n"
+        },
+        {
+          "offset": 74516,
+          "before": "func TestRun_ErrorsWhenStagesMissInitialOrTerminal(t *testing.T) {\n",
+          "after": "func TestRun_StagesUseOrderedEntryAndOptionalFinal(t *testing.T) {\n"
+        },
+        {
+          "offset": 74661,
+          "before": "",
+          "after": "  active: {}\n"
+        },
+        {
+          "offset": 74894,
+          "before": "\tif !reportContains(report.Errors(), \"state_machine_coherence\", \"must declare exactly one initial stage\") {\n\t\tt.Fatalf(\"expected missing initial stage error, got %#v\", report.Errors())\n",
+          "after": "\tgraph, ok := bundle.WorkflowStageTopology(\"support\")\n\tif !ok || graph.InitialStage != \"waiting\" || len(graph.FinalStageIDs()) != 0 {\n\t\tt.Fatalf(\"expected ordered entry and no final stages, got %+v\", graph)\n"
+        },
+        {
+          "offset": 75082,
+          "before": "\tif !reportContains(report.Errors(), \"state_machine_coherence\", \"must declare at least one terminal stage\") {\n\t\tt.Fatalf(\"expected missing terminal stage error, got %#v\", report.Errors())\n",
+          "after": "\tif report.HasErrors() {\n\t\tt.Fatalf(\"a valid service with no final stage must verify: %#v\", report.Errors())\n"
         },
         {
           "offset": 81541,
