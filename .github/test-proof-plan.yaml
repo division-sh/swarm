@@ -962,6 +962,7 @@ units:
     run: ^Test[P-Q].*$
     required_children:
       TestQueuedTurnTerminationBothStores: [pending/sqlite, pending/postgres, retry/sqlite, retry/postgres, rollback/sqlite, rollback/postgres, isolated/sqlite, isolated/postgres, root/sqlite, root/postgres]
+      TestQueuedDirectiveTerminationBothStores: [pending/sqlite, pending/postgres, rollback/sqlite, rollback/postgres, admission_wins/sqlite, admission_wins/postgres, isolated/sqlite, isolated/postgres, root/sqlite, root/postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

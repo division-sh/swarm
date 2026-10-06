@@ -82,8 +82,9 @@ type TurnCancellationDispatcher interface {
 }
 
 type WorkflowTurnTerminationResult struct {
-	Active []TurnCancellation
-	Queued []deliverylifecycle.Snapshot
+	Active           []TurnCancellation
+	Queued           []deliverylifecycle.Snapshot
+	QueuedDirectives []agentcontrol.DirectiveOperation
 }
 
 func (c CanceledTurnCommit) Validate() error {

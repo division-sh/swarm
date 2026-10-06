@@ -11,18 +11,25 @@ import (
 )
 
 func executingDirectiveFlowOrigins(ctx context.Context, tx *sql.Tx, postgres bool, owner flowidentity.RunScopedFlowInstance) ([]agentcontrol.DirectiveOperation, error) {
+	return directiveFlowOperations(ctx, tx, postgres, owner, agentcontrol.DirectiveOperationExecuting)
+}
+
+func directiveFlowOperations(ctx context.Context, tx *sql.Tx, postgres bool, owner flowidentity.RunScopedFlowInstance, state agentcontrol.DirectiveOperationState) ([]agentcontrol.DirectiveOperation, error) {
 	if err := owner.Validate(); err != nil {
 		return nil, err
 	}
-	query := `SELECT CAST(operation_id AS TEXT) FROM agent_directive_operations WHERE resolved_run_id=$1 AND state='executing'
-		AND agent_route_presence='present' AND flow_scope_key=$2 AND flow_instance_id=$3 AND flow_instance=$4 ORDER BY operation_id`
-	args := []any{owner.RunID, owner.Route.ScopeKey, owner.Route.InstanceID, owner.Route.InstancePath}
+	if state != agentcontrol.DirectiveOperationPrepared && state != agentcontrol.DirectiveOperationExecuting {
+		return nil, fmt.Errorf("directive cancellation inventory requires prepared or executing work")
+	}
+	query := `SELECT CAST(operation_id AS TEXT) FROM agent_directive_operations WHERE resolved_run_id=$1 AND state=$2
+		AND agent_route_presence='present' AND flow_scope_key=$3 AND flow_instance_id=$4 AND flow_instance=$5 ORDER BY operation_id`
+	args := []any{owner.RunID, string(state), owner.Route.ScopeKey, owner.Route.InstanceID, owner.Route.InstancePath}
 	if owner.Route.ScopeKey == "." {
 		if owner.Route.InstanceID != owner.RunID || owner.Route.InstancePath != owner.RunID {
 			return nil, fmt.Errorf("root directive termination requires its canonical run-root owner")
 		}
-		query = `SELECT CAST(operation_id AS TEXT) FROM agent_directive_operations WHERE resolved_run_id=$1 AND state='executing' AND agent_route_presence='root' ORDER BY operation_id`
-		args = []any{owner.RunID}
+		query = `SELECT CAST(operation_id AS TEXT) FROM agent_directive_operations WHERE resolved_run_id=$1 AND state=$2 AND agent_route_presence='root' ORDER BY operation_id`
+		args = []any{owner.RunID, string(state)}
 	}
 	if postgres {
 		query += ` FOR UPDATE`
@@ -54,7 +61,7 @@ func executingDirectiveFlowOrigins(ctx context.Context, tx *sql.Tx, postgres boo
 		if err != nil || !found {
 			return nil, fmt.Errorf("load claimed directive: found=%t error=%v", found, err)
 		}
-		if op.State != agentcontrol.DirectiveOperationExecuting || !owner.MatchesAgentRoute(op.AgentIdentity) {
+		if op.State != state || !owner.MatchesAgentRoute(op.AgentIdentity) {
 			return nil, fmt.Errorf("claimed directive contradicts its constructed owner")
 		}
 		result = append(result, op)
@@ -68,6 +75,14 @@ func (s *AgentPostgresOwner) ExecutingDirectiveFlowOriginsTx(ctx context.Context
 
 func (s *AgentSQLiteOwner) ExecutingDirectiveFlowOriginsTx(ctx context.Context, tx *sql.Tx, owner flowidentity.RunScopedFlowInstance) ([]agentcontrol.DirectiveOperation, error) {
 	return executingDirectiveFlowOrigins(ctx, tx, false, owner)
+}
+
+func (s *AgentPostgresOwner) PreparedDirectiveFlowOperationsTx(ctx context.Context, tx *sql.Tx, owner flowidentity.RunScopedFlowInstance) ([]agentcontrol.DirectiveOperation, error) {
+	return directiveFlowOperations(ctx, tx, true, owner, agentcontrol.DirectiveOperationPrepared)
+}
+
+func (s *AgentSQLiteOwner) PreparedDirectiveFlowOperationsTx(ctx context.Context, tx *sql.Tx, owner flowidentity.RunScopedFlowInstance) ([]agentcontrol.DirectiveOperation, error) {
+	return directiveFlowOperations(ctx, tx, false, owner, agentcontrol.DirectiveOperationPrepared)
 }
 
 func directiveTurnOrigin(ctx context.Context, tx *sql.Tx, postgres, lock bool, origin agentcontrol.DirectiveExecutionOrigin) (agentcontrol.DirectiveOperation, error) {

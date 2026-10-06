@@ -43,6 +43,10 @@ func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationproto
 		if err != nil {
 			return err
 		}
+		result.QueuedDirectives, err = cancelQueuedDirectiveTurns(ctx, tx, mutation, postgres, directives, command)
+		if err != nil {
+			return err
+		}
 		result.Active, err = requestUnstartedClaimedTurnTermination(ctx, tx, postgres, delivery, directives, command)
 		if err != nil {
 			return err

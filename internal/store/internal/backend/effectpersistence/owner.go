@@ -44,6 +44,8 @@ type providerDrainDeliveryOwner interface {
 }
 
 type providerDrainDirectiveOwner interface {
+	PreparedDirectiveFlowOperationsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimeagentcontrol.DirectiveOperation, error)
+	CancelPreparedDirectiveTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveOperation, time.Time) (runtimeagentcontrol.DirectiveOperation, error)
 	ExecutingDirectiveFlowOriginsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimeagentcontrol.DirectiveOperation, error)
 	DirectiveTurnOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, bool) (runtimeagentcontrol.DirectiveOperation, error)
 	ProviderDirectiveOriginPendingTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, string, runtimeagentidentity.Identity) (bool, error)

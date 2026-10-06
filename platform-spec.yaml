@@ -16935,12 +16935,17 @@ platform_tables:
         owning carrier still closes its authorized physical work and joins cleanup
         before CommitCanceledTurn settles the business origin. Startup consumes
         that same authorization anchor without manufacturing a launch clock.
-        An unclaimed pending or retry delivery can instead be canceled in the
+        An unclaimed pending or retry delivery or prepared directive can instead be canceled in the
         guarded terminate transaction through the existing delivery owner. It
         preserves claim/retry versions and prior attempt evidence, never creates
         a provider or execution attempt, and consumes the recipient's exact
-        persisted run/flow identity rather than its target's entity. The logical
-        row records the real delivery ID and terminal cause; its authorization
+        persisted run/flow identity rather than its target's entity. A prepared
+        directive is canceled together with its pipeline obligation, without an
+        execution owner or admission timestamp. Admission and termination
+        serialize on that exact operation; a canceled operation cannot execute.
+        Its acknowledged lifecycle result carries the exact terminal operation,
+        not a fabricated executing origin or process callback. The logical
+        row records the real delivery or directive ID and terminal cause; its authorization
         anchor may be absent for an already-settled queued terminate origin, or
         for claimed work terminated before any provider authorization. Claimed
         unstarted work persists a closed versioned origin_evidence record with
@@ -16987,7 +16992,7 @@ platform_tables:
             settled_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL,
             UNIQUE (origin_kind, origin_id),
-            CHECK (admitted_attempt_id IS NOT NULL OR (cancel_reason IS NOT NULL AND cancel_reason = 'terminate' AND first_attempt_id IS NULL AND first_launched_at IS NULL AND bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL AND (origin_evidence IS NOT NULL OR (origin_kind = 'delivery' AND settled_at IS NOT NULL)))),
+            CHECK (admitted_attempt_id IS NOT NULL OR (cancel_reason IS NOT NULL AND cancel_reason = 'terminate' AND first_attempt_id IS NULL AND first_launched_at IS NULL AND bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL AND (origin_evidence IS NOT NULL OR settled_at IS NOT NULL))),
             CHECK (origin_evidence IS NULL OR admitted_attempt_id IS NULL),
             CHECK ((bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL) OR (bound_ns IS NOT NULL AND bound_emit IS NOT NULL AND timeout_event_id IS NOT NULL)),
             CHECK ((first_attempt_id IS NULL AND first_launched_at IS NULL) OR (first_attempt_id IS NOT NULL AND first_launched_at IS NOT NULL)),

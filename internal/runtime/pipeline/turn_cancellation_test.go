@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
@@ -17,6 +18,39 @@ type committedTurnCancellationProbe struct {
 	queuedCalls int
 	fault       error
 	panic       bool
+}
+
+func TestCommittedQueuedDirectiveCancellationRequiresExactAcknowledgment(t *testing.T) {
+	for _, mode := range []string{"healthy", "unacknowledged", "missing_operation_ack", "executing_owner", "wrong_reason"} {
+		t.Run(mode, func(t *testing.T) {
+			runID := uuid.NewString()
+			op := agentcontrol.DirectiveOperation{
+				OperationID: uuid.NewString(), DirectiveEventID: uuid.NewString(), ResolvedRunID: runID,
+				AgentIdentity: agentidentity.Identity{RunID: runID, Name: agentidentity.Name{AgentID: "worker", Owner: ".", Source: agentidentity.NameSourceDeclared}, Route: agentidentity.RootRoute()},
+				State:         agentcontrol.DirectiveOperationCanceled, CancellationReason: deliverylifecycle.CancellationTerminate, CompletedAt: time.Now().UTC(),
+			}
+			pending := CommittedWorkflowLifecycleMutation{QueuedDirectiveCancellations: []agentcontrol.DirectiveOperation{op}}
+			committed := pending.WithCommitAcknowledgment()
+			if pending.Committed || pending.QueuedDirectiveCancellations[0].Acknowledged || emptyCommittedWorkflowLifecycleMutation(committed) {
+				t.Fatal("acknowledgment changed pending evidence or discarded queued directive result")
+			}
+			switch mode {
+			case "unacknowledged":
+				committed = pending
+			case "missing_operation_ack":
+				committed.QueuedDirectiveCancellations[0].Acknowledged = false
+			case "executing_owner":
+				committed.QueuedDirectiveCancellations[0].ExecutionOwnerID = uuid.NewString()
+			case "wrong_reason":
+				committed.QueuedDirectiveCancellations[0].CancellationReason = deliverylifecycle.CancellationTurnTimeout
+			}
+			// Prepared work has no process-owned execution to dispatch or join.
+			var pc *PipelineCoordinator
+			if err := pc.finalizeWorkflowLifecycleMutation(context.Background(), committed); (err != nil) != (mode != "healthy") {
+				t.Fatalf("queued directive acknowledgment: mode=%s err=%v", mode, err)
+			}
+		})
+	}
 }
 
 func (p *committedTurnCancellationProbe) ApplyCommittedQueuedCancellations(_ context.Context, snapshots []deliverylifecycle.Snapshot) error {
