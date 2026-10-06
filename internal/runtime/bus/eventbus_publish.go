@@ -1498,6 +1498,8 @@ func (eb *EventBus) transferPreparedNodeDeliveries(ctx context.Context, prepared
 	}
 	defer func() { err = errors.Join(err, closeReceiver()) }()
 	ctx = receiverCtx.Context
+	eb.notifyTestPostCommitDispatchStarted(ctx, prepared.Event)
+	defer eb.notifyTestPostCommitDispatchCompleted(ctx, prepared.Event)
 	if err := eb.AcceptCommittedDeliveryHandoffs(prepared.committedHandoffs); err != nil {
 		return err
 	}
