@@ -72,20 +72,21 @@ func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRunti
 	}
 }
 
+type receiverPublicDeliveryEvidence struct {
+	eventID, status string
+	owner           events.DeliveryTargetOwnership
+}
+
 func requireReceiverPublicReadback(t *testing.T, rt servedControlProofRuntime, runID string) {
 	t.Helper()
-	type admitted struct {
-		eventID, status string
-		owner           events.DeliveryTargetOwnership
-	}
-	want := map[string]admitted{}
+	want := map[string]receiverPublicDeliveryEvidence{}
 	rows, err := rt.DB.Query(`SELECT delivery_id,event_id,status,CAST(delivery_target_route AS TEXT) FROM event_deliveries WHERE run_id=$1`, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for rows.Next() {
 		var id, raw string
-		var record admitted
+		var record receiverPublicDeliveryEvidence
 		if err := rows.Scan(&id, &record.eventID, &record.status, &raw); err != nil {
 			t.Fatal(err)
 		}
@@ -98,6 +99,11 @@ func requireReceiverPublicReadback(t *testing.T, rt servedControlProofRuntime, r
 		t.Fatal(err)
 	}
 	rows.Close()
+	requireReceiverPublicReadbackEvidence(t, rt.Endpoint, runID, want)
+}
+
+func requireReceiverPublicReadbackEvidence(t *testing.T, endpoint, runID string, want map[string]receiverPublicDeliveryEvidence) {
+	t.Helper()
 	if len(want) == 0 {
 		t.Fatal("readback oracle has no production deliveries")
 	}
@@ -121,7 +127,7 @@ func requireReceiverPublicReadback(t *testing.T, rt servedControlProofRuntime, r
 	cursor := ""
 	for {
 		var page operatorread.OperatorEventListResult
-		requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 1, "cursor": cursor}, &page)
+		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 1, "cursor": cursor}, &page)
 		for _, event := range page.Events {
 			if _, exists := publicEvents[event.EventID]; exists {
 				t.Fatal("pagination repeated an event")
@@ -129,7 +135,7 @@ func requireReceiverPublicReadback(t *testing.T, rt servedControlProofRuntime, r
 			publicEvents[event.EventID] = event
 			check(event)
 			var got operatorread.OperatorEventFull
-			requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": event.EventID}, &got)
+			requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": event.EventID}, &got)
 			check(got)
 			if len(event.Deliveries) != len(got.Deliveries) {
 				t.Fatal("get/list delivery cardinality disagrees")
@@ -153,7 +159,7 @@ func requireReceiverPublicReadback(t *testing.T, rt servedControlProofRuntime, r
 	if len(seen) != len(want) {
 		t.Fatalf("public delivery omissions: read %d, stored %d", len(seen), len(want))
 	}
-	wsURL := "ws" + strings.TrimPrefix(strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "http") + "/v1/ws"
+	wsURL := "ws" + strings.TrimPrefix(strings.TrimSuffix(endpoint, "/v1/rpc"), "http") + "/v1/ws"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": []string{"Bearer " + apiv1.DefaultLoopbackAPIToken}})
 	if err != nil {
 		t.Fatal(err)

@@ -116,24 +116,16 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					if err := rt.DB.QueryRow(`SELECT run_id FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forkRun); err != nil {
 						t.Logf("selected failure run lookup: %v", err)
 					} else {
-						t.Log(servedEventPublishDebugSummary(t, rt.DB, rt.Backend, forkRun))
+						summary, err := storetest.ReadServedRunDebugSummary(context.Background(), selected.RuntimeDeps().EventStore, forkRun)
+						t.Logf("selected failure evidence: %s error=%v", summary, err)
 					}
-					rows, err := rt.DB.Query(`SELECT state, CAST(failure AS TEXT) FROM runtime_external_effect_attempts WHERE failure IS NOT NULL`)
+					rows, err := storetest.ReadWorkspaceEffectFailures(context.Background(), selected.RuntimeDeps().EventStore)
 					if err != nil {
 						t.Logf("selected effect failure evidence: %v", err)
 						return
 					}
-					defer rows.Close()
-					for rows.Next() {
-						var state, failure string
-						if err := rows.Scan(&state, &failure); err != nil {
-							t.Logf("selected effect failure decode: %v", err)
-							return
-						}
-						t.Logf("selected effect: state=%s failure=%s", state, failure)
-					}
-					if err := rows.Err(); err != nil {
-						t.Logf("selected effect failure read: %v", err)
+					for _, row := range rows {
+						t.Logf("selected effect: state=%s failure=%s", row.State, row.Failure)
 					}
 				})
 			}
@@ -147,7 +139,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
 				t.Fatal(err)
 			}
-			sourceBefore := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+			sourceBefore := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
 			targetRoot := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 			body := "return {'text': 'Observed delivery.', 'usage': {'input_tokens': 1, 'output_tokens': 1}}"
 			if nativeRead {
@@ -188,7 +180,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			}
 			if options.gatewayLoss {
 				requireSelectedForkGatewayLossBeforeModel(t, rt.Endpoint, selected.RuntimeDeps().EventStore, params, gatewayFault, seed.RunID)
-				if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
+				if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
 					t.Fatal("failed selected target changed source domain")
 				}
 				return
@@ -201,11 +193,12 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, fork.ForkRunID).Scan(&childEvent); err != nil {
 				t.Fatal(err)
 			}
-			if err := rt.DB.QueryRow(`SELECT bundle_hash FROM runs WHERE run_id=$1`, fork.ForkRunID).Scan(&childHash); err != nil || childHash != fact.BundleHash() {
+			childHash, err = storetest.ReadSelectedForkRunBundleHash(context.Background(), selected.RuntimeDeps().EventStore, fork.ForkRunID)
+			if err != nil || childHash != fact.BundleHash() {
 				t.Fatalf("public fork selected a loaded source instead of target: hash=%q err=%v", childHash, err)
 			}
 			rows := readForkReceiverRows(t, rt, fork.ForkRunID)
-			requireSelectedForkMixedBusinessMutation(t, rt, fork.ForkRunID, childEvent, rows["consumer"].ID)
+			requireSelectedForkMixedBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent, rows["consumer"].ID)
 			if nativeRead {
 				requireSelectedForkNativeMCPRead(t, selected.RuntimeDeps().EventStore, fork.ForkRunID, childEvent)
 			}
@@ -226,7 +219,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					t.Fatalf("selected lifecycle diagnostic %s lost its exact parentless producer authority: %+v", id, receipt)
 				}
 			}
-			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
+			if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
 				t.Fatal("public selected execution changed source domain")
 			}
 			completionCount := 1
@@ -236,12 +229,21 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			requireSelectedForkPublicControlBoundary(t, rt, fork.ForkRunID, childEvent, true, completionCount)
 			t.Run("terminal_public_readback", func(t *testing.T) {
 				requireSelectedForkDeclaredAgentReads(t, rt, fork.ForkRunID, completionCount)
-				if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
+				if !reflect.DeepEqual(sourceBefore, readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)) {
 					t.Fatal("terminal selected readback changed source domain")
 				}
 			})
 		})
 	}
+}
+
+func readWorkspaceProofSourceDomain(t *testing.T, owner runtimebus.EventStore, runID string) map[string]storetest.SelectedForkStorageTableSnapshot {
+	t.Helper()
+	snapshot, err := storetest.ReadSelectedForkSourceDomain(context.Background(), owner, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
 }
 
 func requireSelectedForkNativeMCPRead(t *testing.T, owner runtimebus.EventStore, runID, eventID string) {

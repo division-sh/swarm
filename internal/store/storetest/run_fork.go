@@ -15,6 +15,14 @@ func ReadSelectedForkControlStorage(ctx context.Context, selected any, runID, lo
 	return private.ReadSelectedForkControlStorageForTest(ctx, selected, runID, loadedBundleHash, agentID)
 }
 
+func ReadVersionOneDeliveredSettlementCount(ctx context.Context, selected any, deliveryID string) (int, error) {
+	return private.ReadVersionOneDeliveredSettlementCountForTest(ctx, selected, deliveryID)
+}
+
+func ReadSelectedForkAuthoredMutation(ctx context.Context, selected any, runID, entityID, eventID string) (string, error) {
+	return private.ReadSelectedForkAuthoredMutationForTest(ctx, selected, runID, entityID, eventID)
+}
+
 func ReadSelectedForkApplicationStorageSnapshot(ctx context.Context, selected any) (map[string]SelectedForkStorageTableSnapshot, error) {
 	return private.ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
 }
