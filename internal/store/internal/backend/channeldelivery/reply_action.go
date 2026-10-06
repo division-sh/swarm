@@ -33,81 +33,9 @@ func AdmitReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 	if err != nil || state != "pending" {
 		return render.PendingAction{}, false, fmt.Errorf("reply text changed before control admission: %w", err)
 	}
-	var selected operatorchannel.ActionFact
-	cursor := "00000000-0000-0000-0000-000000000000"
-	for {
-		query := `SELECT action.action_token, action.label FROM channel_delivery_actions action
-			JOIN channel_delivery_renders render ON render.render_id=action.render_id
-			JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
-			JOIN channel_delivery_receipts receipt ON receipt.effect_operation_id=plan.current_receipt_operation_id
-			WHERE plan.interface_key=? AND plan.external_account_reference=?
-			AND plan.conversation_reference=? AND plan.conversation_scope=?
-			AND receipt.state='sent' AND receipt.render_id=render.render_id
-			AND plan.current_render_id=render.render_id AND action.action_token>?
-			ORDER BY action.action_token LIMIT 200`
-		if postgres {
-			query = `SELECT action.action_token::text, action.label FROM channel_delivery_actions action
-				JOIN channel_delivery_renders render ON render.render_id=action.render_id
-				JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
-				JOIN channel_delivery_receipts receipt ON receipt.effect_operation_id=plan.current_receipt_operation_id
-				WHERE plan.interface_key=$1 AND plan.external_account_reference=$2
-				AND plan.conversation_reference=$3 AND plan.conversation_scope=$4
-				AND receipt.state='sent' AND receipt.render_id=render.render_id
-				AND plan.current_render_id=render.render_id AND action.action_token>$5::uuid
-				ORDER BY action.action_token LIMIT 200`
-		}
-		rows, err := tx.QueryContext(ctx, query, text.Interface.Key(), text.ExternalAccountRef,
-			text.ConversationRef, string(text.ConversationScope), cursor)
-		if err != nil {
-			return render.PendingAction{}, false, err
-		}
-		type control struct{ token, label string }
-		page := make([]control, 0, 200)
-		for rows.Next() {
-			var item control
-			if err := rows.Scan(&item.token, &item.label); err != nil {
-				rows.Close()
-				return render.PendingAction{}, false, err
-			}
-			page = append(page, item)
-		}
-		err = rows.Err()
-		closeErr := rows.Close()
-		if err != nil {
-			return render.PendingAction{}, false, err
-		}
-		if closeErr != nil {
-			return render.PendingAction{}, false, closeErr
-		}
-		for _, item := range page {
-			if !render.MatchesTextControl(item.label, text.Text) {
-				continue
-			}
-			fact := operatorchannel.ActionFact{
-				Kind: operatorchannel.ActionSourceReply, TextSource: text.TextFact,
-				Interface: text.Interface, ExternalAccountRef: text.ExternalAccountRef,
-				ConversationRef: text.ConversationRef, ConversationScope: text.ConversationScope,
-				MessageReference: text.ReplyToReference, Token: item.token,
-			}
-			resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, fact, postgres)
-			if err != nil {
-				return render.PendingAction{}, false, err
-			}
-			if !found || !resolved.CurrentRender {
-				continue
-			}
-			if selected.Token != "" {
-				return render.PendingAction{}, false, fmt.Errorf("quoted channel action matches multiple current controls")
-			}
-			selected = fact
-		}
-		if len(page) < 200 {
-			break
-		}
-		cursor = page[len(page)-1].token
-	}
-	if selected.Token == "" {
-		return render.PendingAction{}, false, nil
+	selected, err := findReplyControlTx(ctx, tx, text, postgres)
+	if err != nil || selected.Token == "" {
+		return render.PendingAction{}, false, err
 	}
 	query := `SELECT recorded_at FROM operator_channel_text_intents WHERE publication_id=?`
 	if postgres {
@@ -131,6 +59,90 @@ func AdmitReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 		return render.PendingAction{}, false, err
 	}
 	return render.PendingAction{PublicationID: text.PublicationID, Fact: action, ReceivedAt: receivedAt}, true, nil
+}
+
+func findReplyControlTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (operatorchannel.ActionFact, error) {
+	var selected operatorchannel.ActionFact
+	cursor := "00000000-0000-0000-0000-000000000000"
+	for {
+		page, err := loadReplyControlPageTx(ctx, tx, text, cursor, postgres)
+		if err != nil {
+			return operatorchannel.ActionFact{}, err
+		}
+		for _, item := range page {
+			if !render.MatchesTextControl(item.label, text.Text) {
+				continue
+			}
+			fact := operatorchannel.ActionFact{
+				Kind: operatorchannel.ActionSourceReply, TextSource: text.TextFact,
+				Interface: text.Interface, ExternalAccountRef: text.ExternalAccountRef,
+				ConversationRef: text.ConversationRef, ConversationScope: text.ConversationScope,
+				MessageReference: text.ReplyToReference, Token: item.token,
+			}
+			resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, fact, postgres)
+			if err != nil {
+				return operatorchannel.ActionFact{}, err
+			}
+			if !found || !resolved.CurrentRender {
+				continue
+			}
+			if selected.Token != "" {
+				return operatorchannel.ActionFact{}, fmt.Errorf("quoted channel action matches multiple current controls")
+			}
+			selected = fact
+		}
+		if len(page) < 200 {
+			break
+		}
+		cursor = page[len(page)-1].token
+	}
+	return selected, nil
+}
+
+type replyControl struct{ token, label string }
+
+func loadReplyControlPageTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, cursor string, postgres bool) ([]replyControl, error) {
+	query := `SELECT action.action_token, action.label FROM channel_delivery_actions action
+			JOIN channel_delivery_renders render ON render.render_id=action.render_id
+			JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
+			JOIN channel_delivery_receipts receipt ON receipt.effect_operation_id=plan.current_receipt_operation_id
+			WHERE plan.interface_key=? AND plan.external_account_reference=?
+			AND plan.conversation_reference=? AND plan.conversation_scope=?
+			AND receipt.state='sent' AND receipt.render_id=render.render_id
+			AND plan.current_render_id=render.render_id AND action.action_token>?
+			ORDER BY action.action_token LIMIT 200`
+	if postgres {
+		query = `SELECT action.action_token::text, action.label FROM channel_delivery_actions action
+				JOIN channel_delivery_renders render ON render.render_id=action.render_id
+				JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
+				JOIN channel_delivery_receipts receipt ON receipt.effect_operation_id=plan.current_receipt_operation_id
+				WHERE plan.interface_key=$1 AND plan.external_account_reference=$2
+				AND plan.conversation_reference=$3 AND plan.conversation_scope=$4
+				AND receipt.state='sent' AND receipt.render_id=render.render_id
+				AND plan.current_render_id=render.render_id AND action.action_token>$5::uuid
+				ORDER BY action.action_token LIMIT 200`
+	}
+	rows, err := tx.QueryContext(ctx, query, text.Interface.Key(), text.ExternalAccountRef,
+		text.ConversationRef, string(text.ConversationScope), cursor)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	page := make([]replyControl, 0, 200)
+	for rows.Next() {
+		var item replyControl
+		if err := rows.Scan(&item.token, &item.label); err != nil {
+			return nil, err
+		}
+		page = append(page, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return page, nil
 }
 
 func loadReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (render.PendingAction, bool, error) {

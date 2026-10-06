@@ -36,27 +36,12 @@ func PlanInputPromptForActionTx(ctx context.Context, tx *sql.Tx, action operator
 	if err := tx.QueryRowContext(ctx, query, action.PublicationID).Scan(&disposition); err != nil {
 		return err
 	}
-	if !((disposition == "input_started" && resolved.Action.Kind == "verdict" && resolved.TargetCardID() == cardID) ||
-		(disposition == "applied" && resolved.Action.Kind == "skip_input" && resolved.TargetCardID() == cardID && resolved.Action.DraftID == draftID) ||
-		(disposition == "applied" && resolved.Action.Kind == "select_draft" && resolved.Action.CardID == cardID && resolved.Action.DraftID == draftID)) {
+	if !inputPromptActionMatches(disposition, resolved, cardID, draftID) {
 		return fmt.Errorf("input prompt source is not the exact accepted input control")
 	}
-	if draftID == "" {
-		if disposition != "input_started" {
-			return fmt.Errorf("input prompt continuation requires its exact draft identity")
-		}
-		card, err := decisionpersistence.LoadDecisionCardInTx(ctx, tx, cardID, postgres)
-		if err != nil {
-			return err
-		}
-		prompt, err := loadCurrentCardPromptTx(ctx, tx, Plan{SourceID: cardID, PrincipalID: resolved.PrincipalID}, card, postgres)
-		if err != nil {
-			return err
-		}
-		if prompt.DraftID == "" || prompt.Verdict != resolved.Action.Verdict {
-			return fmt.Errorf("accepted input start does not own the current draft")
-		}
-		draftID = prompt.DraftID
+	draftID, err = resolveInputPromptDraftTx(ctx, tx, disposition, resolved, cardID, draftID, postgres)
+	if err != nil {
+		return err
 	}
 	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil {
@@ -73,6 +58,41 @@ func PlanInputPromptForActionTx(ctx context.Context, tx *sql.Tx, action operator
 		ConversationRef: selected.ConversationRef, ConversationScope: selected.ConversationScope}
 	return planInputPromptTx(ctx, tx, action.PublicationID, cardID, draftID,
 		resolved.ActivationID, resolved.BindingRevision, audience, postgres)
+}
+
+func inputPromptActionMatches(disposition string, resolved render.ResolvedAction, cardID, draftID string) bool {
+	switch resolved.Action.Kind {
+	case "verdict":
+		return disposition == "input_started" && resolved.TargetCardID() == cardID
+	case "skip_input":
+		return disposition == "applied" && resolved.TargetCardID() == cardID && resolved.Action.DraftID == draftID
+	case "select_draft":
+		return disposition == "applied" && resolved.Action.CardID == cardID && resolved.Action.DraftID == draftID
+	default:
+		return false
+	}
+}
+
+func resolveInputPromptDraftTx(ctx context.Context, tx *sql.Tx, disposition string, resolved render.ResolvedAction,
+	cardID, draftID string, postgres bool) (string, error) {
+	if draftID != "" {
+		return draftID, nil
+	}
+	if disposition != "input_started" {
+		return "", fmt.Errorf("input prompt continuation requires its exact draft identity")
+	}
+	card, err := decisionpersistence.LoadDecisionCardInTx(ctx, tx, cardID, postgres)
+	if err != nil {
+		return "", err
+	}
+	prompt, err := loadCurrentCardPromptTx(ctx, tx, Plan{SourceID: cardID, PrincipalID: resolved.PrincipalID}, card, postgres)
+	if err != nil {
+		return "", err
+	}
+	if prompt.DraftID == "" || prompt.Verdict != resolved.Action.Verdict {
+		return "", fmt.Errorf("accepted input start does not own the current draft")
+	}
+	return prompt.DraftID, nil
 }
 
 func PlanInputPromptForTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, cardID, draftID string, postgres bool) error {

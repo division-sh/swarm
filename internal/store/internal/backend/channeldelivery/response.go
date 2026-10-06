@@ -25,24 +25,9 @@ func PlanInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
 		return "", err
 	}
-	entry, found, err := ResolveCurrentInboxEntryTx(ctx, tx, text, postgres)
-	if err == nil && found && entry.Kind == render.InboxEntryNative {
-		qualification, qualificationErr := ReadNativeInboxQualificationTx(ctx, tx, entry.ActivationID, postgres)
-		if qualificationErr != nil {
-			return "", qualificationErr
-		}
-		if qualification.State != channelnative.QualificationQualified || qualification.SettingID != entry.SettingID || qualification.SettingGeneration != entry.SettingGeneration {
-			return "", fmt.Errorf("native inbox response requires exact current client qualification")
-		}
-	}
+	entry, err := requireInboxResponseEntryTx(ctx, tx, text, expected, postgres)
 	if err != nil {
 		return "", err
-	}
-	if !found || entry != expected {
-		return "", fmt.Errorf("native inbox entry changed before response admission")
-	}
-	if entry.Kind != render.InboxEntryNative && entry.Kind != render.InboxEntryTextReply {
-		return "", fmt.Errorf("inbox entry kind is not admitted")
 	}
 	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil {
@@ -78,24 +63,34 @@ func PlanInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 	if err != nil {
 		return "", err
 	}
-	query := `UPDATE operator_channel_text_intents SET state='settled', disposition='entry', settled_at=?
-		WHERE publication_id=? AND state='pending'`
-	if postgres {
-		query = `UPDATE operator_channel_text_intents SET state='settled', disposition='entry', settled_at=$1
-			WHERE publication_id=$2::uuid AND state='pending'`
-	}
-	result, err := tx.ExecContext(ctx, query, now, text.PublicationID)
-	if err != nil {
+	if err := SettleTextIntentTx(ctx, tx, text, "entry", postgres); err != nil {
 		return "", err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return "", err
-	}
-	if rows != 1 {
-		return "", fmt.Errorf("native inbox intent was not settled with its response")
 	}
 	return deliveryID, nil
+}
+
+func requireInboxResponseEntryTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
+	expected render.ResolvedInboxEntry, postgres bool) (render.ResolvedInboxEntry, error) {
+	entry, found, err := ResolveCurrentInboxEntryTx(ctx, tx, text, postgres)
+	if err == nil && found && entry.Kind == render.InboxEntryNative {
+		qualification, qualificationErr := ReadNativeInboxQualificationTx(ctx, tx, entry.ActivationID, postgres)
+		if qualificationErr != nil {
+			return render.ResolvedInboxEntry{}, qualificationErr
+		}
+		if qualification.State != channelnative.QualificationQualified || qualification.SettingID != entry.SettingID || qualification.SettingGeneration != entry.SettingGeneration {
+			return render.ResolvedInboxEntry{}, fmt.Errorf("native inbox response requires exact current client qualification")
+		}
+	}
+	if err != nil {
+		return render.ResolvedInboxEntry{}, err
+	}
+	if !found || entry != expected {
+		return render.ResolvedInboxEntry{}, fmt.Errorf("native inbox entry changed before response admission")
+	}
+	if entry.Kind != render.InboxEntryNative && entry.Kind != render.InboxEntryTextReply {
+		return render.ResolvedInboxEntry{}, fmt.Errorf("inbox entry kind is not admitted")
+	}
+	return entry, nil
 }
 
 // PlanTextResponseTx records a non-sensitive response to a verified ordinary

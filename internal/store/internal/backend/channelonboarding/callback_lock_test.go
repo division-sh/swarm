@@ -491,7 +491,7 @@ func publishCallbackRequest(op domain.Operation, now time.Time) domain.PublishAc
 }
 func (f callbackLockFixture) bind(t *testing.T, op domain.Operation, now time.Time) {
 	t.Helper()
-	binding, err := f.selected.BeginChannelBinding(context.Background(), operatorchannel.BeginRequest{OperationID: op.IdentityOperationID, Kind: operatorchannel.OperationConnect, PrincipalID: f.principal, Interface: op.Interface, RequestKeyHash: op.IdentityOperationID, RequestHash: op.IdentityOperationID, ProviderCredential: callbackCredential(), RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL)})
+	binding, err := f.selected.BeginChannelBinding(context.Background(), operatorchannel.BeginRequest{OperationID: op.IdentityOperationID, Kind: operatorchannel.OperationConnect, PrincipalID: f.principal, Interface: op.Interface, RequestKeyHash: op.IdentityOperationID, RequestHash: op.IdentityOperationID, ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: callbackCredential()}, RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func (f callbackLockFixture) bind(t *testing.T, op domain.Operation, now time.Ti
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = f.selected.ConfirmChannelBinding(context.Background(), operatorchannel.ConfirmRequest{OperationID: binding.OperationID, PrincipalID: f.principal, ExpectedRevision: claimed.Operation.Revision, Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now})
+	_, _, err = f.selected.ConfirmChannelBinding(context.Background(), operatorchannel.ConfirmRequest{OperationID: binding.OperationID, PrincipalID: f.principal, ExpectedRevision: claimed.Operation.Revision, Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}
