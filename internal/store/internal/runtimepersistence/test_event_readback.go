@@ -6,74 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/events"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
-	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
-	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
-
-func LoadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID string) (events.Event, error) {
-	var empty events.Event
-	var record eventrecord.Record
-	var found bool
-	var err error
-	switch owner := selected.(type) {
-	case *PostgresStore:
-		if owner == nil || owner.backend == nil {
-			return empty, fmt.Errorf("canonical event readback requires the original selected store")
-		}
-		if err = owner.requireCurrentSchema(); err == nil {
-			err = owner.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				record, found, err = eventrecordpostgres.Load(ctx, tx, eventID)
-				return err
-			})
-		}
-	case *SQLiteRuntimeStore:
-		if owner == nil || owner.backend == nil {
-			return empty, fmt.Errorf("canonical event readback requires the original selected store")
-		}
-		if err = owner.requireCurrentSchema(); err == nil {
-			err = owner.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				record, found, err = eventrecordsqlite.Load(ctx, tx, eventID)
-				return err
-			})
-		}
-	default:
-		return empty, fmt.Errorf("canonical event readback store %T is unsupported", selected)
-	}
-	if err != nil {
-		return empty, err
-	}
-	if !found {
-		return empty, fmt.Errorf("canonical event record %s is missing", eventID)
-	}
-	admitted, err := record.Decode()
-	if err != nil {
-		return empty, err
-	}
-	return admitted.Event(), nil
-}
-
-type SemanticEventFixtureEvidence struct {
-	Record                      eventrecord.Record
-	RecordFound                 bool
-	RevisionCount               int
-	PipelineReceiptCount        int
-	PipelineReceiptOutcome      string
-	PipelineReceiptReason       string
-	PipelineReceiptFailure      *runtimefailures.Envelope
-	CommittedScope              string
-	CommittedScopeFound         bool
-	RunStatus                   string
-	RunEventCount               int
-	SettledDeliveryAttemptCount int
-	DeliveryProjections         map[string][18]string
-	DeliveryStatuses            map[string]string
-	NonPlatformReceiptCount     int
-}
 
 // ReadSemanticEventFixtureEvidenceForTest keeps record, revision and delivery
 // observations in one read snapshot owned by the original selected coordinator.
@@ -95,10 +32,14 @@ func ReadSemanticEventFixtureEvidenceForTest(ctx context.Context, selected any, 
 		if err := readSemanticEventFacts(ctx, tx, string(dialect) == "postgres", runID, eventID, &evidence); err != nil {
 			return err
 		}
+		count, err := runforkrevision.CountActivityJournalRevisionsForTest(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
+		evidence.RevisionCount = int(count)
 		if err := readSemanticEventPipelineReceipt(ctx, tx, eventID, &evidence); err != nil {
 			return err
 		}
-		var err error
 		evidence.DeliveryProjections, evidence.DeliveryStatuses, err = delivery.ReadSemanticEventDeliveryStorage(ctx, tx, eventID)
 		if err != nil {
 			return err
@@ -120,11 +61,7 @@ func ReadSemanticEventFixtureEvidenceForTest(ctx context.Context, selected any, 
 
 func readSemanticEventFacts(ctx context.Context, tx *sql.Tx, postgres bool, runID, eventID string, evidence *SemanticEventFixtureEvidence) error {
 	var err error
-	if postgres {
-		evidence.Record, evidence.RecordFound, err = eventrecordpostgres.Load(ctx, tx, eventID)
-	} else {
-		evidence.Record, evidence.RecordFound, err = eventrecordsqlite.Load(ctx, tx, eventID)
-	}
+	evidence.Record, evidence.RecordFound, err = loadCanonicalFixtureRecordTx(ctx, tx, postgres, eventID)
 	if err != nil {
 		return err
 	}
@@ -142,10 +79,7 @@ func readSemanticEventFacts(ctx context.Context, tx *sql.Tx, postgres bool, runI
 		return err
 	}
 	evidence.SettledDeliveryAttemptCount, err = delivery.ReadSemanticEventSettledAttemptCount(ctx, tx, eventID)
-	if err != nil {
-		return err
-	}
-	return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id = $1`, runID).Scan(&evidence.RevisionCount)
+	return err
 }
 
 func readSemanticEventPipelineReceipt(ctx context.Context, tx *sql.Tx, eventID string, evidence *SemanticEventFixtureEvidence) error {

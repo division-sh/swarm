@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -19,6 +20,75 @@ import (
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
+
+// Record-bearing fixture evidence uses the publication fixture's closed codec.
+// Callers receive detached facts, never another record interpreter.
+type SemanticEventFixtureEvidence struct {
+	Record                      eventrecord.Record
+	RecordFound                 bool
+	RevisionCount               int
+	PipelineReceiptCount        int
+	PipelineReceiptOutcome      string
+	PipelineReceiptReason       string
+	PipelineReceiptFailure      *runtimefailures.Envelope
+	CommittedScope              string
+	CommittedScopeFound         bool
+	RunStatus                   string
+	RunEventCount               int
+	SettledDeliveryAttemptCount int
+	DeliveryProjections         map[string][18]string
+	DeliveryStatuses            map[string]string
+	NonPlatformReceiptCount     int
+}
+
+func loadCanonicalFixtureRecordTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) (eventrecord.Record, bool, error) {
+	if postgres {
+		return eventrecordpostgres.Load(ctx, tx, eventID)
+	}
+	return eventrecordsqlite.Load(ctx, tx, eventID)
+}
+
+func LoadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID string) (events.Event, error) {
+	var empty events.Event
+	var record eventrecord.Record
+	var found bool
+	var err error
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		if owner == nil || owner.backend == nil {
+			return empty, fmt.Errorf("canonical event readback requires the original selected store")
+		}
+		if err = owner.requireCurrentSchema(); err == nil {
+			err = owner.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				record, found, err = loadCanonicalFixtureRecordTx(ctx, tx, true, eventID)
+				return err
+			})
+		}
+	case *SQLiteRuntimeStore:
+		if owner == nil || owner.backend == nil {
+			return empty, fmt.Errorf("canonical event readback requires the original selected store")
+		}
+		if err = owner.requireCurrentSchema(); err == nil {
+			err = owner.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				record, found, err = loadCanonicalFixtureRecordTx(ctx, tx, false, eventID)
+				return err
+			})
+		}
+	default:
+		return empty, fmt.Errorf("canonical event readback store %T is unsupported", selected)
+	}
+	if err != nil {
+		return empty, err
+	}
+	if !found {
+		return empty, fmt.Errorf("canonical event record %s is missing", eventID)
+	}
+	admitted, err := record.Decode()
+	if err != nil {
+		return empty, err
+	}
+	return admitted.Event(), nil
+}
 
 // CommitSemanticEventFixtureForTest persists the exact fixture facts without
 // adding a fork revision. Writer admission still belongs to the selected store.
