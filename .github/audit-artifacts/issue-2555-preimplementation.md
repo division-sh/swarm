@@ -1,5 +1,19 @@
 # Pre-Implementation Coverage Audit: #2555
 
+Current qualification amendment supersedes the historical full/full and
+E-merge-pending statements below:
+https://github.com/division-sh/swarm/issues/2555#issuecomment-6007289769.
+The chosen 48-row class and runtime contracts are unchanged. Required tiers
+are CI full / Local core, with the exact-head uninstrumented BOTH-store
+numeric root in a separate quiet slot-one window and the named affected-path
+focused receipts. None is relabeled local full or lifecycle. Hosted full at
+the same head remains required. #2525 is integrated with actual both-store
+refusal/retry proof; #2570 now owns G's extracted descendant-join fixture.
+The duplicate hunk is removed during rebase, preserving both merged fixture
+files byte-for-byte. See issue-2555-qualification-venue-amendment.md for the
+receipt order, rebase delta and pending proof; no exclusive scheduler,
+deadline/assertion relaxation or worker-identity shortcut is authorized.
+
 Agent: agent-g. Phase: implementation under the approved independent gate.
 Audited origin/master: `76fbddd6dacec435e7807de14562be03b2a47e1d`.
 The production implementation is committed locally in this branch; no complete
