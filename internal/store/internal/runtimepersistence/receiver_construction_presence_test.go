@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -130,12 +131,14 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 					} else {
 						f = newEagerFlowConstructorFixture(t, backend)
 					}
-					req := f.request("business-key", "r1", "first")
+					var req pipeline.FlowInstanceActivationRequest
 					if shape == "root" {
 						runID := correlation.RunIDFromContext(f.ctx)
 						req = sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
 						req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
 						req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "start.seeded", "constructor-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, req.OccurredAt)
+					} else {
+						req = f.request("business-key", "r1", "first")
 					}
 					plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 					if err != nil {
