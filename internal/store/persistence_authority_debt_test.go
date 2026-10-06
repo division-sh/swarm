@@ -27,6 +27,7 @@ import (
 
 const debtBaselinePath = "internal/store/testdata/persistence_authority_debt_baseline.tsv"
 const debtRefreshEnv = "SWARM_REFRESH_PERSISTENCE_AUTHORITY_DEBT"
+const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5"
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"

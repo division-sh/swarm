@@ -1,6 +1,6 @@
 # persistence-authority-debt-v1
 # bootstrap-source=52b954ec26c85a47605cefb8d7030f2a842f8c24
-# collector=de36becf443af2b3da7724f72e7a664e6f3f83f1a84b9ec02a365536629ce749
+# collector=b42ea974646e7b666459091174645baa501d91da16871813568db23858def7b7
 # kind	file	declaration	operation	resolved	family	replacement-owner	multiplicity
 callback-type	internal/apiv1/agent_snapshot_atomicity_test.go	(github.com/division-sh/swarm/internal/apiv1.agentSnapshotBoundaryFixture).readAcrossExternalTableBoundary	param:mutate	func(github.com/division-sh/swarm/internal/apiv1.agentSnapshotMutationExec)	unowned-authority	exact domain owner not identified here; escalate #2542, never invent a SQL escape	1
 callback-type	internal/apiv1/agent_snapshot_atomicity_test.go	(github.com/division-sh/swarm/internal/apiv1.agentSnapshotBoundaryFixture).readAcrossPostgresExternalTableBoundary	param:mutate	func(github.com/division-sh/swarm/internal/apiv1.agentSnapshotMutationExec)	unowned-authority	exact domain owner not identified here; escalate #2542, never invent a SQL escape	1
