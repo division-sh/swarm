@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 const realDockerProxyArgument = "--test-real-workspace-docker-proxy"
@@ -516,9 +518,7 @@ func workspaceDockerProofConfig(t *testing.T, root string) []string {
 	return []string{"--config", path}
 }
 
-type workspacePrivateStoreObservation struct {
-	AgentDeliveries, Delivered, Emitted int
-}
+type workspacePrivateStoreObservation = storetest.WorkspaceMockInvocationStorage
 
 // Inspection is read-only and limited to this invocation's private store. It
 // runs before joined CLI cleanup removes that store; it cannot create one.
@@ -535,16 +535,17 @@ func observeWorkspacePrivateStore(ctx context.Context, root string) workspacePri
 			if len(paths) != 1 {
 				continue
 			}
-			db, err := openLifecycleFailureInspection(goldenStoreSelection{name: "sqlite", inspectionSQLitePath: paths[0]})
+			inspection, err := storetest.OpenReleaseProcessReadOnlyInspection("sqlite", paths[0])
 			if err != nil {
 				continue
 			}
 			var next workspacePrivateStoreObservation
-			err = db.QueryRowContext(ctx, `SELECT
-				(SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type='agent'),
-				(SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type='agent' AND status='delivered'),
-				(SELECT COUNT(*) FROM events WHERE event_name='work.completed')`).Scan(&next.AgentDeliveries, &next.Delivered, &next.Emitted)
-			closeErr := db.Close()
+			err = inspection.InspectSnapshot(ctx, func(scoped context.Context) error {
+				var err error
+				next, err = storetest.ReadWorkspaceMockInvocationStorage(scoped, inspection)
+				return err
+			})
+			closeErr := inspection.Close()
 			if err == nil && closeErr == nil {
 				observed.AgentDeliveries = max(observed.AgentDeliveries, next.AgentDeliveries)
 				observed.Delivered = max(observed.Delivered, next.Delivered)

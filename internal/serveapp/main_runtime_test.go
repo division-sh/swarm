@@ -1500,25 +1500,30 @@ type servedControlProofRuntime struct {
 
 func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
 	t.Helper()
-	if rt.Runtime == nil {
+	return servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
+}
+
+func servedRuntimeProofAuthorActivityContext(t *testing.T, rt *runtimepkg.Runtime, bundleHash string) context.Context {
+	t.Helper()
+	if rt == nil {
 		t.Fatal("served control proof runtime is required for exact author activity scope")
 	}
-	runtimeInstanceID := strings.TrimSpace(rt.Runtime.Options.RuntimeInstanceID)
-	fact := rt.Runtime.Options.SourceArtifactFact
-	if runtimeInstanceID == "" || fact.BundleHash() == "" || fact.BundleHash() != strings.TrimSpace(rt.BundleHash) {
-		t.Fatalf("served control proof scope = runtime %q fact %#v bundle %q", runtimeInstanceID, fact, rt.BundleHash)
+	runtimeInstanceID := strings.TrimSpace(rt.Options.RuntimeInstanceID)
+	fact := rt.Options.SourceArtifactFact
+	if runtimeInstanceID == "" || fact.BundleHash() == "" || fact.BundleHash() != strings.TrimSpace(bundleHash) {
+		t.Fatalf("served control proof scope = runtime %q fact %#v bundle %q", runtimeInstanceID, fact, bundleHash)
 	}
 	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
-	if rt.Runtime.WorkOccurrence() == nil {
+	if rt.WorkOccurrence() == nil {
 		t.Fatal("served control proof runtime work occurrence is required")
 	}
-	if rt.Runtime.Options.ProcessWorkOwner == nil {
+	if rt.Options.ProcessWorkOwner == nil {
 		t.Fatal("served control proof process work owner is required")
 	}
-	ctx = worklifetime.WithProcess(ctx, rt.Runtime.Options.ProcessWorkOwner)
-	return worklifetime.WithOccurrence(ctx, rt.Runtime.WorkOccurrence())
+	ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
+	return worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 }
 
 type servedConversationForkProofRuntime struct {
@@ -2225,16 +2230,40 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 
 func waitServedConversationForkSourceAgentReady(t *testing.T, rt servedConversationForkProofRuntime, runID, eventID string) {
 	t.Helper()
+	var owner runtimebus.EventStore = rt.SQLite
+	if rt.Postgres != nil {
+		owner = rt.Postgres
+	}
+	waitServedSourceAgentReadyFromOwner(t, owner, rt.Backend, runID, eventID)
+}
+
+func waitServedSourceAgentReadyFromOwner(t *testing.T, owner runtimebus.EventStore, backend, runID, eventID string) {
+	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if servedEventPublishDeliveryStatusCount(t, rt.DB, rt.Backend, eventID, "agent", "fork-source-agent", "delivered") == 1 {
+		delivered, err := storetest.ReadServedDeliveryStatusCount(context.Background(), owner, eventID, "agent", "fork-source-agent", "delivered")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if delivered == 1 {
 			return
 		}
-		if servedEventPublishDeliveryStatusCount(t, rt.DB, rt.Backend, eventID, "agent", "fork-source-agent", "dead_letter") != 0 {
-			t.Fatalf("%s conversation fork source-agent readiness dead-lettered\n%s", rt.Backend, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		failed, err := storetest.ReadServedDeliveryStatusCount(context.Background(), owner, eventID, "agent", "fork-source-agent", "dead_letter")
+		if err != nil {
+			t.Fatal(err)
+		}
+		debug := func() string {
+			summary, err := storetest.ReadServedRunDebugSummary(context.Background(), owner, runID)
+			if err != nil {
+				return fmt.Sprintf("diagnostic read failed: %v", err)
+			}
+			return summary
+		}
+		if failed != 0 {
+			t.Fatalf("%s conversation fork source-agent readiness dead-lettered\n%s", backend, debug())
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%s conversation fork source-agent readiness timed out\n%s", rt.Backend, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+			t.Fatalf("%s conversation fork source-agent readiness timed out\n%s", backend, debug())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -2551,7 +2580,6 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspaceFactory(t *testing.T, 
 		return servedControlProofRuntime{}
 	}
 }
-
 
 func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
