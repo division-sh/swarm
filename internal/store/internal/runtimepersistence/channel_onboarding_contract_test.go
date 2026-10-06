@@ -62,7 +62,7 @@ func TestChannelOnboardingCredentialStaleRecoverySelectedStoreParity(t *testing.
 			ctx := context.Background()
 			begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 			claimed := rig.claim(t, begun, "account-a")
-			if err := rig.file.Set(ctx, claimed.ProviderCredential.Key, "rotated-token"); err != nil {
+			if err := rig.file.Set(ctx, claimed.ProviderAuthority.Credential.Key, "rotated-token"); err != nil {
 				t.Fatal(err)
 			}
 			if _, _, err := rig.identities.Confirm(ctx, claimed.OperationID, claimed.Revision, true, rig.now); !errors.Is(err, operatorchannel.ErrCredentialStale) {
@@ -187,8 +187,8 @@ func TestFailedOnboardingFenceRejectsCredentialReadmissionSelectedStoreParity(t 
 				t.Fatal(err)
 			}
 			admissions := []channelonboarding.CredentialAdmission{
-				{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "provider-receipt", ValueSeal: operatorChannelProviderEvidence().Seal},
-				{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "signing-receipt", ValueSeal: operatorChannelProviderEvidence().Seal},
+				{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "provider-receipt", ValueSeal: operatorChannelProviderAuthority().Credential.Seal},
+				{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "signing-receipt", ValueSeal: operatorChannelProviderAuthority().Credential.Seal},
 			}
 			op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,
@@ -227,7 +227,7 @@ type retiredOnboardingIdentities struct {
 func (i retiredOnboardingIdentities) Principal() (operatorchannel.Principal, error) {
 	return i.principal, nil
 }
-func (retiredOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, string, runtimecredentials.ValueEvidence, bool, time.Time) (operatorchannel.Operation, error) {
+func (retiredOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, string, operatorchannel.ProviderAuthority, bool, time.Time) (operatorchannel.Operation, error) {
 	return operatorchannel.Operation{}, operatorchannel.ErrNotFound
 }
 func (retiredOnboardingIdentities) Confirm(context.Context, string, int64, bool, time.Time) (operatorchannel.Operation, operatorchannel.Binding, error) {
@@ -347,7 +347,7 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 	for _, reservation := range request.CredentialReservations {
 		admissions = append(admissions, channelonboarding.CredentialAdmission{
 			Role: reservation.Role, StoreKey: reservation.StoreKey + "." + request.OperationID,
-			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + request.OperationID, ValueSeal: operatorChannelProviderEvidence().Seal,
+			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + request.OperationID, ValueSeal: operatorChannelProviderAuthority().Credential.Seal,
 		})
 	}
 	op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
@@ -423,8 +423,8 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 		t.Fatalf("concurrent slot operation = %v", err)
 	}
 	admissions := []channelonboarding.CredentialAdmission{
-		{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-provider", ValueSeal: operatorChannelProviderEvidence().Seal},
-		{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-signing", ValueSeal: operatorChannelProviderEvidence().Seal},
+		{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-provider", ValueSeal: operatorChannelProviderAuthority().Credential.Seal},
+		{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-signing", ValueSeal: operatorChannelProviderAuthority().Credential.Seal},
 	}
 	op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseCredentialsAdmitted,

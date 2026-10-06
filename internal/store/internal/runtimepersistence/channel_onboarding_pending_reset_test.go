@@ -45,7 +45,7 @@ func TestChannelOnboardingPendingResetLifecycleSelectedStoreParity(t *testing.T)
 										if rig.parent(t, before.OperationID).Revision != before.Revision {
 											t.Fatal("observation error changed parent")
 										}
-										if err := rig.file.Set(ctx, claimed.ProviderCredential.Key, fmt.Sprintf("rotated-%d", cycle)); err != nil {
+										if err := rig.file.Set(ctx, claimed.ProviderAuthority.Credential.Key, fmt.Sprintf("rotated-%d", cycle)); err != nil {
 											t.Fatal(err)
 										}
 										if entry == "confirm" {
@@ -161,7 +161,7 @@ func beginPendingResetJourney(t *testing.T, rig *boundHandoffRig, verb channelon
 	}
 	bound := rig.confirm(t, begun, account)
 	ctx := context.Background()
-	if err := rig.file.Set(ctx, bound.ProviderCredential.Key, "bound-rotation"); err != nil {
+	if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "bound-rotation"); err != nil {
 		t.Fatal(err)
 	}
 	if err := rig.service.ReconcileLocal(ctx); err != nil {

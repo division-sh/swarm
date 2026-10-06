@@ -20,11 +20,26 @@ func parseChannelManifestAt(body []byte, file string) (ChannelManifest, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return ChannelManifest{}, err
 	}
-	f, err := channelFields(root, "provider", "opaque_types", "operations", "events", "registration", "onboarding", "native_inbox")
+	f, err := channelFields(root, "provider", "transport", "capabilities", "opaque_types", "operations", "events", "registration", "onboarding", "native_inbox")
 	if err != nil {
 		return ChannelManifest{}, err
 	}
 	out := ChannelManifest{source: root, OpaqueTypes: map[string]runtimecontracts.ToolInputSchema{}, Operations: map[string]ChannelOperationBinding{}, Events: map[string]ChannelEventBinding{}}
+	capabilities, err := channelRequired(root, f, "capabilities")
+	if err != nil {
+		return out, err
+	}
+	if out.Capabilities, err = AdmitChannelCapabilities(capabilities); err != nil {
+		return out, err
+	}
+	transport, err := channelRequiredText(root, f, "transport")
+	if err != nil {
+		return out, err
+	}
+	out.Transport = ChannelTransport(transport)
+	if _, err := out.Transport.ActivationPosture(); err != nil {
+		return out, channelError(f["transport"], err.Error())
+	}
 	if out.Provider, err = channelRequiredText(root, f, "provider"); err != nil {
 		return out, err
 	}
@@ -46,7 +61,7 @@ func parseChannelManifestAt(body []byte, file string) (ChannelManifest, error) {
 		out.Registration = &profile
 	}
 	if v, ok := f["onboarding"]; ok {
-		profile, e := admitChannelOnboarding(v)
+		profile, e := admitChannelOnboarding(v, out.Transport)
 		if e != nil {
 			return out, e
 		}
@@ -245,20 +260,18 @@ func admitChannelRegistration(value yamlsource.Value) (ChannelRegistrationProfil
 	return out, nil
 }
 
-func admitChannelOnboarding(value yamlsource.Value) (ChannelOnboardingProfile, error) {
-	f, err := channelFields(value, "activation", "ceremony", "provider_credential", "confirmation", "signing_credential", "connection_health", "learned_destination")
+func admitChannelOnboarding(value yamlsource.Value, transport ChannelTransport) (ChannelOnboardingProfile, error) {
+	f, err := channelFields(value, "ceremony", "provider_credential", "confirmation", "signing_credential", "connection_health", "learned_destination")
 	var out ChannelOnboardingProfile
 	if err != nil {
 		return out, err
 	}
-	for _, name := range []string{"activation", "ceremony", "provider_credential", "confirmation"} {
+	for _, name := range []string{"ceremony", "confirmation"} {
 		text, e := channelRequiredText(value, f, name)
 		if e != nil {
 			return out, e
 		}
 		switch name {
-		case "activation":
-			out.Activation = text
 		case "ceremony":
 			out.Ceremony = text
 		case "provider_credential":
@@ -267,12 +280,20 @@ func admitChannelOnboarding(value yamlsource.Value) (ChannelOnboardingProfile, e
 			out.Confirmation = text
 		}
 	}
+	if v, ok := f["provider_credential"]; ok {
+		if out.ProviderCredentialRole, err = channelText(v); err != nil {
+			return out, err
+		}
+	} else if transport == ChannelTransportWebhook {
+		_, err = channelRequired(value, f, "provider_credential")
+		return out, err
+	}
 	required, forbidden := "signing_credential", "connection_health"
-	if out.Activation == string(ChannelActivationSessionConnection) {
+	if transport == ChannelTransportSession {
 		required, forbidden = forbidden, required
 	}
 	if v, ok := f[forbidden]; ok {
-		return out, channelError(v, "field "+forbidden+" is forbidden for "+out.Activation)
+		return out, channelError(v, "field "+forbidden+" is forbidden for "+string(transport))
 	}
 	text, err := channelRequiredText(value, f, required)
 	if err != nil {

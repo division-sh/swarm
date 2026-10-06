@@ -105,7 +105,7 @@ func proveUnsupportedChooserRetirement(t *testing.T, cards decisioncard.Store, s
 		t.Fatal(err)
 	}
 	prepared := deliver(id, 204)
-	action := operatorchannel.InboundAction{ActionFact: operatorchannel.ActionFact{
+	action := operatorchannel.InboundAction{ActionFact: operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback,
 		Interface: text.Interface, ExternalAccountRef: text.ExternalAccountRef,
 		ConversationRef: text.ConversationRef, ConversationScope: text.ConversationScope,
 		MessageReference: `{"id":204}`, InteractionRef: "retired-chooser-callback", Token: prepared.Actions[0].Token,

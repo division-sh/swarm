@@ -40,14 +40,15 @@ type SentReceipt struct {
 }
 
 type Action struct {
-	Token              string
-	Kind               string
-	Verdict            string
-	DraftID            string
-	CardID             string
-	TextPublicationID  string
-	RecoveryDeliveryID string
-	Label              string
+	Token                    string
+	Kind                     string
+	Verdict                  string
+	DraftID                  string
+	CardID                   string
+	TextPublicationID        string
+	RecoveryDeliveryID       string
+	ParentReceiptOperationID string
+	Label                    string
 }
 
 type ResolvedAction struct {
@@ -63,6 +64,16 @@ type ResolvedAction struct {
 	ActivationID       string
 	ActivationRevision int64
 	CurrentRender      bool
+}
+
+func (a ResolvedAction) TargetCardID() string {
+	if a.SourceKind == "card" {
+		return a.SourceID
+	}
+	if a.SourceKind == "response" && (a.Action.Kind == "cancel_input" || a.Action.Kind == "skip_input") {
+		return a.Action.CardID
+	}
+	return ""
 }
 
 type CardActionDemand struct {
@@ -100,7 +111,8 @@ type InputDraftCandidate struct {
 	ReceiptOperationID string
 }
 
-type ResolvedNativeEntry struct {
+type ResolvedInboxEntry struct {
+	Kind              InboxEntryKind
 	PrincipalID       string
 	InterfaceKey      string
 	BindingRevision   int64
@@ -111,12 +123,20 @@ type ResolvedNativeEntry struct {
 	EntryReference    string
 }
 
-type NativeEntryDisposition string
+type InboxEntryKind string
 
 const (
-	NativeEntryAccepted    NativeEntryDisposition = "accepted"
-	NativeEntryRejected    NativeEntryDisposition = "rejected"
-	NativeEntryUnavailable NativeEntryDisposition = "unavailable"
+	InboxEntryTextReply     InboxEntryKind = "text_reply"
+	InboxEntryNative        InboxEntryKind = "native"
+	TextReplyInboxReference                = "inbox"
+)
+
+type InboxEntryDisposition string
+
+const (
+	InboxEntryAccepted    InboxEntryDisposition = "accepted"
+	InboxEntryRejected    InboxEntryDisposition = "rejected"
+	InboxEntryUnavailable InboxEntryDisposition = "unavailable"
 )
 
 type ActionDisposition string
@@ -149,9 +169,11 @@ type Store interface {
 	FreezeAndPersistChannelRender(context.Context, string, packs.PresentationBounds) (PreparedRender, error)
 	AdvanceChannelActionPage(context.Context, operatorchannel.InboundAction, ResolvedAction) error
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)
+	AdmitChannelReplyAction(context.Context, operatorchannel.InboundText) (PendingAction, bool, error)
 	ListPendingChannelActions(context.Context, string, int) ([]PendingAction, error)
 	SettleUnappliedChannelAction(context.Context, operatorchannel.InboundAction, ActionDisposition) error
 	SettleUnsupportedChannelText(context.Context, operatorchannel.InboundText) error
+	RejectUnboundChannelText(context.Context, operatorchannel.InboundText) error
 	ListPendingChannelTexts(context.Context, string, int) ([]PendingText, error)
 	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (ResolvedText, bool, error)
 	ListCurrentChannelInputDrafts(context.Context, operatorchannel.InboundText, time.Time, string, int) ([]InputDraftCandidate, string, error)
@@ -161,9 +183,9 @@ type Store interface {
 	AdvancePartialChosenChannelInputDraftText(context.Context, operatorchannel.InboundAction, time.Time) (decisioncard.InputFieldProgress, error)
 	PreviewChannelInputSkip(context.Context, operatorchannel.InboundAction, time.Time) (ResolvedAction, decisioncard.InputFieldProgress, decisioncard.InputDraft, error)
 	AdvancePartialChannelInputSkip(context.Context, operatorchannel.InboundAction, time.Time) (decisioncard.InputFieldProgress, error)
-	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (ResolvedNativeEntry, bool, error)
-	RejectNativeInboxEntry(context.Context, operatorchannel.InboundText) error
-	PlanNativeInboxResponse(context.Context, operatorchannel.InboundText, ResolvedNativeEntry, string) (string, error)
+	ResolveCurrentInboxEntry(context.Context, operatorchannel.InboundText) (ResolvedInboxEntry, bool, error)
+	RejectInboxEntry(context.Context, operatorchannel.InboundText) error
+	PlanInboxResponse(context.Context, operatorchannel.InboundText, ResolvedInboxEntry, string) (string, error)
 	PlanChannelTextResponse(context.Context, operatorchannel.InboundText, string, string) (string, error)
 	PlanChannelDraftChooser(context.Context, operatorchannel.InboundText, time.Time) (string, error)
 	PlanChannelActionResponse(context.Context, operatorchannel.InboundAction, ResolvedAction, string) (string, error)

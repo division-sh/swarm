@@ -78,13 +78,24 @@ func LockCurrentPrincipalTx(ctx context.Context, tx *sql.Tx, postgres bool) (str
 }
 
 func LoadDefault(ctx context.Context, db queryer, postgres bool) (Default, bool, error) {
+	return loadDefault(ctx, db, postgres, false)
+}
+
+func LockDefaultTx(ctx context.Context, tx *sql.Tx, postgres bool) (Default, bool, error) {
+	if tx == nil {
+		return Default{}, false, fmt.Errorf("channel delivery default lock requires a selected transaction")
+	}
+	return loadDefault(ctx, tx, postgres, true)
+}
+
+func loadDefault(ctx context.Context, db queryer, postgres, lock bool) (Default, bool, error) {
 	if db == nil {
 		return Default{}, false, fmt.Errorf("channel delivery default store is required")
 	}
 	query := `SELECT principal_id, interface_key, binding_revision, delivery_epoch, external_account_reference,
 		conversation_reference, conversation_scope, state, first_operation_id
 		FROM channel_delivery_defaults WHERE singleton_id = 1`
-	if postgres {
+	if postgres && lock {
 		query += ` FOR UPDATE`
 	}
 	var current Default
@@ -117,7 +128,7 @@ func ApplyBindingTx(ctx context.Context, tx *sql.Tx, binding operatorchannel.Bin
 	if kind != operatorchannel.OperationConnect && kind != operatorchannel.OperationReconnect && kind != operatorchannel.OperationRebind {
 		return fmt.Errorf("channel delivery default cannot consume %s binding", kind)
 	}
-	current, found, err := LoadDefault(ctx, tx, postgres)
+	current, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil {
 		return err
 	}
@@ -175,7 +186,7 @@ func RetireBindingTx(ctx context.Context, tx *sql.Tx, binding operatorchannel.Bi
 		binding.PrincipalID == "" || binding.Revision < 1 || binding.UpdatedAt.IsZero() {
 		return fmt.Errorf("retired channel delivery binding is incomplete")
 	}
-	current, found, err := LoadDefault(ctx, tx, postgres)
+	current, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil || !found {
 		return err
 	}

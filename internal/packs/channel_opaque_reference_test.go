@@ -17,11 +17,19 @@ import (
 func TestChannelLearnedObjectDestination(t *testing.T) {
 	channel, trigger, connector := mockChannelSatisfier()
 	manifest, err := packs.ParseChannelManifest([]byte(`provider: mock
+transport: webhook
+capabilities:
+  card_render: true
+  reply_to_reference: true
+  actions_as_buttons: true
+  actions_as_text: true
+  edit: true
+  acknowledgment: true
+  inbox_listing: true
 opaque_types: {reference: {type: string}}
 operations: {deliver: {tool: mock.deliver}}
 events: {received: {event: mock.received, fields: {text: event.text}}}
 onboarding:
-  activation: webhook_registration
   ceremony: authenticated_text_challenge
   provider_credential: mock_api_key
   signing_credential: mock_callback_key
@@ -238,7 +246,7 @@ func TestChannelLearnedDestinationRelationAdmissionAndGeneration(t *testing.T) {
 		connector.Tools[name] = tool
 	}
 	valid := map[string]packs.ChannelMapping{"destination.queue": {From: "conversation_reference.room"}, "destination.secondary": {From: "conversation_reference.other"}}
-	channel.Manifest.Onboarding = &packs.ChannelOnboardingProfile{Activation: "webhook_registration", Ceremony: "authenticated_text_challenge", ProviderCredentialRole: "mock_api_key", SigningCredentialRole: "mock_callback_key", Confirmation: "deliver", LearnedDestination: valid}
+	channel.Manifest.Onboarding = &packs.ChannelOnboardingProfile{Ceremony: "authenticated_text_challenge", ProviderCredentialRole: "mock_api_key", SigningCredentialRole: "mock_callback_key", Confirmation: "deliver", LearnedDestination: valid}
 	compile := func() (packs.SatisfactionPlan, error) {
 		return packs.CompileChannel(loadChannelInterfaceRegistry(t), channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
 	}

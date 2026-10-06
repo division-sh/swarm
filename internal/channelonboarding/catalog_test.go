@@ -111,7 +111,7 @@ func TestCandidateCatalogResolvesOnlyExactDurableSuccessor(t *testing.T) {
 		{name: "plan", mutate: func(c *Candidate) { c.Coordinate.PlanGeneration = testPlanGeneration("changed") }},
 		{name: "target", mutate: func(c *Candidate) { c.Target.Selector = "ingress:other:telegram" }},
 		{name: "posture", mutate: func(c *Candidate) { c.Posture = ActivationSessionConnection }},
-		{name: "ceremony", mutate: func(c *Candidate) { c.Ceremony = CeremonyProviderPairing }},
+		{name: "ceremony", mutate: func(c *Candidate) { c.Ceremony = IdentityCeremony("provider_pairing") }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

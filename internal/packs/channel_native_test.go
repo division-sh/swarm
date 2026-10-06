@@ -9,7 +9,7 @@ import (
 )
 
 func TestChannelManifestRetainsNativeInboxProfileThroughStrictAdmission(t *testing.T) {
-	body := []byte(`provider: probe
+	body := []byte("transport: webhook\n" + channelCapabilityFixture + `provider: probe
 opaque_types: {reference: {type: string}}
 operations: {deliver: {tool: probe.deliver}}
 events: {received: {event: probe.received, fields: {text: event.text}}}

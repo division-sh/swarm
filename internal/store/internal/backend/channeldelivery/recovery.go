@@ -77,7 +77,7 @@ func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.
 	if !found || !resolved.CurrentRender || resolved != expected || resolved.SourceKind != PlanResponse {
 		return "", fmt.Errorf("manual resend action is not current")
 	}
-	selected, found, err := LoadDefault(ctx, tx, postgres)
+	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil {
 		return "", err
 	}

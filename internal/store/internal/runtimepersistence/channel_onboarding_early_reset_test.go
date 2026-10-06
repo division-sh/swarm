@@ -179,7 +179,7 @@ func TestChannelOnboardingEarlyResetPreservesInheritedAndObservedEvidence(t *tes
 				ctx := context.Background()
 				begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 				bound := rig.confirm(t, begun, "account-a")
-				if err := rig.file.Set(ctx, bound.ProviderCredential.Key, "bound-rotation"); err != nil {
+				if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "bound-rotation"); err != nil {
 					t.Fatal(err)
 				}
 				if err := rig.service.ReconcileLocal(ctx); err != nil {

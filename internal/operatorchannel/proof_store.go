@@ -12,8 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
 
 const proofDocumentVersion = 2
@@ -32,25 +30,24 @@ type proofDocument struct {
 }
 
 type proofRecord struct {
-	Format                      string            `json:"format"`
-	ProofID                     string            `json:"proof_id"`
-	Revision                    int64             `json:"revision"`
-	Status                      ProofStatus       `json:"status"`
-	Interface                   InterfaceIdentity `json:"interface"`
-	ExternalAccountRef          string            `json:"external_account_reference"`
-	ConversationRef             string            `json:"conversation_reference"`
-	ConversationScope           ConversationScope `json:"conversation_scope"`
-	AccountPresentation         string            `json:"account_presentation,omitempty"`
-	Method                      string            `json:"method"`
-	Challenge                   string            `json:"challenge"`
-	OriginalOperationID         string            `json:"original_operation_id"`
-	MintingStoreID              string            `json:"minting_store_id"`
-	MintingDeploymentID         string            `json:"minting_deployment_id"`
-	VerifiedAt                  time.Time         `json:"verified_at"`
-	OperatorConfirmed           bool              `json:"operator_confirmed"`
-	ConsentScopes               []ConsentScope    `json:"consent_scopes"`
-	ProviderCredentialKey       string            `json:"provider_credential_key"`
-	ProviderCredentialValueSeal string            `json:"provider_credential_value_seal"`
+	Format              string                  `json:"format"`
+	ProofID             string                  `json:"proof_id"`
+	Revision            int64                   `json:"revision"`
+	Status              ProofStatus             `json:"status"`
+	Interface           InterfaceIdentity       `json:"interface"`
+	ExternalAccountRef  string                  `json:"external_account_reference"`
+	ConversationRef     string                  `json:"conversation_reference"`
+	ConversationScope   ConversationScope       `json:"conversation_scope"`
+	AccountPresentation string                  `json:"account_presentation,omitempty"`
+	Method              string                  `json:"method"`
+	Challenge           string                  `json:"challenge"`
+	OriginalOperationID string                  `json:"original_operation_id"`
+	MintingStoreID      string                  `json:"minting_store_id"`
+	MintingDeploymentID string                  `json:"minting_deployment_id"`
+	VerifiedAt          time.Time               `json:"verified_at"`
+	OperatorConfirmed   bool                    `json:"operator_confirmed"`
+	ConsentScopes       []ConsentScope          `json:"consent_scopes"`
+	ProviderAuthority   ProviderAuthorityRecord `json:"provider_authority"`
 }
 
 func NewFileProofStore(swarmDir string) (*FileProofStore, error) {
@@ -151,7 +148,11 @@ func (s *FileProofStore) Put(ctx context.Context, proof VerifiedProof) error {
 				return fmt.Errorf("%w: proof revision must advance exactly from %d", ErrRevisionConflict, existing.Revision)
 			}
 		}
-		doc.Entries[key] = recordFromProof(proof)
+		next, err := recordFromProof(proof)
+		if err != nil {
+			return err
+		}
+		doc.Entries[key] = next
 		return s.saveLocked(doc)
 	})
 }
@@ -193,7 +194,11 @@ func (s *FileProofStore) Revoke(ctx context.Context, identity InterfaceIdentity,
 		proof.Revision++
 		proof.Status = ProofRevoked
 		proof.VerifiedAt = now.UTC().Truncate(time.Microsecond)
-		doc.Entries[key] = recordFromProof(proof)
+		next, err := recordFromProof(proof)
+		if err != nil {
+			return err
+		}
+		doc.Entries[key] = next
 		revoked = cloneProof(proof)
 		return s.saveLocked(doc)
 	})
@@ -314,7 +319,11 @@ func (s *FileProofStore) quarantineUnsupportedLocked() error {
 	return nil
 }
 
-func recordFromProof(proof VerifiedProof) proofRecord {
+func recordFromProof(proof VerifiedProof) (proofRecord, error) {
+	authority, err := proof.ProviderAuthority.PrivateRecord()
+	if err != nil {
+		return proofRecord{}, err
+	}
 	return proofRecord{
 		Format: proof.Format, ProofID: proof.ProofID, Revision: proof.Revision, Status: proof.Status,
 		Interface: proof.Interface, ExternalAccountRef: proof.ExternalAccountRef, ConversationRef: proof.ConversationRef,
@@ -322,16 +331,15 @@ func recordFromProof(proof VerifiedProof) proofRecord {
 		Method: proof.Method, Challenge: proof.Challenge, OriginalOperationID: proof.OriginalOperationID,
 		MintingStoreID: proof.MintingStoreID, MintingDeploymentID: proof.MintingDeploymentID,
 		VerifiedAt: proof.VerifiedAt, OperatorConfirmed: proof.OperatorConfirmed,
-		ConsentScopes:               append([]ConsentScope(nil), proof.ConsentScopes...),
-		ProviderCredentialKey:       proof.ProviderCredential.Key,
-		ProviderCredentialValueSeal: proof.ProviderCredential.Seal.String(),
-	}
+		ConsentScopes:     append([]ConsentScope(nil), proof.ConsentScopes...),
+		ProviderAuthority: authority,
+	}, nil
 }
 
 func (r proofRecord) proof() (VerifiedProof, error) {
-	seal, err := runtimecredentials.ParseValueSeal(r.ProviderCredentialValueSeal)
-	if err != nil || strings.TrimSpace(r.ProviderCredentialKey) == "" {
-		return VerifiedProof{}, fmt.Errorf("provider credential evidence is invalid")
+	authority, err := r.ProviderAuthority.Admit()
+	if err != nil {
+		return VerifiedProof{}, fmt.Errorf("provider authority evidence is invalid: %w", err)
 	}
 	return VerifiedProof{
 		Format: r.Format, ProofID: r.ProofID, Revision: r.Revision, Status: r.Status,
@@ -340,8 +348,8 @@ func (r proofRecord) proof() (VerifiedProof, error) {
 		Method: r.Method, Challenge: r.Challenge, OriginalOperationID: r.OriginalOperationID,
 		MintingStoreID: r.MintingStoreID, MintingDeploymentID: r.MintingDeploymentID,
 		VerifiedAt: r.VerifiedAt, OperatorConfirmed: r.OperatorConfirmed,
-		ConsentScopes:      append([]ConsentScope(nil), r.ConsentScopes...),
-		ProviderCredential: runtimecredentials.ValueEvidence{Key: r.ProviderCredentialKey, Seal: seal},
+		ConsentScopes:     append([]ConsentScope(nil), r.ConsentScopes...),
+		ProviderAuthority: authority,
 	}, nil
 }
 

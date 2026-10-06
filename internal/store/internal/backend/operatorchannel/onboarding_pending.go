@@ -33,7 +33,8 @@ func RequireStaleOnboardingChild(ctx context.Context, tx *sql.Tx, postgres bool,
 	if !found || child.State != domain.StateCredentialStale || child.OnboardingOperationID != req.ParentID ||
 		child.PrincipalID != req.PrincipalID || child.Interface.Normalized() != req.Interface.Normalized() ||
 		child.BindingRevision != 0 || child.ProofID != "" ||
-		!slices.Contains(req.AdmittedCredentials, child.ProviderCredential) {
+		child.ProviderAuthority.Kind != domain.ProviderAuthorityCredential ||
+		!slices.Contains(req.AdmittedCredentials, child.ProviderAuthority.Credential) {
 		return fmt.Errorf("%w: pending reset requires the exact settled stale child and admitted evidence", domain.ErrRevisionConflict)
 	}
 	if req.RetainedBindingRevision == 0 {

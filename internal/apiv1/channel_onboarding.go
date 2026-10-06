@@ -148,6 +148,10 @@ func channelClientLanguageParam(params map[string]any) (string, error) {
 }
 
 func channelOnboardingError(err error) error {
+	var sessionUnavailable *operatorchannel.SessionProviderUnavailableError
+	if errors.As(err, &sessionUnavailable) {
+		return runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "channel_session_provider_unavailable", "channel-onboarding", "provider_admission", map[string]any{"provider": sessionUnavailable.Provider}, err)
+	}
 	if errors.Is(err, credentials.ErrCredentialValueUnusable) {
 		if !runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == credentials.ErrCredentialValueUnusable }) {
 			return err

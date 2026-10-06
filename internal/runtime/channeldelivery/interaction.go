@@ -25,7 +25,7 @@ func PrepareCardAction(pending PendingAction, resolved ResolvedAction, card deci
 		return PreparedCardAction{}, err
 	}
 	if pending.PublicationID != pending.Fact.PublicationID || pending.ReceivedAt.IsZero() ||
-		!resolved.CurrentRender || resolved.SourceKind != "card" || resolved.SourceID != card.CardID ||
+		!resolved.CurrentRender || resolved.TargetCardID() != card.CardID ||
 		resolved.PrincipalID == "" || resolved.Action.Token != pending.Fact.Token ||
 		(resolved.Action.Kind != "verdict" && resolved.Action.Kind != "cancel_input") ||
 		resolved.ReceiptOperationID == "" || resolved.RenderHash == "" {

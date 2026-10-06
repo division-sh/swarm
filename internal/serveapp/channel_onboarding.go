@@ -77,8 +77,16 @@ func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdent
 	posture := channelonboarding.ActivationPosture(profile.ActivationPosture())
 	ceremony := channelonboarding.IdentityCeremony(profile.IdentityCeremony())
 	if posture == channelonboarding.ActivationSessionConnection {
-		// Session candidates require #2341's exact service-fulfillment target.
-		return nil, nil
+		return []channelonboarding.Candidate{{
+			SourceLabel: contextDef.BundleIdentity.SourceLabel, Provider: profile.Provider(), Interface: identity,
+			Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
+				BundleHash: contextDef.BundleHash(), BundleIdentity: bundleIdentity,
+				PackInventoryGeneration: contextDef.PackInventoryDigest, RuntimeInstanceID: contextDef.RuntimeInstanceID,
+				ContextPublicationGeneration: contextDef.PublicationGeneration, PlanGeneration: generation,
+			},
+			Posture: posture, Ceremony: ceremony, ProviderCredentialRole: profile.ProviderCredential(),
+			ConfirmationOperation: profile.ConfirmationOperation(), ConnectionHealth: profile.ConnectionHealth(), Plan: plan,
+		}}, nil
 	}
 	var candidates []channelonboarding.Candidate
 	for _, declaration := range declarations {
@@ -623,10 +631,12 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 		facts.ActivationGeneration = publicationLease.Generation()
 	}
 	planCurrent := false
+	nativeRequired := false
 	if available {
 		for _, compiled := range publicationLease.Activations() {
 			if compiled.Plan.BindingID() == planID && compiled.Coordinate.Matches(activation.Coordinate) && compiled.ActivationRevision == activation.Revision {
 				planCurrent = true
+				nativeRequired = compiled.Plan.HasNativeInbox()
 				break
 			}
 		}
@@ -677,11 +687,13 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 			facts.RegistrationCurrent = registration.Current && registration.ActivationGeneration.Equal(facts.ActivationGeneration)
 		}
 	case channelonboarding.ActivationSessionConnection:
-		facts.ServiceFulfillmentGeneration = candidate.ConnectionHealth
-		facts.ExpectedServiceGeneration = candidate.ConnectionHealth
-		facts.SessionCurrent = false
+		return channelonboarding.ConnectedChannelReadiness{Reason: channelonboarding.ReadinessSessionUnavailable, Coordinate: activation.Coordinate, ObservedAt: now}, true, nil
 	}
 	projection := channelonboarding.ProjectReadiness(facts)
+	projection.NativeInboxRequired = nativeRequired
+	if !nativeRequired {
+		return projection, true, nil
+	}
 	if o.native == nil {
 		return projection, false, fmt.Errorf("native inbox qualification readback owner is unavailable")
 	}
@@ -824,6 +836,9 @@ func channelEffectTerminal(outcome runtimeeffects.ChannelOnboardingEffectOutcome
 }
 
 func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx context.Context, request channelonboarding.ConfirmationRequest) (channelonboarding.ConfirmationResult, error) {
+	if err := request.Candidate.Plan.RequireExecutableProvider(); err != nil {
+		return channelonboarding.ConfirmationResult{}, err
+	}
 	if d == nil || d.effects == nil || d.credentials == nil {
 		return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation dispatcher is unavailable")
 	}
@@ -867,7 +882,9 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 	}
 	publicInput := map[string]any{
 		"presentation": map[string]any{"text": confirmationText},
-		"actions":      []any{},
+	}
+	if compiled.Plan.Capabilities().Vector().ActionsAsButtons {
+		publicInput["actions"] = []any{}
 	}
 	_, providerInput, err := compiled.Plan.PrepareOperation(request.Candidate.ConfirmationOperation, publicInput)
 	if err != nil {

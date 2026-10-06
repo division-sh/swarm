@@ -11,12 +11,11 @@ import (
 	"strings"
 	"time"
 
-	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/google/uuid"
 )
 
 const (
-	ProofFormat                = "swarm-verified-account-proof-v2"
+	ProofFormat                = "swarm-verified-account-proof-v3"
 	ChallengePrefix            = "SWARM-"
 	DefaultChallengeTTL        = 10 * time.Minute
 	DefaultConnectWait         = 2 * time.Minute
@@ -205,6 +204,8 @@ type TextFact struct {
 }
 
 type ActionFact struct {
+	Kind               ActionSourceKind  `json:"source_kind"`
+	TextSource         TextFact          `json:"text_source,omitzero"`
 	Interface          InterfaceIdentity `json:"interface"`
 	ExternalAccountRef string            `json:"external_account_reference"`
 	ConversationRef    string            `json:"conversation_reference"`
@@ -214,16 +215,38 @@ type ActionFact struct {
 	Token              string            `json:"token"`
 }
 
+type ActionSourceKind string
+
+const (
+	ActionSourceCallback ActionSourceKind = "callback"
+	ActionSourceReply    ActionSourceKind = "reply"
+)
+
 func (f ActionFact) Validate() error {
 	if err := f.Interface.Validate(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(f.ExternalAccountRef) == "" || strings.TrimSpace(f.ConversationRef) == "" ||
-		strings.TrimSpace(f.MessageReference) == "" || strings.TrimSpace(f.InteractionRef) == "" || strings.TrimSpace(f.Token) == "" {
-		return fmt.Errorf("%w: action fact requires complete identity, message, interaction, and token", ErrInvalidRequest)
+		strings.TrimSpace(f.MessageReference) == "" || strings.TrimSpace(f.Token) == "" {
+		return fmt.Errorf("%w: action fact requires complete identity, message, and token", ErrInvalidRequest)
 	}
 	if !f.ConversationScope.Valid() {
 		return fmt.Errorf("%w: conversation_scope must be direct or shared", ErrInvalidRequest)
+	}
+	switch f.Kind {
+	case ActionSourceCallback:
+		if strings.TrimSpace(f.InteractionRef) == "" || f.TextSource != (TextFact{}) {
+			return fmt.Errorf("%w: callback requires a real interaction and no text source", ErrInvalidRequest)
+		}
+	case ActionSourceReply:
+		if f.InteractionRef != "" || f.TextSource.Validate() != nil || f.TextSource.EntryReference != "" ||
+			f.TextSource.ReplyToReference == "" || f.TextSource.ReplyToReference != f.MessageReference ||
+			f.TextSource.Interface != f.Interface || f.TextSource.ExternalAccountRef != f.ExternalAccountRef ||
+			f.TextSource.ConversationRef != f.ConversationRef || f.TextSource.ConversationScope != f.ConversationScope {
+			return fmt.Errorf("%w: reply action contradicts its exact text and quote evidence", ErrInvalidRequest)
+		}
+	default:
+		return fmt.Errorf("%w: action source_kind must be callback or reply", ErrInvalidRequest)
 	}
 	return nil
 }
@@ -309,20 +332,20 @@ func (c InboundClaim) Validate() error {
 }
 
 type BeginRequest struct {
-	OperationID           string                           `json:"operation_id"`
-	Kind                  OperationKind                    `json:"kind"`
-	PrincipalID           string                           `json:"principal_id"`
-	Interface             InterfaceIdentity                `json:"interface"`
-	ExpectedRevision      int64                            `json:"expected_revision"`
-	RequestKeyHash        string                           `json:"request_key_hash"`
-	RequestHash           string                           `json:"request_hash"`
-	OnboardingOperationID string                           `json:"onboarding_operation_id,omitempty"`
-	SaveProof             bool                             `json:"save_proof"`
-	PlannedProofID        string                           `json:"planned_proof_id,omitempty"`
-	PlannedProofRevision  int64                            `json:"planned_proof_revision,omitempty"`
-	ProviderCredential    runtimecredentials.ValueEvidence `json:"-"`
-	RequestedAt           time.Time                        `json:"requested_at"`
-	ExpiresAt             time.Time                        `json:"expires_at"`
+	OperationID           string            `json:"operation_id"`
+	Kind                  OperationKind     `json:"kind"`
+	PrincipalID           string            `json:"principal_id"`
+	Interface             InterfaceIdentity `json:"interface"`
+	ExpectedRevision      int64             `json:"expected_revision"`
+	RequestKeyHash        string            `json:"request_key_hash"`
+	RequestHash           string            `json:"request_hash"`
+	OnboardingOperationID string            `json:"onboarding_operation_id,omitempty"`
+	SaveProof             bool              `json:"save_proof"`
+	PlannedProofID        string            `json:"planned_proof_id,omitempty"`
+	PlannedProofRevision  int64             `json:"planned_proof_revision,omitempty"`
+	ProviderAuthority     ProviderAuthority `json:"-"`
+	RequestedAt           time.Time         `json:"requested_at"`
+	ExpiresAt             time.Time         `json:"expires_at"`
 }
 
 type BeginReplayRequest struct {
@@ -332,12 +355,12 @@ type BeginReplayRequest struct {
 }
 
 type ConfirmRequest struct {
-	OperationID               string    `json:"operation_id"`
-	PrincipalID               string    `json:"principal_id"`
-	ExpectedRevision          int64     `json:"expected_revision"`
-	Approve                   bool      `json:"approve"`
-	ProviderCredentialCurrent bool      `json:"-"`
-	ConfirmedAt               time.Time `json:"confirmed_at"`
+	OperationID              string    `json:"operation_id"`
+	PrincipalID              string    `json:"principal_id"`
+	ExpectedRevision         int64     `json:"expected_revision"`
+	Approve                  bool      `json:"approve"`
+	ProviderAuthorityCurrent bool      `json:"-"`
+	ConfirmedAt              time.Time `json:"confirmed_at"`
 }
 
 type ExpireRequest struct {
@@ -365,71 +388,71 @@ type BootBindRequest struct {
 }
 
 type Operation struct {
-	OperationID             string                           `json:"operation_id"`
-	Kind                    OperationKind                    `json:"kind"`
-	PrincipalID             string                           `json:"principal_id"`
-	Interface               InterfaceIdentity                `json:"interface"`
-	Challenge               string                           `json:"challenge,omitempty"`
-	State                   OperationState                   `json:"state"`
-	Revision                int64                            `json:"revision"`
-	BindingRevision         int64                            `json:"binding_revision,omitempty"`
-	ExternalAccountRef      string                           `json:"external_account_reference,omitempty"`
-	ConversationRef         string                           `json:"conversation_reference,omitempty"`
-	ConversationScope       ConversationScope                `json:"conversation_scope,omitempty"`
-	AccountPresentation     string                           `json:"account_presentation,omitempty"`
-	SaveProof               bool                             `json:"save_proof"`
-	ProofID                 string                           `json:"proof_id,omitempty"`
-	ProofRevision           int64                            `json:"proof_revision,omitempty"`
-	ProofStatus             ProofStatus                      `json:"proof_status"`
-	ClaimDisposition        string                           `json:"claim_disposition,omitempty"`
-	RequestedAt             time.Time                        `json:"requested_at"`
-	ExpiresAt               time.Time                        `json:"expires_at,omitzero"`
-	ClaimedAt               time.Time                        `json:"claimed_at,omitzero"`
-	CompletedAt             time.Time                        `json:"completed_at,omitzero"`
-	OnboardingOperationID   string                           `json:"onboarding_operation_id,omitempty"`
-	RequestHash             string                           `json:"-"`
-	ExpectedBindingRevision int64                            `json:"-"`
-	PlannedProofID          string                           `json:"-"`
-	PlannedProofRevision    int64                            `json:"-"`
-	ProviderCredential      runtimecredentials.ValueEvidence `json:"-"`
+	OperationID             string            `json:"operation_id"`
+	Kind                    OperationKind     `json:"kind"`
+	PrincipalID             string            `json:"principal_id"`
+	Interface               InterfaceIdentity `json:"interface"`
+	Challenge               string            `json:"challenge,omitempty"`
+	State                   OperationState    `json:"state"`
+	Revision                int64             `json:"revision"`
+	BindingRevision         int64             `json:"binding_revision,omitempty"`
+	ExternalAccountRef      string            `json:"external_account_reference,omitempty"`
+	ConversationRef         string            `json:"conversation_reference,omitempty"`
+	ConversationScope       ConversationScope `json:"conversation_scope,omitempty"`
+	AccountPresentation     string            `json:"account_presentation,omitempty"`
+	SaveProof               bool              `json:"save_proof"`
+	ProofID                 string            `json:"proof_id,omitempty"`
+	ProofRevision           int64             `json:"proof_revision,omitempty"`
+	ProofStatus             ProofStatus       `json:"proof_status"`
+	ClaimDisposition        string            `json:"claim_disposition,omitempty"`
+	RequestedAt             time.Time         `json:"requested_at"`
+	ExpiresAt               time.Time         `json:"expires_at,omitzero"`
+	ClaimedAt               time.Time         `json:"claimed_at,omitzero"`
+	CompletedAt             time.Time         `json:"completed_at,omitzero"`
+	OnboardingOperationID   string            `json:"onboarding_operation_id,omitempty"`
+	RequestHash             string            `json:"-"`
+	ExpectedBindingRevision int64             `json:"-"`
+	PlannedProofID          string            `json:"-"`
+	PlannedProofRevision    int64             `json:"-"`
+	ProviderAuthority       ProviderAuthority `json:"-"`
 }
 
 type Binding struct {
-	PrincipalID         string                           `json:"principal_id"`
-	Interface           InterfaceIdentity                `json:"interface"`
-	ExternalAccountRef  string                           `json:"external_account_reference,omitempty"`
-	ConversationRef     string                           `json:"conversation_reference,omitempty"`
-	ConversationScope   ConversationScope                `json:"conversation_scope,omitempty"`
-	AccountPresentation string                           `json:"account_presentation,omitempty"`
-	Revision            int64                            `json:"revision"`
-	Status              BindingStatus                    `json:"status"`
-	Source              BindingSource                    `json:"source,omitempty"`
-	ProofID             string                           `json:"proof_id,omitempty"`
-	ProofRevision       int64                            `json:"proof_revision,omitempty"`
-	OperationID         string                           `json:"operation_id"`
-	UpdatedAt           time.Time                        `json:"updated_at"`
-	ProviderCredential  runtimecredentials.ValueEvidence `json:"-"`
+	PrincipalID         string            `json:"principal_id"`
+	Interface           InterfaceIdentity `json:"interface"`
+	ExternalAccountRef  string            `json:"external_account_reference,omitempty"`
+	ConversationRef     string            `json:"conversation_reference,omitempty"`
+	ConversationScope   ConversationScope `json:"conversation_scope,omitempty"`
+	AccountPresentation string            `json:"account_presentation,omitempty"`
+	Revision            int64             `json:"revision"`
+	Status              BindingStatus     `json:"status"`
+	Source              BindingSource     `json:"source,omitempty"`
+	ProofID             string            `json:"proof_id,omitempty"`
+	ProofRevision       int64             `json:"proof_revision,omitempty"`
+	OperationID         string            `json:"operation_id"`
+	UpdatedAt           time.Time         `json:"updated_at"`
+	ProviderAuthority   ProviderAuthority `json:"-"`
 }
 
 type VerifiedProof struct {
-	Format              string                           `json:"format"`
-	ProofID             string                           `json:"proof_id"`
-	Revision            int64                            `json:"revision"`
-	Status              ProofStatus                      `json:"status"`
-	Interface           InterfaceIdentity                `json:"interface"`
-	ExternalAccountRef  string                           `json:"external_account_reference"`
-	ConversationRef     string                           `json:"conversation_reference"`
-	ConversationScope   ConversationScope                `json:"conversation_scope"`
-	AccountPresentation string                           `json:"account_presentation,omitempty"`
-	Method              string                           `json:"method"`
-	Challenge           string                           `json:"challenge"`
-	OriginalOperationID string                           `json:"original_operation_id"`
-	MintingStoreID      string                           `json:"minting_store_id"`
-	MintingDeploymentID string                           `json:"minting_deployment_id"`
-	VerifiedAt          time.Time                        `json:"verified_at"`
-	OperatorConfirmed   bool                             `json:"operator_confirmed"`
-	ConsentScopes       []ConsentScope                   `json:"consent_scopes"`
-	ProviderCredential  runtimecredentials.ValueEvidence `json:"-"`
+	Format              string            `json:"format"`
+	ProofID             string            `json:"proof_id"`
+	Revision            int64             `json:"revision"`
+	Status              ProofStatus       `json:"status"`
+	Interface           InterfaceIdentity `json:"interface"`
+	ExternalAccountRef  string            `json:"external_account_reference"`
+	ConversationRef     string            `json:"conversation_reference"`
+	ConversationScope   ConversationScope `json:"conversation_scope"`
+	AccountPresentation string            `json:"account_presentation,omitempty"`
+	Method              string            `json:"method"`
+	Challenge           string            `json:"challenge"`
+	OriginalOperationID string            `json:"original_operation_id"`
+	MintingStoreID      string            `json:"minting_store_id"`
+	MintingDeploymentID string            `json:"minting_deployment_id"`
+	VerifiedAt          time.Time         `json:"verified_at"`
+	OperatorConfirmed   bool              `json:"operator_confirmed"`
+	ConsentScopes       []ConsentScope    `json:"consent_scopes"`
+	ProviderAuthority   ProviderAuthority `json:"-"`
 }
 
 func (p VerifiedProof) Validate() error {
@@ -451,8 +474,8 @@ func (p VerifiedProof) Validate() error {
 	if len(p.ConsentScopes) == 0 {
 		return fmt.Errorf("%w: proof consent scope is required", ErrProofUnavailable)
 	}
-	if err := p.ProviderCredential.Validate(); err != nil {
-		return fmt.Errorf("%w: provider credential evidence is invalid", ErrProofUnavailable)
+	if err := p.ProviderAuthority.Validate(); err != nil {
+		return fmt.Errorf("%w: provider authority evidence is invalid: %w", ErrProofUnavailable, err)
 	}
 	for _, scope := range p.ConsentScopes {
 		if scope != ConsentNotify && scope != ConsentDecide {

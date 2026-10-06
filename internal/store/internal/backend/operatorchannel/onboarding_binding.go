@@ -46,7 +46,7 @@ func RequireOnboardingBinding(ctx context.Context, tx *sql.Tx, postgres bool, re
 	if !found || child.State != domain.StateBound || child.OnboardingOperationID != req.ParentID ||
 		child.PrincipalID != req.PrincipalID || child.Interface.Normalized() != req.Interface.Normalized() ||
 		child.BindingRevision != binding.Revision || binding.OperationID != child.OperationID ||
-		child.ProviderCredential != binding.ProviderCredential || child.ExternalAccountRef != binding.ExternalAccountRef ||
+		child.ProviderAuthority != binding.ProviderAuthority || child.ExternalAccountRef != binding.ExternalAccountRef ||
 		child.ConversationRef != binding.ConversationRef || child.ConversationScope != binding.ConversationScope ||
 		child.AccountPresentation != binding.AccountPresentation ||
 		child.ProofID != binding.ProofID || child.ProofRevision != binding.ProofRevision ||

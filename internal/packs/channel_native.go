@@ -25,7 +25,10 @@ type CompiledNativeInboxProfile struct {
 }
 
 func compileNativeInboxProfile(raw *NativeInboxProfile, plan SatisfactionPlan) (*CompiledNativeInboxProfile, error) {
-	if raw == nil || raw.Kind != "scoped_commands_v1" || raw.CommandsLauncher != "commands" ||
+	if raw == nil {
+		return nil, nil
+	}
+	if raw.Kind != "scoped_commands_v1" || raw.CommandsLauncher != "commands" ||
 		raw.InheritedLauncher != "default" || raw.DirectLauncherRead == raw.DefaultLauncherRead {
 		return nil, fmt.Errorf("native_inbox requires a scoped_commands_v1 profile with commands/default precedence and distinct launcher reads")
 	}
@@ -72,7 +75,7 @@ func compileNativeInboxProfile(raw *NativeInboxProfile, plan SatisfactionPlan) (
 
 func (p SatisfactionPlan) NativeInboxProfile() (CompiledNativeInboxProfile, error) {
 	if p.nativeInbox == nil {
-		return CompiledNativeInboxProfile{}, fmt.Errorf("compiled native inbox profile is missing")
+		return CompiledNativeInboxProfile{}, &UnsupportedChannelNativeExtensionError{Operation: "native_inbox_profile"}
 	}
 	return *p.nativeInbox, nil
 }

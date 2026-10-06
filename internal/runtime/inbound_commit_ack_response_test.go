@@ -369,8 +369,8 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 				OperationID: operatorchannel.NewOperationID(), Kind: operatorchannel.OperationConnect,
 				PrincipalID: principal.ID, Interface: identity, ExpectedRevision: 0,
 				RequestKeyHash: "ack-operator-key", RequestHash: "ack-operator-body",
-				ProviderCredential: providerEvidence,
-				RequestedAt:        now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+				ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: providerEvidence},
+				RequestedAt:       now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
 			})
 			if err != nil {
 				t.Fatal(err)

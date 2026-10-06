@@ -60,15 +60,32 @@ func ResolveCurrentTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.
 	return result, true, rows.Err()
 }
 
-func ResolveCurrentNativeInboxEntryTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (render.ResolvedNativeEntry, bool, error) {
+func ResolveCurrentInboxEntryTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (render.ResolvedInboxEntry, bool, error) {
 	if tx == nil {
-		return render.ResolvedNativeEntry{}, false, fmt.Errorf("native inbox entry requires selected transaction")
+		return render.ResolvedInboxEntry{}, false, fmt.Errorf("native inbox entry requires selected transaction")
 	}
 	if err := RequireTextIntentTx(ctx, tx, text, postgres); err != nil {
-		return render.ResolvedNativeEntry{}, false, err
+		return render.ResolvedInboxEntry{}, false, err
 	}
 	if text.EntryReference == "" {
-		return render.ResolvedNativeEntry{}, false, nil
+		return render.ResolvedInboxEntry{}, false, nil
+	}
+	if text.EntryReference == render.TextReplyInboxReference {
+		bound, current, err := ResolveCurrentTextTx(ctx, tx, text, postgres)
+		if err != nil || !current {
+			return render.ResolvedInboxEntry{}, false, err
+		}
+		activationID, bindingRevision, audience, err := currentBoundTextAudienceTx(ctx, tx, text, postgres, false)
+		if err != nil {
+			return render.ResolvedInboxEntry{}, false, err
+		}
+		if bindingRevision != bound.BindingRevision || audience.PrincipalID != bound.PrincipalID || audience.InterfaceKey != bound.InterfaceKey {
+			return render.ResolvedInboxEntry{}, false, fmt.Errorf("text/reply inbox authority changed")
+		}
+		return render.ResolvedInboxEntry{
+			Kind: render.InboxEntryTextReply, PrincipalID: bound.PrincipalID, InterfaceKey: bound.InterfaceKey,
+			BindingRevision: bound.BindingRevision, ActivationID: activationID, EntryReference: text.EntryReference,
+		}, true, nil
 	}
 	query := `SELECT b.principal_id, b.interface_key, b.binding_revision, a.activation_id,
 		s.setting_id, s.resource_slot_id, s.generation, s.entry_command
@@ -119,28 +136,29 @@ func ResolveCurrentNativeInboxEntryTx(ctx context.Context, tx *sql.Tx, text oper
 	rows, err := tx.QueryContext(ctx, query, text.Interface.Key(), text.ExternalAccountRef,
 		text.ConversationRef, string(text.ConversationScope), text.Provider, text.EntryReference)
 	if err != nil {
-		return render.ResolvedNativeEntry{}, false, err
+		return render.ResolvedInboxEntry{}, false, err
 	}
 	defer rows.Close()
-	var result render.ResolvedNativeEntry
+	var result render.ResolvedInboxEntry
 	if !rows.Next() {
-		return render.ResolvedNativeEntry{}, false, rows.Err()
+		return render.ResolvedInboxEntry{}, false, rows.Err()
 	}
 	if err := rows.Scan(&result.PrincipalID, &result.InterfaceKey, &result.BindingRevision,
 		&result.ActivationID, &result.SettingID, &result.ResourceSlotID, &result.SettingGeneration, &result.EntryReference); err != nil {
-		return render.ResolvedNativeEntry{}, false, err
+		return render.ResolvedInboxEntry{}, false, err
 	}
 	if rows.Next() {
-		return render.ResolvedNativeEntry{}, false, fmt.Errorf("native inbox entry resolves multiple current settings")
+		return render.ResolvedInboxEntry{}, false, fmt.Errorf("native inbox entry resolves multiple current settings")
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return render.ResolvedNativeEntry{}, false, err
+		return render.ResolvedInboxEntry{}, false, err
 	}
 	count, err := currentNativeConsumersTx(ctx, tx, result.SettingID, postgres)
 	if err != nil || count != 1 {
-		return render.ResolvedNativeEntry{}, false, errors.Join(err, fmt.Errorf("native inbox entry requires one current connection"))
+		return render.ResolvedInboxEntry{}, false, errors.Join(err, fmt.Errorf("native inbox entry requires one current connection"))
 	}
 	// Discovery keeps a known generation retryable. Usability is admitted only
-	// by fresh provider qualification and PlanNativeInboxResponseTx.
+	// by fresh provider qualification and PlanInboxResponseTx.
+	result.Kind = render.InboxEntryNative
 	return result, true, nil
 }

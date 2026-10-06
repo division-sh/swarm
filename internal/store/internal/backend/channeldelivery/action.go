@@ -173,6 +173,7 @@ func EnsureRenderActionsTx(ctx context.Context, tx *sql.Tx, renderID string, fro
 		actual.CardID = desired[index].CardID
 		actual.TextPublicationID = desired[index].TextPublicationID
 		actual.RecoveryDeliveryID = desired[index].RecoveryDeliveryID
+		actual.ParentReceiptOperationID = desired[index].ParentReceiptOperationID
 		desired[index] = actual
 	}
 	query := `SELECT COUNT(*) FROM channel_delivery_actions WHERE render_id=?`
@@ -189,73 +190,6 @@ func EnsureRenderActionsTx(ctx context.Context, tx *sql.Tx, renderID string, fro
 	return desired, nil
 }
 
-func semanticActionsForFrozen(frozen render.Frozen) []render.Action {
-	desired := make([]render.Action, 0, len(frozen.Choices)+len(frozen.DraftChoices)+3)
-	for _, choice := range frozen.Choices {
-		desired = append(desired, render.Action{Kind: "verdict", Verdict: choice.Verdict, Label: choice.Label})
-	}
-	if frozen.Prompt != nil {
-		desired = append(desired, render.Action{Kind: "cancel_input", DraftID: frozen.Prompt.DraftID, Label: "Cancel input"})
-		if frozen.Prompt.Optional {
-			desired = append(desired, render.Action{Kind: "skip_input", DraftID: frozen.Prompt.DraftID, Label: "Skip field"})
-		}
-	}
-	if frozen.DraftChooser != nil {
-		for _, choice := range frozen.DraftChoices {
-			desired = append(desired, render.Action{Kind: "select_draft", DraftID: choice.DraftID, CardID: choice.CardID,
-				TextPublicationID: frozen.DraftChooser.TextPublicationID, Label: choice.Label})
-		}
-	}
-	if frozen.Recovery != nil {
-		for _, choice := range frozen.RecoveryChoices {
-			desired = append(desired, render.Action{Kind: "resend", RecoveryDeliveryID: choice.DeliveryID, Label: choice.Label})
-		}
-	}
-	if frozen.SourceKind == PlanSummary {
-		desired = append(desired, render.Action{Kind: "open_inbox", Label: "Open inbox"})
-	}
-	if frozen.SourceKind == PlanNotice && !frozen.NoticeAcknowledged {
-		desired = append(desired, render.Action{Kind: "acknowledge_notice", Label: "Acknowledge"})
-	}
-	if frozen.Page != nil && frozen.Page.Index+1 < frozen.Page.Count {
-		desired = append(desired, render.Action{Kind: "next_page", Label: "Next page"})
-	}
-	return desired
-}
-
 func actionsForFrozen(frozen render.Frozen) ([]render.Action, error) {
-	if err := frozen.Validate(); err != nil {
-		return nil, err
-	}
-	desired := semanticActionsForFrozen(frozen)
-	_, truncated, err := render.PresentationText(frozen)
-	if err != nil {
-		return nil, err
-	}
-	if truncated {
-		desired = append([]render.Action{{Kind: "view_full", Label: "View full"}}, desired...)
-	}
-	if page := frozen.ActionPage; page != nil {
-		if len(desired) > page.Capacity {
-			pageSize := page.Capacity - 1
-			pages, err := render.ActionPageCount(frozen)
-			if err != nil {
-				return nil, err
-			}
-			start := (page.Index % pages) * pageSize
-			end := start + pageSize
-			if end > len(desired) {
-				end = len(desired)
-			}
-			if start >= end {
-				return nil, fmt.Errorf("channel action page has no controls")
-			}
-			paged := append([]render.Action(nil), desired[start:end]...)
-			desired = append(paged, render.Action{Kind: "more_controls", Label: "More choices"})
-		}
-	}
-	for index := range desired {
-		desired[index].Label = frozen.Bounds.Label(desired[index].Label)
-	}
-	return desired, nil
+	return render.ControlsForRender(frozen)
 }
