@@ -49,3 +49,33 @@ each protocol attempt. No domain/provider/materialization callback is replayed.
 Qualification reruns the census in normal environment, actual omission/restored
 refusal controls, read-only startup/inspection and native protocol tests. The
 full failed core receipt remains evidence; interrupted units earn no proof credit.
+
+## D1 Runtime Construction And Preserved Admission
+
+The exact68cd1aa01 lifecycle receipt correctly rejects the stale `newRuntime`
+fingerprint after the separately approved D1 composition (origin E ed8b59011,
+#2564 approval6021549457, rebased implementing commit b7f81ddf0). Only this
+measured body changes in the regenerated census; the owner, inherited
+A05/A08/A11/A13/A18/A23/A24/A25 and P04/P08/P09/P11/P15/P20/P21 classifications
+remain unchanged. This records the actual deletion, not a guard exemption.
+
+`newRuntime` still constructs the normal PipelineCoordinator from its exact typed
+ports and supplies it as the tool mutation owner. It no longer injects the
+ordinary-final `InstanceDeactivationPreparer`; selected-fork construction removes
+the same injection in `agent_runtime_materialization.go`. The deleted preparer
+is not source/provider/workspace/receiver admission or explicit termination
+authority. Their existing owners, validation and cleanup remain. Ordinary
+handler/timer final entry cannot acquire operational retirement through another
+injection or callback, and explicit termination retains its separate command.
+
+| Consumer / preserved obligation | Actual execution witness |
+| --- | --- |
+| Normal constructor ports, process grant and current dependency graph | `TestRuntimeRequiresProcessGenerationGrant`, `TestRuntimeDepsValidateOwnsRequiredBootInputs`, `TestRuntimeDepsValidatedDerivesCanonicalBootGraph`, `TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway`, `TestRuntimeCorePersistenceRolesAreConstructorInputs`, `TestServeCompositionProvidesExactRuntimePorts`. |
+| Normal real node/agent/timer execution without final-entry retirement | Original unchanged four-cell H2 PASS256.347s; deterministic `TestIssue2564H2FinalEntryCompletionOrderingBothStores` and actual M33 late provider/save/result proof PASS190.465s at race-three. Exact source-bound receipts are in the #2564 D1 composition record; these are not final-tier credit. |
+| Selected construction, accepted work and recovery refusals | Complete `catalog-runtime-fork-readiness` initial/staged unit passes238 entries on68cd locally and again149.018s under server2 lifecycle load. Connected causal/identity/provider/future-oracle preservation passes168 entries at race-three; unsupported staged work still refuses without mutation. |
+| Ordinary publication/settlement and retained explicit cleanup | Complete `catalog-runtime-scatter-safety` passes all seven variants/both stores, including exact cause receipts, original100-item reverse completion and duplicate/held no-op assertions. Explicit middle-member/suffix/panic/cancel and provider/directive retirement controls remain required and pass connected race-three; no ordinary retirement is restored. |
+| Drift detection / fail-closed caller preservation | `TestVerifyBootStartupPredicateCensus` runs with update mode absent; all three `TestAdmissionPredicateRatchetRejects*` controls restore an unaccounted startup refusal, remove a verify consumer or change provider prerequisites and must still reject. No scanner, expected surface, classification, workload or deadline changes. |
+
+The68cd lifecycle failure and interrupted/unstarted units remain unqualified.
+Generator success is not execution proof. Final lifecycle plus the four existing
+supplements and hosted full still qualify the next committed head.
