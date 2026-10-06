@@ -49,6 +49,7 @@ type servedWorkspaceProofRuntime struct {
 		ListStandingServiceStatuses(context.Context) ([]pipeline.StandingServiceStatus, error)
 	}
 	ForkRuntime selectedForkRuntimeProofOptions
+	Restart     func() servedWorkspaceProofRuntime
 }
 
 func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
@@ -118,8 +119,23 @@ func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backen
 	default:
 		t.Fatalf("unknown served workspace backend %q", backend)
 	}
-	proof.Endpoint, proof.Runtime = startOwnedMockLifecycleFollowUpRuntime(t, opts)
-	proof.ForkRuntime = *forkOptions
+	retainedRoot := ownedMockLifecycleRoot(t)
+	var process *serveRuntimeTestProcess
+	start := func() {
+		process = startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
+		process.waitForReadyLine()
+		proof.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+		proof.Runtime = servedTestProcessRuntime(t, process)
+		proof.ForkRuntime = *forkOptions
+	}
+	proof.Restart = func() servedWorkspaceProofRuntime {
+		if code := process.stop(); code != 0 {
+			t.Fatalf("retained workspace predecessor exit=%d", code)
+		}
+		start()
+		return proof
+	}
+	start()
 	if proof.Events == nil || proof.Lifecycle == nil || proof.Observability == nil || proof.WorkflowTargets == nil || proof.Inbound == nil || proof.Standing == nil {
 		t.Fatal("workspace proof requires the original selected read roles")
 	}

@@ -2213,9 +2213,10 @@ func TestProjectToolCallSuccessText_RoleScopedTypedReadPreservesLargeValidationC
 	}
 	ctx := roleScopedTypedReadContext("read_validation_case")
 
-	text, err := projectToolCallSuccessText(ctx, testToolExecutor(func(context.Context, string, any) (any, error) {
+	value, err := projectToolCallSuccessValue(ctx, testToolExecutor(func(context.Context, string, any) (any, error) {
 		return payload, nil
 	}), "read_validation_case", map[string]any{}, payload)
+	text := ToolResultText(value)
 	if err != nil {
 		t.Fatalf("projectToolCallSuccessText: %v", err)
 	}
@@ -2240,9 +2241,10 @@ func TestProjectToolCallSuccessText_RoleScopedTypedReadFieldPreservesCompleteFie
 	}
 	ctx := roleScopedTypedReadContext("read_validation_case_mvp_spec")
 
-	text, err := projectToolCallSuccessText(ctx, testToolExecutor(func(context.Context, string, any) (any, error) {
+	value, err := projectToolCallSuccessValue(ctx, testToolExecutor(func(context.Context, string, any) (any, error) {
 		return field, nil
 	}), "read_validation_case_mvp_spec", map[string]any{}, field)
+	text := ToolResultText(value)
 	if err != nil {
 		t.Fatalf("projectToolCallSuccessText: %v", err)
 	}
@@ -2262,11 +2264,11 @@ func TestProjectToolCallSuccessText_RoleScopedTypedReadFailsClosedWhenTooLarge(t
 	payload := map[string]any{"blob": strings.Repeat("x", toolresultpolicy.MaxCompleteTypedReadResultBytes+1024)}
 	ctx := roleScopedTypedReadContext("read_validation_case")
 
-	text, err := projectToolCallSuccessText(ctx, testToolExecutor(func(context.Context, string, any) (any, error) {
+	value, err := projectToolCallSuccessValue(ctx, testToolExecutor(func(context.Context, string, any) (any, error) {
 		return payload, nil
 	}), "read_validation_case", map[string]any{}, payload)
 	if err == nil {
-		t.Fatalf("projectToolCallSuccessText returned nil error and text %s", text)
+		t.Fatalf("projectToolCallSuccessValue returned nil error and value %#v", value)
 	}
 	runtimeErr, ok := failures.As(err)
 	if !ok || runtimeErr.Failure.Class != failures.ClassDataLimitExceeded || runtimeErr.Failure.Detail.Code != toolresultpolicy.TypedReadResultTooLargeCode {
@@ -2277,9 +2279,10 @@ func TestProjectToolCallSuccessText_RoleScopedTypedReadFailsClosedWhenTooLarge(t
 func TestProjectToolCallSuccessText_ReadPrefixedNonRoleScopedToolKeepsLegacyProjection(t *testing.T) {
 	payload := map[string]any{"blob": strings.Repeat("x", maxToolResultBytes+1024)}
 
-	text, err := projectToolCallSuccessText(unmanagedMCPTestContext(), testToolExecutor(func(context.Context, string, any) (any, error) {
+	value, err := projectToolCallSuccessValue(unmanagedMCPTestContext(), testToolExecutor(func(context.Context, string, any) (any, error) {
 		return payload, nil
 	}), "read_custom_report", map[string]any{}, payload)
+	text := ToolResultText(value)
 	if err != nil {
 		t.Fatalf("projectToolCallSuccessText: %v", err)
 	}

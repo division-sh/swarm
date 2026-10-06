@@ -26,34 +26,39 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 // This uses an actually completed source turn, native worker, real MCP HTTP,
 // and the public fork/chat APIs. The existing API-provider fork test remains a
 // separate provider control; it cannot earn mock transport credit.
 func TestMockForkChatPublicMCPTransportBothStores(t *testing.T) {
-	proveMockForkChatPublicMCPTransportBothStores(t, false, false)
+	proveMockForkChatPublicMCPTransportBothStores(t, false, false, false)
 }
 
 func TestMockForkChatRealDockerPublicMCPTransportBothStores(t *testing.T) {
 	if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") != "1" {
 		t.Skip("real Docker gateway journey; a skip earns no Docker proof")
 	}
-	proveMockForkChatPublicMCPTransportBothStores(t, true, false)
+	proveMockForkChatPublicMCPTransportBothStores(t, true, false, false)
 }
 
 func TestMockForkChatOversizedPublicMCPTransportBothStores(t *testing.T) {
-	proveMockForkChatPublicMCPTransportBothStores(t, false, true)
+	proveMockForkChatPublicMCPTransportBothStores(t, false, true, false)
 }
 
 func TestMockForkChatOversizedRealDockerPublicMCPTransportBothStores(t *testing.T) {
 	if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") != "1" {
 		t.Skip("real Docker oversized gateway journey; a skip earns no Docker proof")
 	}
-	proveMockForkChatPublicMCPTransportBothStores(t, true, true)
+	proveMockForkChatPublicMCPTransportBothStores(t, true, true, false)
 }
 
-func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker, oversized bool) {
+func TestMockForkChatTerminalOutputRetainedRestartBothStores(t *testing.T) {
+	proveMockForkChatPublicMCPTransportBothStores(t, false, true, true)
+}
+
+func proveMockForkChatPublicMCPTransportBothStores(t *testing.T, docker, oversized, restart bool) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyRootIngressServedConversationFork(t)
@@ -92,6 +97,9 @@ def handle(input):
     if "fork_snapshot_read_entities" in names:
         if input["messages"][-1]["role"] != "tool":
             return {"calls": [{"name": "fork_snapshot_read_entities", "arguments": {}}, {"name": "emit_event", "arguments": {"event_name": "forkchat.note"}}], "usage": {"input_tokens": 4, "output_tokens": 2}}
+        import json
+        feedback = json.loads(input["messages"][-1]["content"])
+        assert len(feedback) == 2 and all(entry["ok"] for entry in feedback), feedback
         if OVERSIZED_SNAPSHOT:
             import json
             content = input["messages"][-1]["content"]
@@ -289,6 +297,7 @@ def handle(input):
 				t.Fatalf("exact public mock fork response: %+v", chat)
 			}
 			var read, stub int
+			var outputID, outputTime string
 			for _, call := range chat.Turn.ToolCalls {
 				var result map[string]any
 				if err := json.Unmarshal(call.Result, &result); err != nil {
@@ -299,10 +308,20 @@ def handle(input):
 					if result["status"] != "read_from_snapshot" || result["snapshot_owner"] != runfork.ConversationForkChatSnapshotOwner {
 						t.Fatalf("HTTP tool did not consume frozen snapshot: %s", call.Result)
 					}
+					if result["event_id"] != nil {
+						t.Fatal("nonterminal snapshot read acquired output authority")
+					}
 					read++
 				case "emit_event":
 					if result["status"] != "stubbed" || result["live_mutation"] != false {
 						t.Fatalf("HTTP tool escaped sandbox: %s", call.Result)
+					}
+					outputID, _ = result["event_id"].(string)
+					outputTime, _ = result["created_at"].(string)
+					id, idErr := uuid.Parse(outputID)
+					created, timeErr := time.Parse(time.RFC3339Nano, outputTime)
+					if idErr != nil || id.Version() != 5 || timeErr != nil || created.IsZero() {
+						t.Fatalf("terminal sandbox emit lost settled deterministic identity: %s", call.Result)
 					}
 					stub++
 				default:
@@ -318,6 +337,9 @@ def handle(input):
 			if !replay.IdempotencyReplayed || replay.Turn.TurnID != chat.Turn.TurnID {
 				t.Fatalf("committed mock response replay: %+v", replay)
 			}
+			if !reflect.DeepEqual(replay.Turn.ToolCalls, chat.Turn.ToolCalls) {
+				t.Fatal("replay changed settled terminal output identity")
+			}
 			var next runfork.ConversationForkChatResult
 			chatRequest(map[string]any{
 				"fork_id": created.Fork.ForkID, "message": "continue the private conversation", "idempotency_key": "mock-forkchat-next",
@@ -326,12 +348,37 @@ def handle(input):
 			if next.Turn.TurnID == chat.Turn.TurnID || next.Turn.TurnIndex != chat.Turn.TurnIndex+1 || !next.Turn.ParseOK {
 				t.Fatalf("mock fork continuation: %+v", next)
 			}
+			for _, call := range next.Turn.ToolCalls {
+				if call.Name == "emit_event" {
+					var output struct {
+						EventID string `json:"event_id"`
+					}
+					if json.Unmarshal(call.Result, &output) != nil || output.EventID == "" || output.EventID == outputID {
+						t.Fatal("distinct settled fork occurrence reused terminal output identity")
+					}
+				}
+			}
 			if after := mockForkChatDomainCounts(t, rt, seed.RunID); after != before {
 				t.Fatalf("mock MCP sandbox mutated live facts: before=%+v after=%+v", before, after)
 			}
 			forkRows, err := storetest.ReadConversationForkStorage(context.Background(), rt.Events, created.Fork.ForkID)
 			if err != nil || forkRows.Snapshots != 1 || forkRows.Turns != 2 {
 				t.Fatalf("exact committed fork rows=%+v error=%v, want one snapshot and two turns", forkRows, err)
+			}
+			if restart {
+				restarted := rt.Restart()
+				// Fresh boot owns its own run/event. The replay must not create
+				// any additional domain fact after that admitted boot completes.
+				beforeReplay := mockForkChatDomainCounts(t, restarted, seed.RunID)
+				var recovered runfork.ConversationForkChatResult
+				requireServedJSONRPCResult(t, restarted.Endpoint, "conversation.fork_chat", params, &recovered)
+				if !recovered.IdempotencyReplayed || !reflect.DeepEqual(recovered.Turn.ToolCalls, chat.Turn.ToolCalls) {
+					t.Fatalf("retained restart changed exact terminal output: before=%+v recovered=%+v", chat.Turn, recovered.Turn)
+				}
+				if after := mockForkChatDomainCounts(t, restarted, seed.RunID); after != beforeReplay {
+					t.Fatalf("retained replay changed source/sibling domain facts: before=%+v after=%+v", beforeReplay, after)
+				}
+				return
 			}
 			for _, fault := range []string{"stale-authority", "gateway-disconnect"} {
 				// The oversized supplement qualifies result projection. The original

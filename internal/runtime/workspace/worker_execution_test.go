@@ -62,6 +62,9 @@ func TestWorkerRealDockerIdentityReuseAndCancellationJoin(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if err := manager.EnsurePrereqs(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if err := manager.EnsureContainerRunning(ctx, name, []string{"--entrypoint", "sleep", cfg.WorkspaceImage, "infinity"}); err != nil {
 		t.Fatal(err)
 	}
@@ -367,6 +370,9 @@ func proveWorkerRealDockerHTTPJoin(t *testing.T, proof workerHTTPJoinProof) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if err := manager.EnsurePrereqs(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if err := manager.EnsureContainerRunning(ctx, name, []string{"--entrypoint", "sleep", cfg.WorkspaceImage, "infinity"}); err != nil {
 		t.Fatal(err)
 	}

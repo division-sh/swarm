@@ -177,9 +177,10 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		var cancelLease context.CancelFunc
 		ctx, cancelLease = context.WithCancel(ctx)
 		defer cancelLease()
+		heartbeatCtx := ctx
 		stopHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
 			cancelLease()
-			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the mock session lease heartbeat failed", session.AgentID, session.ID, entityID, nil, heartbeatErr)
+			logPublisherRuntime(heartbeatCtx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the mock session lease heartbeat failed", session.AgentID, session.ID, entityID, nil, heartbeatErr)
 		})
 		defer stopHeartbeat()
 		if session.adoptedFromID != "" {
