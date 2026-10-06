@@ -132,6 +132,13 @@ type revisionExactWriterContract struct {
 
 func TestRunForkRevisionExactWriterContributions(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
+	retiredBody, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend/entityruntime/persistence.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRetiredEntityDiffWriters(string(retiredBody)); err != nil {
+		t.Fatal(err)
+	}
 	seen := map[string]bool{}
 	for _, contract := range revisionExactWriterContracts() {
 		key := contract.path + "|" + contract.symbol
@@ -151,13 +158,44 @@ func TestRunForkRevisionExactWriterContributions(t *testing.T) {
 	}
 }
 
+func validateRetiredEntityDiffWriters(source string) error {
+	functions, err := revisionGuardFunctions(source)
+	if err != nil {
+		return err
+	}
+	for _, name := range []string{"insertPostgresEntityStateDiff", "insertSQLiteEntityStateDiff", "insertSQLiteEntityStateDiffAttempt"} {
+		if functions[name] != nil {
+			return fmt.Errorf("retired entity diff writer %s was restored", name)
+		}
+	}
+	return nil
+}
+
+func TestRunForkRevisionRetiredEntityDiffGuardHostileControls(t *testing.T) {
+	for _, name := range []string{"insertPostgresEntityStateDiff", "insertSQLiteEntityStateDiff", "insertSQLiteEntityStateDiffAttempt"} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateRetiredEntityDiffWriters("package p; func " + name + "() {}"); err == nil {
+				t.Fatal("restored entity diff writer was accepted")
+			}
+			if err := validateRetiredEntityDiffWriters("package p; // " + name + "\nfunc readState() {}"); err != nil {
+				t.Fatalf("historical text was treated as an executable writer: %v", err)
+			}
+		})
+	}
+}
+
 func revisionExactWriterContracts() []revisionExactWriterContract {
 	return []revisionExactWriterContract{
 		{"mutationlog/adapter.go", "Insert", []string{"uuid.NewString()", "attempt.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID)"}},
 		{"mutationlog/adapter.go", "insertSQLiteAt", []string{"uuid.NewString()", "attempt.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID)"}},
-		{"entityruntime/persistence.go", "insertPostgresEntityStateDiff", []string{"uuid.NewString()", "mutation.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
-		{"entityruntime/persistence.go", "insertSQLiteEntityStateDiff", []string{"uuid.NewString()", "addFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
-		{"entityruntime/persistence.go", "insertSQLiteEntityStateDiffAttempt", []string{"insertSQLiteEntityStateDiff(ctx, tx, runID, entityID, before, after, writer, createdAt, mutation.AddFact, mutation.Record)"}},
+		{"pipelinepersistence/workflow_engine_mutation_commit.go", "commitWorkflowEngineMutationLog", []string{
+			"workflowEngineStateProjection(record)",
+			"insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, before, after, writer, record.UpdatedAt)",
+		}},
+		{"pipelinepersistence/workflow_engine_mutation_commit.go", "insertWorkflowEngineStateDiff", []string{
+			"privatemutationlog.InsertEntityStateDiff(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) { return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID) }), entityID, before, after, writer)",
+			"privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) { return selected.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID) }), entityID, before, after, writer, occurredAt)",
+		}},
 		{"pipelinepersistence/scenario_setup.go", "PipelinePostgresOwner.SetupScenarioEntities", []string{"s.CommitScenarioSetup(ctx, runtimebus.ScenarioSetupCommand{Setup: req})"}},
 		{"pipelinepersistence/scenario_setup.go", "PipelineSQLiteOwner.SetupScenarioEntities", []string{"s.CommitScenarioSetup(ctx, runtimebus.ScenarioSetupCommand{Setup: req})"}},
 		{"pipelinepersistence/scenario_setup.go", "PipelinePostgresOwner.CommitScenarioSetup", []string{"attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)"}},

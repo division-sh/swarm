@@ -61,7 +61,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -2473,14 +2472,14 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 
 func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
-	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, nil, hooks...)
+	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, hooks...)
 }
 
 func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
-	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, realWorkspace, nil, hooks...)
+	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, realWorkspace, hooks...)
 }
 
-func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, observer lifecycleprobe.Observer, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
 	forkOptions := captureServedForkRuntimeOptions(t)
 	configureWorkspace := func() {
@@ -2530,7 +2529,6 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
-			TestLifecycleProbe:               observer,
 			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 			APIListenAddr:                    "127.0.0.1:0",
 			MCPListenAddr:                    "127.0.0.1:0",
@@ -2556,7 +2554,6 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
-			TestLifecycleProbe:               observer,
 			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 			StoreMode:                        "postgres",
 			StoreModeSet:                     true,
