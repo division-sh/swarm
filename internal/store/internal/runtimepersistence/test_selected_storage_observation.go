@@ -46,4 +46,3 @@ func validateChannelObservationOwner(selected any) error {
 	}
 	return nil
 }
-
