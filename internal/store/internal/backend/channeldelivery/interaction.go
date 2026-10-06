@@ -335,7 +335,7 @@ func RejectUnboundTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 }
 
 func SettleTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, disposition string, postgres bool) error {
-	if disposition != "input_progressed" && disposition != "input_complete" && disposition != "teaching" && disposition != "chooser" && disposition != "control" && disposition != "rejected" {
+	if disposition != "input_progressed" && disposition != "input_complete" && disposition != "teaching" && disposition != "chooser" && disposition != "control" && disposition != "rejected" && disposition != "entry" {
 		return fmt.Errorf("unsupported channel text disposition %q", disposition)
 	}
 	if err := RequireTextIntentTx(ctx, tx, text, postgres); err != nil {

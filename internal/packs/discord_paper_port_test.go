@@ -1,8 +1,10 @@
 package packs_test
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -29,7 +31,7 @@ func discordPaperPort(t *testing.T) (packs.SatisfactionPlan, packs.TriggerPackDe
 	}
 	channel := packs.LoadedChannelPack{
 		Envelope: packs.Envelope{ID: "provider.discord.hitl_channel", Type: packs.TypeChannel,
-			Version: "0.1.0", ManifestHash: "sha256:" + strings.Repeat("d", 64),
+			Version: "0.1.0", ManifestHash: fmt.Sprintf("sha256:%x", sha256.Sum256(body)),
 			Implements: []string{"swarm.hitl-channel/v2"}, Provenance: packs.Provenance{Source: "external"},
 			Requires: packs.Requires{Packs: map[string]string{packs.TypeTrigger: "provider.discord", packs.TypeConnector: "provider.discord.connector"}}},
 		Manifest: manifest, Source: packs.MustPackSource("test", "discord-paper-port"),
