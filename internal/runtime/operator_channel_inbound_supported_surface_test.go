@@ -58,7 +58,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 	if sqlite {
 		inboundTarget = seedSQLiteInboundGatewayRuntime(t, ctx, selected.(*store.SQLiteRuntimeStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
 	} else {
-		inboundTarget = seedPostgresInboundGatewayRuntime(t, ctx, db, selected.(*store.PostgresStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
+		inboundTarget = seedPostgresInboundGatewayRuntime(t, ctx, selected.(*store.PostgresStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
 	}
 
 	plan := compileEmbeddedTelegramOperatorChannelPlan(t)

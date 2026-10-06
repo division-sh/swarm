@@ -46,7 +46,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 		entityID := runtimeflowidentity.EntityID(flowInstance)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
+		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
 		runSlackManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{

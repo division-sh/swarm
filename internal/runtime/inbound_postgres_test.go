@@ -113,7 +113,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -319,7 +319,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -483,7 +483,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -612,7 +612,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -733,7 +733,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
 	if err != nil {
@@ -1014,7 +1014,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
+			target := seedPostgresInboundGatewayRuntime(t, ctx, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
 
 			bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, tc.providerEventName)
 			if err != nil {
@@ -1154,7 +1154,6 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 func seedPostgresInboundGatewayRuntime(
 	t *testing.T,
 	ctx context.Context,
-	db *sql.DB,
 	pg *store.PostgresStore,
 	runID string,
 	entityID string,

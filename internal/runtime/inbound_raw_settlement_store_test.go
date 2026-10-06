@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -56,13 +55,13 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			for providerIndex, provider := range providers {
 				t.Run(provider.provider, func(t *testing.T) {
-					selected, db := openProviderRawSettlementStore(t, backend)
+					selected := openProviderRawSettlementStore(t, backend)
 					runID := uuid.NewString()
 					entityID := uuid.NewString()
 					flowInstance := boundedProviderFlowID
 					secret := provider.provider + "-raw-settlement-secret"
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-					target := seedProviderRawSettlementRuntime(t, ctx, selected, db, runID, entityID, flowInstance, provider.provider, secret, "")
+					target := seedProviderRawSettlementRuntime(t, ctx, selected, runID, entityID, flowInstance, provider.provider, secret, "")
 					source := providerRawSettlementSemanticSource(t, target, provider, secret)
 					for _, realSubscriber := range []bool{false, true} {
 						outcome := "zero_consumer"
@@ -257,22 +256,22 @@ func providerRawSettlementAgentIdentity(t testing.TB, runID, flowID, flowInstanc
 	return runtimeagentidentitytest.RuntimeForRun(t, runID, agentID, "runtime-test/provider-raw-settlement", flowID, flowInstance, flowInstance)
 }
 
-func openProviderRawSettlementStore(t *testing.T, backend string) (providerRawSettlementProofStore, *sql.DB) {
+func openProviderRawSettlementStore(t *testing.T, backend string) providerRawSettlementProofStore {
 	t.Helper()
 	if backend == "postgres" {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
-		return storetest.AdmitPostgresRuntimeStore(t, db), db
+		return storetest.AdmitPostgresRuntimeStore(t, db)
 	}
 	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, testAuthorActivityContext(context.Background()))
-	return selected, storetest.DatabaseForTest(selected)
+	return selected
 }
 
-func seedProviderRawSettlementRuntime(t *testing.T, ctx context.Context, selected providerRawSettlementProofStore, db *sql.DB, runID, entityID, flowInstance, provider, secret, agentID string) runtimepkg.InboundTarget {
+func seedProviderRawSettlementRuntime(t *testing.T, ctx context.Context, selected providerRawSettlementProofStore, runID, entityID, flowInstance, provider, secret, agentID string) runtimepkg.InboundTarget {
 	t.Helper()
 	switch typed := selected.(type) {
 	case *store.PostgresStore:
-		return seedPostgresInboundGatewayRuntime(t, ctx, db, typed, runID, entityID, flowInstance, "customer-a", provider, secret, agentID)
+		return seedPostgresInboundGatewayRuntime(t, ctx, typed, runID, entityID, flowInstance, "customer-a", provider, secret, agentID)
 	case *store.SQLiteRuntimeStore:
 		return seedSQLiteInboundGatewayRuntime(t, ctx, typed, runID, entityID, flowInstance, "customer-a", provider, secret, agentID)
 	default:

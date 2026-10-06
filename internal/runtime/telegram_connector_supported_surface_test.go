@@ -50,7 +50,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		entityID := runtimeflowidentity.EntityID(flowInstance)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
+		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
