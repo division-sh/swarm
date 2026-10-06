@@ -66,3 +66,24 @@ func TestClockSuspensionRejectsTerminalAndNonClockRearming(t *testing.T) {
 		t.Fatal("control schedule acquired clock parking")
 	}
 }
+
+func TestClockSuspensionCountsOnlyTheSuspendedInterval(t *testing.T) {
+	for _, cadence := range []DueBasis{EveryDue(5 * time.Minute), CronDue("*/5 * * * *")} {
+		t.Run(string(cadence.Kind), func(t *testing.T) {
+			original := instanceRecoveryActivation(t)
+			original.Command.Due = cadence
+			original.AdmittedAt = time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+			original.InitialDueAt, _ = cadence.FirstDue(original.AdmittedAt)
+			original.CurrentDueAt = original.InitialDueAt
+			original.ImmutableHash, _ = original.Command.ImmutableHash()
+			parked, err := ParkClock(original, original.AdmittedAt.Add(21*time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resumed, err := ResumeClock(parked, original.AdmittedAt.Add(61*time.Minute))
+			if err != nil || resumed.ClockSuspension.SkippedOccurrences != 8 {
+				t.Fatalf("pre-suspension backlog counted as suspended: %+v, %v", resumed.ClockSuspension, err)
+			}
+		})
+	}
+}

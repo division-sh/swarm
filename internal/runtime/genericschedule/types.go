@@ -471,24 +471,8 @@ func (a Activation) Validate() error {
 	if err != nil || !derived.Equal(a.InitialDueAt) {
 		return errors.New("generic schedule initial due coordinate does not match persisted due basis")
 	}
-	if a.CurrentDueAt.Before(a.InitialDueAt) {
-		return errors.New("generic schedule current due coordinate precedes its initial coordinate")
-	}
-	if !a.Command.Due.Recurring() && !a.CurrentDueAt.Equal(a.InitialDueAt) {
-		return errors.New("one-shot generic schedule current due coordinate changed")
-	}
-	if err := validateClockSuspension(a); err != nil {
+	if err := a.validateCurrentDue(); err != nil {
 		return err
-	}
-	cadenceBase, err := a.cadenceBase()
-	if err != nil {
-		return err
-	}
-	if a.CurrentDueAt.Before(cadenceBase) {
-		return errors.New("generic schedule current due precedes its cadence base")
-	}
-	if a.Command.Due.Kind == DueEvery && (a.CurrentDueAt.UnixMicro()-cadenceBase.UnixMicro())%a.Command.Due.Every.Microseconds() != 0 {
-		return errors.New("every generic schedule current due coordinate is off cadence")
 	}
 	hasOccurrenceID := a.CurrentEventID != ""
 	hasOccurrenceAdmission := !a.CurrentEventAdmittedAt.IsZero()
@@ -547,6 +531,29 @@ func (a Activation) Validate() error {
 	}
 	if a.CurrentEventID != "" && a.CurrentEventID != OccurrenceEventID(a.ID, a.CurrentDueAt) {
 		return errors.New("generic schedule occurrence event identity is not deterministic")
+	}
+	return nil
+}
+
+func (a Activation) validateCurrentDue() error {
+	if a.CurrentDueAt.Before(a.InitialDueAt) {
+		return errors.New("generic schedule current due coordinate precedes its initial coordinate")
+	}
+	if !a.Command.Due.Recurring() && !a.CurrentDueAt.Equal(a.InitialDueAt) {
+		return errors.New("one-shot generic schedule current due coordinate changed")
+	}
+	if err := validateClockSuspension(a); err != nil {
+		return err
+	}
+	cadenceBase, err := a.cadenceBase()
+	if err != nil {
+		return err
+	}
+	if a.CurrentDueAt.Before(cadenceBase) {
+		return errors.New("generic schedule current due precedes its cadence base")
+	}
+	if a.Command.Due.Kind == DueEvery && (a.CurrentDueAt.UnixMicro()-cadenceBase.UnixMicro())%a.Command.Due.Every.Microseconds() != 0 {
+		return errors.New("every generic schedule current due coordinate is off cadence")
 	}
 	return nil
 }

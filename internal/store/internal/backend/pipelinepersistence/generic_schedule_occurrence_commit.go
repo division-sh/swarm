@@ -9,6 +9,8 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	privategenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -64,6 +66,12 @@ func commitGenericScheduleOccurrence(
 				persisted.CurrentEventAdmittedAt.Equal(command.Occurrence.AdmittedAt)
 			committedReplay := persisted.Status == runtimegenericschedule.StatusFired ||
 				(persisted.Command.Due.Recurring() && persisted.CurrentDueAt.After(command.Occurrence.DueAt))
+			if committedReplay {
+				committedReplay, err = genericScheduleOccurrenceWasAccepted(txctx, tx, postgres, command.Occurrence.EventID)
+				if err != nil {
+					return err
+				}
+			}
 			if !currentOccurrence && !committedReplay {
 				result = runtimegenericschedule.CommitResult{Outcome: runtimegenericschedule.CommitTerminal, Next: persisted}
 				return nil
@@ -132,6 +140,17 @@ func commitGenericScheduleOccurrence(
 		result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
 	}
 	return result, errors.Join(outcome.Err(), result.Validate())
+}
+
+// Rearming advances a due coordinate without accepting an occurrence. The
+// existing event owner, not coordinate ordering, proves an acknowledged replay.
+func genericScheduleOccurrenceWasAccepted(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) (bool, error) {
+	if postgres {
+		_, found, err := eventrecordpostgres.Load(ctx, tx, eventID)
+		return found, err
+	}
+	_, found, err := eventrecordsqlite.Load(ctx, tx, eventID)
+	return found, err
 }
 
 func (s *PipelinePostgresOwner) CommitGenericScheduleOccurrence(ctx context.Context, command runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {

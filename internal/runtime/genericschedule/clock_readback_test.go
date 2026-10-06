@@ -42,3 +42,31 @@ func TestClockReadbackUsesPersistedLifecycleEvidence(t *testing.T) {
 		t.Fatal("corrupt activation projected as a clock")
 	}
 }
+
+func TestClockReadbackKeepsParkingAndSkippedIntervalIsolated(t *testing.T) {
+	activation := instanceRecoveryActivation(t)
+	parked, err := ParkClock(activation, activation.AdmittedAt.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := ProjectClockReadback(parked, true)
+	if err != nil || view.Status != StatusParked || view.NextDueAt != nil || view.RetainsRun || view.Suspension == nil {
+		t.Fatalf("parked projection=%+v error=%v", view, err)
+	}
+	view.Suspension.ParkedAt = time.Time{}
+	if parked.ClockSuspension.ParkedAt.IsZero() {
+		t.Fatal("readback mutated durable parking evidence")
+	}
+	resumed, err := ResumeClock(parked, activation.AdmittedAt.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err = ProjectClockReadback(resumed, true)
+	if err != nil || view.NextDueAt == nil || !view.RetainsRun || view.Suspension.SkippedOccurrences != 60 {
+		t.Fatalf("resumed projection=%+v error=%v", view, err)
+	}
+	view.Suspension.SkippedOccurrences = -1
+	if resumed.ClockSuspension.SkippedOccurrences != 60 {
+		t.Fatal("readback mutated skipped occurrence evidence")
+	}
+}

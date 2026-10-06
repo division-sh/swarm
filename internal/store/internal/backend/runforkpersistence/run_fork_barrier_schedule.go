@@ -60,6 +60,9 @@ func validateRunForkBarrierSchedules(snapshot *runForkRevisionSnapshot, obligati
 // Transport projection only: the existing activation and barrier owners validate
 // the command, immutable hash, due coordinates, status, and ownership relation.
 func projectRunForkBarrierActivation(timer runForkRevisionTimer) (genericschedule.Activation, error) {
+	if len(timer.ClockSuspension) != 0 && string(timer.ClockSuspension) != "null" {
+		return genericschedule.Activation{}, fmt.Errorf("barrier activation cannot carry clock suspension")
+	}
 	if timer.DueBasisKind != string(genericschedule.DueAbsolute) || timer.DueBasisAbsolute == nil ||
 		timer.DueBasisDuration != "" || timer.DueBasisCron != "" || timer.Recurring || timer.RecurrenceInterval != "" ||
 		timer.TaskType != "timer" || timer.OwnerKind != string(genericschedule.OwnerSystem) || timer.OwnerNode != "" ||

@@ -427,15 +427,21 @@ func TestClockScheduleReadbackSchemaPublishesDurableEvidence(t *testing.T) {
 	}
 	properties := mustMappingValue(t, clock, "properties")
 	status := mustMappingValue(t, mustMappingValue(t, properties, "status"), "enum")
-	if status.Kind != yaml.SequenceNode || len(status.Content) != 3 {
-		t.Fatalf("clock status enum = %#v, want three clock lifecycle statuses", status)
+	if status.Kind != yaml.SequenceNode || len(status.Content) != 4 {
+		t.Fatalf("clock status enum = %#v, want four clock lifecycle statuses", status)
 	}
-	for i, want := range []string{"active", "cancelled", "failed"} {
+	for i, want := range []string{"active", "parked", "cancelled", "failed"} {
 		assertScalarValue(t, status.Content[i], want)
 	}
 	due := mustMappingValue(t, properties, "next_due_at")
 	assertScalarValue(t, mustMappingValue(t, due, "$ref"), "#/components/schemas/Timestamp")
 	assertScalarContains(t, mustMappingValue(t, due, "description"), "not recomputed on read")
+	suspension := mustMappingValue(t, properties, "suspension")
+	assertSurfaceListedValue(t, mustMappingValue(t, suspension, "required"), "skipped_occurrences")
+	interval := mustMappingValue(t, suspension, "properties")
+	for _, field := range []string{"parked_at", "suspended_from", "resumed_at"} {
+		assertScalarValue(t, mustMappingValue(t, mustMappingValue(t, interval, field), "$ref"), "#/components/schemas/Timestamp")
+	}
 	runProperties := mustMappingValue(t, mustMappingValue(t, schemas, "RunHeader"), "properties")
 	clocks := mustMappingValue(t, runProperties, "clock_schedules")
 	assertScalarValue(t, mustMappingValue(t, mustMappingValue(t, clocks, "items"), "$ref"), "#/components/schemas/ClockScheduleReadback")

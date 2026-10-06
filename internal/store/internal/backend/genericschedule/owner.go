@@ -633,7 +633,7 @@ func cancelTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt
 	if !found {
 		return runtimegenericschedule.CancelResult{Outcome: runtimegenericschedule.CancelMissing}, nil
 	}
-	if activation.Status != runtimegenericschedule.StatusActive {
+	if activation.Status != runtimegenericschedule.StatusActive && activation.Status != runtimegenericschedule.StatusParked {
 		return runtimegenericschedule.CancelResult{Outcome: runtimegenericschedule.CancelTerminal, Activation: activation}, nil
 	}
 	activation, err = cancelLoadedTx(ctx, tx, dialectFor(postgres), activation, command.Cause, command.CancelledAt)
@@ -721,7 +721,7 @@ func cancelAdmissionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotoco
 	if activation.ImmutableHash != hash {
 		return runtimegenericschedule.CancelResult{}, &runtimegenericschedule.ConflictError{ScopeKey: scope, ScheduleKey: command.ScheduleKey}
 	}
-	if activation.Status != runtimegenericschedule.StatusActive {
+	if activation.Status != runtimegenericschedule.StatusActive && activation.Status != runtimegenericschedule.StatusParked {
 		return runtimegenericschedule.CancelResult{Outcome: runtimegenericschedule.CancelTerminal, Activation: activation}, nil
 	}
 	activation, err = cancelLoadedTx(ctx, tx, dialectFor(postgres), activation, cause, cancelledAt)
@@ -758,6 +758,19 @@ func CancelRunsTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgr
 }
 
 func cancelRunsTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, runIDs []string, cause string, cancelledAt time.Time) ([]runtimetimercancellation.Ref, error) {
+	refs, err := runActivationRefsTx(ctx, tx, postgres, runIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, ref := range refs {
+		if _, err := CancelTx(ctx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt}); err != nil {
+			return nil, err
+		}
+	}
+	return refs, nil
+}
+
+func runActivationRefsTx(ctx context.Context, tx *sql.Tx, postgres bool, runIDs []string) ([]runtimetimercancellation.Ref, error) {
 	ids := normalizedIDs(runIDs)
 	if len(ids) == 0 {
 		return nil, nil
@@ -783,11 +796,6 @@ func cancelRunsTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Att
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	for _, ref := range refs {
-		if _, err := CancelTx(ctx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt}); err != nil {
-			return nil, err
-		}
 	}
 	return refs, nil
 }
@@ -850,7 +858,7 @@ routing_source, execution_mode, COALESCE(reply_context_id, ''), due_basis_kind, 
 COALESCE(due_basis_duration, ''), COALESCE(due_basis_cron, ''), COALESCE(task_id, ''),
 immutable_hash, created_at, initial_fire_at, fire_at, COALESCE(CAST(occurrence_event_id AS TEXT), ''),
 occurrence_admitted_at, status, COALESCE(cancel_cause, ''), cancelled_at, fired_at, accepted_at,
-failed_at, COALESCE(failure_code, ''), COALESCE(failure_message, '')`
+failed_at, COALESCE(failure_code, ''), COALESCE(failure_message, ''), clock_suspension`
 
 func activationSelectByID(d dialect) string {
 	if d == postgresDialect {
@@ -878,7 +886,7 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 		nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID            string
 		eventType, executionMode, replyContext, dueKind, dueDuration, dueCron, taskID string
 		immutableHash, immutableHashDuplicate, occurrenceEventID, status              string
-		payloadRaw, routingRaw                                                        any
+		payloadRaw, routingRaw, suspensionRaw                                         any
 		dueAbsoluteRaw, createdRaw, initialRaw, currentRaw, occurrenceAdmittedRaw     any
 		cancelCause, failureCode, failureMessage                                      string
 		cancelledRaw, firedRaw, acceptedRaw, failedRaw                                any
@@ -889,7 +897,7 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 		&routingRaw, &executionMode, &replyContext, &dueKind, &dueAbsoluteRaw, &dueDuration, &dueCron, &taskID,
 		&immutableHashDuplicate, &createdRaw, &initialRaw, &currentRaw, &occurrenceEventID,
 		&occurrenceAdmittedRaw, &status, &cancelCause, &cancelledRaw, &firedRaw, &acceptedRaw,
-		&failedRaw, &failureCode, &failureMessage,
+		&failedRaw, &failureCode, &failureMessage, &suspensionRaw,
 	)
 	if err != nil {
 		return runtimegenericschedule.Activation{}, err
@@ -936,6 +944,9 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 	activation.Status = runtimegenericschedule.Status(status)
 	activation.CancelCause = cancelCause
 	activation.Failure = runtimegenericschedule.Failure{Code: failureCode, Message: failureMessage}
+	if activation.ClockSuspension, err = decodeClockSuspension(suspensionRaw); err != nil {
+		return malformed(err)
+	}
 	if activation.AdmittedAt, _, err = timeValue(createdRaw); err != nil {
 		return malformed(err)
 	}
@@ -1064,12 +1075,23 @@ func stampOccurrenceTx(ctx context.Context, tx *sql.Tx, d dialect, activation ru
 
 func cancelLoadedTx(ctx context.Context, tx *sql.Tx, d dialect, activation runtimegenericschedule.Activation, cause string, at time.Time) (runtimegenericschedule.Activation, error) {
 	at = canonicalTime(at)
-	query := `UPDATE timers SET status = 'cancelled', cancel_cause = ?, cancelled_at = ?
-		WHERE timer_id = ? AND task_type IN ('timer','scheduled_task','global_recurring') AND status = 'active'`
-	args := []any{strings.TrimSpace(cause), at, activation.ID}
+	var suspension any
+	if activation.ClockSuspension != nil && !activation.ClockSuspension.ResumedAt.IsZero() {
+		activation.ClockSuspension.ParkedAt = time.Time{}
+		encoded, err := json.Marshal(activation.ClockSuspension)
+		if err != nil {
+			return runtimegenericschedule.Activation{}, err
+		}
+		suspension = string(encoded)
+	} else {
+		activation.ClockSuspension = nil
+	}
+	query := `UPDATE timers SET status = 'cancelled', cancel_cause = ?, cancelled_at = ?, clock_suspension = ?
+		WHERE timer_id = ? AND task_type IN ('timer','scheduled_task','global_recurring') AND status IN ('active','parked')`
+	args := []any{strings.TrimSpace(cause), at, suspension, activation.ID}
 	if d == postgresDialect {
-		query = `UPDATE timers SET status = 'cancelled', cancel_cause = $1, cancelled_at = $2
-			WHERE timer_id = $3::uuid AND task_type IN ('timer','scheduled_task','global_recurring') AND status = 'active'`
+		query = `UPDATE timers SET status = 'cancelled', cancel_cause = $1, cancelled_at = $2, clock_suspension = $3::jsonb
+			WHERE timer_id = $4::uuid AND task_type IN ('timer','scheduled_task','global_recurring') AND status IN ('active','parked')`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -1306,7 +1328,7 @@ func runActivationQuery(postgres bool, ids []string) (string, []any) {
 	}
 	query := `SELECT CAST(timer_id AS TEXT), fire_at, CAST(run_id AS TEXT), COALESCE(timer_name, '') FROM timers
 		WHERE run_id IN (` + strings.Join(placeholders, ",") + `)
-		AND task_type IN ('timer','scheduled_task','global_recurring') AND status = 'active'
+		AND task_type IN ('timer','scheduled_task','global_recurring') AND status IN ('active','parked')
 		ORDER BY timer_id`
 	if postgres {
 		query += " FOR UPDATE"

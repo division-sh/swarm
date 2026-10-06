@@ -117,6 +117,7 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 			t.task_type,
 			COALESCE(CAST(t.run_id AS TEXT), ''),
 			t.status,
+			t.owner_kind,
 			t.fire_at,
 			COALESCE(r.status, ''),
 			CAST(t.timer_id AS TEXT), t.initial_fire_at,
@@ -135,6 +136,7 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 				t.task_type,
 				COALESCE(t.run_id::text, ''),
 				t.status,
+				t.owner_kind,
 				t.fire_at,
 				COALESCE(r.status, ''),
 				t.timer_id::text, t.initial_fire_at,
@@ -166,13 +168,14 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 			familyValue                                                        string
 			runID                                                              string
 			status                                                             string
+			ownerKind                                                          string
 			fireAtValue                                                        any
 			runStatus                                                          string
 			activation                                                         Activation
 			initialAt, occurrenceAdmittedAt, acceptedAt, cancelledAt, failedAt any
 		)
 		if err := rows.Scan(
-			&familyValue, &runID, &status, &fireAtValue, &runStatus,
+			&familyValue, &runID, &status, &ownerKind, &fireAtValue, &runStatus,
 			&activation.ActivationID, &initialAt, &activation.OccurrenceEventID,
 			&occurrenceAdmittedAt, &acceptedAt, &activation.CancelCause, &cancelledAt,
 			&activation.FailureCode, &activation.FailureMessage, &failedAt,
@@ -190,7 +193,7 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 		runID = strings.TrimSpace(runID)
 		status = strings.TrimSpace(status)
 		runStatus = strings.TrimSpace(runStatus)
-		if err := validateRow(family, runID, status, fireAt); err != nil {
+		if err := validateRow(family, runID, status, ownerKind, fireAt); err != nil {
 			return Snapshot{}, err
 		}
 		activation.Family = family
@@ -323,9 +326,13 @@ func familyIndex(family Family) int {
 	panic("validated timer family is absent from canonical ordering")
 }
 
-func validateRow(family Family, runID, status string, fireAt time.Time) error {
+func validateRow(family Family, runID, status, ownerKind string, fireAt time.Time) error {
 	switch status {
 	case "active", "fired", "cancelled", "failed":
+	case "parked":
+		if family != FamilyScheduledTask || ownerKind != "instance" || runID == "" {
+			return fmt.Errorf("parked timer requires a run-owned instance clock")
+		}
 	default:
 		return fmt.Errorf("timer family %s has invalid status %q", family, status)
 	}
