@@ -14,6 +14,7 @@ type SchemaInspection = private.SchemaInspection
 type SchemaCompatibilityError = private.SchemaCompatibilityError
 type SchemaDialect = private.SchemaDialect
 type SchemaTableDDL = private.SchemaTableDDL
+type ReadOnlyInspection = construction.ReadOnlyInspection
 
 var DSNFromConfig = private.DSNFromConfig
 var FlattenSchemaTableDDLs = private.FlattenSchemaTableDDLs
@@ -21,6 +22,7 @@ var GenerateNodeStateTableDDLs = private.GenerateNodeStateTableDDLs
 var GeneratePlatformTableDDLs = private.GeneratePlatformTableDDLs
 var NewPostgresStore = construction.NewPostgres
 var NewSQLiteRuntimeStore = construction.NewSQLiteRuntime
+var OpenReadOnlyInspection = construction.OpenReadOnlyInspection
 var NodeStateFieldTypeToDDL = private.NodeStateFieldTypeToDDL
 var QuoteIdent = private.QuoteIdent
 var ResolveDatabasePassword = private.ResolveDatabasePassword
