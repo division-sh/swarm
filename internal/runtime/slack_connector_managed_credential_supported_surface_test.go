@@ -616,92 +616,32 @@ func waitForSlackManagedConnectorTerminalActivityAttempt(t *testing.T, backend s
 }
 
 func tryLoadSlackManagedConnectorActivityAttempt(backend slackManagedConnectorBackend, sourceEventID string) (runtimepipeline.ActivityAttemptRecord, bool, error) {
-	var requestEventID string
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT request_event_id
-			FROM activity_attempts
-			WHERE run_id = ?
-			  AND tool = 'slack.post_message'
-			  AND source_event_id = ?
-			ORDER BY started_at ASC
-			LIMIT 1
-		`, backend.runID, sourceEventID).Scan(&requestEventID)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT request_event_id::text
-			FROM activity_attempts
-			WHERE run_id = $1::uuid
-			  AND tool = 'slack.post_message'
-			  AND source_event_id = $2::uuid
-			ORDER BY started_at ASC
-			LIMIT 1
-		`, backend.runID, sourceEventID).Scan(&requestEventID)
+	rows, err := runtimeConnectorActivityRowsForSource(backend.ctx, backend.eventStore, backend.runID, "slack.post_message", sourceEventID)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	if err == sql.ErrNoRows {
+	if len(rows) == 0 {
 		return runtimepipeline.ActivityAttemptRecord{}, false, nil
 	}
-	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, false, err
-	}
-	rec, ok, err := backend.activityAttempts.LoadActivityAttempt(backend.ctx, requestEventID)
-	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, false, err
-	}
-	return rec, ok, nil
+	return backend.activityAttempts.LoadActivityAttempt(backend.ctx, rows[0].RequestEventID)
 }
 
 func countSlackManagedConnectorActivityAttempts(t *testing.T, backend slackManagedConnectorBackend) int {
 	t.Helper()
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = ?
-			  AND tool = 'slack.post_message'
-		`, backend.runID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = $1::uuid
-			  AND tool = 'slack.post_message'
-		`, backend.runID).Scan(&count)
-	}
+	rows, err := runtimeConnectorActivityRows(backend.ctx, backend.eventStore, backend.runID, "slack.post_message")
 	if err != nil {
-		t.Fatalf("%s count activity attempts: %v", backend.name, err)
+		t.Fatalf("%s read exact activity storage: %v", backend.name, err)
 	}
-	return count
+	return len(rows)
 }
 
 func countSlackManagedConnectorActivityAttemptsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = ?
-			  AND tool = 'slack.post_message'
-			  AND source_event_id = ?
-		`, backend.runID, sourceEventID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = $1::uuid
-			  AND tool = 'slack.post_message'
-			  AND source_event_id = $2::uuid
-		`, backend.runID, sourceEventID).Scan(&count)
-	}
+	rows, err := runtimeConnectorActivityRowsForSource(backend.ctx, backend.eventStore, backend.runID, "slack.post_message", sourceEventID)
 	if err != nil {
-		t.Fatalf("%s count activity attempts for source event %s: %v", backend.name, sourceEventID, err)
+		t.Fatalf("%s read exact activity storage: %v", backend.name, err)
 	}
-	return count
+	return len(rows)
 }
 
 func countSlackManagedConnectorFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
@@ -833,51 +773,12 @@ func loadSlackManagedConnectorActivityRequestEvent(t *testing.T, backend slackMa
 
 func assertSlackManagedConnectorNoStoredSecret(t *testing.T, backend slackManagedConnectorBackend, secret string) {
 	t.Helper()
-	var eventLeaks int
-	var attemptLeaks int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = ?
-			  AND payload LIKE '%' || ? || '%'
-		`, backend.runID, secret).Scan(&eventLeaks)
-		if err == nil {
-			err = backend.db.QueryRowContext(backend.ctx, `
-				SELECT COUNT(*)
-				FROM activity_attempts
-				WHERE run_id = ?
-				  AND (
-					COALESCE(result_payload, '') LIKE '%' || ? || '%'
-					OR COALESCE(failure, '') LIKE '%' || ? || '%'
-				  )
-			`, backend.runID, secret, secret).Scan(&attemptLeaks)
-		}
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND payload::text LIKE '%' || $2 || '%'
-		`, backend.runID, secret).Scan(&eventLeaks)
-		if err == nil {
-			err = backend.db.QueryRowContext(backend.ctx, `
-				SELECT COUNT(*)
-				FROM activity_attempts
-				WHERE run_id = $1::uuid
-				  AND (
-					COALESCE(result_payload::text, '') LIKE '%' || $2 || '%'
-					OR COALESCE(failure::text, '') LIKE '%' || $2 || '%'
-				  )
-			`, backend.runID, secret).Scan(&attemptLeaks)
-		}
-	}
+	evidence, err := storetest.ReadConnectorCredentialLeakStorage(backend.ctx, backend.eventStore, backend.runID, secret)
 	if err != nil {
-		t.Fatalf("%s no-secret query for %q: %v", backend.name, secret, err)
+		t.Fatalf("%s no-secret storage evidence: %v", backend.name, err)
 	}
-	if eventLeaks != 0 || attemptLeaks != 0 {
-		t.Fatalf("%s stored secret %q leaks: events=%d activity_attempts=%d", backend.name, secret, eventLeaks, attemptLeaks)
+	if evidence.EventPayloads != 0 || evidence.ActivityResultsOrFailures != 0 {
+		t.Fatalf("%s stored secret leaks: events=%d activity_attempts=%d", backend.name, evidence.EventPayloads, evidence.ActivityResultsOrFailures)
 	}
 }
 

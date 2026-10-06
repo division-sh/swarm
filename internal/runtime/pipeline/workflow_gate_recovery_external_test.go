@@ -1619,18 +1619,18 @@ func waitForGateRecoveryQuiescence(t *testing.T, bus *runtimebus.EventBus, ctx c
 func assertProposedEffectProofCounts(t *testing.T, selected gateRecoveryStoreCase, runID string, requests, attempts int) {
 	t.Helper()
 	requestQuery := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested'`
-	attemptQuery := `SELECT COUNT(*) FROM activity_attempts WHERE run_id = ?`
 	if selected.postgres {
 		requestQuery = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'`
-		attemptQuery = `SELECT COUNT(*) FROM activity_attempts WHERE run_id = $1::uuid`
 	}
-	var gotRequests, gotAttempts int
+	var gotRequests int
 	if err := selected.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), requestQuery, runID).Scan(&gotRequests); err != nil {
 		t.Fatal(err)
 	}
-	if err := selected.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), attemptQuery, runID).Scan(&gotAttempts); err != nil {
+	storedAttempts, err := storetest.ReadActivityAttemptStorage(testAuthorActivityContext(t, context.Background()), selected.events, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	gotAttempts := len(storedAttempts)
 	if gotRequests != requests || gotAttempts != attempts {
 		t.Fatalf("durable activity counts = requests:%d attempts:%d, want %d/%d", gotRequests, gotAttempts, requests, attempts)
 	}

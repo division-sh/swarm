@@ -16,6 +16,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -122,26 +123,22 @@ func assertPersistedHandlerRuleSelection(t *testing.T, selected gateRecoveryStor
 
 func assertPersistedHandlerRuleSelectionInFlow(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantFlowPath, wantSemanticPath, wantLabel string) {
 	t.Helper()
-	query := `SELECT s.selection_context, s.disposition, COALESCE(s.flow_path, ''), COALESCE(s.declaration_family, ''), COALESCE(s.semantic_path, ''), s.display_label
-	FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id = s.delivery_id
-	WHERE d.event_id = ? AND d.subscriber_type = 'node'`
-	if selected.postgres {
-		query = `SELECT s.selection_context, s.disposition, COALESCE(s.flow_path, ''), COALESCE(s.declaration_family, ''), COALESCE(s.semantic_path, ''), s.display_label
-	FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id = s.delivery_id
-	WHERE d.event_id = $1::uuid AND d.subscriber_type = 'node'`
-	}
-	var gotContext, gotDisposition, gotFlowPath, gotFamily, gotSemanticPath, gotLabel string
-	if err := selected.db.QueryRowContext(ctx, query, eventID).Scan(&gotContext, &gotDisposition, &gotFlowPath, &gotFamily, &gotSemanticPath, &gotLabel); err != nil {
+	rows, err := storetest.ReadHandlerSelectionStorage(ctx, selected.events, eventID)
+	if err != nil {
 		t.Fatalf("load handler-rule selection for %s: %v", eventID, err)
 	}
+	if len(rows) != 1 {
+		t.Fatalf("handler-rule selection for %s: got %d rows, want exactly one", eventID, len(rows))
+	}
+	got := rows[0]
 	wantFamily := ""
 	if handlerRuleSelectionDispositionCarriesIdentity(wantDisposition) {
 		wantFamily = "handler_rule"
 	} else {
 		wantFlowPath = ""
 	}
-	if gotContext != string(wantContext) || gotDisposition != string(wantDisposition) || gotFlowPath != wantFlowPath || gotFamily != wantFamily || gotSemanticPath != wantSemanticPath || gotLabel != wantLabel {
-		t.Fatalf("persisted selection = %s/%s/%s/%s/%s/%s, want %s/%s/%s/%s/%s/%s", gotContext, gotDisposition, gotFlowPath, gotFamily, gotSemanticPath, gotLabel, wantContext, wantDisposition, wantFlowPath, wantFamily, wantSemanticPath, wantLabel)
+	if got.Context != string(wantContext) || got.Disposition != string(wantDisposition) || got.FlowPath != wantFlowPath || got.Family != wantFamily || got.SemanticPath != wantSemanticPath || got.DisplayLabel != wantLabel {
+		t.Fatalf("persisted selection = %s/%s/%s/%s/%s/%s, want %s/%s/%s/%s/%s/%s", got.Context, got.Disposition, got.FlowPath, got.Family, got.SemanticPath, got.DisplayLabel, wantContext, wantDisposition, wantFlowPath, wantFamily, wantSemanticPath, wantLabel)
 	}
 }
 

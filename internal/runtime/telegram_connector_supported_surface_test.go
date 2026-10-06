@@ -602,107 +602,46 @@ func waitForTelegramConnectorSupportedSurfaceTerminalActivityAttempt(t *testing.
 }
 
 func tryLoadTelegramConnectorSupportedSurfaceActivityAttempt(backend telegramConnectorSupportedSurfaceBackend) (runtimepipeline.ActivityAttemptRecord, bool, error) {
-	var requestEventID string
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT request_event_id
-			FROM activity_attempts
-			WHERE run_id = ?
-			  AND tool = 'telegram.send_message'
-			ORDER BY started_at ASC
-			LIMIT 1
-		`, backend.runID).Scan(&requestEventID)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT request_event_id::text
-			FROM activity_attempts
-			WHERE run_id = $1::uuid
-			  AND tool = 'telegram.send_message'
-			ORDER BY started_at ASC
-			LIMIT 1
-		`, backend.runID).Scan(&requestEventID)
+	rows, err := runtimeConnectorActivityRows(backend.ctx, backend.eventStore, backend.runID, "telegram.send_message")
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	if err == sql.ErrNoRows {
+	if len(rows) == 0 {
 		return runtimepipeline.ActivityAttemptRecord{}, false, nil
 	}
-	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, false, err
-	}
-	rec, ok, err := backend.activityAttempts.LoadActivityAttempt(backend.ctx, requestEventID)
-	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, false, err
-	}
-	return rec, ok, nil
+	return backend.activityAttempts.LoadActivityAttempt(backend.ctx, rows[0].RequestEventID)
 }
 
 func countTelegramConnectorSupportedSurfaceActivityAttempts(t *testing.T, backend telegramConnectorSupportedSurfaceBackend) int {
 	t.Helper()
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = ?
-			  AND tool = 'telegram.send_message'
-		`, backend.runID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = $1::uuid
-			  AND tool = 'telegram.send_message'
-		`, backend.runID).Scan(&count)
-	}
+	rows, err := runtimeConnectorActivityRows(backend.ctx, backend.eventStore, backend.runID, "telegram.send_message")
 	if err != nil {
-		t.Fatalf("%s count activity attempts: %v", backend.name, err)
+		t.Fatalf("%s read exact activity storage: %v", backend.name, err)
 	}
-	return count
+	return len(rows)
 }
 
 func countTelegramConnectorSupportedSurfaceActivityAttemptsForEvent(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, providerEventID string) int {
 	t.Helper()
 	inboundEventID := loadTelegramConnectorSupportedSurfaceInboundEventIDByRun(t, backend, backend.runID, providerEventID)
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = ?
-			  AND tool = 'telegram.send_message'
-			  AND source_event_id = ?
-		`, backend.runID, inboundEventID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM activity_attempts
-			WHERE run_id = $1::uuid
-			  AND tool = 'telegram.send_message'
-			  AND source_event_id = $2::uuid
-		`, backend.runID, inboundEventID).Scan(&count)
-	}
+	rows, err := runtimeConnectorActivityRowsForSource(backend.ctx, backend.eventStore, backend.runID, "telegram.send_message", inboundEventID)
 	if err != nil {
-		t.Fatalf("%s count activity attempts for provider event %s: %v", backend.name, providerEventID, err)
+		t.Fatalf("%s read exact activity storage: %v", backend.name, err)
 	}
-	return count
+	return len(rows)
 }
 
 func telegramConnectorSupportedSurfaceActivityStatusForEvent(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, providerEventID string) string {
 	t.Helper()
 	inboundEventID := loadTelegramConnectorSupportedSurfaceInboundEventIDByRun(t, backend, backend.runID, providerEventID)
-	var status string
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `SELECT status FROM activity_attempts WHERE run_id = ? AND tool = 'telegram.send_message' AND source_event_id = ?`, backend.runID, inboundEventID).Scan(&status)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `SELECT status FROM activity_attempts WHERE run_id = $1::uuid AND tool = 'telegram.send_message' AND source_event_id = $2::uuid`, backend.runID, inboundEventID).Scan(&status)
-	}
+	rows, err := runtimeConnectorActivityRowsForSource(backend.ctx, backend.eventStore, backend.runID, "telegram.send_message", inboundEventID)
 	if err != nil {
-		t.Fatalf("%s load activity status for provider event %s: %v", backend.name, providerEventID, err)
+		t.Fatalf("%s read exact activity storage: %v", backend.name, err)
 	}
-	return status
+	if len(rows) != 1 {
+		t.Fatalf("%s exact activity status for %s has %d rows, want one", backend.name, inboundEventID, len(rows))
+	}
+	return rows[0].Status
 }
 
 func countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, providerEventID string) int {
@@ -839,51 +778,12 @@ func loadTelegramConnectorSupportedSurfaceActivityRequestEvent(t *testing.T, bac
 
 func assertTelegramConnectorSupportedSurfaceNoStoredSecret(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, secret string) {
 	t.Helper()
-	var eventLeaks int
-	var attemptLeaks int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = ?
-			  AND payload LIKE '%' || ? || '%'
-		`, backend.runID, secret).Scan(&eventLeaks)
-		if err == nil {
-			err = backend.db.QueryRowContext(backend.ctx, `
-				SELECT COUNT(*)
-				FROM activity_attempts
-				WHERE run_id = ?
-				  AND (
-					COALESCE(result_payload, '') LIKE '%' || ? || '%'
-					OR COALESCE(failure, '') LIKE '%' || ? || '%'
-				  )
-			`, backend.runID, secret, secret).Scan(&attemptLeaks)
-		}
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND payload::text LIKE '%' || $2 || '%'
-		`, backend.runID, secret).Scan(&eventLeaks)
-		if err == nil {
-			err = backend.db.QueryRowContext(backend.ctx, `
-				SELECT COUNT(*)
-				FROM activity_attempts
-				WHERE run_id = $1::uuid
-				  AND (
-					COALESCE(result_payload::text, '') LIKE '%' || $2 || '%'
-					OR COALESCE(failure::text, '') LIKE '%' || $2 || '%'
-				  )
-			`, backend.runID, secret).Scan(&attemptLeaks)
-		}
-	}
+	evidence, err := storetest.ReadConnectorCredentialLeakStorage(backend.ctx, backend.eventStore, backend.runID, secret)
 	if err != nil {
-		t.Fatalf("%s no-secret query: %v", backend.name, err)
+		t.Fatalf("%s no-secret storage evidence: %v", backend.name, err)
 	}
-	if eventLeaks != 0 || attemptLeaks != 0 {
-		t.Fatalf("%s stored secret leaks: events=%d activity_attempts=%d", backend.name, eventLeaks, attemptLeaks)
+	if evidence.EventPayloads != 0 || evidence.ActivityResultsOrFailures != 0 {
+		t.Fatalf("%s stored secret leaks: events=%d activity_attempts=%d", backend.name, evidence.EventPayloads, evidence.ActivityResultsOrFailures)
 	}
 }
 

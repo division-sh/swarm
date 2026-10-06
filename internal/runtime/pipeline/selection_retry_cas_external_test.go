@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -130,8 +131,17 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 				t.Fatalf("CAS conflict lost retry: %s %v", status, err)
 			}
 			var count int
-			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, id).Scan(&count); err != nil || count != 0 {
-				t.Fatalf("failed CAS froze fact: %d %v", count, err)
+			selections, err := storetest.ReadHandlerSelectionStorage(ctx, selected.events, event.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, selection := range selections {
+				if selection.DeliveryID == id {
+					count++
+				}
+			}
+			if count != 0 {
+				t.Fatalf("failed CAS froze fact: %d", count)
 			}
 			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name IN ('selected','ack')`, runID).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("failed CAS leaked effects: %d %v", count, err)

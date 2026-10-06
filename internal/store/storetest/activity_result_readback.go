@@ -10,6 +10,12 @@ import (
 
 type ActivityResultPublicationStorage = private.ActivityResultPublicationStorage
 
+type ActivityAttemptStorageEvidence = private.ActivityAttemptStorageEvidence
+
+func ReadActivityAttemptStorage(ctx context.Context, selected any, run string) ([]ActivityAttemptStorageEvidence, error) {
+	return private.ReadActivityAttemptStorageForTest(ctx, selected, run)
+}
+
 func ActivityJournalCleanupPersistenceFault(t testing.TB, selected any, fault error) (runtimepipeline.WorkflowPersistence, func() int32) {
 	t.Helper()
 	persistence, count, err := private.ActivityJournalCleanupPersistenceFaultForTest(selected, fault)

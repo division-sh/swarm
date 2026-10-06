@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -373,53 +374,41 @@ type a2MapFanOutOutput struct {
 
 func (p *a2MapFanOutExecution) outputs(t *testing.T) []a2MapFanOutOutput {
 	t.Helper()
-	rows, err := p.selected.db.QueryContext(p.ctx, `SELECT o.ordinal, o.event_id, e.payload, o.outcome_kind
-		FROM fan_out_outcomes o JOIN events e ON e.event_id=o.event_id WHERE o.run_id=$1 ORDER BY o.ordinal`, p.runID)
+	rows, err := storetest.ReadFanOutPublishedOutcomeStorage(p.ctx, p.selected.events, p.runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	var outputs []a2MapFanOutOutput
-	for rows.Next() {
-		var output a2MapFanOutOutput
-		var payload []byte
-		var kind string
-		if err := rows.Scan(&output.Ordinal, &output.EventID, &payload, &kind); err != nil {
-			t.Fatal(err)
+	for _, row := range rows {
+		output := a2MapFanOutOutput{Ordinal: row.Ordinal, EventID: row.EventID}
+		if row.Kind != "committed" {
+			t.Fatalf("ordinal %d outcome=%s", output.Ordinal, row.Kind)
 		}
-		if kind != "committed" {
-			t.Fatalf("ordinal %d outcome=%s", output.Ordinal, kind)
-		}
-		if err := json.Unmarshal(payload, &output.Payload); err != nil {
+		if err := json.Unmarshal(row.Payload, &output.Payload); err != nil {
 			t.Fatal(err)
 		}
 		outputs = append(outputs, output)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	return outputs
 }
 
 func (p *a2MapFanOutExecution) assertProgress(t *testing.T, cursor, cardinality int, status string, sourceMutation string) {
 	t.Helper()
-	var intents, outcomes, eventsCount, gotCursor, gotCardinality int
-	var gotStatus, mutation string
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, p.runID).Scan(&intents); err != nil {
+	evidence, err := storetest.ReadFanOutRunProgressStorage(p.ctx, p.selected.events, p.runID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT cursor,cardinality,status,source_mutation_id FROM fan_out_intents WHERE run_id=$1`, p.runID).Scan(&gotCursor, &gotCardinality, &gotStatus, &mutation); err != nil {
-		t.Fatal(err)
+	if len(evidence.Intents) != 1 {
+		t.Fatalf("durable progress requires exactly one physical intent: %+v", evidence)
 	}
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, p.runID).Scan(&outcomes); err != nil {
-		t.Fatal(err)
-	}
+	intent := evidence.Intents[0]
+	var eventsCount int
 	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='item.ready'`, p.runID).Scan(&eventsCount); err != nil {
 		t.Fatal(err)
 	}
-	if intents != 1 || outcomes != cursor || eventsCount != cursor || gotCursor != cursor || gotCardinality != cardinality || gotStatus != status || mutation != sourceMutation {
+	if evidence.Outcomes != cursor || eventsCount != cursor || intent.Cursor != cursor || intent.Cardinality != cardinality || intent.Status != status || intent.SourceMutationID != sourceMutation {
 		t.Fatalf("durable progress: intents=%d outcomes=%d events=%d cursor=%d cardinality=%d status=%s mutation=%s; want %d/%d/%s/%s",
-			intents, outcomes, eventsCount, gotCursor, gotCardinality, gotStatus, mutation, cursor, cardinality, status, sourceMutation)
+			len(evidence.Intents), evidence.Outcomes, eventsCount, intent.Cursor, intent.Cardinality, intent.Status, intent.SourceMutationID, cursor, cardinality, status, sourceMutation)
 	}
 }
 
@@ -463,23 +452,17 @@ func (p *a2MapFanOutExecution) compositeReceipt(t *testing.T, trigger events.Eve
 	}
 	r := a2CompositeMapReceipt{plan: plans[0]}
 	r.key.RunID, r.key.ElementRef = p.runID, r.plan.Ref.ElementRef
-	var capsule []byte
-	var digest string
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT i.triggering_delivery_id, i.semantic_digest, i.capsule,
-		i.source_kind, COALESCE(CAST(i.source_event_id AS TEXT),''), COALESCE(CAST(i.source_run_id AS TEXT),''), COALESCE(CAST(i.source_entity_id AS TEXT),''),
-		i.source_field, COALESCE(CAST(i.source_mutation_id AS TEXT),''), i.cardinality, i.cursor, i.status
-		FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id
-		WHERE i.run_id=$1 AND d.event_id=$2 AND d.subscriber_type='node' AND d.subscriber_id=$3
-		AND i.flow_path=$4 AND i.declaration_family=$5 AND i.semantic_path=$6`,
-		p.runID, trigger.ID(), node.Key(), r.key.ElementRef.FlowPath, r.key.ElementRef.Family, r.key.ElementRef.SemanticPath).
-		Scan(&r.key.TriggeringDeliveryID, &digest, &capsule, &r.source.Kind, &r.source.EventID, &r.source.RunID,
-			&r.source.EntityID, &r.source.Field, &r.source.MutationID, &r.cardinality, &r.cursor, &r.status); err != nil {
+	rows, err := storetest.ReadFanOutTriggeredIntentStorage(p.ctx, p.selected.events, p.runID, trigger.ID(), node, r.key.ElementRef)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("exact compiled trigger/source intent: rows=%+v err=%v", rows, err)
+	}
+	stored := rows[0]
+	r.key.TriggeringDeliveryID, r.source = stored.TriggeringDeliveryID, stored.Source
+	r.cardinality, r.cursor, r.status = stored.Cardinality, stored.Cursor, stored.Status
+	if err := json.Unmarshal(stored.Capsule, &r.capsule); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(capsule, &r.capsule); err != nil {
-		t.Fatal(err)
-	}
-	if digest != r.plan.Ref.SemanticDigest || !reflect.DeepEqual(r.capsule.SourceProjection, r.plan.SemanticEvidence()) ||
+	if stored.SemanticDigest != r.plan.Ref.SemanticDigest || !reflect.DeepEqual(r.capsule.SourceProjection, r.plan.SemanticEvidence()) ||
 		r.capsule.Lineage.ParentEventID != trigger.ID() {
 		t.Fatalf("retained source disagrees with actual compiled declaration/trigger: %#v", r)
 	}
@@ -495,9 +478,9 @@ func (p *a2MapFanOutExecution) compositeReceipt(t *testing.T, trigger events.Eve
 		if r.source.RunID != p.runID || r.source.EntityID != p.runID || r.source.Field != "items" || !r.plan.SourceAfterWrites {
 			t.Fatalf("writer did not retain its exact post-write field: %#v", r.source)
 		}
-		if err := p.selected.db.QueryRowContext(p.ctx, `SELECT new_value FROM entity_mutations
-			WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
-			r.source.MutationID, r.source.RunID, r.source.EntityID, r.source.Field).Scan(&frozen); err != nil {
+		var err error
+		frozen, err = storetest.ReadPinnedAuthoredMutationStorage(p.ctx, p.selected.events, r.source)
+		if err != nil {
 			t.Fatal(err)
 		}
 	case fanoutobligation.SourceEventPayloadField:
@@ -582,21 +565,14 @@ func (p *a2MapFanOutExecution) compositePublication(t *testing.T, eventID, event
 
 func (p *a2MapFanOutExecution) compositeOutputs(t *testing.T, r a2CompositeMapReceipt, eventName string, wantPayloads []map[string]any, nodeName string, arm *joinruntime.Activation) []events.Event {
 	t.Helper()
-	rows, err := p.selected.db.QueryContext(p.ctx, `SELECT o.ordinal, o.event_id, o.outcome_kind FROM fan_out_outcomes o
-		WHERE o.run_id=$1 AND o.triggering_delivery_id=$2 AND o.flow_path=$3 AND o.declaration_family=$4 AND o.semantic_path=$5
-		ORDER BY o.ordinal`, p.runID, r.key.TriggeringDeliveryID, r.key.ElementRef.FlowPath, r.key.ElementRef.Family, r.key.ElementRef.SemanticPath)
+	storage, err := storetest.ReadFanOutIntentCompletionStorage(p.ctx, p.selected.events, r.key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	var outputs []events.Event
 	seen := map[string]bool{}
-	for rows.Next() {
-		var ordinal int
-		var eventID, kind string
-		if err := rows.Scan(&ordinal, &eventID, &kind); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range storage.Outcomes {
+		ordinal, eventID, kind := row.Ordinal, row.EventID, row.Kind
 		if ordinal != len(outputs) || ordinal >= len(wantPayloads) || kind != "committed" || seen[eventID] {
 			t.Fatalf("lost independent ordinal publication: ordinal=%d kind=%s event=%s", ordinal, kind, eventID)
 		}
@@ -607,16 +583,11 @@ func (p *a2MapFanOutExecution) compositeOutputs(t *testing.T, r a2CompositeMapRe
 		}
 		outputs = append(outputs, event)
 	}
-	if err := rows.Err(); err != nil || len(outputs) != len(wantPayloads) {
-		t.Fatalf("committed ordinal count=%d want=%d err=%v", len(outputs), len(wantPayloads), err)
+	if len(outputs) != len(wantPayloads) {
+		t.Fatalf("committed ordinal count=%d want=%d", len(outputs), len(wantPayloads))
 	}
-	var cursor, cardinality int
-	var status string
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT cursor,cardinality,status FROM fan_out_intents
-		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`,
-		p.runID, r.key.TriggeringDeliveryID, r.key.ElementRef.FlowPath, r.key.ElementRef.Family, r.key.ElementRef.SemanticPath).
-		Scan(&cursor, &cardinality, &status); err != nil || cursor != len(outputs) || cardinality != len(outputs) || status != "closed" {
-		t.Fatalf("durable intent progress=%d/%d/%s err=%v", cursor, cardinality, status, err)
+	if storage.Cursor != len(outputs) || storage.Cardinality != len(outputs) || storage.Status != "closed" {
+		t.Fatalf("durable intent progress=%d/%d/%s", storage.Cursor, storage.Cardinality, storage.Status)
 	}
 	return outputs
 }
