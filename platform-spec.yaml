@@ -8473,6 +8473,17 @@ engine:
         re-executing the stop. Reconciliation failure is diagnostic recovery evidence after an already committed stop; it
         never replays the stop transaction. No raw mixed-family status writer, public SQL transaction, copied comparison SQL,
         migration reader, or compatibility path is supported.
+      declared_clock_suspension: >
+        Operator standing.suspend parks declared instance clocks in the same desired-state transaction. Parked
+        bindings retain their activation ID, run, generation, immutable command and initial due, but cannot execute
+        or retain the run. Exact wakeups and recovery remain cancelled and joined through their original work owner.
+        standing.resume re-arms only those parked bindings in the same activation/run/generation; reset, stop and
+        declaration removal remain destructive cancellation, never generic schedule resurrection. Resume computes
+        the next due from the admitted schedule and the selected-store transaction time now, without emitting any
+        elapsed occurrence. Mutable clock_suspension evidence records the parked timestamp and last completed
+        suspension interval with the exact number of skipped occurrences; cadence after resume uses that recorded
+        resume coordinate. Ordinary process restart of an armed clock retains ordered downtime catch-up. Other
+        schedule families keep their existing cancellation, recurrence and recovery laws.
       reply_and_scope: >
         reply_context_id is immutable one-shot routing authority; recurrence with reply context is rejected before mutation.
         Run-scoped admission requires a running or paused run. Missing or terminal linkage fails closed. start_on boot is a
@@ -8496,9 +8507,10 @@ engine:
           - Ordinary runtime restoration restores control-schedule families only. Serve admits or exactly replays declared instance clocks after construction, attachment and executable context publication, under the binding's exact standing work occurrence. Finite entry points cannot restore a deployment clock implicitly; replay preserves its existing activation and due coordinate.
           - Instance-owned admission carries exact run, declaration owner, typed static-instance source, bare payload and recurrence in the immutable hash and persisted activation. It has no agent identity, task or reply context. Other control-schedule families do not acquire business emission authority.
           - A wake directly creates its instance_publication business event. Event acceptance and recurrence advancement commit atomically through CommitGenericScheduleOccurrence. No intermediate platform event, second dispatcher, process-local recurrence or acknowledgment-loss resend.
-          - Retention derives from an enabled binding or an actually active durable schedule in the current generation, never from declaration presence. Stop, removal, suspension, restart and reset consume the existing desired-state and exact cancellation owners.
-          - Offline publication eligibility and describe share one transient compiled projection. Live inspection supplements it with exact durable binding, activation, due and retention evidence; no persisted publication artifact or independent next-fire interpreter.
+          - Retention derives from an enabled binding or an actually active durable schedule in the current generation, never from declaration presence. A parked binding is present but non-executable and non-retaining. Stop/removal/reset cancel it; suspend/resume park and re-arm it through the existing desired-state owner.
+          - Offline describe projects compiled declaration facts. Live inspection supplements it with exact durable binding, activation, due and retention evidence; the retired publication-eligibility artifact is not a second owner.
           - run.get and run.diagnose include clock_schedules in the detailed run header; swarm run status renders those same records. Each record carries the admitted activation ID, schedule name, run and instance coordinates, cadence, lifecycle status and exact persisted initial due. Only active records expose next_due_at; retains_run also requires an active run. Cancellation and failure remain visible without a next occurrence. Listing run headers remains a summary, not a clock inventory. Reading clocks never arms, advances or repairs them; malformed immutable evidence fails closed.
+          - Clock readback distinguishes parked from active/armed and retains suspension evidence. run status renders suspended from T1 to T2, N occurrences skipped after resume, or suspended since T1 while parked; it never invents catch-up publications.
     declaration:
       description: >
         Public staged lifecycle timers are declared as stage-resident rows in schema.yaml. Legacy/kernel timers are
@@ -13193,6 +13205,12 @@ flow_model:
         an in-process credential change cannot use cached enabled targets to bypass fresh admission. Suspension may
         still stop work without granting execution. A new enabled declaration creates generation one. Operator suspend,
         resume, and reset consume the same desired-state owner and survive restart.
+        Operator suspension parks declared clocks, rather than terminally cancelling their deployment bindings.
+        Resume re-arms the same activation/run/generation from the schedule and selected-store time now, skips all
+        elapsed occurrences without catch-up, and records the suspended interval and skipped count for clock
+        readback and run status. Reset remains destructive; terminal schedules cannot be resurrected. Other
+        generic/workflow timer families retain existing quiescence cancellation. Ordinary armed-clock process
+        restart retains its ordered catch-up rule.
         The current standing generation named by standing_services.current_run_id is excluded from the generic non-standing
         active-run bundle availability projection and from every startup-cleanup, availability-admission, and pinned-hash
         admission consumer of that projection. This exclusion is exactly the current pointer, not all standing lineage:
@@ -18462,18 +18480,21 @@ platform_tables:
             failure_code          TEXT,
             failure_message       TEXT,
             failed_at             TIMESTAMPTZ,
+            clock_suspension      JSONB,
             task_type             TEXT NOT NULL DEFAULT 'timer' CHECK (task_type IN ('timer', 'scheduled_task', 'global_recurring', 'workflow_timer')),
-            status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'fired', 'cancelled', 'failed')),
+            status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'parked', 'fired', 'cancelled', 'failed')),
             fired_at              TIMESTAMPTZ,
             created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK ((task_type = 'workflow_timer' AND schedule_scope IS NULL AND schedule_key IS NULL AND immutable_hash IS NULL AND initial_fire_at IS NULL AND task_id IS NULL AND due_basis_kind IS NULL AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL AND occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL AND accepted_at IS NULL AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (task_type IN ('timer', 'scheduled_task', 'global_recurring') AND schedule_scope = TRIM(schedule_scope) AND NULLIF(schedule_scope, '') IS NOT NULL AND schedule_key = TRIM(schedule_key) AND NULLIF(schedule_key, '') IS NOT NULL AND immutable_hash = TRIM(immutable_hash) AND NULLIF(immutable_hash, '') IS NOT NULL AND initial_fire_at IS NOT NULL AND due_basis_kind IN ('absolute', 'delay', 'cron', 'every'))),
+            CHECK ((task_type = 'workflow_timer' AND schedule_scope IS NULL AND schedule_key IS NULL AND immutable_hash IS NULL AND initial_fire_at IS NULL AND task_id IS NULL AND due_basis_kind IS NULL AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL AND occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL AND accepted_at IS NULL AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL AND clock_suspension IS NULL) OR (task_type IN ('timer', 'scheduled_task', 'global_recurring') AND schedule_scope = TRIM(schedule_scope) AND NULLIF(schedule_scope, '') IS NOT NULL AND schedule_key = TRIM(schedule_key) AND NULLIF(schedule_key, '') IS NOT NULL AND immutable_hash = TRIM(immutable_hash) AND NULLIF(immutable_hash, '') IS NOT NULL AND initial_fire_at IS NOT NULL AND due_basis_kind IN ('absolute', 'delay', 'cron', 'every'))),
             CHECK (task_type = 'workflow_timer' OR ((due_basis_kind = 'absolute' AND due_basis_absolute IS NOT NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'delay' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'cron' AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NOT NULL) OR (due_basis_kind = 'every' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL))),
             CHECK (task_type = 'workflow_timer' OR ((recurring = FALSE AND due_basis_kind IN ('absolute', 'delay') AND task_type = 'timer') OR (recurring = TRUE AND due_basis_kind IN ('cron', 'every') AND task_type IN ('scheduled_task', 'global_recurring')))),
             CHECK (task_type = 'workflow_timer' OR ((occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL) OR (occurrence_event_id IS NOT NULL AND occurrence_admitted_at IS NOT NULL))),
             CHECK (task_type = 'workflow_timer' OR ((fired_at IS NULL AND accepted_at IS NULL) OR (fired_at IS NOT NULL AND accepted_at IS NOT NULL AND accepted_at >= fired_at))),
             CHECK (task_type = 'workflow_timer' OR recurring = TRUE OR status = 'fired' OR (fired_at IS NULL AND accepted_at IS NULL)),
             CHECK (task_type = 'workflow_timer' OR status <> 'fired' OR occurrence_admitted_at IS NULL OR accepted_at >= occurrence_admitted_at),
-            CHECK (task_type = 'workflow_timer' OR ((status = 'active' AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'fired' AND recurring = FALSE AND fired_at IS NOT NULL AND accepted_at IS NOT NULL AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'cancelled' AND cancel_cause IS NOT NULL AND cancelled_at IS NOT NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'failed' AND failure_code IS NOT NULL AND failed_at IS NOT NULL AND cancel_cause IS NULL AND cancelled_at IS NULL))),
+            CHECK (task_type = 'workflow_timer' OR ((status IN ('active', 'parked') AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'fired' AND recurring = FALSE AND fired_at IS NOT NULL AND accepted_at IS NOT NULL AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'cancelled' AND cancel_cause IS NOT NULL AND cancelled_at IS NOT NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'failed' AND failure_code IS NOT NULL AND failed_at IS NOT NULL AND cancel_cause IS NULL AND cancelled_at IS NULL))),
+            CHECK (clock_suspension IS NULL OR (owner_kind = 'instance' AND task_type = 'scheduled_task' AND recurring = TRUE)),
+            CHECK (status <> 'parked' OR (owner_kind = 'instance' AND task_type = 'scheduled_task' AND clock_suspension IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (run_id IS NOT NULL AND entity_id IS NOT NULL AND flow_scope_key = TRIM(flow_scope_key) AND NULLIF(flow_scope_key, '') IS NOT NULL AND flow_instance_id = TRIM(flow_instance_id) AND NULLIF(flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (timer_name = TRIM(timer_name) AND NULLIF(timer_name, '') IS NOT NULL AND fire_event = TRIM(fire_event) AND NULLIF(fire_event, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL)),
@@ -30615,7 +30636,7 @@ api_specification:
             description: Separate lifecycle-control reason from run_control_state; for cancelled runs this is the terminal reason and never a failure class.
           clock_schedules:
             type: array
-            description: Detailed run reads include durable instance-owned clock activations, including cancelled and failed records. Run listings omit this detail.
+            description: Detailed run reads include durable instance-owned clock activations, including parked, cancelled and failed records. Run listings omit this detail.
             items:
               $ref: '#/components/schemas/ClockScheduleReadback'
       ClockScheduleReadback:
@@ -30641,7 +30662,7 @@ api_specification:
             type: string
           status:
             type: string
-            enum: [active, cancelled, failed]
+            enum: [active, parked, cancelled, failed]
           initial_due_at:
             $ref: '#/components/schemas/Timestamp'
           next_due_at:
@@ -30652,6 +30673,21 @@ api_specification:
             description: True only for an active durable clock in an active run.
           cancel_cause:
             type: string
+          suspension:
+            type: object
+            additionalProperties: false
+            required: [skipped_occurrences]
+            description: Persisted parking and last completed suspension interval; resume never emits elapsed occurrences.
+            properties:
+              parked_at:
+                $ref: '#/components/schemas/Timestamp'
+              suspended_from:
+                $ref: '#/components/schemas/Timestamp'
+              resumed_at:
+                $ref: '#/components/schemas/Timestamp'
+              skipped_occurrences:
+                type: integer
+                minimum: 0
           cancelled_at:
             $ref: '#/components/schemas/Timestamp'
           failure:

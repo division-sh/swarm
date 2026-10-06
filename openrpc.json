@@ -15238,10 +15238,34 @@
           "status": {
             "enum": [
               "active",
+              "parked",
               "cancelled",
               "failed"
             ],
             "type": "string"
+          },
+          "suspension": {
+            "additionalProperties": false,
+            "description": "Persisted parking and last completed suspension interval; resume never emits elapsed occurrences.",
+            "properties": {
+              "parked_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "resumed_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "skipped_occurrences": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "suspended_from": {
+                "$ref": "#/components/schemas/Timestamp"
+              }
+            },
+            "required": [
+              "skipped_occurrences"
+            ],
+            "type": "object"
           }
         },
         "required": [
@@ -21234,7 +21258,7 @@
             "description": "Exact durable run source; default fork pin resolution consumes this, not the health source."
           },
           "clock_schedules": {
-            "description": "Detailed run reads include durable instance-owned clock activations, including cancelled and failed records. Run listings omit this detail.",
+            "description": "Detailed run reads include durable instance-owned clock activations, including parked, cancelled and failed records. Run listings omit this detail.",
             "items": {
               "$ref": "#/components/schemas/ClockScheduleReadback"
             },

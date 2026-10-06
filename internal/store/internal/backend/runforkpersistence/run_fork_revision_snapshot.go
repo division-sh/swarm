@@ -170,6 +170,7 @@ type runForkRevisionTimer struct {
 	FailureCode          string          `json:"failure_code"`
 	FailureMessage       string          `json:"failure_message"`
 	FailedAt             *time.Time      `json:"failed_at"`
+	ClockSuspension      json.RawMessage `json:"clock_suspension"`
 	TaskType             string          `json:"task_type"`
 	Status               string          `json:"status"`
 	FiredAt              *time.Time      `json:"fired_at"`

@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -28,14 +26,10 @@ func TestClockScheduleHTTPReadbackOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected clockReadbackStore
-			var db *sql.DB
 			if backend == "sqlite" {
-				store := storetest.StartSQLiteRuntimeStore(t)
-				selected, db = store, storetest.DatabaseForTest(store)
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				_, opened, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
+				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
 			artifact := sourceartifactfixture.New("schema.yaml", []byte("name: clock-readback\n"))
 			ctx := testAuthorActivityContextForSource(context.Background(), sourceartifactfixture.FactFor(artifact))
@@ -89,11 +83,7 @@ func TestClockScheduleHTTPReadbackOnBothStores(t *testing.T) {
 					}
 				}
 			}
-			query := "UPDATE timers SET immutable_hash = 'corrupt' WHERE timer_id = ?"
-			if backend == "postgres" {
-				query = "UPDATE timers SET immutable_hash = 'corrupt' WHERE timer_id = $1::uuid"
-			}
-			if _, err := db.ExecContext(ctx, query, activation.ID); err != nil {
+			if err := storetest.CorruptClockImmutableHash(ctx, selected, runID, activation.ID); err != nil {
 				t.Fatal(err)
 			}
 			for _, method := range []string{"run.get", "run.diagnose"} {
@@ -102,9 +92,9 @@ func TestClockScheduleHTTPReadbackOnBothStores(t *testing.T) {
 					t.Fatalf("%s returned partial clock evidence: %#v", method, response)
 				}
 			}
-			var status, hash string
-			if err := db.QueryRowContext(ctx, "SELECT status, immutable_hash FROM timers").Scan(&status, &hash); err != nil || status != "cancelled" || hash != "corrupt" {
-				t.Fatalf("inspection mutated corrupt evidence: status=%q hash=%q err=%v", status, hash, err)
+			physical, err := storetest.ReadClockStorage(ctx, selected, runID, activation.ID)
+			if err != nil || physical.Rows != 1 || physical.Status != "cancelled" || physical.ImmutableHash != "corrupt" {
+				t.Fatalf("inspection mutated corrupt evidence: physical=%+v err=%v", physical, err)
 			}
 		})
 	}

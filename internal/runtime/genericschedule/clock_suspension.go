@@ -1,6 +1,7 @@
 package genericschedule
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -12,6 +13,21 @@ type ClockSuspension struct {
 	SuspendedFrom      time.Time `json:"suspended_from,omitempty"`
 	ResumedAt          time.Time `json:"resumed_at,omitempty"`
 	SkippedOccurrences int64     `json:"skipped_occurrences"`
+}
+
+func (s ClockSuspension) MarshalJSON() ([]byte, error) {
+	timestamp := func(at time.Time) *time.Time {
+		if at.IsZero() {
+			return nil
+		}
+		return &at
+	}
+	return json.Marshal(struct {
+		ParkedAt           *time.Time `json:"parked_at,omitempty"`
+		SuspendedFrom      *time.Time `json:"suspended_from,omitempty"`
+		ResumedAt          *time.Time `json:"resumed_at,omitempty"`
+		SkippedOccurrences int64      `json:"skipped_occurrences"`
+	}{timestamp(s.ParkedAt), timestamp(s.SuspendedFrom), timestamp(s.ResumedAt), s.SkippedOccurrences})
 }
 
 func (s *ClockSuspension) Canonical() *ClockSuspension {
@@ -90,7 +106,7 @@ func ResumeClock(activation Activation, at time.Time) (Activation, error) {
 	if activation.Command.OwnerKind != OwnerInstance || activation.Status != StatusParked || at.Before(activation.ClockSuspension.ParkedAt) {
 		return Activation{}, errors.New("resumption requires a parked declared clock and chronological time")
 	}
-	skipped, err := skippedClockOccurrences(activation.Command.Due, activation.CurrentDueAt, at)
+	skipped, err := skippedClockOccurrences(activation.Command.Due, activation.CurrentDueAt, activation.ClockSuspension.ParkedAt, at)
 	if err != nil {
 		return Activation{}, err
 	}
@@ -108,12 +124,27 @@ func ResumeClock(activation Activation, at time.Time) (Activation, error) {
 	return activation, activation.Validate()
 }
 
-func skippedClockOccurrences(due DueBasis, next, through time.Time) (int64, error) {
+func skippedClockOccurrences(due DueBasis, next, from, through time.Time) (int64, error) {
 	if next.After(through) {
 		return 0, nil
 	}
 	if due.Kind == DueEvery {
+		if next.Before(from) {
+			distance := from.UnixMicro() - next.UnixMicro()
+			steps := (distance-1)/due.Every.Microseconds() + 1
+			next = time.UnixMicro(next.UnixMicro() + steps*due.Every.Microseconds())
+		}
+		if next.After(through) {
+			return 0, nil
+		}
 		return (through.UnixMicro()-next.UnixMicro())/due.Every.Microseconds() + 1, nil
+	}
+	if next.Before(from) {
+		var err error
+		next, err = due.FirstDue(from.Add(-time.Microsecond))
+		if err != nil {
+			return 0, err
+		}
 	}
 	var skipped int64
 	for !next.After(through) {

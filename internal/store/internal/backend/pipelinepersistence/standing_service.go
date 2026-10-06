@@ -525,8 +525,11 @@ func (s *standingServiceAdapter) SuspendStandingService(ctx context.Context, ope
 			result.CommittedMutation = runtimerunlifecycle.MutationExactNoop
 			return nil
 		}
-		now := time.Now().UTC()
-		cancellations, err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_suspended", "cancelled", now)
+		now, err := s.standingClockTimeTx(txctx, tx)
+		if err != nil {
+			return err
+		}
+		cancellations, err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_suspended", "cancelled", now, true)
 		if err != nil {
 			return err
 		}
@@ -594,7 +597,13 @@ func (s *standingServiceAdapter) ResumeStandingService(ctx context.Context, oper
 			result.CommittedMutation = runtimerunlifecycle.MutationExactNoop
 			return nil
 		}
-		now := time.Now().UTC()
+		now, err := s.standingClockTimeTx(txctx, tx)
+		if err != nil {
+			return err
+		}
+		if err := storegenericschedule.ResumeClockRunTx(txctx, s.attempt, s.postgres, current.RunID, now); err != nil {
+			return err
+		}
 		if err := s.setStandingRunRunningTx(txctx, tx, current.RunID, operation.Reason, operation.Actor, now); err != nil {
 			return err
 		}
@@ -661,7 +670,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			return err
 		}
 		if currentState.Active() {
-			cancellations, err = s.quiesceStandingRunTx(txctx, tx, current.RunID, currentRunSource.BundleHash(), "standing_reset", "cancelled", now)
+			cancellations, err = s.quiesceStandingRunTx(txctx, tx, current.RunID, currentRunSource.BundleHash(), "standing_reset", "cancelled", now, false)
 			if err != nil {
 				return err
 			}
@@ -1273,7 +1282,7 @@ func (s *standingServiceAdapter) disableStandingServiceTx(ctx context.Context, t
 		if err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
-		cancellations, err = s.quiesceStandingRunTx(ctx, tx, current.RunID, runSource.BundleHash(), reason, "cancelled", now)
+		cancellations, err = s.quiesceStandingRunTx(ctx, tx, current.RunID, runSource.BundleHash(), reason, "cancelled", now, false)
 		if err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
@@ -1398,7 +1407,7 @@ func (s *standingServiceAdapter) orphanStandingServiceTx(ctx context.Context, tx
 	previousState := current.EffectiveState
 	var cancellations []runtimetimercancellation.Ref
 	if currentState.Active() {
-		cancellations, err = s.quiesceStandingRunTx(ctx, tx, current.RunID, current.BundleHash, "standing_declaration_removed", "orphaned", now)
+		cancellations, err = s.quiesceStandingRunTx(ctx, tx, current.RunID, current.BundleHash, "standing_declaration_removed", "orphaned", now, false)
 		if err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
@@ -1432,9 +1441,21 @@ func (s *standingServiceAdapter) orphanStandingServiceTx(ctx context.Context, tx
 	return result, nil
 }
 
-func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time) ([]runtimetimercancellation.Ref, error) {
+func (s *standingServiceAdapter) standingClockTimeTx(ctx context.Context, tx *sql.Tx) (time.Time, error) {
+	var now func() time.Time
+	if s.sqliteStore != nil {
+		now = s.sqliteStore.now
+	}
+	return storegenericschedule.SelectedStoreTimeTx(ctx, tx, s.postgres, now)
+}
+
+func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time, parkDeclaredClocks bool) ([]runtimetimercancellation.Ref, error) {
 	if !s.validRunLifecycleMutation(tx) {
 		return nil, fmt.Errorf("quiesce standing run: standing transaction owner is required")
+	}
+	quiesceGeneric := storegenericschedule.CancelRunsTx
+	if parkDeclaredClocks {
+		quiesceGeneric = storegenericschedule.ParkClockRunsTx
 	}
 	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, bundleHash)
 	if err != nil {
@@ -1472,7 +1493,7 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 				return nil, err
 			}
 		}
-		generic, err := storegenericschedule.CancelRunsTx(ctx, s.attempt, false, []string{runID}, reason, now)
+		generic, err := quiesceGeneric(ctx, s.attempt, false, []string{runID}, reason, now)
 		if err != nil {
 			return nil, fmt.Errorf("cancel sqlite standing generic schedules: %w", err)
 		}
@@ -1493,7 +1514,7 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 			return nil, err
 		}
 	}
-	generic, err := storegenericschedule.CancelRunsTx(ctx, s.attempt, true, []string{runID}, reason, now)
+	generic, err := quiesceGeneric(ctx, s.attempt, true, []string{runID}, reason, now)
 	if err != nil {
 		return nil, fmt.Errorf("cancel standing generic schedules: %w", err)
 	}
