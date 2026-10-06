@@ -335,7 +335,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
 				if !unavailable {
-					requireSelectedForkPublicControlBoundary(t, rt, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
+					requireSelectedForkPublicControlBoundary(t, rt, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID, declaredAgent, 1)
 				}
 			})
 		}
@@ -360,30 +360,30 @@ func writeSelectedForkAgentProofFixture(t *testing.T, root, role, subscriptions,
 	}
 }
 
-func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, runID, eventID string, declaredAgent bool, completionCount int) {
+func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, owner runtimebus.EventStore, runID, eventID string, declaredAgent bool, completionCount int) {
 	t.Helper()
 	// Delivery completion precedes the completion worker's await-mutation
 	// projection. Observe that durable handoff before measuring API mutations;
 	// the full snapshots below must still include the candidate columns.
 	// A different selected bundle has no completion worker in this loaded runtime.
 	deadline := time.Now().Add(servedProofPollDeadline)
+	var storage storetest.SelectedForkControlStorage
 	for {
-		var awaitingMutation bool
-		if err := rt.DB.QueryRow(`SELECT status='running' AND (bundle_hash <> $2 OR completion_due_at IS NULL) FROM runs WHERE run_id=$1`, runID, rt.BundleHash).Scan(&awaitingMutation); err != nil {
+		var err error
+		storage, err = storetest.ReadSelectedForkControlStorage(context.Background(), owner, runID, rt.BundleHash, "same-name")
+		if err != nil {
 			t.Fatal(err)
 		}
-		if awaitingMutation {
+		if storage.AwaitingMutation {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("selected fork did not finish its completion candidate: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+			summary, err := storetest.ReadServedRunDebugSummary(context.Background(), owner, runID)
+			t.Fatalf("selected fork did not finish its completion candidate: %s error=%v", summary, err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	var bindingID string
-	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, runID).Scan(&bindingID); err != nil {
-		t.Fatal(err)
-	}
+	bindingID := storage.BindingID
 	type controlCase struct {
 		method string
 		params map[string]any
@@ -397,17 +397,16 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 		{"event.replay", map[string]any{"event_id": eventID}},
 	}
 	if declaredAgent {
-		var count int
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE run_id=$1 AND agent_id='same-name'`, runID).Scan(&count); err != nil || count != 1 {
-			t.Logf("agent rows: %v", snapshotForkReceiverApplication(t, rt)["agents"])
-			t.Fatalf("selected declaration did not materialize the control target: count=%d err=%v", count, err)
+		if storage.AgentCount != 1 {
+			t.Logf("agent rows: %v", readWorkspaceProofApplication(t, owner)["agents"])
+			t.Fatalf("selected declaration did not materialize the control target: count=%d", storage.AgentCount)
 		}
 		cases = append(cases, controlCase{"agent.replay", map[string]any{"run_id": runID, "agent_id": "same-name", "event_id": eventID}})
-		requireSelectedForkDeclaredAgentReads(t, rt, runID, completionCount)
+		requireSelectedForkDeclaredAgentReads(t, rt, owner, runID, completionCount)
 	}
 	for _, test := range cases {
 		t.Run(test.method, func(t *testing.T) {
-			before := snapshotForkReceiverApplication(t, rt)
+			before := readWorkspaceProofApplication(t, owner)
 			err := requireServedJSONRPCError(t, rt.Endpoint, test.method, test.params)
 			if err.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
 				t.Fatalf("selected control escaped through loaded same-hash runtime: %+v", err)
@@ -416,7 +415,7 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 			if !ok || details["operation"] != test.method || details["run_id"] != runID || details["binding_id"] != bindingID {
 				t.Fatalf("selected refusal lost exact binding: %+v", err)
 			}
-			after := snapshotForkReceiverApplication(t, rt)
+			after := readWorkspaceProofApplication(t, owner)
 			if !reflect.DeepEqual(before, after) {
 				for table, rows := range before {
 					if !reflect.DeepEqual(rows, after[table]) {
@@ -445,9 +444,9 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 	}
 }
 
-func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRuntime, runID string, completionCount int) {
+func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRuntime, owner runtimebus.EventStore, runID string, completionCount int) {
 	t.Helper()
-	before := snapshotForkReceiverApplication(t, rt)
+	before := readWorkspaceProofApplication(t, owner)
 	params := map[string]any{"run_id": runID, "agent_id": "same-name", "flow_instance": "consumer"}
 	var detail operatorread.OperatorAgentDetail
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.get", params, &detail)
@@ -477,8 +476,8 @@ func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRu
 	if usage.AgentID != "same-name" || usage.Usage.Estimated.LedgerEntries != completionCount || usage.Usage.Exact.LedgerEntries != 0 {
 		t.Fatalf("selected agent usage lost its exact mock turn: %+v", usage)
 	}
-	requireSelectedForkDurablePublicReads(t, rt, runID, completionCount)
-	if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+	requireSelectedForkDurablePublicReads(t, rt, owner, runID, completionCount)
+	if !reflect.DeepEqual(before, readWorkspaceProofApplication(t, owner)) {
 		t.Fatal("selected agent reads changed durable state")
 	}
 }

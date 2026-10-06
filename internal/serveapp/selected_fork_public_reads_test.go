@@ -1,13 +1,16 @@
 package serveapp
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
-func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRuntime, runID string, completionCount int) {
+func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRuntime, owner runtimebus.EventStore, runID string, completionCount int) {
 	t.Helper()
 	params := map[string]any{"run_id": runID}
 	var get struct {
@@ -25,8 +28,8 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 	if !reflect.DeepEqual(diagnose.Run, get.Run) || len(diagnose.Failed) != 0 {
 		t.Fatalf("selected run diagnosis disagrees with exact run header: %+v", diagnose)
 	}
-	var hash string
-	if err := rt.DB.QueryRow(`SELECT bundle_hash FROM runs WHERE run_id=$1`, runID).Scan(&hash); err != nil || hash == rt.BundleHash {
+	hash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), owner, runID)
+	if err != nil || hash == rt.BundleHash {
 		t.Fatalf("public read fixture must target an unloaded different artifact: hash=%s err=%v", hash, err)
 	}
 	var runs struct {
