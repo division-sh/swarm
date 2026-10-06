@@ -1,7 +1,9 @@
 package canonicalrouting
 
 import (
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +26,18 @@ func CopyChannelLearnedObjectOptionalInputJourney(t testing.TB, partial bool) st
 	}
 	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"),
 		"input: {reason: {type: text, required: true}}", input)
+	return root
+}
+
+func CopyChannelLearnedObjectControlPagesJourney(t testing.TB) string {
+	t.Helper()
+	root := CopyChannelLearnedObjectOptionalInputJourney(t, true)
+	var outcomes strings.Builder
+	outcomes.WriteString("      outcomes:\n")
+	for i := 1; i <= 20; i++ {
+		fmt.Fprintf(&outcomes, "        choice%02d: {advances_to: done}\n", i)
+	}
+	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "      outcomes:\n", outcomes.String())
 	return root
 }
 

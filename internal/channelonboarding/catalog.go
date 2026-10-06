@@ -1,6 +1,7 @@
 package channelonboarding
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -57,6 +58,14 @@ type Candidate struct {
 	ConfirmationOperation  string                            `json:"confirmation_operation"`
 	ConnectionHealth       string                            `json:"connection_health,omitempty"`
 	Plan                   packs.SatisfactionPlan            `json:"-"`
+}
+
+func (c Candidate) MarshalJSON() ([]byte, error) {
+	type readback Candidate
+	return json.Marshal(struct {
+		readback
+		Capabilities packs.ChannelCapabilityVector `json:"capabilities"`
+	}{readback: readback(c), Capabilities: c.Plan.Capabilities().Vector()})
 }
 
 func (c Candidate) Validate() error {

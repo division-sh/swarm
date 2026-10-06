@@ -141,6 +141,13 @@ const (
 
 type ActionDisposition string
 
+type ControlPageMode string
+
+const (
+	ControlPageEdit      ControlPageMode = "edit"
+	ControlPageFreshCopy ControlPageMode = "fresh_copy"
+)
+
 const (
 	ActionApplied      ActionDisposition = "applied"
 	ActionInputStarted ActionDisposition = "input_started"
@@ -167,7 +174,7 @@ type Store interface {
 	GetCurrentChannelSentReceipt(context.Context, string, string) (SentReceipt, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	FreezeAndPersistChannelRender(context.Context, string, packs.PresentationBounds) (PreparedRender, error)
-	AdvanceChannelActionPage(context.Context, operatorchannel.InboundAction, ResolvedAction) error
+	AdvanceChannelActionPage(context.Context, operatorchannel.InboundAction, ResolvedAction, ControlPageMode) error
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)
 	AdmitChannelReplyAction(context.Context, operatorchannel.InboundText) (PendingAction, bool, error)
 	ListPendingChannelActions(context.Context, string, int) ([]PendingAction, error)

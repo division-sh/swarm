@@ -226,7 +226,19 @@ func (d *serveChannelDeliveryDispatcher) processResolvedChannelAction(ctx contex
 		_, err = d.store.PlanChannelActionResponse(ctx, intent.Fact, resolved, inboxText)
 		return err
 	case "more_controls":
-		return d.store.AdvanceChannelActionPage(ctx, intent.Fact, resolved)
+		candidate, found, err := d.store.GetCurrentChannelDeliveryPlan(ctx, resolved.DeliveryID)
+		if err != nil || !found {
+			return err
+		}
+		_, capabilities, err := d.selectedPresentation(ctx, candidate)
+		if err != nil {
+			return err
+		}
+		mode := runtimechanneldelivery.ControlPageFreshCopy
+		if capabilities.Vector().Edit {
+			mode = runtimechanneldelivery.ControlPageEdit
+		}
+		return d.store.AdvanceChannelActionPage(ctx, intent.Fact, resolved, mode)
 	case "acknowledge_notice":
 		if resolved.SourceKind == "notice" {
 			return d.processNoticeAction(ctx, intent, resolved)
