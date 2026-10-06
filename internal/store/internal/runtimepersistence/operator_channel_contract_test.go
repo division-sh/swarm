@@ -834,7 +834,7 @@ func operatorChannelContractProof(identity operatorchannel.InterfaceIdentity, bi
 		ConversationScope: binding.ConversationScope, AccountPresentation: binding.AccountPresentation,
 		Method: string(operatorchannel.OperationRebind), Challenge: "SWARM-AAAAAAAAAAAAAAAA", OriginalOperationID: binding.OperationID,
 		MintingStoreID: binding.PrincipalID, MintingDeploymentID: uuid.NewString(), VerifiedAt: at, OperatorConfirmed: true,
-		ConsentScopes:      []operatorchannel.ConsentScope{operatorchannel.ConsentNotify, operatorchannel.ConsentDecide},
+		ConsentScopes:     []operatorchannel.ConsentScope{operatorchannel.ConsentNotify, operatorchannel.ConsentDecide},
 		ProviderAuthority: binding.ProviderAuthority,
 	}
 }
