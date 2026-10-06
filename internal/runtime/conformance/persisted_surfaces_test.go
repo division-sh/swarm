@@ -1730,13 +1730,13 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 
-	requireMutationSurface(t, db)
+	requireMutationSurface(t, selected)
 
 	fixtureRoot := t.TempDir()
 	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: mutation-proof\nstages: []\n")
@@ -1806,15 +1806,15 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		}
 	}
 
-	if err := trackedMutationStateMatchesEntityState(db, runID, entityID); err != nil {
+	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
 		t.Fatalf("trackedMutationStateMatchesEntityState(workflow): %v", err)
 	}
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t *testing.T) {
-	ctx, exec, db, runID := newEntityToolConformanceHarness(t)
+	ctx, exec, selected, runID := newEntityToolConformanceHarness(t)
 
-	requireMutationSurface(t, db)
+	requireMutationSurface(t, selected)
 
 	_, err := exec.Execute(ctx, "create_entity", map[string]any{
 		"flow_instance": runID,
@@ -1835,7 +1835,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 		t.Fatalf("save_entity_field: %v", err)
 	}
 
-	if err := trackedMutationStateMatchesEntityState(db, runID, entityID); err != nil {
+	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
 		t.Fatalf("trackedMutationStateMatchesEntityState(tool): %v", err)
 	}
 }
@@ -1846,7 +1846,7 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 
-	requireMutationSurface(t, db)
+	requireMutationSurface(t, pg)
 
 	entityID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
@@ -1873,41 +1873,22 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 
 func requireCanonicalConversationSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "agent_turns", "turn_id", "turn_blocks")
-	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "agent_conversation_audits", "session_id")
+	if err := storetest.CheckConversationStorageColumns(ctx, pg); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func requireCanonicalRuntimeLogSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "events", "event_id", "event_name", "payload", "scope", "created_at")
+	if err := storetest.CheckRuntimeLogStorageColumns(ctx, pg); err != nil {
+		t.Fatal(err)
+	}
 }
 
-func requireMutationSurface(t *testing.T, db *sql.DB) {
+func requireMutationSurface(t *testing.T, selected any) {
 	t.Helper()
-	requireTableColumns(t, testAuthorActivityContext(context.Background()), db, "entity_state", "entity_id", "current_state", "fields", "bookkeeping", "gates", "accumulator")
-	requireTableColumns(t, testAuthorActivityContext(context.Background()), db, "entity_mutations", "entity_id", "domain", "path", "old_value", "new_value", "writer_type", "writer_id", "handler_step", "created_at")
-}
-
-func requireTableColumns(t *testing.T, ctx context.Context, db *sql.DB, tableName string, columns ...string) {
-	t.Helper()
-	for _, column := range columns {
-		var exists bool
-		if err := db.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1
-				FROM information_schema.columns
-				WHERE table_schema = 'public'
-				  AND table_name = $1
-				  AND column_name = $2
-			)
-		`, strings.TrimSpace(tableName), strings.TrimSpace(column)).Scan(&exists); err != nil {
-			t.Fatalf("inspect column %s.%s: %v", tableName, column, err)
-		}
-		if !exists {
-			t.Fatalf("missing required canonical column %s.%s", tableName, column)
-		}
+	if err := storetest.CheckMutationStorageColumns(testAuthorActivityContext(context.Background()), selected); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -2011,27 +1992,12 @@ func conformanceAgentMemoryIdentity(t testing.TB, runID, agentID string) agentme
 	return conformanceAgentIdentity(t, strings.TrimSpace(runID), agentID)
 }
 
-func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) error {
-	var (
-		currentState string
-		fieldsRaw    []byte
-		bookRaw      []byte
-		gatesRaw     []byte
-		accRaw       []byte
-	)
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT
-			COALESCE(current_state, ''),
-			COALESCE(fields, '{}'::jsonb),
-			COALESCE(bookkeeping, '{}'::jsonb),
-			COALESCE(gates, '{}'::jsonb),
-			COALESCE(accumulator, '{}'::jsonb)
-			FROM entity_state
-			WHERE run_id = $1::uuid AND entity_id = $2::uuid
-		`, runID, entityID).Scan(&currentState, &fieldsRaw, &bookRaw, &gatesRaw, &accRaw); err != nil {
-		return fmt.Errorf("load entity_state projection: %w", err)
+func trackedMutationStateMatchesEntityState(selected any, runID, entityID string) error {
+	evidence, readErr := storetest.ReadTrackedEntityMutationProjectionStorage(testAuthorActivityContext(context.Background()), selected, runID, entityID)
+	if readErr != nil {
+		return readErr
 	}
-
+	currentState, fieldsRaw, bookRaw, gatesRaw, accRaw := evidence.CurrentState, evidence.Fields, evidence.Bookkeeping, evidence.Gates, evidence.Accumulator
 	want := runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(currentState),
 		Fields:       map[string]any{},
@@ -2052,42 +2018,15 @@ func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) 
 	if want.Accumulator, err = decodeJSONMapErr(accRaw); err != nil {
 		return fmt.Errorf("decode entity_state accumulator: %w", err)
 	}
+
 	records := make([]runtimemutationlog.ProjectionMutation, 0, 8)
-
-	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
-		SELECT domain, path, new_value
-			FROM entity_mutations
-			WHERE run_id = $1::uuid AND entity_id = $2::uuid
-			ORDER BY created_at ASC, mutation_id ASC
-		`, runID, entityID)
-	if err != nil {
-		return fmt.Errorf("query mutations: %w", err)
-	}
-	defer rows.Close()
-
-	rowCount := 0
-	for rows.Next() {
-		rowCount++
-		var (
-			domain   string
-			path     string
-			newValue []byte
-		)
-		if err := rows.Scan(&domain, &path, &newValue); err != nil {
-			return fmt.Errorf("scan mutation: %w", err)
-		}
-		value, err := decodeJSONValueErr(newValue)
+	rowCount := len(evidence.Mutations)
+	for _, mutation := range evidence.Mutations {
+		value, err := decodeJSONValueErr(mutation.NewValue)
 		if err != nil {
 			return fmt.Errorf("decode mutation value: %w", err)
 		}
-		records = append(records, runtimemutationlog.ProjectionMutation{
-			Domain:   runtimemutationlog.Domain(strings.TrimSpace(domain)),
-			Path:     strings.TrimSpace(path),
-			NewValue: value,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("read mutations: %w", err)
+		records = append(records, runtimemutationlog.ProjectionMutation{Domain: runtimemutationlog.Domain(strings.TrimSpace(mutation.Domain)), Path: strings.TrimSpace(mutation.Path), NewValue: value})
 	}
 	if rowCount == 0 {
 		return fmt.Errorf("entity_mutations is empty; canonical mutation surface is missing")
@@ -2142,7 +2081,7 @@ func mustCanonicalJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
-func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB, string) {
+func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetools.Executor, operatorread.EntityReader, string) {
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
 	fixtureRoot := t.TempDir()
@@ -2155,11 +2094,11 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	source := runtimesemanticview.Wrap(bundle)
 	fact := conformanceSourceArtifactFact(t, source)
 	ctx := testAuthorActivityContextForBundle(context.Background(), fact)
-	_, db, _ := testutil.StartPostgres(t)
+	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
 	runID := uuid.NewString()
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
-	construction := newFanInBarrierRuntimeForSource(t, pg, db, source, fact, 1)
+	construction := newFanInBarrierRuntimeForSource(t, pg, source, fact, 1)
 	constructionCtx := runtimecorrelation.WithRunID(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runID)
 	if err := construction.manager.ActivateFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source, Instance: runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""), OccurredAt: time.Now().UTC(),
@@ -2180,7 +2119,7 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 		Role:          "operator",
 		Tools:         []string{"create_entity", "save_entity_field"},
 	})
-	return ctx, exec, db, runID
+	return ctx, exec, pg, runID
 }
 
 func readString(value any) string {

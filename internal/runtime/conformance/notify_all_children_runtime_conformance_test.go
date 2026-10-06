@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -504,7 +505,7 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 			})
 			waitNotifyAllChildrenRuntime(t, runtime, runID)
 
-			items := loadNotifyAllChildrenItemEvents(t, ctx, selected, db, runID, notifyID)
+			items := loadNotifyAllChildrenItemEvents(t, ctx, selected, runID, notifyID)
 			if len(items) != len(accountIDs) {
 				t.Fatalf("fan-out item events = %#v, want %d", items, len(accountIDs))
 			}
@@ -647,7 +648,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				"portfolio_id": "portfolio-numeric-valid",
 				"threshold":    75,
 			})
-			assertNotifyAllChildrenMetadata(t, validCtx, selected, db, "portfolio", "portfolio_id", "portfolio-numeric-valid")
+			assertNotifyAllChildrenMetadata(t, validCtx, selected, "portfolio", "portfolio_id", "portfolio-numeric-valid")
 			transactions := storetest.CollectTransactions(t, selected, transactionOptions)
 			t.Cleanup(func() {
 				if t.Failed() {
@@ -671,7 +672,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 					"account_ids":  rows,
 				})
 			}
-			issuanceReached := waitNotifyAllChildrenFanOutCursor(t, runtime, db, validRunID, 500)
+			issuanceReached := waitNotifyAllChildrenFanOutCursor(t, runtime, validRunID, 500)
 			var receipt storetest.TransactionSnapshot
 			receiptDeadline := time.Now().Add(5 * time.Second)
 			for {
@@ -877,7 +878,7 @@ func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testi
 				"portfolio_id": "portfolio-numeric-internal",
 				"account_ids":  rows,
 			})
-			waitNotifyAllChildrenFanOutCursor(t, runtime, db, runID, len(rows))
+			waitNotifyAllChildrenFanOutCursor(t, runtime, runID, len(rows))
 			waitNotifyAllChildrenRuntimeWithin(t, runtime, runID, time.Minute)
 
 			summary, err := selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
@@ -956,9 +957,9 @@ func TestNumericFanOutTemplateSelectOrCreateMaterializesOnBothBackends(t *testin
 				if !ok {
 					t.Fatalf("template numeric downstream entity %s was not materialized", accountID)
 				}
-				assertNotifyAllChildrenMetadata(t, ctx, selected, db, descriptor.FlowInstance, "account_id", accountID)
-				assertNotifyAllChildrenMetadata(t, ctx, selected, db, descriptor.FlowInstance, "eng_roles", row["eng_roles"])
-				assertNotifyAllChildrenMetadata(t, ctx, selected, db, descriptor.FlowInstance, "gem_score", row["gem_score"])
+				assertNotifyAllChildrenMetadata(t, ctx, selected, descriptor.FlowInstance, "account_id", accountID)
+				assertNotifyAllChildrenMetadata(t, ctx, selected, descriptor.FlowInstance, "eng_roles", row["eng_roles"])
+				assertNotifyAllChildrenMetadata(t, ctx, selected, descriptor.FlowInstance, "gem_score", row["gem_score"])
 			}
 		})
 	}
@@ -1350,15 +1351,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if reintroduced.Config.Role != "returned" || reintroduced.LifecycleGeneration <= terminated.Generation {
 		t.Fatalf("reintroduced lifecycle = %#v, want successor after %#v", reintroduced, terminated)
 	}
-	if transitions := countNotifyAllChildrenLifecycleTransitions(
-		t,
-		ctx,
-		selected,
-		db,
-		retiredID,
-		runtimemanager.AgentLifecycleTerminated,
-		runtimemanager.AgentLifecycleRegistered,
-	); transitions != 1 {
+	if transitions := countNotifyAllChildrenLifecycleTransitions(t, ctx, selected, retiredID, runtimemanager.AgentLifecycleTerminated, runtimemanager.AgentLifecycleRegistered); transitions != 1 {
 		t.Fatalf("terminated-to-registered transitions = %d, want exactly one", transitions)
 	}
 	if reader := v3Agents[readerID]; reader.Config.Role != "reader-v3" {
@@ -1397,27 +1390,14 @@ func countNotifyAllChildrenLifecycleTransitions(
 	t *testing.T,
 	ctx context.Context,
 	backend notifyAllChildrenStore,
-	db *sql.DB,
+
 	agentID string,
 	previous runtimemanager.AgentLifecyclePhase,
 	next runtimemanager.AgentLifecyclePhase,
 ) int {
 	t.Helper()
-	query := `
-		SELECT COUNT(*)
-		FROM agent_lifecycle_transition_facts
-		WHERE agent_id = $1 AND previous_phase = $2 AND next_phase = $3
-	`
-	switch backend.(type) {
-	case *failingNotifyAllChildrenSQLiteStore, *store.SQLiteRuntimeStore:
-		query = `
-			SELECT COUNT(*)
-			FROM agent_lifecycle_transition_facts
-			WHERE agent_id = ? AND previous_phase = ? AND next_phase = ?
-		`
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, query, agentID, string(previous), string(next)).Scan(&count); err != nil {
+	count, err := storetest.ReadNotifyLifecycleTransitionCount(ctx, notifyAllChildrenNativeObservationOwner(backend), agentID, string(previous), string(next))
+	if err != nil {
 		t.Fatalf("count lifecycle transitions for %s: %v", agentID, err)
 	}
 	return count
@@ -1643,7 +1623,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 						assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t, ctx, db, tc.name, runID, nameCase.agentID, instancePath)
 						waitNotifyAllChildrenAgentAbsent(t, runtime.manager, runID, nameCase.agentID, instancePath)
 					}
-					assertNotifyAllChildrenCompletedTurns(t, ctx, backend, db, runID, nameCase.agentID, cardinality)
+					assertNotifyAllChildrenCompletedTurns(t, ctx, backend, runID, nameCase.agentID, cardinality)
 					if active, err := backend.LoadAgents(ctx); err != nil {
 						t.Fatalf("LoadAgents after independent terminalization: %v", err)
 					} else if len(active) != 0 {
@@ -1734,7 +1714,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
 			})
-			assertNotifyAllChildrenRunPersisted(t, ctx, backend, db, runID)
+			assertNotifyAllChildrenRunPersisted(t, ctx, backend, runID)
 			for _, accountID := range []string{"acct-a", "acct-b", "acct-stale"} {
 				publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.account.register.requested", map[string]any{
 					"portfolio_id": "portfolio-main",
@@ -1744,7 +1724,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 
 			descriptors := notifyAllChildrenAccountDescriptors(t, ctx, backend)
 			if len(descriptors) != 3 {
-				dumpNotifyAllChildrenRuntimeState(t, ctx, backend, db)
+				dumpNotifyAllChildrenRuntimeState(t, ctx, backend)
 				t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 				t.Fatalf("active account descriptors = %#v, want A/B/stale", descriptors)
 			}
@@ -1763,9 +1743,9 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				"portfolio_id": "portfolio-main",
 				"command":      "ordered-duplicate",
 			})
-			orderedItems := loadNotifyAllChildrenItemEvents(t, ctx, backend, db, runID, orderedNotifyID)
+			orderedItems := loadNotifyAllChildrenItemEvents(t, ctx, backend, runID, orderedNotifyID)
 			if len(orderedItems) != len(orderedMembership) {
-				dumpNotifyAllChildrenRuntimeState(t, ctx, backend, db)
+				dumpNotifyAllChildrenRuntimeState(t, ctx, backend)
 				t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 			}
 			assertNotifyAllChildrenItemSequence(t, orderedItems, orderedMembership)
@@ -1783,7 +1763,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				"portfolio_id": "portfolio-main",
 				"account_ids":  []string{"acct-a", "acct-b", "acct-stale"},
 			})
-			assertNotifyAllChildrenMetadata(t, ctx, backend, db, "portfolio", "account_ids", []any{"acct-a", "acct-b", "acct-stale"})
+			assertNotifyAllChildrenMetadata(t, ctx, backend, "portfolio", "account_ids", []any{"acct-a", "acct-b", "acct-stale"})
 
 			stale := descriptors["acct-stale"]
 			if err := runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
@@ -1805,9 +1785,9 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				"portfolio_id": "portfolio-main",
 				"command":      "refresh",
 			})
-			itemEvents := loadNotifyAllChildrenItemEvents(t, ctx, backend, db, runID, notifyID)
+			itemEvents := loadNotifyAllChildrenItemEvents(t, ctx, backend, runID, notifyID)
 			if len(itemEvents) != 3 {
-				dumpNotifyAllChildrenRuntimeState(t, ctx, backend, db)
+				dumpNotifyAllChildrenRuntimeState(t, ctx, backend)
 				t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 				t.Fatalf("fan-out item events = %#v, want exactly A/B/stale", itemEvents)
 			}
@@ -1821,18 +1801,18 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				}
 				want := descriptors[accountID]
 				assertNotifyAllChildrenExactRoutes(t, routes, want)
-				assertNotifyAllChildrenMetadata(t, ctx, backend, db, want.FlowInstance, "last_command", "refresh")
+				assertNotifyAllChildrenMetadata(t, ctx, backend, want.FlowInstance, "last_command", "refresh")
 			}
 
 			staleID := items["acct-stale"]
 			if routes, err := backend.ListEventDeliveryRoutes(ctx, staleID); err != nil || len(routes) != 0 {
 				t.Fatalf("stale routes = %#v err=%v, want none", routes, err)
 			}
-			failure := loadNotifyAllChildrenFailure(t, ctx, backend, db, staleID)
+			failure := loadNotifyAllChildrenFailure(t, ctx, backend, staleID)
 			if failure.Class != runtimefailures.ClassTargetUnreachable || !strings.Contains(failure.Detail.Code, "target") {
 				t.Fatalf("stale failure = %#v, want platform.target_unreachable with route detail", failure)
 			}
-			assertNotifyAllChildrenFlowInstanceCount(t, ctx, backend, db, 3)
+			assertNotifyAllChildrenFlowInstanceCount(t, ctx, backend, 3)
 
 			// A later supported write changes current membership and state. Replaying
 			// the original A item must still use its persisted route and payload.
@@ -1844,7 +1824,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				"portfolio_id": "portfolio-main",
 				"command":      "newer",
 			})
-			assertNotifyAllChildrenMetadata(t, ctx, backend, db, descriptors["acct-a"].FlowInstance, "last_command", "newer")
+			assertNotifyAllChildrenMetadata(t, ctx, backend, descriptors["acct-a"].FlowInstance, "last_command", "newer")
 			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.membership.seeded", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"account_ids":  []string{"acct-b"},
@@ -1911,7 +1891,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			}
 			startNotifyAllChildrenDeliveryContinuations(t, ctx, backend, restarted, recoveryEvent.ID(), routes[0])
 			waitNotifyAllChildrenRuntime(t, restarted, runID)
-			assertNotifyAllChildrenMetadata(t, ctx, backend, db, descriptors["acct-a"].FlowInstance, "last_command", "refresh")
+			assertNotifyAllChildrenMetadata(t, ctx, backend, descriptors["acct-a"].FlowInstance, "last_command", "refresh")
 			if got := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID); got != eventCountBefore {
 				t.Fatalf("item event count after replay = %d, want %d; replay must not re-expand current membership", got, eventCountBefore)
 			}
@@ -2454,7 +2434,7 @@ func waitNotifyAllChildrenEntityState(
 		time.Sleep(10 * time.Millisecond)
 	}
 	if concrete, ok := t.(*testing.T); ok {
-		dumpNotifyAllChildrenRuntimeState(concrete, ctx, backend, db)
+		dumpNotifyAllChildrenRuntimeState(concrete, ctx, backend)
 	}
 	t.Fatalf(
 		"flow instance %s status = %q, want %q",
@@ -2542,28 +2522,17 @@ func assertNotifyAllChildrenCompletedTurns(
 	t testing.TB,
 	ctx context.Context,
 	backend notifyAllChildrenStore,
-	db *sql.DB,
+
 	runID string,
 	agentID string,
 	wantInstances int,
 ) {
 	t.Helper()
-	query := `
-		SELECT COUNT(*), COUNT(DISTINCT flow_instance)
-		FROM agent_turns
-		WHERE run_id = $1::uuid AND agent_id = $2 AND failure IS NULL
-	`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `
-			SELECT COUNT(*), COUNT(DISTINCT flow_instance)
-			FROM agent_turns
-			WHERE run_id = ? AND agent_id = ? AND failure IS NULL
-		`
-	}
-	var turns, instances int
-	if err := db.QueryRowContext(ctx, query, runID, agentID).Scan(&turns, &instances); err != nil {
+	observed, err := storetest.ReadNotifyCompletedTurns(ctx, notifyAllChildrenNativeObservationOwner(backend), runID, agentID)
+	if err != nil {
 		t.Fatalf("count completed %s turns: %v", agentID, err)
 	}
+	turns, instances := observed.Turns, observed.Instances
 	if turns < wantInstances || instances != wantInstances {
 		t.Fatalf(
 			"completed %s turns=%d distinct instances=%d, want at least %d turns across %d instances",
@@ -2711,23 +2680,20 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 	}
 }
 
-func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRuntime, db *sql.DB, runID string, cardinality int) time.Time {
+func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRuntime, runID string, cardinality int) time.Time {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), 5*time.Minute)
 	defer cancel()
-	query := `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1::uuid`
-	if _, ok := runtime.selected.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=?`
-	}
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	lastCursor, loggedHundreds := 0, 0
 	for {
-		var total, cursor, owed, blocked int
-		if err := db.QueryRowContext(ctx, query, runID).Scan(&total, &cursor, &owed, &blocked); err != nil {
-			logNotifyAllChildrenFanOutWork(t, db, runID)
+		observed, err := storetest.ReadNotifyFanOutCursor(ctx, notifyAllChildrenNativeObservationOwner(runtime.selected), runID)
+		if err != nil {
+			logNotifyAllChildrenFanOutWork(t, runtime.selected, runID)
 			t.Fatalf("load fan-out cursor: %v; last cursor=%d want=%d", err, lastCursor, cardinality)
 		}
+		total, cursor, owed, blocked := observed.Total, observed.Cursor, observed.Owed, observed.Blocked
 		lastCursor = cursor
 		if cursor/100 > loggedHundreds {
 			loggedHundreds = cursor / 100
@@ -2735,15 +2701,14 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 		}
 		if total == cardinality && cursor == cardinality && owed == 0 {
 			observed := time.Now()
-			logNotifyAllChildrenFanOutWork(t, db, runID)
+			logNotifyAllChildrenFanOutWork(t, runtime.selected, runID)
 			return observed
 		}
-		var terminalFailure string
-		err := db.QueryRowContext(ctx, `SELECT CAST(d.failure AS TEXT) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE CAST(e.run_id AS TEXT)=$1 LIMIT 1`, runID).Scan(&terminalFailure)
+		terminalFailure, err := storetest.ReadNotifyFirstRunFailure(ctx, notifyAllChildrenNativeObservationOwner(runtime.selected), runID)
 		if err == nil {
 			t.Fatalf("fan-out run has a terminally failed delivery before expected cursor: total=%d cursor=%d want=%d failure=%s", total, cursor, cardinality, terminalFailure)
 		}
-		if err != sql.ErrNoRows {
+		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("diagnose terminal fan-out delivery: %v", err)
 		}
 		// Poll progress, not the per-ordinal settlement fold. The caller still
@@ -2759,7 +2724,7 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 		}
 		select {
 		case <-ctx.Done():
-			logNotifyAllChildrenFanOutWork(t, db, runID)
+			logNotifyAllChildrenFanOutWork(t, runtime.selected, runID)
 			t.Fatalf("wait for fan-out cursor: %v; total=%d cursor=%d owed=%d", ctx.Err(), total, cursor, owed)
 		case <-ticker.C:
 		}
@@ -2768,36 +2733,22 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 
 // Observe only after the original progress verdict or completed quiescence.
 // A bounded diagnostic read cannot extend, recover or waive that verdict.
-func logNotifyAllChildrenFanOutWork(t *testing.T, db *sql.DB, runID string) {
+func logNotifyAllChildrenFanOutWork(t *testing.T, selected notifyAllChildrenStore, runID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	var intents, floor, minimum, maximum int
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN next_chunk_size=1 THEN 1 ELSE 0 END),0),COALESCE(MIN(next_chunk_size),0),COALESCE(MAX(next_chunk_size),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intents, &floor, &minimum, &maximum)
+	observed, err := storetest.ReadNotifyFanOutWork(ctx, notifyAllChildrenNativeObservationOwner(selected), runID)
 	if err != nil {
 		t.Logf("fan-out work diagnostic: %v", err)
 		return
 	}
-	var revisions, facts int64
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1`, runID).Scan(&revisions); err != nil {
-		t.Logf("fan-out revision diagnostic: %v", err)
-		return
-	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1`, runID).Scan(&facts); err != nil {
-		t.Logf("fan-out fact diagnostic: %v", err)
-		return
-	}
-	t.Logf("fan-out work: intents=%d floor_one=%d next_chunk=%d..%d committed_revisions=%d fact_revisions=%d", intents, floor, minimum, maximum, revisions, facts)
+	t.Logf("fan-out work: intents=%d floor_one=%d next_chunk=%d..%d committed_revisions=%d fact_revisions=%d", observed.Intents, observed.FloorOne, observed.Minimum, observed.Maximum, observed.Revisions, observed.Facts)
 }
 
-func assertNotifyAllChildrenRunPersisted(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) {
+func assertNotifyAllChildrenRunPersisted(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, runID string) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT COUNT(*) FROM runs WHERE run_id = ?`
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, query, runID).Scan(&count); err != nil {
+	count, err := storetest.ReadNotifyRunPresence(ctx, notifyAllChildrenNativeObservationOwner(backend), runID)
+	if err != nil {
 		t.Fatalf("query notify-all-children run: %v", err)
 	}
 	if count != 1 {
@@ -2830,34 +2781,20 @@ type notifyAllChildrenItemEvent struct {
 	Ordinal   int
 }
 
-func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, sourceEventID string) []notifyAllChildrenItemEvent {
+func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, runID, sourceEventID string) []notifyAllChildrenItemEvent {
 	t.Helper()
-	query := `SELECT e.event_id::text,e.payload,e.created_at,o.ordinal FROM fan_out_outcomes o JOIN events e ON e.event_id=o.event_id AND e.run_id=o.run_id WHERE o.run_id=$1::uuid AND e.event_name=$2 AND e.source_event_id=$3::uuid AND o.outcome_kind='committed' ORDER BY o.ordinal`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT e.event_id,e.payload,e.created_at,o.ordinal FROM fan_out_outcomes o JOIN events e ON e.event_id=o.event_id AND e.run_id=o.run_id WHERE o.run_id=? AND e.event_name=? AND e.source_event_id=? AND o.outcome_kind='committed' ORDER BY o.ordinal`
-	}
-	rows, err := db.QueryContext(ctx, query, runID, "portfolio/account.notify.requested", sourceEventID)
+	rows, err := storetest.ReadNotifyAllChildrenItemStorage(ctx, notifyAllChildrenNativeObservationOwner(backend), runID, sourceEventID)
 	if err != nil {
 		t.Fatalf("query fan-out item events: %v", err)
 	}
-	defer rows.Close()
 	out := []notifyAllChildrenItemEvent{}
-	for rows.Next() {
-		var id string
-		var ordinal int
-		var raw, createdAt any
-		if err := rows.Scan(&id, &raw, &createdAt, &ordinal); err != nil {
-			t.Fatalf("scan fan-out item event: %v", err)
-		}
+	for _, row := range rows {
 		payload := map[string]any{}
-		if err := json.Unmarshal(notifyAllChildrenJSONBytes(raw), &payload); err != nil {
+		if err := json.Unmarshal([]byte(row.Payload), &payload); err != nil {
 			t.Fatalf("decode fan-out item payload: %v", err)
 		}
 		accountID, _ := payload["account_id"].(string)
-		out = append(out, notifyAllChildrenItemEvent{ID: id, AccountID: accountID, CreatedAt: fmt.Sprint(createdAt), Ordinal: ordinal})
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read fan-out item events: %v", err)
+		out = append(out, notifyAllChildrenItemEvent{ID: row.ID, AccountID: accountID, CreatedAt: row.CreatedAt, Ordinal: row.Ordinal})
 	}
 	return out
 }
@@ -2907,12 +2844,8 @@ func countNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend
 	return count
 }
 
-func assertNotifyAllChildrenMetadata(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, flowInstance, field string, want any) {
+func assertNotifyAllChildrenMetadata(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, flowInstance, field string, want any) {
 	t.Helper()
-	query := `SELECT fields FROM entity_state WHERE flow_instance = $1 ORDER BY updated_at DESC LIMIT 1`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT fields FROM entity_state WHERE flow_instance = ? ORDER BY updated_at DESC LIMIT 1`
-	}
 	wantJSON, _ := json.Marshal(want)
 	deadline := time.Now().Add(5 * time.Second)
 	var (
@@ -2921,14 +2854,14 @@ func assertNotifyAllChildrenMetadata(t *testing.T, ctx context.Context, backend 
 		lastErr error
 	)
 	for time.Now().Before(deadline) {
-		var raw any
-		if err := db.QueryRowContext(ctx, query, flowInstance).Scan(&raw); err != nil {
+		raw, err := storetest.ReadNotifyAllChildrenMetadataStorage(ctx, notifyAllChildrenNativeObservationOwner(backend), flowInstance)
+		if err != nil {
 			lastErr = err
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 		fields = map[string]any{}
-		if err := json.Unmarshal(notifyAllChildrenJSONBytes(raw), &fields); err != nil {
+		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 			lastErr = err
 			time.Sleep(10 * time.Millisecond)
 			continue
@@ -2939,18 +2872,14 @@ func assertNotifyAllChildrenMetadata(t *testing.T, ctx context.Context, backend 
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	dumpNotifyAllChildrenRuntimeState(t, ctx, backend, db)
+	dumpNotifyAllChildrenRuntimeState(t, ctx, backend)
 	t.Fatalf("%s.%s = %s, want %s (all fields %#v, last error %v)", flowInstance, field, gotJSON, wantJSON, fields, lastErr)
 }
 
-func loadNotifyAllChildrenFailure(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, eventID string) runtimefailures.Envelope {
+func loadNotifyAllChildrenFailure(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, eventID string) runtimefailures.Envelope {
 	t.Helper()
-	query := `SELECT failure::text FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at DESC LIMIT 1`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT failure FROM dead_letters WHERE original_event_id = ? ORDER BY created_at DESC LIMIT 1`
-	}
-	var raw any
-	if err := db.QueryRowContext(ctx, query, eventID).Scan(&raw); err != nil {
+	raw, err := storetest.ReadNotifyLatestEventFailure(ctx, notifyAllChildrenNativeObservationOwner(backend), eventID)
+	if err != nil {
 		t.Fatalf("load stale target failure: %v", err)
 	}
 	failure, err := runtimefailures.UnmarshalEnvelope(notifyAllChildrenJSONBytes(raw))
@@ -2960,14 +2889,10 @@ func loadNotifyAllChildrenFailure(t *testing.T, ctx context.Context, backend not
 	return failure
 }
 
-func assertNotifyAllChildrenFlowInstanceCount(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, want int) {
+func assertNotifyAllChildrenFlowInstanceCount(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, want int) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM flow_instances WHERE flow_template = $1`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT COUNT(*) FROM flow_instances WHERE flow_template = ?`
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, query, notifyallchildren.ChildFlowID).Scan(&count); err != nil {
+	count, err := storetest.ReadNotifyFlowInstanceCount(ctx, notifyAllChildrenNativeObservationOwner(backend), notifyallchildren.ChildFlowID)
+	if err != nil {
 		t.Fatalf("count account flow instances: %v", err)
 	}
 	if count != want {
@@ -2986,6 +2911,23 @@ func deleteNotifyAllChildrenPipelineReceipt(t *testing.T, ctx context.Context, b
 	}
 }
 
+func notifyAllChildrenNativeObservationOwner(selected notifyAllChildrenStore) any {
+	switch owner := selected.(type) {
+	case *failingNotifyAllChildrenPostgresStore:
+		if owner == nil {
+			return nil
+		}
+		return owner.PostgresStore
+	case *failingNotifyAllChildrenSQLiteStore:
+		if owner == nil {
+			return nil
+		}
+		return owner.SQLiteRuntimeStore
+	default:
+		return selected
+	}
+}
+
 func notifyAllChildrenJSONBytes(raw any) []byte {
 	switch typed := raw.(type) {
 	case []byte:
@@ -2997,41 +2939,20 @@ func notifyAllChildrenJSONBytes(raw any) []byte {
 	}
 }
 
-func dumpNotifyAllChildrenRuntimeState(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB) {
+func dumpNotifyAllChildrenRuntimeState(t *testing.T, ctx context.Context, backend notifyAllChildrenStore) {
 	t.Helper()
-	queries := []string{
-		`SELECT event_name, event_id, payload FROM events ORDER BY created_at, event_id`,
-		`SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '') FROM event_receipts ORDER BY event_id, subscriber_type, subscriber_id`,
-		`SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), ''), COALESCE(CAST(delivery_target_route AS TEXT), '') FROM event_deliveries ORDER BY event_id, subscriber_type, subscriber_id`,
-		`SELECT flow_instance, current_state, fields FROM entity_state ORDER BY flow_instance`,
-		`SELECT run_id, instance_path, flow_template, status, config FROM flow_instances ORDER BY run_id, instance_path`,
-		`SELECT original_event_id, failure FROM dead_letters ORDER BY created_at`,
+	sections, err := storetest.ReadNotifyAllChildrenDiagnosticStorage(ctx, notifyAllChildrenNativeObservationOwner(backend))
+	if err != nil {
+		t.Logf("notify-all-children diagnostic owner failed: %v", err)
+		return
 	}
-	for _, query := range queries {
-		rows, err := db.QueryContext(ctx, query)
-		if err != nil {
-			t.Logf("notify-all-children diagnostic query failed: %v", err)
+	for _, section := range sections {
+		if section.Failure != "" {
+			t.Logf("notify-all-children diagnostic query failed: %s", section.Failure)
 			continue
 		}
-		columns, _ := rows.Columns()
-		for rows.Next() {
-			values := make([]any, len(columns))
-			destinations := make([]any, len(columns))
-			for i := range values {
-				destinations[i] = &values[i]
-			}
-			if err := rows.Scan(destinations...); err != nil {
-				t.Logf("notify-all-children diagnostic scan failed: %v", err)
-				break
-			}
-			for i, value := range values {
-				if raw, ok := value.([]byte); ok {
-					values[i] = string(raw)
-				}
-			}
-			t.Logf("notify-all-children %v: %v", columns, values)
+		for _, values := range section.Rows {
+			t.Logf("notify-all-children %v: %v", section.Columns, values)
 		}
-		_ = rows.Close()
 	}
-	_ = backend
 }

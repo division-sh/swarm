@@ -124,7 +124,7 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			}
 			assertNestedExactBarrier(t, ctx, db, parent.Key, "fired", fanoutbarrier.Summary{Total: 3, Succeeded: 3})
 			reader := nestedPublicReader(t, rt.selected)
-			parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, db, runID, notifyID)
+			parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, runID, notifyID)
 			assertNotifyAllChildrenItemSequence(t, parents, accounts)
 			parentViews := make(map[string]operatorread.OperatorEventFull, len(parents))
 			for _, event := range parents {

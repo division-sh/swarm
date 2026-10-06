@@ -45,7 +45,7 @@ func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *t
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(t.Context(), conformanceSourceArtifactFact(t, source)), runID)
 			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
-			runtime := newFanInBarrierRuntime(t, backend, db, source)
+			runtime := newFanInBarrierRuntime(t, backend, source)
 			load := func(period string) runtimepipeline.WorkflowInstance {
 				instances, err := runtime.pipeline.ListWorkflowInstances(ctx, runID)
 				var matches []runtimepipeline.WorkflowInstance
@@ -107,7 +107,7 @@ func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *t
 			if err := runtime.grant.Retire(ctx); err != nil {
 				t.Fatal(err)
 			}
-			runtime = newFanInBarrierRuntime(t, backend, db, source, 2)
+			runtime = newFanInBarrierRuntime(t, backend, source, 2)
 			if err := runtime.bus.PublishAcknowledged(ctx, original); err != nil {
 				t.Fatalf("reconstructed exact publication: %v", err)
 			}

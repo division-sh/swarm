@@ -954,7 +954,7 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 	fact := conformanceSourceArtifactFact(t, source)
 	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(ctx, fact), runID)
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-	runtime := newFanInBarrierRuntimeForSource(t, selected, replyConformanceDB(t, backend), source, fact, 1)
+	runtime := newFanInBarrierRuntimeForSource(t, selected, source, fact, 1)
 	if err := runtime.manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source, Instance: runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""), OccurredAt: time.Now().UTC(),
 	}); err != nil {

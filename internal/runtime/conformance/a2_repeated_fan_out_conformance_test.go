@@ -29,7 +29,7 @@ func TestA2RepeatedFanOutTriggerIsolationOnBothStores(t *testing.T) {
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("repeated fan-out counters: %+v", probe.snapshot())
-					dumpNotifyAllChildrenRuntimeState(t, context.Background(), rt.selected, db)
+					dumpNotifyAllChildrenRuntimeState(t, context.Background(), rt.selected)
 				}
 			})
 			if err := rt.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "a2-repeated-fan-out", rt.sourceArtifactFact)); err != nil {
@@ -98,7 +98,7 @@ func TestA2RepeatedFanOutTriggerIsolationOnBothStores(t *testing.T) {
 			}
 			var callbackIDs []string
 			for _, tc := range cases {
-				items := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, db, runID, tc.eventID)
+				items := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, runID, tc.eventID)
 				assertNotifyAllChildrenItemSequence(t, items, tc.accounts)
 				assertNotifyAllChildrenContiguousItemOrdinals(t, items)
 				callbackIDs = append(callbackIDs, tc.eventID)
