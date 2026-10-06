@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -315,8 +316,8 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunFo
 		entityID := strings.TrimSpace(fact.EntityID)
 		domain := mutationlog.Domain(strings.TrimSpace(fact.Domain))
 		path := strings.TrimSpace(fact.Path)
-		var value any
-		if err := json.Unmarshal(fact.NewValue, &value); err != nil {
+		value, err := decodeRunForkMutationValue(fact.NewValue)
+		if err != nil {
 			return nil, fmt.Errorf("decode fork entity mutation %s/%s/%s: %w", entityID, domain, path, err)
 		}
 		if _, ok := seen[entityID]; !ok {
@@ -360,6 +361,14 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunFo
 		})
 	}
 	return out, nil
+}
+
+func decodeRunForkMutationValue(raw json.RawMessage) (any, error) {
+	var value any
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &value); err != nil {
+		return nil, err
+	}
+	return canonicaljson.CloneRuntimeValue(value)
 }
 
 func runForkPendingReferencesActiveSession(pending []runfork.RunForkPendingWork) bool {

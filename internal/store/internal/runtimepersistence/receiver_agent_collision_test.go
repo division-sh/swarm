@@ -5,16 +5,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -100,67 +99,14 @@ func receiverAgentHistoricalProjection(t *testing.T, f receiverConfigActivationF
 		t.Fatal(err)
 	}
 	project := func() {
-		var metadata struct {
-			EntityID         string          `json:"entity_id"`
-			FlowInstance     string          `json:"flow_instance"`
-			EntityType       string          `json:"entity_type"`
-			FlowConfig       json.RawMessage `json:"flow_config"`
-			ConstructionKind string          `json:"construction_kind"`
-			FlowTemplate     string          `json:"flow_template"`
-			Mode             string          `json:"mode"`
-			Status           string          `json:"status"`
-			StageDefined     bool            `json:"stage_defined"`
-			CurrentState     string          `json:"current_state"`
-			EnteredStateAt   time.Time       `json:"entered_state_at"`
-			CreatedAt        time.Time       `json:"created_at"`
-			UpdatedAt        time.Time       `json:"updated_at"`
-		}
-		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
-			t.Fatal(err)
-		}
-		if metadata.EntityID != activation.Identity.EntityID || metadata.FlowInstance != activation.Identity.InstancePath || metadata.ConstructionKind != "constructed" {
-			t.Fatalf("foreign historical metadata: %s", raw)
-		}
-		rows, err := f.db.QueryContext(f.ctx, `WITH ranked AS (
-			SELECT fact,present,ROW_NUMBER() OVER (PARTITION BY fact_key ORDER BY revision DESC) AS rank
-			FROM run_fork_fact_revisions WHERE run_id=$1 AND family='entity_mutations' AND revision<=$2
-		) SELECT CAST(fact AS TEXT) FROM ranked WHERE rank=1 AND present=TRUE`, activation.Readiness.RunID, revision)
+		owner := flowidentity.RunScopedFlowInstance{RunID: activation.Readiness.RunID, Route: activation.Identity.Route()}
+		state, err := ReadReceiverHistoricalEntityStateForTest(f.ctx, f.store, owner, activation.Identity.EntityID, revision)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var mutations []mutationlog.ProjectionMutation
-		for rows.Next() {
-			var fact string
-			if err := rows.Scan(&fact); err != nil {
-				t.Fatal(err)
-			}
-			var mutation struct {
-				EntityID string             `json:"entity_id"`
-				Domain   mutationlog.Domain `json:"domain"`
-				Path     string             `json:"path"`
-				NewValue json.RawMessage    `json:"new_value"`
-			}
-			if err := json.Unmarshal([]byte(fact), &mutation); err != nil {
-				t.Fatal(err)
-			}
-			if mutation.EntityID != metadata.EntityID {
-				continue
-			}
-			var value any
-			if err := canonicaljson.DecodePreservingNumberLexemes(mutation.NewValue, &value); err != nil {
-				t.Fatal(err)
-			}
-			mutations = append(mutations, mutationlog.ProjectionMutation{Domain: mutation.Domain, Path: mutation.Path, NewValue: value})
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		if err := rows.Close(); err != nil {
-			t.Fatal(err)
-		}
-		state, err := mutationlog.ReconstructEntityStateProjection(mutations)
-		if err != nil {
-			t.Fatal(err)
+		metadata := state.MaterializationMetadata
+		if metadata == nil || state.EntityID != activation.Identity.EntityID || metadata.FlowInstance != activation.Identity.InstancePath {
+			t.Fatalf("foreign historical metadata: %+v", state)
 		}
 		want, err := canonicaljson.MarshalPreservingNumberKinds(activation.Instance.Fields)
 		if err != nil {
@@ -174,17 +120,13 @@ func receiverAgentHistoricalProjection(t *testing.T, f receiverConfigActivationF
 			t.Fatalf("historical supplied state differs: got=%s want=%s", got, want)
 		}
 		eventID := "11111111-1111-4111-8111-111111111111"
-		plan := runfork.RunForkPlan{SourceRunID: activation.Readiness.RunID, ForkPoint: runfork.RunForkPoint{Revision: revision}, Entities: []runfork.RunForkEntityState{{EntityID: metadata.EntityID, Fields: state.Fields, Bookkeeping: state.Bookkeeping, Gates: state.Gates, Accumulator: state.Accumulator, CurrentState: metadata.CurrentState, EnteredStateAt: &metadata.EnteredStateAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
-			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType, FlowConfig: metadata.FlowConfig,
-			FlowTemplate: metadata.FlowTemplate, Mode: metadata.Mode, Status: metadata.Status, StageDefined: metadata.StageDefined,
-			EnteredStateAt: metadata.EnteredStateAt, CreatedAt: metadata.CreatedAt, UpdatedAt: metadata.UpdatedAt,
-		}}}}
+		plan := runfork.RunForkPlan{SourceRunID: activation.Readiness.RunID, ForkPoint: runfork.RunForkPoint{Revision: revision}, Entities: []runfork.RunForkEntityState{state}}
 		plan = plan.WithHistoricalEvents(revision, []string{eventID})
-		target, err := events.NewExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: metadata.FlowInstance, EntityID: metadata.EntityID})
+		target, err := events.NewExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: metadata.FlowInstance, EntityID: state.EntityID})
 		if err != nil {
 			t.Fatal(err)
 		}
-		plan.PendingWork = []runfork.RunForkPendingWork{{EventID: eventID, EventName: metadata.FlowInstance + "/task.started", FlowInstance: metadata.FlowInstance, RoutingSource: eventtest.ConcreteTemplateRoutingSource("review", metadata.FlowInstance, metadata.EntityID), DeliveryRoute: events.DeliveryRoute{Target: target}, Classification: runfork.RunForkPendingClassificationPending}}
+		plan.PendingWork = []runfork.RunForkPendingWork{{EventID: eventID, EventName: metadata.FlowInstance + "/task.started", FlowInstance: metadata.FlowInstance, RoutingSource: eventtest.ConcreteTemplateRoutingSource("review", metadata.FlowInstance, state.EntityID), DeliveryRoute: events.DeliveryRoute{Target: target}, Classification: runfork.RunForkPendingClassificationPending}}
 		source := semanticview.Wrap(f.bundle)
 		frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})
 		if err != nil {
