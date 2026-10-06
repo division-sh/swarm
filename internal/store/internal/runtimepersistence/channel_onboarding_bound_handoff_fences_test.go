@@ -28,7 +28,7 @@ func TestChannelOnboardingBoundHandoffObservationAndCleanupReplaySelectedStorePa
 				t.Fatalf("observation failure mutated parent: %#v", unchanged)
 			}
 			rig.currentness.err = nil
-			if err := rig.file.Set(ctx, bound.ProviderCredential.Key, "intervening-token"); err != nil {
+			if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "intervening-token"); err != nil {
 				t.Fatal(err)
 			}
 			cleanupError := errors.New("interrupted after credential release")
@@ -98,7 +98,7 @@ func TestChannelOnboardingBoundHandoffSelectedStoreFences(t *testing.T) {
 					}
 				}
 				if change == "retire_during_cleanup" || change == "revision_during_cleanup" {
-					if err := rig.file.Set(ctx, bound.ProviderCredential.Key, "intervening-token"); err != nil {
+					if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "intervening-token"); err != nil {
 						t.Fatal(err)
 					}
 					rig.credentialFile.afterRelease = func() error { rig.credentialFile.afterRelease = nil; mutate(); return nil }
@@ -154,7 +154,7 @@ func TestChannelOnboardingBoundHandoffProofResponsibilityFencesSelectedStorePari
 				if err != nil || blocked.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation {
 					t.Fatalf("unfinished proof published activation: %#v, %v", blocked, err)
 				}
-				if err := rig.file.Set(ctx, bound.ProviderCredential.Key, "intervening-token"); err != nil {
+				if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "intervening-token"); err != nil {
 					t.Fatal(err)
 				}
 				if err := rig.service.ReconcileLocal(ctx); err != nil {
@@ -189,7 +189,7 @@ func TestChannelOnboardingRetainedReconnectFencesSelectedStoreParity(t *testing.
 				ctx := context.Background()
 				begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 				bound := rig.confirm(t, begun, "account-a")
-				if err := rig.file.Set(ctx, bound.ProviderCredential.Key, "intervening-token"); err != nil {
+				if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "intervening-token"); err != nil {
 					t.Fatal(err)
 				}
 				if err := rig.service.ReconcileLocal(ctx); err != nil {
@@ -197,10 +197,10 @@ func TestChannelOnboardingRetainedReconnectFencesSelectedStoreParity(t *testing.
 				}
 				observationError := errors.New("retained binding observation unavailable")
 				if changed {
-					if err := rig.file.Set(ctx, bound.ProviderCredential.Key, "original-token"); err != nil {
+					if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "original-token"); err != nil {
 						t.Fatal(err)
 					}
-					successor, err := rig.identities.Begin(ctx, bound.Interface.Selector, operatorchannel.OperationReconnect, bound.BindingRevision, uuid.NewString(), uuid.NewString(), "", bound.ProviderCredential, false, rig.now)
+					successor, err := rig.identities.Begin(ctx, bound.Interface.Selector, operatorchannel.OperationReconnect, bound.BindingRevision, uuid.NewString(), uuid.NewString(), "", bound.ProviderAuthority, false, rig.now)
 					if err != nil {
 						t.Fatal(err)
 					}

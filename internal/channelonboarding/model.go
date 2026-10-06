@@ -36,11 +36,10 @@ type IdentityCeremony string
 
 const (
 	CeremonyAuthenticatedTextChallenge IdentityCeremony = "authenticated_text_challenge"
-	CeremonyProviderPairing            IdentityCeremony = "provider_pairing"
 )
 
 func (c IdentityCeremony) Valid() bool {
-	return c == CeremonyAuthenticatedTextChallenge || c == CeremonyProviderPairing
+	return c == CeremonyAuthenticatedTextChallenge
 }
 
 type Verb string
@@ -330,33 +329,32 @@ const (
 )
 
 type ReadinessFacts struct {
-	Coordinate                       ChannelRuntimeContextCoordinate   `json:"coordinate"`
-	Interface                        operatorchannel.InterfaceIdentity `json:"interface"`
-	ActivationRevision               int64                             `json:"activation_revision"`
-	PlanGeneration                   plangeneration.Generation         `json:"plan_generation"`
-	ActivationGeneration             ChannelActivationGeneration       `json:"-"`
-	RegistrationActivationGeneration ChannelActivationGeneration       `json:"-"`
-	ActivationCurrent                bool                              `json:"activation_current"`
-	BindingRevision                  int64                             `json:"binding_revision"`
-	ExpectedBindingRevision          int64                             `json:"expected_binding_revision"`
-	ProofID                          string                            `json:"proof_id,omitempty"`
-	ProofRevision                    int64                             `json:"proof_revision,omitempty"`
-	ExpectedProofRevision            int64                             `json:"expected_proof_revision,omitempty"`
-	ProofCurrent                     bool                              `json:"proof_current"`
-	CredentialsCurrent               bool                              `json:"credentials_current"`
-	ConfirmationActivationRevision   int64                             `json:"confirmation_activation_revision"`
-	ConfirmationBindingRevision      int64                             `json:"confirmation_binding_revision"`
-	ConfirmationTerminalSuccess      bool                              `json:"confirmation_terminal_success"`
-	Posture                          ActivationPosture                 `json:"activation_posture"`
-	TargetGeneration                 uint64                            `json:"target_generation,omitempty"`
-	ExpectedTargetGeneration         uint64                            `json:"expected_target_generation,omitempty"`
-	ExposureGeneration               string                            `json:"exposure_generation,omitempty"`
-	ExpectedExposureGeneration       string                            `json:"expected_exposure_generation,omitempty"`
-	RegistrationCurrent              bool                              `json:"registration_current,omitempty"`
-	ServiceFulfillmentGeneration     string                            `json:"service_fulfillment_generation,omitempty"`
-	ExpectedServiceGeneration        string                            `json:"expected_service_fulfillment_generation,omitempty"`
-	SessionCurrent                   bool                              `json:"session_current,omitempty"`
-	ObservedAt                       time.Time                         `json:"observed_at"`
+	Coordinate                       ChannelRuntimeContextCoordinate               `json:"coordinate"`
+	Interface                        operatorchannel.InterfaceIdentity             `json:"interface"`
+	ActivationRevision               int64                                         `json:"activation_revision"`
+	PlanGeneration                   plangeneration.Generation                     `json:"plan_generation"`
+	ActivationGeneration             ChannelActivationGeneration                   `json:"-"`
+	RegistrationActivationGeneration ChannelActivationGeneration                   `json:"-"`
+	ActivationCurrent                bool                                          `json:"activation_current"`
+	BindingRevision                  int64                                         `json:"binding_revision"`
+	ExpectedBindingRevision          int64                                         `json:"expected_binding_revision"`
+	ProofID                          string                                        `json:"proof_id,omitempty"`
+	ProofRevision                    int64                                         `json:"proof_revision,omitempty"`
+	ExpectedProofRevision            int64                                         `json:"expected_proof_revision,omitempty"`
+	ProofCurrent                     bool                                          `json:"proof_current"`
+	CredentialsCurrent               bool                                          `json:"credentials_current"`
+	ConfirmationActivationRevision   int64                                         `json:"confirmation_activation_revision"`
+	ConfirmationBindingRevision      int64                                         `json:"confirmation_binding_revision"`
+	ConfirmationTerminalSuccess      bool                                          `json:"confirmation_terminal_success"`
+	Posture                          ActivationPosture                             `json:"activation_posture"`
+	TargetGeneration                 uint64                                        `json:"target_generation,omitempty"`
+	ExpectedTargetGeneration         uint64                                        `json:"expected_target_generation,omitempty"`
+	ExposureGeneration               string                                        `json:"exposure_generation,omitempty"`
+	ExpectedExposureGeneration       string                                        `json:"expected_exposure_generation,omitempty"`
+	RegistrationCurrent              bool                                          `json:"registration_current,omitempty"`
+	SessionAuthority                 operatorchannel.ProviderAuthority             `json:"-"`
+	SessionObservation               *operatorchannel.SessionConnectionObservation `json:"-"`
+	ObservedAt                       time.Time                                     `json:"observed_at"`
 }
 
 type ConnectedChannelReadiness struct {
@@ -368,6 +366,7 @@ type ConnectedChannelReadiness struct {
 	ActivationGeneration string                          `json:"activation_generation,omitempty"`
 	ObservedAt           time.Time                       `json:"observed_at"`
 	NativeInbox          *channelnative.Qualification    `json:"native_inbox,omitempty"`
+	NativeInboxRequired  bool                            `json:"native_inbox_required"`
 }
 
 // ConnectedChannelReadback is the canonical presentation projection for one
@@ -440,7 +439,9 @@ func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 			return fail(ReadinessRegistrationUnavailable)
 		}
 	case ActivationSessionConnection:
-		if strings.TrimSpace(f.ServiceFulfillmentGeneration) == "" || f.ServiceFulfillmentGeneration != f.ExpectedServiceGeneration || !f.SessionCurrent {
+		if f.SessionAuthority.Kind != operatorchannel.ProviderAuthoritySession || f.SessionAuthority.RequireExecutable() != nil ||
+			f.SessionObservation == nil || f.SessionObservation.Validate() != nil || !f.SessionObservation.Connected ||
+			f.SessionObservation.Admission != f.SessionAuthority.Session || !f.SessionObservation.ObservedAt.Equal(f.ObservedAt) {
 			return fail(ReadinessSessionUnavailable)
 		}
 	}

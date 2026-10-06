@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/google/uuid"
 )
 
 func TestChannelRuntimeContextCoordinateRequiresEveryExactGeneration(t *testing.T) {
@@ -201,9 +202,6 @@ func TestConnectedReadinessRejectsEveryMixedOrMissingFact(t *testing.T) {
 		}, want: ReadinessRegistrationUnavailable},
 		{name: "session", mutate: func(f *ReadinessFacts) {
 			f.Posture = ActivationSessionConnection
-			f.ServiceFulfillmentGeneration = "service-1"
-			f.ExpectedServiceGeneration = "service-1"
-			f.SessionCurrent = false
 		}, want: ReadinessSessionUnavailable},
 	}
 	for _, tc := range tests {
@@ -226,11 +224,13 @@ func TestConnectedReadinessRejectsEveryMixedOrMissingFact(t *testing.T) {
 
 	session := facts
 	session.Posture = ActivationSessionConnection
-	session.ServiceFulfillmentGeneration = "service-1"
-	session.ExpectedServiceGeneration = "service-1"
-	session.SessionCurrent = true
-	if got := ProjectReadiness(session); !got.Ready {
-		t.Fatalf("current session-backed channel is not ready: %#v", got)
+	session.SessionAuthority = operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession,
+		Session: operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: uuid.NewString(),
+			AccountRef: "provider-account", AdmissionID: uuid.NewString(), Revision: 1}}
+	session.SessionObservation = &operatorchannel.SessionConnectionObservation{Admission: session.SessionAuthority.Session,
+		OccurrenceID: uuid.NewString(), Connected: true, ObservedAt: session.ObservedAt}
+	if got := ProjectReadiness(session); got.Ready || got.Reason != ReadinessSessionUnavailable {
+		t.Fatalf("uninstalled session fabricated readiness: %#v", got)
 	}
 }
 

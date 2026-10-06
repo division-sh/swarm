@@ -36,7 +36,7 @@ func TestOperatorChannelConfirmationRequiresActiveOwningOnboardingParentSelected
 
 				confirmed, binding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 					OperationID: child.OperationID, PrincipalID: child.PrincipalID, ExpectedRevision: child.Revision,
-					Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(6 * time.Second),
+					Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now.Add(6 * time.Second),
 				})
 				if !errors.Is(err, operatorchannel.ErrConflict) || confirmed != (operatorchannel.Operation{}) || binding != (operatorchannel.Binding{}) {
 					t.Fatalf("retired-parent confirmation = op:%#v binding:%#v err:%v", confirmed, binding, err)
@@ -63,7 +63,7 @@ func TestOperatorChannelConfirmationRequiresActiveOwningOnboardingParentSelected
 
 				_, _, err = fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 					OperationID: child.OperationID, PrincipalID: child.PrincipalID, ExpectedRevision: child.Revision,
-					Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(66 * time.Second),
+					Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now.Add(66 * time.Second),
 				})
 				if !errors.Is(err, operatorchannel.ErrRevisionConflict) {
 					t.Fatalf("unowned-child confirmation error = %v, want revision conflict", err)
@@ -74,7 +74,7 @@ func TestOperatorChannelConfirmationRequiresActiveOwningOnboardingParentSelected
 				parent, child := prepareChannelOnboardingConfirmation(t, fixture, "terminal-replay", now.Add(2*time.Minute))
 				confirmed, binding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 					OperationID: child.OperationID, PrincipalID: child.PrincipalID, ExpectedRevision: child.Revision,
-					Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(125 * time.Second),
+					Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now.Add(125 * time.Second),
 				})
 				if err != nil || confirmed.State != operatorchannel.StateBound || binding.Status != operatorchannel.BindingCurrent {
 					t.Fatalf("initial confirmation = op:%#v binding:%#v err:%v", confirmed, binding, err)
@@ -83,7 +83,7 @@ func TestOperatorChannelConfirmationRequiresActiveOwningOnboardingParentSelected
 
 				replayed, replayedBinding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 					OperationID: child.OperationID, PrincipalID: child.PrincipalID, ExpectedRevision: child.Revision,
-					Approve: true, ProviderCredentialCurrent: false, ConfirmedAt: now.Add(127 * time.Second),
+					Approve: true, ProviderAuthorityCurrent: false, ConfirmedAt: now.Add(127 * time.Second),
 				})
 				if err != nil || replayed != confirmed || replayedBinding != binding {
 					t.Fatalf("post-retirement replay = op:%#v binding:%#v err:%v; want op:%#v binding:%#v", replayed, replayedBinding, err, confirmed, binding)
@@ -154,13 +154,13 @@ func prepareChannelOnboardingConfirmation(t *testing.T, fixture channelOnboardin
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence := operatorChannelProviderEvidence()
-	evidence.Key = request.CredentialReservations[0].StoreKey
+	evidence := operatorChannelProviderAuthority()
+	evidence.Credential.Key = request.CredentialReservations[0].StoreKey
 	parent, err = fixture.store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 		OperationID: parent.OperationID, ExpectedRevision: parent.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{{
-			Role: request.CredentialReservations[0].Role, StoreKey: evidence.Key,
-			Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: evidence.Seal,
+			Role: request.CredentialReservations[0].Role, StoreKey: evidence.Credential.Key,
+			Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: evidence.Credential.Seal,
 		}},
 		ReplaceCredentialAdmissions: true, Now: now.Add(time.Second),
 	})
@@ -178,7 +178,7 @@ func prepareChannelOnboardingConfirmation(t *testing.T, fixture channelOnboardin
 		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
 		Interface: request.Interface, ExpectedRevision: 0,
 		RequestKeyHash: "confirmation-child-key-" + suffix, RequestHash: "confirmation-child-input-" + suffix,
-		OnboardingOperationID: parent.OperationID, ProviderCredential: evidence,
+		OnboardingOperationID: parent.OperationID, ProviderAuthority: evidence,
 		RequestedAt: now.Add(2 * time.Second), ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
 	})
 	if err != nil {

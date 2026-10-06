@@ -53,7 +53,7 @@ func channelActionAckAuthorityCurrent(ctx context.Context, q schemaQueryer, auth
 	if err := json.Unmarshal(raw, &fact); err != nil {
 		return false, fmt.Errorf("decode verified channel action: %w", err)
 	}
-	if state != "pending" || provider != ack.Provider || eventID != ack.ProviderEventID ||
+	if fact.Kind != operatorchannel.ActionSourceCallback || state != "pending" || provider != ack.Provider || eventID != ack.ProviderEventID ||
 		interfaceKey != ack.InterfaceKey || authorization != ack.ProviderAuthorization || fact.Interface.Key() != ack.InterfaceKey ||
 		fact.ExternalAccountRef != ack.ExternalAccountRef || fact.ConversationRef != ack.ConversationRef ||
 		string(fact.ConversationScope) != ack.ConversationScope || fact.MessageReference != ack.MessageReference ||

@@ -59,7 +59,7 @@ func loadUnsupportedChooserTextTx(ctx context.Context, tx *sql.Tx, fact operator
 		return render.PendingText{}, false, err
 	}
 	action.Verdict = verdict.String
-	action, err = hydrateFrozenChannelAction(action, raw, hash, position)
+	action, _, err = hydrateFrozenChannelAction(action, raw, hash, position)
 	if err != nil {
 		return render.PendingText{}, false, err
 	}

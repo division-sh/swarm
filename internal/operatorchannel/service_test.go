@@ -37,16 +37,16 @@ func TestProofResponsibilityRejectsProviderEvidenceContradictions(t *testing.T) 
 	if _, err := validatedResponsibilityProof(responsibility); err != nil {
 		t.Fatalf("valid proof responsibility: %v", err)
 	}
-	other := runtimecredentials.ValueEvidence{
-		Key:  responsibility.Operation.ProviderCredential.Key,
+	other := ProviderAuthority{Kind: ProviderAuthorityCredential, Credential: runtimecredentials.ValueEvidence{
+		Key:  responsibility.Operation.ProviderAuthority.Credential.Key,
 		Seal: runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat("b", 64)),
-	}
+	}}
 	for _, test := range []struct {
 		name   string
 		mutate func(*ProofResponsibility)
 	}{
-		{name: "binding", mutate: func(value *ProofResponsibility) { value.Binding.ProviderCredential = other }},
-		{name: "proof projection", mutate: func(value *ProofResponsibility) { value.Proof.ProviderCredential = other }},
+		{name: "binding", mutate: func(value *ProofResponsibility) { value.Binding.ProviderAuthority = other }},
+		{name: "proof projection", mutate: func(value *ProofResponsibility) { value.Proof.ProviderAuthority = other }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			contradictory := responsibility
@@ -71,8 +71,8 @@ func TestProviderCredentialEvidenceIsPrivateInPublicLifecycleJSON(t *testing.T) 
 				t.Fatal(err)
 			}
 			serialized := string(raw)
-			if strings.Contains(serialized, responsibility.Operation.ProviderCredential.Key) ||
-				strings.Contains(serialized, string(responsibility.Operation.ProviderCredential.Seal)) ||
+			if strings.Contains(serialized, responsibility.Operation.ProviderAuthority.Credential.Key) ||
+				strings.Contains(serialized, string(responsibility.Operation.ProviderAuthority.Credential.Seal)) ||
 				strings.Contains(serialized, "provider_credential") {
 				t.Fatalf("public JSON exposed provider credential evidence: %s", serialized)
 			}
@@ -89,7 +89,7 @@ func testProofResponsibility(t *testing.T) ProofResponsibility {
 		ExternalAccountRef: proof.ExternalAccountRef, ConversationRef: proof.ConversationRef,
 		ConversationScope: proof.ConversationScope, AccountPresentation: proof.AccountPresentation,
 		SaveProof: true, ProofID: proof.ProofID, ProofRevision: proof.Revision, ProofStatus: ProofPending,
-		CompletedAt: proof.VerifiedAt, ProviderCredential: proof.ProviderCredential,
+		CompletedAt: proof.VerifiedAt, ProviderAuthority: proof.ProviderAuthority,
 	}
 	binding := Binding{
 		PrincipalID: operation.PrincipalID, Interface: operation.Interface,
@@ -97,7 +97,7 @@ func testProofResponsibility(t *testing.T) ProofResponsibility {
 		ConversationScope: operation.ConversationScope, AccountPresentation: operation.AccountPresentation,
 		Revision: operation.BindingRevision, Status: BindingCurrent, Source: BindingSourceLiveVerification,
 		ProofID: operation.ProofID, ProofRevision: operation.ProofRevision, OperationID: operation.OperationID,
-		UpdatedAt: operation.CompletedAt, ProviderCredential: operation.ProviderCredential,
+		UpdatedAt: operation.CompletedAt, ProviderAuthority: operation.ProviderAuthority,
 	}
 	projected := proofFromOperation(operation, binding)
 	if _, err := uuid.Parse(projected.ProofID); err != nil {

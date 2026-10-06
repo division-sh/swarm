@@ -101,8 +101,8 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		OperationID: operatorchannel.NewOperationID(), Kind: operatorchannel.OperationConnect,
 		PrincipalID: principal.ID, Interface: identity, ExpectedRevision: 0,
 		RequestKeyHash: "signed-telegram-connect-key", RequestHash: "signed-telegram-connect-body",
-		ProviderCredential: providerEvidence,
-		RequestedAt:        now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+		ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: providerEvidence},
+		RequestedAt:       now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -200,8 +200,8 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		if index > 0 {
 			operation, err = selected.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
 				OperationID: operatorchannel.NewOperationID(), Kind: claim.kind,
-				ProviderCredential: providerEvidence,
-				PrincipalID:        principal.ID, Interface: identity, ExpectedRevision: int64(index),
+				ProviderAuthority: operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthorityCredential, Credential: providerEvidence},
+				PrincipalID:       principal.ID, Interface: identity, ExpectedRevision: int64(index),
 				RequestKeyHash: fmt.Sprintf("signed-telegram-rebind-key-%d", index), RequestHash: fmt.Sprintf("signed-telegram-rebind-body-%d", index),
 				RequestedAt: now.Add(time.Duration(index) * time.Minute), ExpiresAt: now.Add(time.Duration(index)*time.Minute + operatorchannel.DefaultChallengeTTL),
 			})
@@ -227,7 +227,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		}
 		confirmed, binding, err := selected.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 			OperationID: operation.OperationID, PrincipalID: principal.ID, ExpectedRevision: claimed.Revision,
-			Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(time.Duration(index+1)*time.Minute - time.Second),
+			Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now.Add(time.Duration(index+1)*time.Minute - time.Second),
 		})
 		if err != nil || confirmed.State != operatorchannel.StateBound || binding.Revision != int64(index+1) || binding.ConversationScope != claim.scope {
 			t.Fatalf("%s confirmation = operation:%#v binding:%#v err:%v", claim.chatKind, confirmed, binding, err)

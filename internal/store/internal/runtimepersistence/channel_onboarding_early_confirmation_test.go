@@ -31,7 +31,7 @@ func TestChannelOnboardingConfirmedReconnectBeforeParentPhaseSelectedStoreParity
 			if before.Phase != channelonboarding.PhaseAwaitingExternalIdentity || before.BindingRevision != 0 {
 				t.Fatalf("API confirmation changed parent phase: %#v", before)
 			}
-			if err := rig.file.Set(ctx, bound.ProviderCredential.Key, "intervening-token"); err != nil {
+			if err := rig.file.Set(ctx, bound.ProviderAuthority.Credential.Key, "intervening-token"); err != nil {
 				t.Fatal(err)
 			}
 			if err := rig.service.ReconcileLocal(ctx); err != nil {
@@ -61,7 +61,7 @@ func TestChannelOnboardingStaleConfirmationBeforeParentPhaseSelectedStoreParity(
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := rig.file.Set(ctx, claimed.Operation.ProviderCredential.Key, "intervening-token"); err != nil {
+			if err := rig.file.Set(ctx, claimed.Operation.ProviderAuthority.Credential.Key, "intervening-token"); err != nil {
 				t.Fatal(err)
 			}
 			_, _, err = rig.service.ConfirmIdentity(ctx, claimed.Operation.OperationID, claimed.Operation.Revision, true, rig.now)

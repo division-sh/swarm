@@ -43,7 +43,7 @@ func proveChannelResponseReceiptMatrix(t *testing.T, selected selectedChannelDel
 				}
 				if family == "navigation" {
 					action := operatorchannel.InboundAction{
-						ActionFact: operatorchannel.ActionFact{Interface: text.Interface, ExternalAccountRef: text.ExternalAccountRef,
+						ActionFact: operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback, Interface: text.Interface, ExternalAccountRef: text.ExternalAccountRef,
 							ConversationRef: text.ConversationRef, ConversationScope: text.ConversationScope,
 							Token: uuid.NewString(), InteractionRef: "fixture-interaction", MessageReference: text.MessageReference},
 						Provider: text.Provider, ProviderEventID: text.ProviderEventID, PublicationID: text.PublicationID,
@@ -80,7 +80,7 @@ func proveChannelResponseReceiptMatrix(t *testing.T, selected selectedChannelDel
 						}
 					} else {
 						action := operatorchannel.InboundAction{
-							ActionFact: operatorchannel.ActionFact{Interface: text.Interface, ExternalAccountRef: text.ExternalAccountRef,
+							ActionFact: operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback, Interface: text.Interface, ExternalAccountRef: text.ExternalAccountRef,
 								ConversationRef: text.ConversationRef, ConversationScope: text.ConversationScope,
 								Token: uuid.NewString(), InteractionRef: "contradictory-source", MessageReference: text.MessageReference},
 							Provider: text.Provider, ProviderEventID: text.ProviderEventID, PublicationID: text.PublicationID,
@@ -264,8 +264,8 @@ func proveResponseAuthorityNegatives(t *testing.T, selected selectedChannelDeliv
 	}{
 		{"unsettled_intent", `UPDATE ` + intentTable + ` SET state='pending', disposition=NULL, settled_at=NULL WHERE publication_id=$1`, publicationID},
 		{"missing_intent", `DELETE FROM ` + intentTable + ` WHERE publication_id=$1`, publicationID},
-		{"retired_binding", `UPDATE operator_channel_bindings SET status='unbound', provider_credential_key=NULL,
-			provider_credential_value_seal=NULL, external_account_reference=NULL, conversation_reference=NULL,
+		{"retired_binding", `UPDATE operator_channel_bindings SET status='unbound', provider_authority=NULL,
+			external_account_reference=NULL, conversation_reference=NULL,
 			conversation_scope=NULL, source=NULL WHERE interface_key=$1`, edit.ChannelDelivery.InterfaceKey},
 		{"retired_activation", `UPDATE connected_channel_activations SET status='retired', retired_at=CURRENT_TIMESTAMP, retirement_reason='test retirement' WHERE activation_id=$1`, edit.ChannelDelivery.ActivationID},
 		{"retired_default", `UPDATE channel_delivery_defaults SET state='retired' WHERE principal_id=$1`, edit.ChannelDelivery.PrincipalID},

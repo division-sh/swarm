@@ -1,4 +1,13 @@
 provider: telegram
+transport: webhook
+capabilities:
+  card_render: true
+  reply_to_reference: true
+  actions_as_buttons: true
+  actions_as_text: true
+  edit: true
+  acknowledgment: true
+  inbox_listing: true
 native_inbox:
   kind: scoped_commands_v1
   client_languages: [en, fr]
@@ -7,7 +16,6 @@ native_inbox:
   commands_launcher: commands
   inherited_launcher: default
 onboarding:
-  activation: webhook_registration
   ceremony: authenticated_text_challenge
   provider_credential: telegram_bot_token
   signing_credential: webhook_signing_secret

@@ -70,6 +70,13 @@ type Frozen struct {
 	Recovery           *RecoveryPage
 	RecoveryChoices    []RecoveryChoice
 	Page               *ResponsePage
+	InputCard          *InputCardPrompt
+}
+
+type InputCardPrompt struct {
+	CardID                   string `json:"card_id"`
+	CardContentHash          string `json:"card_content_hash"`
+	ParentReceiptOperationID string `json:"parent_receipt_operation_id"`
 }
 
 type RecoveryChoice struct {
@@ -112,6 +119,7 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 		FullText        string           `json:"full_text"`
 		Page            *ResponsePage    `json:"page"`
 		DraftPrompt     *DraftPrompt     `json:"draft_prompt"`
+		InputCard       *InputCardPrompt `json:"input_card_prompt"`
 		DraftChoices    []DraftChoice    `json:"draft_choices"`
 		DraftChooser    *DraftChooser    `json:"draft_chooser"`
 		Recovery        *RecoveryPage    `json:"recovery_page"`
@@ -147,7 +155,8 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 			ConversationRef: wire.Audience.ConversationRef, ConversationScope: wire.Audience.ConversationScope},
 		Input: append(json.RawMessage(nil), raw...), Hash: hash, FullText: wire.FullText, Choices: choices,
 		Prompt: wire.DraftPrompt, DraftChoices: wire.DraftChoices, DraftChooser: wire.DraftChooser,
-		Recovery: wire.Recovery, RecoveryChoices: wire.RecoveryChoices, Page: wire.Page, ActionPage: wire.ActionPage, Bounds: wire.Bounds,
+		InputCard: wire.InputCard,
+		Recovery:  wire.Recovery, RecoveryChoices: wire.RecoveryChoices, Page: wire.Page, ActionPage: wire.ActionPage, Bounds: wire.Bounds,
 	}
 	if err := frozen.Validate(); err != nil {
 		return Frozen{}, err
@@ -172,12 +181,14 @@ type frozenProjectionIndex struct {
 	FullText        string                   `json:"full_text"`
 	Page            *ResponsePage            `json:"page"`
 	Prompt          *DraftPrompt             `json:"draft_prompt"`
+	InputCard       *InputCardPrompt         `json:"input_card_prompt"`
 	Drafts          []DraftChoice            `json:"draft_choices"`
 	Chooser         *DraftChooser            `json:"draft_chooser"`
 	Recovery        *RecoveryPage            `json:"recovery_page"`
 	RecoveryChoices []RecoveryChoice         `json:"recovery_choices"`
 	ActionPage      *ActionPage              `json:"action_page"`
 	Bounds          packs.PresentationBounds `json:"presentation_bounds"`
+	Choices         []Choice                 `json:"choices"`
 }
 
 func (f Frozen) Validate() error {
@@ -217,6 +228,20 @@ func (f Frozen) validateFrozenIdentity(index frozenProjectionIndex) error {
 		index.Audience.ConversationScope != string(f.Audience.ConversationScope) {
 		return fmt.Errorf("channel render projection index contradicts frozen input")
 	}
+	if len(f.Choices) != len(index.Choices) {
+		return fmt.Errorf("channel controls contradict frozen input")
+	}
+	for i, choice := range f.Choices {
+		stored := index.Choices[i]
+		if choice.Verdict != stored.Verdict || choice.Label != stored.Label || len(choice.Fields) != len(stored.Fields) {
+			return fmt.Errorf("channel control contradicts frozen input")
+		}
+		for j, field := range choice.Fields {
+			if field != stored.Fields[j] {
+				return fmt.Errorf("channel control field contradicts frozen input")
+			}
+		}
+	}
 	return nil
 }
 
@@ -250,12 +275,41 @@ func (f Frozen) validateFrozenPages(index frozenProjectionIndex) error {
 }
 
 func (f Frozen) validateFrozenPrompt(index frozenProjectionIndex) error {
+	if (f.InputCard == nil) != (index.InputCard == nil) || f.InputCard != nil &&
+		(f.SourceKind != "response" || *f.InputCard != *index.InputCard || f.Prompt == nil ||
+			f.Page != nil || f.DraftChooser != nil || f.Recovery != nil || len(f.Choices) != 0 ||
+			uuid.Validate(f.InputCard.CardID) != nil || f.InputCard.CardContentHash == "" ||
+			uuid.Validate(f.InputCard.ParentReceiptOperationID) != nil) {
+		return fmt.Errorf("channel input card prompt contradicts frozen input")
+	}
 	if (f.Prompt == nil) != (index.Prompt == nil) || f.Prompt != nil &&
-		(f.SourceKind != "card" || *f.Prompt != *index.Prompt || uuid.Validate(f.Prompt.DraftID) != nil ||
+		((f.SourceKind != "card" && f.InputCard == nil) || *f.Prompt != *index.Prompt || uuid.Validate(f.Prompt.DraftID) != nil ||
 			f.Prompt.Verdict == "" || f.Prompt.NextFieldIndex < 0 || f.Prompt.ExpiresAt.IsZero()) {
 		return fmt.Errorf("channel draft prompt contradicts frozen input")
 	}
 	return nil
+}
+
+func FreezeInputCardPrompt(publicationID string, card decisioncard.Card, prompt DraftPrompt, parentReceiptID string, audience Audience) (Frozen, error) {
+	if err := card.Validate(); err != nil {
+		return Frozen{}, err
+	}
+	if uuid.Validate(publicationID) != nil || uuid.Validate(prompt.DraftID) != nil ||
+		card.Status != decisioncard.StatusPending || uuid.Validate(parentReceiptID) != nil {
+		return Frozen{}, fmt.Errorf("input prompt requires an exact active card draft and parent receipt")
+	}
+	projection, line, err := cardDraftPrompt(card, prompt)
+	if err != nil || projection == nil || line == "" {
+		return Frozen{}, fmt.Errorf("input prompt requires a current requested field: %w", err)
+	}
+	text := "Input for " + card.Snapshot.Title + "\n" + line
+	input := map[string]any{
+		"projection_version": ProjectionVersion, "source_kind": "response", "source_id": publicationID,
+		"source_revision": int64(1), "audience": audienceProjection(audience), "full_text": text,
+		"draft_prompt": projection, "input_card_prompt": InputCardPrompt{
+			CardID: card.CardID, CardContentHash: card.CardContentHash, ParentReceiptOperationID: parentReceiptID},
+	}
+	return freeze(input, "response", publicationID, 1, audience, text)
 }
 
 func (f Frozen) validateFrozenChooser(index frozenProjectionIndex) error {
@@ -308,29 +362,11 @@ func ActionPageCount(f Frozen) (int, error) {
 }
 
 func actionPageCount(f Frozen, capacity int) (int, error) {
-	count := len(f.Choices) + len(f.DraftChoices) + len(f.RecoveryChoices)
-	if f.Prompt != nil {
-		count++
-		if f.Prompt.Optional {
-			count++
-		}
+	if capacity != f.Bounds.Actions {
+		return 0, fmt.Errorf("channel control page capacity contradicts pinned bounds")
 	}
-	if f.SourceKind == "summary" || f.SourceKind == "notice" && !f.NoticeAcknowledged {
-		count++
-	}
-	if f.Page != nil && f.Page.Index+1 < f.Page.Count {
-		count++
-	}
-	if len([]rune(f.FullText)) > f.Bounds.TextRunes {
-		count++
-	}
-	if count <= capacity {
-		return 1, nil
-	}
-	if capacity < 2 {
-		return 0, fmt.Errorf("channel action capacity cannot page controls")
-	}
-	return (count + capacity - 2) / (capacity - 1), nil
+	pages, err := projectedControlPages(f)
+	return len(pages), err
 }
 
 func WithPresentation(f Frozen, bounds packs.PresentationBounds, index int) (Frozen, error) {
@@ -744,7 +780,11 @@ func FullTextPage(fullText string, index int, bounds packs.PresentationBounds) (
 	if len(runes) == 0 {
 		return "", 0, fmt.Errorf("view-full source is empty")
 	}
-	pageRunes := bounds.TextRunes - len("Page 1000/1000\n")
+	pageRunes := bounds.TextRunes - len("Page 1000/1000\n") - textReplySuffixRunes("00000000-0000-0000-0000-000000000000",
+		[]Action{{Label: bounds.Label("Next page")}})
+	if pageRunes < 1 {
+		return "", 0, fmt.Errorf("view-full page cannot retain its exact reference and continuation")
+	}
 	count := (len(runes) + pageRunes - 1) / pageRunes
 	if count > 1000 || index < 0 || index >= count {
 		return "", 0, fmt.Errorf("view-full page is outside the bounded immutable source")

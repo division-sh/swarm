@@ -32,7 +32,7 @@ func TestChannelLearnedObjectInputPublicJourney(t *testing.T) {
 				defer provider.mu.Unlock()
 				for _, operation := range []string{"/v2/deliver", "/v2/edit"} {
 					for _, input := range provider.calls[operation] {
-						if !objectChannelPresentationValid(input) || strings.Contains(fmt.Sprint(input["body"]), "object-private-") {
+						if !objectChannelPresentationValid(input, false) || strings.Contains(fmt.Sprint(input["body"]), "object-private-") {
 							t.Fatalf("%s violated tighter bounds or exposed private input: %#v", operation, input)
 						}
 					}
@@ -61,7 +61,7 @@ func TestChannelLearnedObjectInvalidChosenAnswerPublicJourney(t *testing.T) {
 			waitObjectMessageText(t, p, teaching, "That answer does not match the requested field.")
 			p.mu.Lock()
 			input := p.message(teaching)
-			valid := objectChannelPresentationValid(input)
+			valid := objectChannelPresentationValid(input, false)
 			p.mu.Unlock()
 			if !valid {
 				t.Fatalf("chosen-answer teaching exceeded the compiled provider bounds: %#v", input)

@@ -99,20 +99,20 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxSettings(ctx contex
 	return nil
 }
 
-func (d *serveChannelDeliveryDispatcher) resolveNativeInboxEntry(ctx context.Context, text operatorchannel.InboundText) (runtimechanneldelivery.ResolvedNativeEntry, runtimechanneldelivery.NativeEntryDisposition, error) {
+func (d *serveChannelDeliveryDispatcher) resolveInboxEntry(ctx context.Context, text operatorchannel.InboundText) (runtimechanneldelivery.ResolvedInboxEntry, runtimechanneldelivery.InboxEntryDisposition, error) {
 	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.ingress == nil || d.credentials == nil || d.now == nil {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, fmt.Errorf("native inbox entry owners are unavailable")
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, fmt.Errorf("native inbox entry owners are unavailable")
 	}
-	entry, found, err := d.store.ResolveCurrentNativeInboxEntry(ctx, text)
+	entry, found, err := d.store.ResolveCurrentInboxEntry(ctx, text)
 	if err != nil {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
 	}
 	if !found {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
 	}
 	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
 	if err != nil {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
 	}
 	var selected channelonboarding.ConnectedChannelActivation
 	for _, activation := range activations {
@@ -120,33 +120,33 @@ func (d *serveChannelDeliveryDispatcher) resolveNativeInboxEntry(ctx context.Con
 			continue
 		}
 		if selected.ActivationID != "" {
-			return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, fmt.Errorf("native inbox activation is duplicated")
+			return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, fmt.Errorf("native inbox activation is duplicated")
 		}
 		selected = activation
 	}
 	if selected.ActivationID == "" {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, nil
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, nil
 	}
 	if selected.PrincipalID != entry.PrincipalID ||
 		selected.Interface.Key() != entry.InterfaceKey || selected.BindingRevision != entry.BindingRevision ||
 		selected.Provider != text.Provider || selected.ConversationRef != text.ConversationRef {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
 	}
 	return d.qualifyResolvedNativeEntry(ctx, text, entry, selected)
 }
 
-func (d *serveChannelDeliveryDispatcher) qualifyResolvedNativeEntry(ctx context.Context, text operatorchannel.InboundText, entry runtimechanneldelivery.ResolvedNativeEntry, selected channelonboarding.ConnectedChannelActivation) (runtimechanneldelivery.ResolvedNativeEntry, runtimechanneldelivery.NativeEntryDisposition, error) {
+func (d *serveChannelDeliveryDispatcher) qualifyResolvedNativeEntry(ctx context.Context, text operatorchannel.InboundText, entry runtimechanneldelivery.ResolvedInboxEntry, selected channelonboarding.ConnectedChannelActivation) (runtimechanneldelivery.ResolvedInboxEntry, runtimechanneldelivery.InboxEntryDisposition, error) {
 	registration, current := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
 		channelonboarding.LearnedBindingID(selected.SlotKey), selected.TargetSelector, selected.Provider)
 	if !current || !registration.Current {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, nil
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, nil
 	}
-	if registration.Registration.SlotID != entry.ResourceSlotID {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
+	if entry.Kind == runtimechanneldelivery.InboxEntryNative && registration.Registration.SlotID != entry.ResourceSlotID {
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
 	}
 	lease, current, err := d.manager.AcquireChannelActivationPublication(selected.Coordinate.BundleHash, selected.Coordinate.ContextPublicationGeneration)
 	if err != nil || !current {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
 	}
 	defer lease.Release()
 	var plan packs.OutboundBindingPlan
@@ -158,35 +158,59 @@ func (d *serveChannelDeliveryDispatcher) qualifyResolvedNativeEntry(ctx context.
 			continue
 		}
 		if matched {
-			return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, fmt.Errorf("native inbox compiled activation is duplicated")
+			return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, fmt.Errorf("native inbox compiled activation is duplicated")
 		}
 		plan, matched = compiled.Plan, true
 	}
 	if !matched {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, fmt.Errorf("native inbox compiled publication is unavailable")
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, fmt.Errorf("native inbox compiled publication is unavailable")
 	}
 	ctx, err = withChannelProviderAdmission(ctx, lease, plan)
 	if err != nil {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
+	}
+	if entry.Kind == runtimechanneldelivery.InboxEntryTextReply {
+		if err := plan.Capabilities().Require(packs.ChannelCapabilityInboxListing); err != nil {
+			return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
+		}
+		if text.EntryReference != runtimechanneldelivery.TextReplyInboxReference {
+			return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
+		}
+		if text.EntryAddress != "" {
+			if !plan.HasNativeInbox() {
+				return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
+			}
+			address, err := d.readNativeInboxAddress(ctx, plan, selected.CredentialAdmissions)
+			if err != nil {
+				return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
+			}
+			if !strings.EqualFold(text.EntryAddress, address) {
+				return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
+			}
+		}
+		return entry, runtimechanneldelivery.InboxEntryAccepted, nil
+	}
+	if entry.Kind != runtimechanneldelivery.InboxEntryNative || !plan.HasNativeInbox() {
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
 	}
 	if err := d.reconcileNativeInboxActivation(ctx, selected); err != nil {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
 	}
 	qualification, err := d.native.ReadNativeInboxQualification(ctx, selected.ActivationID)
 	if err != nil || qualification.State != channelnative.QualificationQualified || qualification.SettingID != entry.SettingID || qualification.SettingGeneration != entry.SettingGeneration {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, errors.Join(err, fmt.Errorf("native inbox entry has no exact current client qualification"))
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, errors.Join(err, fmt.Errorf("native inbox entry has no exact current client qualification"))
 	}
 	address, err := d.readNativeInboxAddress(ctx, plan, selected.CredentialAdmissions)
 	if err != nil {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryUnavailable, err
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
 	}
 	if text.ConversationScope == operatorchannel.ConversationScopeShared && text.EntryAddress == "" {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
 	}
 	if text.EntryAddress != "" && !strings.EqualFold(text.EntryAddress, address) {
-		return runtimechanneldelivery.ResolvedNativeEntry{}, runtimechanneldelivery.NativeEntryRejected, nil
+		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
 	}
-	return entry, runtimechanneldelivery.NativeEntryAccepted, nil
+	return entry, runtimechanneldelivery.InboxEntryAccepted, nil
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx context.Context, activation channelonboarding.ConnectedChannelActivation) error {
@@ -215,6 +239,9 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 	}
 	if compiled.OnboardingOperationID == "" {
 		return fmt.Errorf("native inbox compiled activation is not exact-current")
+	}
+	if !compiled.Plan.HasNativeInbox() {
+		return nil
 	}
 	ctx, err = withChannelProviderAdmission(ctx, lease, compiled.Plan)
 	if err != nil {

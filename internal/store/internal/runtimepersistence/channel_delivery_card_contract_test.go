@@ -151,7 +151,7 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 				op, err := selected.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
 					OperationID: id, Kind: kind, PrincipalID: principal.ID, Interface: identity,
 					ExpectedRevision: revision, RequestKeyHash: id, RequestHash: id,
-					ProviderCredential: operatorChannelProviderEvidence(), RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+					ProviderAuthority: operatorChannelProviderAuthority(), RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -162,7 +162,7 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 				}
 				_, binding, err := selected.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 					OperationID: id, PrincipalID: principal.ID, ExpectedRevision: settled.Operation.Revision,
-					Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
+					Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -461,7 +461,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 				OperationID: onboarding.IdentityOperationID, Kind: operatorchannel.OperationConnect,
 				PrincipalID: principal.ID, Interface: activation.Interface, ExpectedRevision: 0,
 				RequestKeyHash: onboarding.IdentityOperationID, RequestHash: onboarding.IdentityOperationID,
-				ProviderCredential: operatorChannelProviderEvidence(), RequestedAt: now,
+				ProviderAuthority: operatorChannelProviderAuthority(), RequestedAt: now,
 				ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
 			})
 			if err != nil {
@@ -474,7 +474,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			}
 			_, binding, err := selected.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 				OperationID: bindingOperation.OperationID, PrincipalID: principal.ID, ExpectedRevision: claimed.Operation.Revision,
-				Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
+				Approve: true, ProviderAuthorityCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -574,7 +574,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			if err := handle.Succeed(effectCtx, map[string]any{"projected_output": map[string]any{"delivery_reference": map[string]any{"id": 91}}}); err != nil {
 				t.Fatal(err)
 			}
-			fact := operatorchannel.ActionFact{
+			fact := operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback,
 				Interface: binding.Interface, ExternalAccountRef: candidate.Audience.ExternalAccountRef,
 				ConversationRef: candidate.Audience.ConversationRef, ConversationScope: candidate.Audience.ConversationScope,
 				MessageReference: `{"id":91}`, InteractionRef: "callback-card-91", Token: acceptToken,

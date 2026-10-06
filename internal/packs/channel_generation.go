@@ -151,9 +151,15 @@ func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Gener
 			"learned_destination": compiledChannelMappingGenerationValue(p.onboarding.learnedDestination),
 		}
 	}
+	var nativeInbox any
+	if p.nativeInbox != nil {
+		nativeInbox = p.nativeInbox.canonicalValue()
+	}
 	return plangeneration.FromCanonicalValue(map[string]any{
 		"interface_ref":      p.interfaceRef.String(),
-		"native_inbox":       p.nativeInbox.canonicalValue(),
+		"capabilities":       p.capabilities.Vector(),
+		"transport":          p.transport,
+		"native_inbox":       nativeInbox,
 		"channel":            p.channel,
 		"trigger":            p.trigger,
 		"connector":          p.connector,
@@ -170,8 +176,11 @@ func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Gener
 }
 
 func validateSatisfactionPlanGenerationInputs(plan SatisfactionPlan) error {
-	if plan.nativeInbox == nil {
-		return fmt.Errorf("channel generation requires a compiled native inbox profile")
+	if _, err := plan.transport.ActivationPosture(); err != nil {
+		return err
+	}
+	if _, err := CompileChannelCapabilities(plan.capabilities.Vector()); err != nil {
+		return fmt.Errorf("channel generation requires admitted capabilities: %w", err)
 	}
 	for family, schemas := range map[string]map[string]runtimecontracts.ToolInputSchema{
 		"schema": plan.schemas, "opaque type": plan.opaqueTypes, "constraint": plan.constraints,

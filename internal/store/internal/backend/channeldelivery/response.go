@@ -14,19 +14,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// PlanNativeInboxResponseTx commits a requested readback and its immutable
+// PlanInboxResponseTx commits a requested readback and its immutable
 // render together with the verified inbound intent disposition. Delivery is a
 // later managed effect; the entry alone grants no resend or mailbox mutation.
-func PlanNativeInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
-	expected render.ResolvedNativeEntry, fullText string, postgres bool) (string, error) {
+func PlanInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
+	expected render.ResolvedInboxEntry, fullText string, postgres bool) (string, error) {
 	if tx == nil || text.EntryReference == "" || expected.PrincipalID == "" {
 		return "", fmt.Errorf("native inbox response requires verified entry")
 	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
 		return "", err
 	}
-	entry, found, err := ResolveCurrentNativeInboxEntryTx(ctx, tx, text, postgres)
-	if err == nil && found {
+	entry, found, err := ResolveCurrentInboxEntryTx(ctx, tx, text, postgres)
+	if err == nil && found && entry.Kind == render.InboxEntryNative {
 		qualification, qualificationErr := ReadNativeInboxQualificationTx(ctx, tx, entry.ActivationID, postgres)
 		if qualificationErr != nil {
 			return "", qualificationErr
@@ -41,7 +41,10 @@ func PlanNativeInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorcha
 	if !found || entry != expected {
 		return "", fmt.Errorf("native inbox entry changed before response admission")
 	}
-	selected, found, err := LoadDefault(ctx, tx, postgres)
+	if entry.Kind != render.InboxEntryNative && entry.Kind != render.InboxEntryTextReply {
+		return "", fmt.Errorf("inbox entry kind is not admitted")
+	}
+	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil {
 		return "", err
 	}
@@ -180,6 +183,10 @@ func currentTextResponseAudienceTx(ctx context.Context, tx *sql.Tx, text operato
 	if err := RequireTextIntentTx(ctx, tx, text, postgres); err != nil {
 		return "", 0, render.Audience{}, err
 	}
+	return currentBoundTextAudienceTx(ctx, tx, text, postgres, true)
+}
+
+func currentBoundTextAudienceTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres, lock bool) (string, int64, render.Audience, error) {
 	resolved, current, err := ResolveCurrentTextTx(ctx, tx, text, postgres)
 	if err != nil {
 		return "", 0, render.Audience{}, err
@@ -187,10 +194,12 @@ func currentTextResponseAudienceTx(ctx context.Context, tx *sql.Tx, text operato
 	if !current {
 		return "", 0, render.Audience{}, fmt.Errorf("channel text response has no current binding")
 	}
-	if err := LockPrincipalTx(ctx, tx, resolved.PrincipalID, postgres); err != nil {
-		return "", 0, render.Audience{}, err
+	if lock {
+		if err := LockPrincipalTx(ctx, tx, resolved.PrincipalID, postgres); err != nil {
+			return "", 0, render.Audience{}, err
+		}
 	}
-	selected, found, err := LoadDefault(ctx, tx, postgres)
+	selected, found, err := loadDefault(ctx, tx, postgres, lock)
 	if err != nil {
 		return "", 0, render.Audience{}, err
 	}
@@ -341,7 +350,7 @@ func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 	if !found || !resolved.CurrentRender || resolved != expected {
 		return "", fmt.Errorf("channel navigation action is no longer current")
 	}
-	selected, found, err := LoadDefault(ctx, tx, postgres)
+	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil {
 		return "", err
 	}

@@ -84,7 +84,7 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 	identity := operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2,
 		ChannelPackID: "provider.mock.hitl_channel", ChannelPackVersion: "1", ChannelManifestHash: "sha256:mock",
 		SemanticGeneration: "mock-generation"}.Normalized()
-	action := operatorchannel.InboundAction{ActionFact: operatorchannel.ActionFact{
+	action := operatorchannel.InboundAction{ActionFact: operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback,
 		Interface: identity, ExternalAccountRef: "account", ConversationRef: "group",
 		ConversationScope: operatorchannel.ConversationScopeShared, MessageReference: `{"id":91}`,
 		InteractionRef: "callback-91", Token: uuid.NewString(),

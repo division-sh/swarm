@@ -42,6 +42,17 @@ interfaces:
               label: {type: string, minLength: 1}
               token: {type: string, minLength: 1}
         nonempty_text: {type: string, minLength: 1}
+        text_reply_controls:
+          type: array
+          minItems: 0
+          maxItems: 16
+          items:
+            type: object
+            additionalProperties: false
+            required: [label, token]
+            properties:
+              label: {type: string, minLength: 1, maxLength: 64}
+              token: {type: string, minLength: 1, maxLength: 128}
         inbound_text: {type: string, minLength: 1}
         conversation_scope: {type: string, enum: [direct, shared]}
         entry_invocation:
@@ -10886,6 +10897,7 @@ tool_model:
       runtime_schema_acceptance: internal/runtime/eventschema
       structural_compiler: internal/packs.CompileChannelInventory
       capability_vector: internal/packs.CompileChannelCapabilities and AdmitChannelCapabilities
+      immutable_render_controls: internal/runtime/channeldelivery.ControlsForRender
       immutable_structural_plan: internal/packs.SatisfactionPlan
       admitted_pack_source_and_identity: internal/packs.PackSource and PackIdentity
       directional_assignability_and_cardinality: internal/packs channel relation owner
@@ -10915,7 +10927,48 @@ tool_model:
           is necessary evidence, not sufficient authorization: existing principal, provider account, conversation,
           binding revision, source, card and input guards remain mandatory. A bare action word never substitutes for
           the required provider reply evidence. Customer messages do not identify or authorize the operator.
+          The exact visible control word is matched after surrounding whitespace trimming and Unicode case folding;
+          extra prose does not select a control, and ambiguous folded words are refused rather than guessed.
       optional_capabilities: [actions_as_buttons, edit, acknowledgment]
+      transport: >
+        Every channel body declares exactly one transport, webhook or session, independent of its accepted connector
+        operation targets. The compiled owner projects that fact into onboarding activation posture; authored
+        onboarding.activation is retired and invalid. Session transport does not imply a token requirement: genuine
+        required credentials remain explicit compiled requirements, while provider-private session material is not a
+        Swarm credential. Uninstalled session execution is a typed channel_session_provider_unavailable refusal,
+        not a fake credential, guessed webhook target or false connection/readiness observation.
+      provider_authority: >
+        Operator identity operations, bindings, proofs, onboarding consistency and readback share one closed private
+        ProviderAuthority. The credential variant retains genuine exact credential key/value-seal evidence and forbids
+        inactive session fields. The session_account variant identifies the provider, stable connection UUID, exact
+        provider account, admission UUID and revision; it may additionally require a genuine credential, as Discord
+        does, but WhatsApp session state is not a dummy Swarm token. Provider account admission never identifies the
+        human operator. Current connection health is a separately observed exact occurrence matched to that admitted
+        account/revision, not a service-name self-equality or an ambient credential lookup. The token-only durable
+        columns and proof format are removed; v3 proofs carry the private discriminated authority record. Old stores
+        and old proof formats are unsupported, with no migration, fallback or compatibility decoder. Uninstalled
+        session begin, proof adoption, executable publication, dispatch and readiness remain explicitly unavailable,
+        even if a caller supplies structurally valid session evidence or a fabricated connected observation.
+      text_reply_controls: >
+        Without buttons, semantic text controls use the finite text_reply_controls schema (16 controls per page,
+        64 runes per label, 128 runes per private control token). These are neutral render limits, not invented provider
+        button capabilities. The exact reference and control words remain untruncated within the selected provider text
+        bound; only the immutable source-content excerpt may be shortened. Tokens stay private and reply authority
+        resolves through the exact accepted provider receipt. With buttons, existing accepted connector-derived bounds
+        continue to govern the native controls without widening Telegram's limits. The same immutable render owner
+        computes controls, pages and the text budget including the reference and visible words. Control pages respect
+        both the admitted count and text limits; a content excerpt adds the exact View full control, whose requested
+        continuation pages reserve their own reference and Next page space without losing source bytes.
+      input_prompts: >
+        A channel input start, partial answer, partial skip or chosen-draft advancement commits a distinct requested
+        prompt in the same selected-store transaction as that accepted progress. The prompt freezes only the card and
+        draft identity, current requested field, position, expiry, content hash and original accepted card receipt;
+        entered answer values never enter the render. Its exact accepted provider receipt can authorize a quoted
+        answer or the declared Cancel input/Skip field control only while the same pending card and draft position
+        remain current. Progress, retirement, reset, fork refusal and expiry fence old prompts. A crash cannot commit
+        field progress without its requested prompt responsibility. This explicit request is not an edit fallback or
+        an automatic resend after uncertain acceptance. Providers without edit leave older accepted physical copies
+        immutable; canonical state, fresh requested prompts and Inbox remain authoritative.
       unsupported_rule: >
         Unsupported optional capability requests are refused with a typed error naming the capability before any
         mutation or effect launch. Unsupported edit never silently becomes a fresh send. Native interaction
@@ -11154,12 +11207,13 @@ tool_model:
         - session_connection
         identity_ceremony:
         - authenticated_text_challenge
-        - provider_pairing
         rule: >
           Generic onboarding branches only on these admitted axes. Telegram is webhook_registration plus
-          authenticated_text_challenge. Discord paper conformance is the second webhook/text shape. WhatsApp paper
-          conformance is session_connection plus provider_pairing and grants no executable session authority before
-          #2338/#2341 provide the service and health owners.
+          authenticated_text_challenge. Discord paper conformance uses session_connection for Gateway input with
+          separately admitted HTTPS outbound operations. Every session provider still uses the same authenticated human
+          challenge; pairing and provider Connected are readiness, never principal or conversation identity. The session
+          contract is structurally admitted but its uninstalled implementation is explicitly unavailable until #2577
+          supplies exact connection/admission/state/health owners. No dummy credential or false setup/READY is permitted.
       learned_destination_declaration: >
         Every channel onboarding profile requires an explicit learned_destination map using ChannelMapping syntax.
         Sources are scalar leaves rooted at conversation_reference; targets are scalar leaves rooted at destination.
@@ -11435,6 +11489,14 @@ tool_model:
         Provider-native conversation-kind vocabulary does not cross the v2 interface. The required provider-neutral
         conversation_scope is exactly direct or shared and is projected once by the accepted provider trigger.
     operation_model:
+      selection: >
+        exact_operations is the finite complete operation vocabulary, not a requirement that every satisfier implements
+        all of it. deliver is mandatory; edit and acknowledge_interaction are required exactly when their respective
+        capabilities are true. The seven native Inbox operations are required exactly with the admitted native_inbox
+        extension. Action events are selected for buttons or native interaction acknowledgment; text is always required
+        and must map the optional delivery reply reference. Native buttons require mapped actions; text-only operation
+        inputs contain no native actions array. The selected operation/event/opaque-slot sets are exact: disabled or
+        extra declarations are contradictions, never silently removed from an authored pack.
       exact_operations:
       - deliver
       - edit
@@ -15617,8 +15679,7 @@ platform_tables:
             channel_pack_version TEXT NOT NULL,
             channel_manifest_hash TEXT NOT NULL,
             semantic_generation TEXT NOT NULL,
-            provider_credential_key TEXT,
-            provider_credential_value_seal TEXT,
+            provider_authority JSONB,
             onboarding_operation_id UUID,
             request_key_hash TEXT NOT NULL UNIQUE,
             request_hash TEXT NOT NULL,
@@ -15649,7 +15710,7 @@ platform_tables:
             completed_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL,
             CHECK ((operation_kind = 'unbind' AND challenge IS NULL AND state = 'unbound') OR (operation_kind <> 'unbind' AND challenge IS NOT NULL)),
-            CHECK ((operation_kind = 'unbind' AND provider_credential_key IS NULL AND provider_credential_value_seal IS NULL) OR (operation_kind <> 'unbind' AND provider_credential_key IS NOT NULL AND provider_credential_value_seal IS NOT NULL)),
+            CHECK ((operation_kind = 'unbind' AND provider_authority IS NULL) OR (operation_kind <> 'unbind' AND provider_authority IS NOT NULL)),
             CHECK (state NOT IN ('awaiting_confirmation','bound','rejected','credential_stale') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
             CHECK ((state IN ('bound','unbound')) = (binding_revision IS NOT NULL)),
             CHECK ((save_proof AND planned_proof_id IS NOT NULL AND planned_proof_revision IS NOT NULL) OR (NOT save_proof AND planned_proof_id IS NULL AND planned_proof_revision IS NULL)),
@@ -15674,8 +15735,7 @@ platform_tables:
             channel_pack_version TEXT NOT NULL,
             channel_manifest_hash TEXT NOT NULL,
             semantic_generation TEXT NOT NULL,
-            provider_credential_key TEXT,
-            provider_credential_value_seal TEXT,
+            provider_authority JSONB,
             external_account_reference TEXT,
             conversation_reference TEXT,
             conversation_scope TEXT CHECK (conversation_scope IS NULL OR conversation_scope IN ('direct','shared')),
@@ -15687,7 +15747,7 @@ platform_tables:
             proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
             operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
             updated_at TIMESTAMPTZ NOT NULL,
-            CHECK ((status = 'current' AND provider_credential_key IS NOT NULL AND provider_credential_value_seal IS NOT NULL AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND provider_credential_key IS NULL AND provider_credential_value_seal IS NULL AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
+            CHECK ((status = 'current' AND provider_authority IS NOT NULL AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND provider_authority IS NULL AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
             CHECK (source <> 'local_proof' OR (proof_id IS NOT NULL AND proof_revision IS NOT NULL)),
             INDEX idx_operator_channel_bindings_principal (principal_id, interface_key),
             INDEX idx_operator_channel_bindings_proof (proof_id, proof_revision)
@@ -16037,7 +16097,7 @@ platform_tables:
             target_selector TEXT NOT NULL,
             target_generation BIGINT NOT NULL CHECK (target_generation >= 0),
             activation_posture TEXT NOT NULL CHECK (activation_posture IN ('webhook_registration','session_connection')),
-            identity_ceremony TEXT NOT NULL CHECK (identity_ceremony IN ('authenticated_text_challenge','provider_pairing')),
+            identity_ceremony TEXT NOT NULL CHECK (identity_ceremony = 'authenticated_text_challenge'),
             phase TEXT NOT NULL CHECK (phase IN ('preparing','credentials_admitted','activating_provider','awaiting_external_identity','awaiting_operator_confirmation','publishing_activation','publishing_process_activation','promoting_registration','retiring_predecessor','delivering_confirmation','succeeded','failed','retired')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             save_proof BOOLEAN NOT NULL,
@@ -16246,8 +16306,14 @@ platform_tables:
         );
     operator_channel_action_intents:
       description: >-
-        Verified channel callback facts commit with their inbound publication and publish zero business
-        events. This row is an intent, not verdict or principal authority: processing must recheck the
+        Verified native callback facts commit with their inbound publication and publish zero business
+        events. A callback carries a real interaction reference. A reply action instead retains its exact verified
+        text/quote evidence and the private control selected through the accepted receipt. The selected-store owner
+        atomically transfers that occurrence from pending text to pending action, retaining the original text as
+        settled control evidence with identical provider, occurrence, interface and authorization. There is one
+        executable responsibility, not two pending interpreters. Replays require the exact retained transfer;
+        fabricated callback references, mismatched original text and ambiguous controls are rejected. This row is
+        an intent, not verdict or principal authority: processing must recheck the
         current binding, exact provider receipt, render, card and selected-source authority before
         replay or mutation. A committed pending row survives callback acknowledgement loss and restart.
         Applied verdict and input-start dispositions settle atomically with the canonical human mutation;
@@ -16285,6 +16351,9 @@ platform_tables:
         response, principal mutation or later revival. Temporary owner, publication or
         provider readback unavailability remains pending for retry. Delivery reconciliation
         continues across other valid intents; rejection grants no private-response authority.
+        A reserved operator text occurrence without a current matching human binding settles as rejected,
+        without a private reply, business fallback or later revival. A genuine quoted control can transfer atomically
+        to the action owner as described by operator_channel_action_intents; the original text remains evidence.
         Selected-fork card input is a deferred execution control, not business ingress:
         an exact refused verified occurrence settles once as unsupported without draft,
         verdict, event or response mutation. A refused chooser selection atomically settles
@@ -33796,7 +33865,7 @@ api_specification:
         additionalProperties: false
         required: [format, proof_id, revision, status, interface, external_account_reference, conversation_reference, conversation_scope, method, challenge, original_operation_id, minting_store_id, minting_deployment_id, verified_at, operator_confirmed, consent_scopes]
         properties:
-          format: {type: string, const: swarm-verified-account-proof-v2}
+          format: {type: string, const: swarm-verified-account-proof-v3}
           proof_id: {$ref: '#/components/schemas/OpaqueId'}
           revision: {type: integer, minimum: 1}
           status: {type: string, enum: [active, revoked]}
@@ -33886,7 +33955,7 @@ api_specification:
           coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
           target_selector: {type: string, minLength: 1}
           activation_posture: {type: string, enum: [webhook_registration, session_connection]}
-          identity_ceremony: {type: string, enum: [authenticated_text_challenge, provider_pairing]}
+          identity_ceremony: {type: string, enum: [authenticated_text_challenge]}
           phase: {type: string, enum: [preparing, credentials_admitted, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, publishing_activation, publishing_process_activation, promoting_registration, retiring_predecessor, delivering_confirmation, succeeded, failed, retired]}
           revision: {type: integer, minimum: 1}
           save_proof: {type: boolean}
@@ -33944,7 +34013,7 @@ api_specification:
           coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
           target: {$ref: '#/components/schemas/ChannelOnboardingCandidateTarget'}
           activation_posture: {type: string, enum: [webhook_registration, session_connection]}
-          identity_ceremony: {type: string, enum: [authenticated_text_challenge, provider_pairing]}
+          identity_ceremony: {type: string, enum: [authenticated_text_challenge]}
           provider_credential_role: {type: string, minLength: 1}
           signing_credential_role: {type: string}
           confirmation_operation: {type: string, minLength: 1}

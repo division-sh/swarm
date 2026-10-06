@@ -25,6 +25,7 @@ func ResolveActionFactTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.A
 // transaction form.
 func ResolveActionFact(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, fact operatorchannel.ActionFact, postgres bool) (render.ResolvedAction, bool, error) {
 	return resolveActionFactTx(ctx, q, fact, postgres, false)
 }
@@ -68,8 +69,8 @@ func RequireCardActionTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.A
 	if err != nil {
 		return err
 	}
-	if !found || !resolved.CurrentRender || resolved.SourceKind != "card" ||
-		resolved.SourceID != demand.CardID || resolved.PrincipalID != demand.PrincipalID ||
+	if !found || !resolved.CurrentRender || resolved.TargetCardID() != demand.CardID ||
+		resolved.PrincipalID != demand.PrincipalID ||
 		(demand.Method == "mailbox.cancel_input" && (resolved.Action.Kind != "cancel_input" || resolved.Action.DraftID != demand.DraftID)) ||
 		(demand.Method != "mailbox.cancel_input" && (resolved.Action.Kind != "verdict" || resolved.Action.Verdict != demand.Verdict ||
 			resolved.ReceiptOperationID != demand.ReceiptOperationID)) ||
@@ -118,33 +119,35 @@ func RequireNoticeActionTx(ctx context.Context, tx *sql.Tx, action operatorchann
 	return state, nil
 }
 
-func hydrateFrozenChannelAction(action render.Action, renderRaw []byte, renderHash string, position int) (render.Action, error) {
+func hydrateFrozenChannelAction(action render.Action, renderRaw []byte, renderHash string, position int) (render.Action, render.Frozen, error) {
 	renderRaw, err := canonicaljson.Canonicalize(renderRaw)
 	if err != nil {
-		return render.Action{}, fmt.Errorf("canonicalize exact channel action render: %w", err)
+		return render.Action{}, render.Frozen{}, fmt.Errorf("canonicalize exact channel action render: %w", err)
 	}
 	frozen, err := render.Decode(renderRaw, renderHash)
 	if err != nil {
-		return render.Action{}, fmt.Errorf("decode exact channel action render: %w", err)
+		return render.Action{}, render.Frozen{}, fmt.Errorf("decode exact channel action render: %w", err)
 	}
 	expected, err := actionsForFrozen(frozen)
 	if err != nil || position < 1 || position > len(expected) {
-		return render.Action{}, fmt.Errorf("channel action position contradicts immutable render: %w", err)
+		return render.Action{}, render.Frozen{}, fmt.Errorf("channel action position contradicts immutable render: %w", err)
 	}
 	if choice := expected[position-1]; choice.Kind != action.Kind ||
 		choice.Verdict != action.Verdict || choice.Label != action.Label {
-		return render.Action{}, fmt.Errorf("channel action contradicts immutable render projection")
+		return render.Action{}, render.Frozen{}, fmt.Errorf("channel action contradicts immutable render projection")
 	} else {
 		action.DraftID = choice.DraftID
 		action.CardID = choice.CardID
 		action.TextPublicationID = choice.TextPublicationID
 		action.RecoveryDeliveryID = choice.RecoveryDeliveryID
+		action.ParentReceiptOperationID = choice.ParentReceiptOperationID
 	}
-	return action, nil
+	return action, frozen, nil
 }
 
 func resolveActionFactTx(ctx context.Context, tx interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, fact operatorchannel.ActionFact, postgres, mutation bool) (render.ResolvedAction, bool, error) {
 	if tx == nil {
 		return render.ResolvedAction{}, false, fmt.Errorf("channel action requires a selected transaction")
@@ -259,7 +262,8 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	if verdict.Valid {
 		resolved.Action.Verdict = verdict.String
 	}
-	resolved.Action, err = hydrateFrozenChannelAction(resolved.Action, renderRaw, resolved.RenderHash, position)
+	var frozen render.Frozen
+	resolved.Action, frozen, err = hydrateFrozenChannelAction(resolved.Action, renderRaw, resolved.RenderHash, position)
 	if err != nil {
 		return render.ResolvedAction{}, false, err
 	}
@@ -273,6 +277,16 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	}
 	if messageRef != fact.MessageReference {
 		return render.ResolvedAction{}, false, nil
+	}
+	if fact.Kind == operatorchannel.ActionSourceReply && !render.MatchesTextControl(resolved.Action.Label, fact.TextSource.Text) {
+		return render.ResolvedAction{}, false, nil
+	}
+	if frozen.InputCard != nil {
+		current, err := inputPromptCurrent(ctx, tx, frozen, postgres, mutation)
+		if err != nil {
+			return render.ResolvedAction{}, false, err
+		}
+		resolved.CurrentRender = resolved.CurrentRender && current
 	}
 	return resolved, true, nil
 }

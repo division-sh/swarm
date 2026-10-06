@@ -97,9 +97,12 @@ func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, 
 	if candidate.State != "planned" && candidate.State != "rendered" && candidate.State != "sent" {
 		return fmt.Errorf("channel delivery %s has unsupported state %q", candidate.DeliveryID, candidate.State)
 	}
-	bounds, err := d.selectedPresentationBounds(ctx, candidate)
+	bounds, capabilities, err := d.selectedPresentation(ctx, candidate)
 	if err != nil {
 		return fmt.Errorf("select channel delivery %s presentation bounds: %w", candidate.DeliveryID, err)
+	}
+	if candidate.CurrentReceiptID != "" && !capabilities.Vector().Edit {
+		return nil
 	}
 	prepared, err := d.store.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, bounds)
 	if err != nil {
@@ -238,11 +241,11 @@ func (d *serveChannelDeliveryDispatcher) processResolvedChannelAction(ctx contex
 			return err
 		}
 	case "skip_input":
-		if resolved.SourceKind == "card" {
+		if resolved.TargetCardID() != "" {
 			return d.processInputSkip(ctx, intent, resolved)
 		}
 	case "verdict", "cancel_input":
-		if resolved.SourceKind == "card" {
+		if resolved.TargetCardID() != "" {
 			return d.processCurrentCardAction(ctx, intent, resolved)
 		}
 	}
@@ -250,7 +253,7 @@ func (d *serveChannelDeliveryDispatcher) processResolvedChannelAction(ctx contex
 }
 
 func (d *serveChannelDeliveryDispatcher) processCurrentCardAction(ctx context.Context, intent runtimechanneldelivery.PendingAction, resolved runtimechanneldelivery.ResolvedAction) error {
-	card, err := d.cards.GetDecisionCard(ctx, resolved.SourceID)
+	card, err := d.cards.GetDecisionCard(ctx, resolved.TargetCardID())
 	if errors.Is(err, decisioncard.ErrNotFound) || err == nil && card.Status != decisioncard.StatusPending {
 		return d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionStale)
 	}
@@ -329,28 +332,42 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context
 
 func (d *serveChannelDeliveryDispatcher) processPendingChannelText(ctx context.Context, intent runtimechanneldelivery.PendingText) error {
 	if intent.Fact.EntryReference == "" {
-		err := d.processPendingInputText(ctx, intent)
+		_, current, err := d.store.ResolveCurrentChannelText(ctx, intent.Fact)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return d.store.RejectUnboundChannelText(ctx, intent.Fact)
+		}
+		action, found, err := d.store.AdmitChannelReplyAction(ctx, intent.Fact)
+		if err != nil {
+			return err
+		}
+		if found {
+			return d.processPendingChannelAction(ctx, action)
+		}
+		err = d.processPendingInputText(ctx, intent)
 		var unsupported *runfork.SelectedForkControlUnsupported
 		if errors.As(err, &unsupported) {
 			return d.store.SettleUnsupportedChannelText(ctx, intent.Fact)
 		}
 		return err
 	}
-	entry, disposition, err := d.resolveNativeInboxEntry(ctx, intent.Fact)
+	entry, disposition, err := d.resolveInboxEntry(ctx, intent.Fact)
 	if err != nil {
 		return fmt.Errorf("resolve native inbox entry: %w", err)
 	}
-	if disposition == runtimechanneldelivery.NativeEntryRejected {
-		return d.store.RejectNativeInboxEntry(ctx, intent.Fact)
+	if disposition == runtimechanneldelivery.InboxEntryRejected {
+		return d.store.RejectInboxEntry(ctx, intent.Fact)
 	}
-	if disposition != runtimechanneldelivery.NativeEntryAccepted {
+	if disposition != runtimechanneldelivery.InboxEntryAccepted {
 		return nil
 	}
 	content, err := d.inboxContent(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = d.store.PlanNativeInboxResponse(ctx, intent.Fact, entry, content)
+	_, err = d.store.PlanInboxResponse(ctx, intent.Fact, entry, content)
 	return err
 }
 

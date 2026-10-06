@@ -73,8 +73,8 @@ func (c Candidate) Validate() error {
 }
 
 func (c Candidate) ValidateDeclaration() error {
-	if strings.TrimSpace(c.Provider) == "" || strings.TrimSpace(c.ProviderCredentialRole) == "" || strings.TrimSpace(c.ConfirmationOperation) == "" {
-		return fmt.Errorf("channel onboarding candidate requires provider, credential role, and confirmation operation")
+	if strings.TrimSpace(c.Provider) == "" || strings.TrimSpace(c.ConfirmationOperation) == "" {
+		return fmt.Errorf("channel onboarding candidate requires provider and confirmation operation")
 	}
 	if err := c.Interface.Validate(); err != nil {
 		return err
@@ -87,6 +87,9 @@ func (c Candidate) ValidateDeclaration() error {
 	}
 	switch c.Posture {
 	case ActivationWebhookRegistration:
+		if strings.TrimSpace(c.ProviderCredentialRole) == "" {
+			return fmt.Errorf("webhook channel onboarding candidate requires provider credential role")
+		}
 		if strings.TrimSpace(c.SigningCredentialRole) == "" || strings.TrimSpace(c.ConnectionHealth) != "" {
 			return fmt.Errorf("webhook channel onboarding candidate requires signing credential and forbids connection health")
 		}

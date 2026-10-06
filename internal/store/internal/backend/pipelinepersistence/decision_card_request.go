@@ -125,7 +125,14 @@ func settleChannelCardActionTx(ctx context.Context, tx *sql.Tx, mutation pipelin
 	default:
 		return fmt.Errorf("channel action does not authorize this card method")
 	}
-	return storechanneldelivery.SettleAppliedActionIntentTx(ctx, tx, fact, disposition, postgres)
+	if err := storechanneldelivery.SettleAppliedActionIntentTx(ctx, tx, fact, disposition, postgres); err != nil {
+		return err
+	}
+	if mutation.Kind() == pipeline.DecisionCardMutationBeginInput {
+		begin, _, _ := mutation.InputBegin()
+		return storechanneldelivery.PlanInputPromptForActionTx(ctx, tx, fact, begin.CardID, "", postgres)
+	}
+	return nil
 }
 
 func requireChannelCardTextTx(ctx context.Context, tx *sql.Tx, req apiidempotency.Request, mutation pipeline.DecisionCardMutation, postgres, lock bool) error {

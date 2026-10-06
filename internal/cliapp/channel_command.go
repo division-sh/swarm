@@ -351,7 +351,9 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 
 func writeChannelNativeQualification(out io.Writer, result channelOnboardingResult) {
 	if result.Readiness == nil || result.Readiness.NativeInbox == nil {
-		fmt.Fprintln(out, "Native inbox is not yet qualified; use swarm channel status for current evidence.")
+		if result.Readiness == nil || result.Readiness.NativeInboxRequired {
+			fmt.Fprintln(out, "Native inbox is not yet qualified; use swarm channel status for current evidence.")
+		}
 		return
 	}
 	qualification := result.Readiness.NativeInbox

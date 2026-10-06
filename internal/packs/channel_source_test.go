@@ -20,6 +20,8 @@ func TestChannelManifestAdmissionPresenceMatrix(t *testing.T) {
 		optional, emptyMap bool
 	}{
 		{[]string{"provider"}, false, false},
+		{[]string{"transport"}, false, false},
+		{[]string{"capabilities"}, false, false},
 		{[]string{"opaque_types"}, false, false},
 		{[]string{"operations"}, false, false},
 		{[]string{"events"}, false, false},
@@ -51,7 +53,6 @@ func TestChannelManifestAdmissionPresenceMatrix(t *testing.T) {
 		{[]string{"registration", "readback", "tool"}, false, false},
 		{[]string{"registration", "readback", "output"}, true, true},
 		{[]string{"onboarding"}, true, false},
-		{[]string{"onboarding", "activation"}, false, false},
 		{[]string{"onboarding", "ceremony"}, false, false},
 		{[]string{"onboarding", "provider_credential"}, false, false},
 		{[]string{"onboarding", "confirmation"}, false, false},
@@ -97,7 +98,7 @@ func TestChannelManifestAdmissionPresenceMatrix(t *testing.T) {
 }
 
 func TestChannelMappingAdmissionPresenceAndRetirement(t *testing.T) {
-	base := "provider: probe\nopaque_types: {reference: {type: string}}\noperations: {deliver: {tool: probe.deliver, input: {value: %s}}}\nevents: {observed: {event: probe.observed, fields: {value: event.value}}}\n"
+	base := "provider: probe\ntransport: webhook\n" + channelCapabilityFixture + "opaque_types: {reference: {type: string}}\noperations: {deliver: {tool: probe.deliver, input: {value: %s}}}\nevents: {observed: {event: probe.observed, fields: {value: event.value}}}\n"
 	for _, mapping := range []string{"7", "true", "null", "''", "{from: payload.value}", "{from: '', each: input.rows, item: [{value: item.value}]}", "{from: null, each: input.rows, item: [{value: item.value}]}", "{each: '', item: [{value: item.value}]}", "{each: input.rows, item: []}", "{each: input.rows, item: [{value: {each: item.rows, item: [{value: item.value}]}}]}"} {
 		_, err := packs.ParseChannelManifest([]byte(fmt.Sprintf(base, mapping)))
 		if err == nil {
@@ -110,7 +111,7 @@ func TestChannelMappingAdmissionPresenceAndRetirement(t *testing.T) {
 		}
 	}
 	for _, inactive := range []string{"null", "''", "[]", "{}", "false", "health"} {
-		body := fmt.Sprintf(base, "payload.value") + "onboarding: {activation: webhook_registration, ceremony: authenticated_text_challenge, provider_credential: key, signing_credential: signing, confirmation: deliver, connection_health: " + inactive + "}\n"
+		body := fmt.Sprintf(base, "payload.value") + "onboarding: {ceremony: authenticated_text_challenge, provider_credential: key, signing_credential: signing, confirmation: deliver, connection_health: " + inactive + "}\n"
 		if _, err := packs.ParseChannelManifest([]byte(body)); err == nil {
 			t.Fatalf("inactive connection_health admitted: %s", inactive)
 		}

@@ -185,7 +185,7 @@ func TestChannelSchemaYAMLAdmissionRejectsExplicitNullAtEveryBoundary(t *testing
 		},
 		{
 			name: "channel",
-			body: "provider: test\nopaque_types:\n  destination:\n    type: string\n    enum: null\noperations: {}\nevents: {}\n",
+			body: "provider: test\ntransport: webhook\n" + channelCapabilityFixture + "opaque_types:\n  destination:\n    type: string\n    enum: null\noperations: {}\nevents: {}\n",
 			admit: func(t *testing.T, body []byte) error {
 				var manifest packs.ChannelManifest
 				if err := unmarshalToolTestYAML(body, &manifest); err != nil {
@@ -1121,18 +1121,18 @@ func TestChannelOnboardingProfileAxesAreProviderNeutral(t *testing.T) {
 		ceremony packs.ChannelIdentityCeremony
 	}{
 		{
-			name:    "discord webhook text",
-			profile: packs.ChannelOnboardingProfile{Activation: "webhook_registration", Ceremony: "authenticated_text_challenge", ProviderCredentialRole: "discord_app_token", SigningCredentialRole: "discord_signature_key", Confirmation: "deliver", LearnedDestination: map[string]packs.ChannelMapping{"destination": {From: "conversation_reference"}}},
-			posture: packs.ChannelActivationWebhookRegistration, ceremony: packs.ChannelCeremonyAuthenticatedTextChallenge,
+			name:    "discord gateway text",
+			profile: packs.ChannelOnboardingProfile{Ceremony: "authenticated_text_challenge", ProviderCredentialRole: "discord_app_token", Confirmation: "deliver", ConnectionHealth: "provider_connection", LearnedDestination: map[string]packs.ChannelMapping{"destination": {From: "conversation_reference"}}},
+			posture: packs.ChannelActivationSessionConnection, ceremony: packs.ChannelCeremonyAuthenticatedTextChallenge,
 		},
 		{
-			name:    "whatsapp session pairing",
-			profile: packs.ChannelOnboardingProfile{Activation: "session_connection", Ceremony: "provider_pairing", ProviderCredentialRole: "whatsapp_session", Confirmation: "deliver", ConnectionHealth: "bridge_connection", LearnedDestination: map[string]packs.ChannelMapping{"destination": {From: "conversation_reference"}}},
-			posture: packs.ChannelActivationSessionConnection, ceremony: packs.ChannelCeremonyProviderPairing,
+			name:    "session without a token requirement",
+			profile: packs.ChannelOnboardingProfile{Ceremony: "authenticated_text_challenge", Confirmation: "deliver", ConnectionHealth: "provider_connection", LearnedDestination: map[string]packs.ChannelMapping{"destination": {From: "conversation_reference"}}},
+			posture: packs.ChannelActivationSessionConnection, ceremony: packs.ChannelCeremonyAuthenticatedTextChallenge,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			compiled, err := packs.CompileChannelOnboardingProfile("paper-port", tc.profile, []string{"deliver"})
+			compiled, err := packs.CompileChannelOnboardingProfile("paper-port", packs.ChannelTransportSession, tc.profile, []string{"deliver"})
 			if err != nil {
 				t.Fatalf("CompileChannelOnboardingProfile: %v", err)
 			}
@@ -2107,8 +2107,17 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 			map[string]any{"registration": map[string]any{"callback": "{{response.body.data.subscription.endpoint}}"}},
 		),
 	}
+	capabilities, err := packs.CompileChannelCapabilities(packs.ChannelCapabilityVector{
+		CardRender: true, ReplyToReference: true, ActionsAsButtons: true, ActionsAsText: true,
+		Edit: true, Acknowledgment: true, InboxListing: true,
+	})
+	if err != nil {
+		panic(err)
+	}
 	manifest := packs.ChannelManifest{
-		Provider: "mock",
+		Capabilities: capabilities,
+		Transport:    packs.ChannelTransportWebhook,
+		Provider:     "mock",
 		NativeInbox: &packs.NativeInboxProfile{
 			Kind: "scoped_commands_v1", ClientLanguages: []string{"en", "fr"},
 			DirectLauncherRead: "read_inbox_launcher", DefaultLauncherRead: "read_default_inbox_launcher",
