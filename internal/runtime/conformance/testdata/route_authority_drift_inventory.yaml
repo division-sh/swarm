@@ -1402,7 +1402,7 @@ seam_families:
     notes: >
       TestIssue2269StaticAndTemplateAgentsRetainExactTurnTimeout authors a
       subscription in its fixture while proving immutable timeout configuration
-      through the existing static/template configuration builders. The paired
+      through the existing static/template configuration constructors. The paired
       plan/recovery proof checks bound identity and invalid-bound refusal.
       Neither test registers a live subscription, creates a route or grants a
       provider emit tool for the platform-owned timeout reaction.
