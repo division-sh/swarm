@@ -2,27 +2,29 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
+func VerifyActivityJournalFixtureTerminalNoopBothStoresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := open(t, backend)
+			store, ctx := fixture.Persistence.store, fixture.Context
+			runID := uuid.NewString()
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
+			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			for _, status := range []string{ActivityAttemptStatusSucceeded, ActivityAttemptStatusFailed, ActivityAttemptStatusUncertain} {
 				t.Run(status, func(t *testing.T) {
 					intent := testNonIdempotentActivityIntent(runtimecorrelation.RunIDFromContext(ctx), uuid.NewString(), uuid.NewString())
@@ -44,11 +46,8 @@ func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
 					if err != nil || !committed {
 						t.Fatal(err)
 					}
-					var beforeCount, beforeHead int64
-					if err := store.testDB().QueryRow(`SELECT COUNT(*) FROM author_activity_occurrences`).Scan(&beforeCount); err != nil {
-						t.Fatal(err)
-					}
-					if err := store.testDB().QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&beforeHead); err != nil {
+					before, err := fixture.ReadJournal(ctx, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					again, inserted, err := store.StartActivityAttempt(ctx, terminal)
@@ -65,14 +64,11 @@ func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
 					if err != nil || !committed || !reflect.DeepEqual(again, terminal) {
 						t.Fatalf("terminal uncertainty: %v", err)
 					}
-					var afterCount, afterHead int64
-					if err := store.testDB().QueryRow(`SELECT COUNT(*) FROM author_activity_occurrences`).Scan(&afterCount); err != nil {
+					after, err := fixture.ReadJournal(ctx, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
-					if err := store.testDB().QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&afterHead); err != nil {
-						t.Fatal(err)
-					}
-					if beforeCount != afterCount || beforeHead != afterHead {
+					if before.StoryCount != after.StoryCount || before.StoryHead != after.StoryHead {
 						t.Fatal("fixture invented a no-op story")
 					}
 				})
@@ -81,34 +77,15 @@ func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
 	}
 }
 
-func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
-	cases := []struct {
-		name  string
-		store func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
-	}{
-		{
-			name: "sqlite",
-			store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-				db, journal := newSQLiteActivityJournalStore(t, ctx)
-				return db, journal, true
-			},
-		},
-		{
-			name: "postgres",
-			store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return db, newPostgresWorkflowInstanceStoreForTest(db), false
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			db, journal, sqlite := tc.store(t, ctx)
+func VerifyActivityAttemptJournalSQLiteAndPostgresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := open(t, backend)
+			journal, ctx := fixture.Persistence.store, fixture.Context
 			runID := uuid.NewString()
-			seedActivityRun(t, db, sqlite, runID)
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 			start := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 
@@ -160,59 +137,40 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 			if inserted || terminalAgain.Status != ActivityAttemptStatusSucceeded {
 				t.Fatalf("terminal duplicate = (%v, %q), want existing succeeded", inserted, terminalAgain.Status)
 			}
-			if !sqlite {
-				var revisions int
-				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id = $1::uuid`, runID).Scan(&revisions); err != nil {
+			if backend == "postgres" {
+				observed, err := fixture.ReadJournal(ctx, runID)
+				if err != nil {
 					t.Fatalf("count activity-only run fork revisions: %v", err)
 				}
-				if revisions != 0 {
-					t.Fatalf("activity-only run fork revisions = %d, want 0 for post-frontier selected-execution evidence", revisions)
+				if observed.RunForkRevisions != 0 {
+					t.Fatalf("activity-only run fork revisions = %d, want 0 for post-frontier selected-execution evidence", observed.RunForkRevisions)
 				}
 			}
 		})
 	}
 }
 
-func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
-	cases := []struct {
-		name  string
-		store func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
-	}{
-		{
-			name: "sqlite",
-			store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-				db, journal := newSQLiteActivityJournalStore(t, ctx)
-				return db, journal, true
-			},
-		},
-		{
-			name: "postgres",
-			store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return db, newPostgresWorkflowInstanceStoreForTest(db), false
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			db, journal, sqlite := tc.store(t, ctx)
+func VerifyActivityAttemptJournalPreservesReplyContextAcrossRestartForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := open(t, backend)
+			journal, ctx := fixture.Persistence.store, fixture.Context
 			runID := uuid.NewString()
-			seedActivityRun(t, db, sqlite, runID)
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
 			requestEventID := uuid.NewString()
 			replyContextID := "reply-v1:activity-" + uuid.NewString()
-			seedActivityReplyContext(t, db, sqlite, runID, requestEventID, replyContextID)
+			if err := fixture.CreateReply(ctx, runID, requestEventID, replyContextID); err != nil {
+				t.Fatal(err)
+			}
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 			start := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 			start.ReplyContextID = replyContextID
 			if _, inserted, err := journal.StartActivityAttempt(ctx, start); err != nil || !inserted {
 				t.Fatalf("StartActivityAttempt inserted=%v err=%v", inserted, err)
 			}
-			restarted := newPostgresWorkflowInstanceStoreForTest(db)
-			if sqlite {
-				restarted = newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
-			}
+			restarted := fixture.Reopen().Persistence.store
 			loaded, ok, err := restarted.LoadActivityAttempt(ctx, start.RequestEventID)
 			if err != nil || !ok || loaded.ReplyContextID != replyContextID {
 				t.Fatalf("restarted activity attempt = %#v ok=%v err=%v", loaded, ok, err)
@@ -337,27 +295,4 @@ func advanceLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx
 func isFailureClass(err error, class runtimefailures.Class) bool {
 	envelope, ok := runtimefailures.EnvelopeFromError(err)
 	return ok && envelope.Class == class
-}
-
-func seedActivityReplyContext(t *testing.T, db *sql.DB, sqlite bool, runID, requestEventID, replyContextID string) {
-	t.Helper()
-	if sqlite {
-		return
-	}
-	seedPipelineEventRecord(t, context.Background(), db, eventtest.PersistedRuntimeControlForProducer(
-		requestEventID, events.EventType("provider.requested"),
-		eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
-		runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
-	))
-	if _, err := db.Exec(`
-		INSERT INTO reply_contexts (
-			reply_context_id, run_id, request_event_id, requester_flow_id, request_output_pin,
-			reply_input_pin, provider_flow_id, provider_input_pin, provider_output_pin,
-			origin_route, request_correlation_id, state, created_at, updated_at
-		)
-		VALUES ($1, $2::uuid, $3::uuid, 'requester', 'provider_requested', 'provider_replied', 'provider',
-			'provider_requested', 'provider_replied', '{"flow_id":"requester","flow_instance":"requester/a","entity_id":"entity-a"}'::jsonb, $3, 'open', now(), now())
-	`, replyContextID, runID, requestEventID); err != nil {
-		t.Fatalf("seed postgres reply context: %v", err)
-	}
 }
