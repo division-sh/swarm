@@ -84,35 +84,7 @@ def handle(input):
 }
 
 func TestMockManagedRequestConsumesCanonicalExecutionFrame(t *testing.T) {
-	source := []byte(`
-import json
-
-def handle(input):
-    frame = json.loads(input["messages"][-1]["content"])
-    assert frame["kind"] == "initial"
-    assert frame["event"]["type"] == "work.requested"
-    assert "event" not in input
-    return {"text": "done", "usage": {"input_tokens": 5, "output_tokens": 2}}
-`)
-	harness := effecttest.New()
-	registry := sessions.NewInMemoryRegistry(time.Second)
-	runtime := NewMockRuntime(&config.Config{LLM: config.LLMConfig{Models: llmselection.ModelAliases{
-		"hostile-alias": {llmselection.BackendMock: "hostile-config-model"},
-	}}}, registry, "worker-1", nil, nil, liveTestCompletionController(harness, harness, harness, harness), mockHostRuntimeOptions(t))
-	ctx := testManagedConversationContext(t, harness, "mock-agent", "mock/inst-1", "worker")
-	actor, _ := runtimeactors.ActorFromContext(ctx)
-	actor.ExecutionMode = runtimeeffects.ExecutionModeMock
-	actor.Model = "hostile-alias"
-	actor.ResolvedModel = "hostile-actor-model"
-	actor.ResolvedLLMBackend = "hostile-backend"
-	actor.ResolvedLLMProvider = "hostile-provider"
-	actor.ResolvedLLMTransport = "hostile-transport"
-	actor.Mock = mockperformance.Performance{Kind: "python", SourcePath: "mocks/agent.py", Source: source, Digest: pythonSourceDigest(source)}
-	ctx = runtimeactors.WithActor(ctx, actor)
-	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
-	conversation := newTestManagedConversation(t, "mock-agent", "mock/inst-1", "worker", nil, testMemory(), 2, runtime)
-	conversation.SetToolExecutor(openAIToolExecutor{})
-	response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEventWithMode("mock-agent", runtimeeffects.ExecutionModeMock)})
+	harness, response, err := runMockManagedFrameFixture(t, sessions.NewInMemoryRegistry(time.Minute), mockHostRuntimeOptions(t))
 	if err != nil {
 		t.Fatalf("RunManaged: %v", err)
 	}
@@ -131,6 +103,39 @@ def handle(input):
 	if settlements[0].Usage.ResolvedModel != "test-model" || settlements[0].Spend.ResolvedModel != "test-model" {
 		t.Fatalf("mock settlement = %#v, want sealed frame model", settlements[0])
 	}
+}
+
+func runMockManagedFrameFixture(t *testing.T, registry sessions.Registry, options MockRuntimeOptions) (*effecttest.Harness, *Response, error) {
+	t.Helper()
+	source := []byte(`
+import json
+
+def handle(input):
+    frame = json.loads(input["messages"][-1]["content"])
+    assert frame["kind"] == "initial"
+    assert frame["event"]["type"] == "work.requested"
+    assert "event" not in input
+    return {"text": "done", "usage": {"input_tokens": 5, "output_tokens": 2}}
+`)
+	harness := effecttest.New()
+	runtime := NewMockRuntime(&config.Config{LLM: config.LLMConfig{Models: llmselection.ModelAliases{
+		"hostile-alias": {llmselection.BackendMock: "hostile-config-model"},
+	}}}, registry, "worker-1", nil, nil, liveTestCompletionController(harness, harness, harness, harness), options)
+	ctx := testManagedConversationContext(t, harness, "mock-agent", "mock/inst-1", "worker")
+	actor, _ := runtimeactors.ActorFromContext(ctx)
+	actor.ExecutionMode = runtimeeffects.ExecutionModeMock
+	actor.Model = "hostile-alias"
+	actor.ResolvedModel = "hostile-actor-model"
+	actor.ResolvedLLMBackend = "hostile-backend"
+	actor.ResolvedLLMProvider = "hostile-provider"
+	actor.ResolvedLLMTransport = "hostile-transport"
+	actor.Mock = mockperformance.Performance{Kind: "python", SourcePath: "mocks/agent.py", Source: source, Digest: pythonSourceDigest(source)}
+	ctx = runtimeactors.WithActor(ctx, actor)
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
+	conversation := newTestManagedConversation(t, "mock-agent", "mock/inst-1", "worker", nil, testMemory(), 2, runtime)
+	conversation.SetToolExecutor(openAIToolExecutor{})
+	response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEventWithMode("mock-agent", runtimeeffects.ExecutionModeMock)})
+	return harness, response, err
 }
 
 func TestMockProviderTailLatencyShapesSelfTerminalization(t *testing.T) {

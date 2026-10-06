@@ -61,3 +61,39 @@ func TestManagedToolOutputRejectsGenericExecutor(t *testing.T) {
 		t.Fatalf("generic executor error = %v, want tool_output_event_executor_missing", err)
 	}
 }
+
+func TestSettledToolOutputCallRejectsForeignNameArgumentsAndOccurrence(t *testing.T) {
+	authority := ToolOutputAuthority{ProviderOperationID: uuid.NewString(), SettledAt: time.Unix(10, 0).UTC()}
+	ctx, err := withToolOutputCall(context.Background(), authority, "one-call", "emit_event", map[string]any{"event_name": "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := ToolOutputCallFromContext(ctx)
+	if !ok {
+		t.Fatal("sealed output call missing")
+	}
+	want, err := authority.eventIdentity("one-call")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, tool, event, occurrence string
+		valid                         bool
+	}{
+		{"exact", "emit_event", "done", "one-call", true},
+		{"foreign_tool", "save_entity_field", "done", "one-call", false},
+		{"foreign_arguments", "emit_event", "foreign", "one-call", false},
+		{"foreign_occurrence", "emit_event", "done", "foreign", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			identity, err := call.Authorize(test.tool, map[string]any{"event_name": test.event}, test.occurrence)
+			if test.valid {
+				if err != nil || identity.EventID() != want.EventID() || !identity.CreatedAt().Equal(want.CreatedAt()) {
+					t.Fatalf("exact settled output changed: %+v %v", identity, err)
+				}
+			} else if err == nil {
+				t.Fatal("foreign call acquired settled output authority")
+			}
+		})
+	}
+}

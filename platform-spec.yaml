@@ -40174,7 +40174,13 @@ managed_agent_capability_surface:
       failures and leaves the operation uncertain, without container retirement
       or call replay. A missing or malformed post-call result, including its
       projected value, is an uncertain outcome, not a pre-dispatch definition
-      mismatch or known tool failure. Cancellation after tool dispatch preserves
+      mismatch or known tool failure. Successful results carry the bounded projected
+      JSON value explicitly in MCP result _meta["swarm/result"], including null.
+      Display text is presentation only: plain text, empty text, JSON-looking
+      strings and structured values retain their original JSON type. The parent
+      never parses display text to infer a result value; missing or invalid typed
+      success evidence after execution remains outcome_uncertain.
+      Cancellation after tool dispatch preserves
       typed outcome uncertainty through the native protocol and the parent join;
       it cannot replace possible-commit evidence with bare cancellation. An
       ordinary host cancellation first asks the native worker to cancel and join
@@ -40202,6 +40208,14 @@ managed_agent_capability_surface:
       occurrence, actor, owner, fence and unexpired lease before listing or calling a sandbox tool. A bare sandbox
       permission cannot substitute the live workflow executor. MCP request payloads cannot create this dispatch
       authority; the conversation remains its owner. Native mock and live CLI transports use this same boundary.
+      Fork registration also preserves the server-side settled ToolOutputCall. The
+      gateway validates its exact tool, argument hash and occurrence before dispatch
+      through that frozen executor's terminal-output boundary, never the live workflow
+      executor. The sandbox emit_event capability retains emit classification and
+      records the settled deterministic event ID and timestamp as fork-local stub
+      output only. Nonterminal snapshot reads have no output authority. Permanent
+      keyed replay and retained restart preserve those exact stub facts without live
+      source/sibling mutation or a replacement event identity.
       Sandbox target resolution consumes the existing capability-admission workspace without materializing a live
       run's data projection. Fork-scoped Claude backing remains invocation-local, and live Claude still requires
       Docker; a mock subprocess descriptor is not mistaken for the live Claude provider or its host prohibition.

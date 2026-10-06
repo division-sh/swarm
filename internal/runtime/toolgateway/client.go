@@ -17,6 +17,10 @@ import (
 
 const ObservationBytes = 2 << 20
 
+// Owned gateway results carry the projected JSON value separately from MCP
+// display text, whose contents cannot establish a value's type.
+const ProjectedResultMetaKey = "swarm/result"
+
 // HTTPObservation is performed by the workspace child, not by a host-side
 // readiness reader. Tokens travel on the private child input, never argv.
 type HTTPObservation struct {

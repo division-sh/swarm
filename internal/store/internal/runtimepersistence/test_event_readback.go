@@ -3,12 +3,13 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -72,10 +73,11 @@ func readSemanticEventFacts(ctx context.Context, tx *sql.Tx, postgres bool, runI
 		Scan(&evidence.RunStatus, &evidence.RunEventCount); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1`, eventID).
-		Scan(&evidence.CommittedScope); err == nil {
+	scope, err := pipelinepersistence.LoadCommittedScope(ctx, tx, eventID, postgres)
+	if err == nil {
+		evidence.CommittedScope = string(scope)
 		evidence.CommittedScopeFound = true
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	} else if !errors.Is(err, runtimepipelineobligation.ErrMissingScope) {
 		return err
 	}
 	evidence.SettledDeliveryAttemptCount, err = delivery.ReadSemanticEventSettledAttemptCount(ctx, tx, eventID)
@@ -83,24 +85,13 @@ func readSemanticEventFacts(ctx context.Context, tx *sql.Tx, postgres bool, runI
 }
 
 func readSemanticEventPipelineReceipt(ctx context.Context, tx *sql.Tx, eventID string, evidence *SemanticEventFixtureEvidence) error {
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1 AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).
-		Scan(&evidence.PipelineReceiptCount); err != nil {
+	receipt, err := pipelinepersistence.ReadPipelineReceiptStorage(ctx, tx, eventID)
+	if err != nil {
 		return err
 	}
-	if evidence.PipelineReceiptCount == 0 {
-		return nil
-	}
-	var failure sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT outcome, COALESCE(reason_code, ''), CAST(failure AS TEXT) FROM event_receipts
-		WHERE event_id = $1 AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).
-		Scan(&evidence.PipelineReceiptOutcome, &evidence.PipelineReceiptReason, &failure); err != nil {
-		return err
-	}
-	if failure.Valid {
-		if err := json.Unmarshal([]byte(failure.String), &evidence.PipelineReceiptFailure); err != nil {
-			return fmt.Errorf("decode pipeline receipt failure: %w", err)
-		}
-	}
+	evidence.PipelineReceiptCount = receipt.Count
+	evidence.PipelineReceiptOutcome = receipt.Outcome
+	evidence.PipelineReceiptReason = receipt.Reason
+	evidence.PipelineReceiptFailure = receipt.Failure
 	return nil
 }
