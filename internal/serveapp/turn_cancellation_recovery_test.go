@@ -53,12 +53,20 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			seen := make(chan effects.CanceledTurnCommand, 1)
 			recovered := make(chan effects.CanceledTurnCommand, 1)
 			var once sync.Once
+			var selected interface {
+				deliverylifecycle.Store
+				effects.CanceledTurnRecoveryStore
+			}
 			original := projectRuntimePersistenceForServe
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 				if recoverNext.Load() {
 					cut.Store(false)
 				}
 				persistence := original(owner)
+				selected = persistence.deps.EventStore.(interface {
+					deliverylifecycle.Store
+					effects.CanceledTurnRecoveryStore
+				})
 				role := persistence.deps.ManagerPersistenceRoles.LifecycleEffects
 				persistence.deps.ManagerPersistenceRoles.LifecycleEffects = turnCancellationCutStore{
 					Store: role, TurnLifetimeStore: role.(effects.TurnLifetimeStore), CanceledTurnStore: role.(effects.CanceledTurnStore),
@@ -68,7 +76,23 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = original })
 			root := canonicalrouting.CopyTurnCancellationRecovery(t)
-			rt, _, restart := newRetainedMailboxCompletionRuntime(t, backend, root)
+			name := "sqlite"
+			if backend == servedparity.BackendExplicitPostgres {
+				name = "postgres"
+			}
+			_, start := issue2564ServeHarness(t, name, root, true)
+			process, rt := start()
+			t.Cleanup(func() {
+				if code := process.stop(); code != 0 {
+					t.Errorf("retained cancellation runtime stop=%d\n%s", code, process.outputString())
+				}
+			})
+			restart := func() {
+				if code := process.stop(); code != 0 {
+					t.Fatalf("retained cancellation predecessor stop=%d\n%s", code, process.outputString())
+				}
+				process, rt = start()
+			}
 			params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "bounded-turn"}, "idempotency_key": "canceled-recovery"}
 			accepted := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			var command effects.CanceledTurnCommand
@@ -103,13 +127,6 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			if command.Origin.Kind != effects.CompletionOriginDelivery || command.Origin.Delivery.RunID() != accepted.RunID || command.Publication == nil {
 				t.Fatalf("foreground omitted exact origin/reaction: %+v", command)
 			}
-			var selected interface {
-				deliverylifecycle.Store
-				effects.CanceledTurnRecoveryStore
-			} = rt.SQLite
-			if rt.Postgres != nil {
-				selected = rt.Postgres
-			}
 			before, err := selected.Snapshot(context.Background(), command.Origin.Delivery.DeliveryID())
 			if err != nil || before.Status != deliverylifecycle.StatusInProgress {
 				t.Fatalf("interruption falsely settled business origin: %+v %v", before, err)
@@ -122,7 +139,7 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			// Keep the cut through predecessor shutdown. Only construction of the
 			// successor releases it; cleanup must not masquerade as startup proof.
 			recoverNext.Store(true)
-			rt, _ = restart()
+			restart()
 			select {
 			case recoveredCommand := <-recovered:
 				plan, ok := recoveredCommand.Publication.(bus.EnginePublicationPlan)
@@ -173,7 +190,7 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			}
 			var exact operatorread.OperatorEventFull
 			requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": cause}, &exact)
-			rt, _ = restart()
+			restart()
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			if duplicate.EventID != accepted.EventID || duplicate.RunID != accepted.RunID {
 				t.Fatal("public retry changed the original ingress identity")

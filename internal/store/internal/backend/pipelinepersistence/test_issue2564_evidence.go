@@ -140,3 +140,122 @@ func advanceGateHeaderRevision(ctx context.Context, tx *sql.Tx, state pipeline.W
 	}
 	return nil
 }
+
+type WriterStageEvidence struct{ EntityID, State string }
+
+func (s *PipelinePostgresOwner) ObserveWriterStageForTest(ctx context.Context, runID, entityID, stage string) (WriterStageEvidence, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return WriterStageEvidence{}, err
+	}
+	var out WriterStageEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return observeWriterStage(ctx, tx, runID, entityID, stage, &out)
+	})
+	if err != nil {
+		return WriterStageEvidence{}, err
+	}
+	return out, nil
+}
+
+func (s *PipelineSQLiteOwner) ObserveWriterStageForTest(ctx context.Context, runID, entityID, stage string) (WriterStageEvidence, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return WriterStageEvidence{}, err
+	}
+	var out WriterStageEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return observeWriterStage(ctx, tx, runID, entityID, stage, &out)
+	})
+	if err != nil {
+		return WriterStageEvidence{}, err
+	}
+	return out, nil
+}
+
+func observeWriterStage(ctx context.Context, tx *sql.Tx, runID, entityID, stage string, out *WriterStageEvidence) error {
+	if _, err := uuid.Parse(runID); err != nil {
+		return err
+	}
+	var err error
+	if entityID != "" {
+		if _, err := uuid.Parse(entityID); err != nil {
+			return err
+		}
+		out.EntityID = entityID
+		err = tx.QueryRowContext(ctx, `SELECT current_state FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&out.State)
+	} else {
+		err = tx.QueryRowContext(ctx, `SELECT entity_id,current_state FROM flow_instances WHERE run_id=$1 AND current_state=$2 ORDER BY created_at,entity_id LIMIT 1`, runID, stage).Scan(&out.EntityID, &out.State)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return err
+}
+
+func (s *PipelinePostgresOwner) ObservePendingFixtureCardForTest(ctx context.Context, runID string) (string, error) {
+	var id string
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT card_id FROM decision_cards WHERE run_id=$1 AND status='pending'`, runID).Scan(&id)
+	})
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (s *PipelineSQLiteOwner) ObservePendingFixtureCardForTest(ctx context.Context, runID string) (string, error) {
+	var id string
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT card_id FROM decision_cards WHERE run_id=$1 AND status='pending'`, runID).Scan(&id)
+	})
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+type WriterFlowEvidence struct {
+	InstancePath string
+	Config       json.RawMessage
+}
+
+func (s *PipelinePostgresOwner) ObserveWriterFlowForTest(ctx context.Context, runID, entityID string) (WriterFlowEvidence, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return WriterFlowEvidence{}, err
+	}
+	var out WriterFlowEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error { return observeWriterFlow(ctx, tx, runID, entityID, &out) })
+	if err != nil {
+		return WriterFlowEvidence{}, err
+	}
+	return out, nil
+}
+
+func (s *PipelineSQLiteOwner) ObserveWriterFlowForTest(ctx context.Context, runID, entityID string) (WriterFlowEvidence, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return WriterFlowEvidence{}, err
+	}
+	var out WriterFlowEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error { return observeWriterFlow(ctx, tx, runID, entityID, &out) })
+	if err != nil {
+		return WriterFlowEvidence{}, err
+	}
+	return out, nil
+}
+
+func observeWriterFlow(ctx context.Context, tx *sql.Tx, runID, entityID string, out *WriterFlowEvidence) error {
+	if _, err := uuid.Parse(runID); err != nil {
+		return err
+	}
+	if entityID == "" {
+		return tx.QueryRowContext(ctx, `SELECT instance_path FROM flow_instances WHERE run_id=$1 AND flow_template='hub'`, runID).Scan(&out.InstancePath)
+	}
+	if _, err := uuid.Parse(entityID); err != nil {
+		return err
+	}
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT instance_path,CAST(config AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&out.InstancePath, &raw); err != nil {
+		return err
+	}
+	out.Config = json.RawMessage(raw)
+	return nil
+}

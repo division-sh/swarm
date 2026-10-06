@@ -18,6 +18,8 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // These are NEW served H3/M33 fixtures, not the unavailable archived H1/H2
@@ -43,7 +45,7 @@ func TestIssue2564ServedH3CollectionOperationsBothStores(t *testing.T) {
 					}
 					_, rt := startIssue2564Served(t, backend, writeIssue2564Fixture(t, false), p, nil)
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-start"})
-					entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, "", "idle")
+					entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
 					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-begin"})
 					// Both sessions have captured literal operations before either
 					// response is released. No precomputed collection is supplied.
@@ -77,7 +79,7 @@ func TestIssue2564ServedH3CollectionOperationsBothStores(t *testing.T) {
 					for _, actor := range []string{"a", "b"} {
 						p.release(actor, 4)
 					}
-					waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+					rt.waitDeliveries(t, seed.RunID)
 					entity := issue2564Entity(t, rt, seed.RunID, entityID)
 					items, ok := entity.Fields["items"].([]any)
 					if !ok || len(items) != 4 {
@@ -135,10 +137,10 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 					}
 				})
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-start"})
-				entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, "", "idle")
+				entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-begin"})
 				p.wait(t, "a", 0)
-				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "working")
+				rt.waitEntityStage(t, seed.RunID, entityID, "working")
 				if order == "save_then_timer" {
 					p.release("a", 0)
 					p.wait(t, "a", 1)
@@ -147,7 +149,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 						t.Fatalf("reverse ordering did not commit before timer: %#v", entity)
 					}
 				}
-				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "review")
+				rt.waitEntityStage(t, seed.RunID, entityID, "review")
 				requireIssue2564TimerReceipt(t, rt, seed.RunID, entityID)
 				requireIssue2564Pending(t, rt, seed.RunID, "agent", "hub.work")
 				if order == "timer_then_save" {
@@ -164,7 +166,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 				select {
 				case <-resultEntered:
 				case <-time.After(servedProofPollDeadline):
-					t.Fatalf("late result never reached authored handler in review\n%s", servedEventPublishDebugSummary(t, rt.DB, backend, seed.RunID))
+					t.Fatalf("late result never reached authored handler in review\n%s", rt.debug(t, seed.RunID))
 				}
 				// Now the emitted result itself is durable but not handled. It
 				// must remain a completion obligation, not be canceled at deadline.
@@ -172,14 +174,16 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 				unblockResult()
 				// A successful generated output event ends the managed turn;
 				// it does not require an invented extra provider continuation.
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				rt.waitDeliveries(t, seed.RunID)
 				entity := issue2564Entity(t, rt, seed.RunID, entityID)
 				if entity.Entity.CurrentState != "review" || entity.Fields["marker"] != "retained" || entity.Fields["result"] != "retained" || entity.Fields["result_stage"] != "review" || entity.Fields["results"] != float64(1) {
 					t.Fatalf("deadline/late-result effects not retained in current stage: %#v", entity)
 				}
 				requireIssue2564MutationReceipts(t, rt, seed.RunID, entityID, map[string]int{"marker": 1}, 1)
 				requireIssue2564Settled(t, rt, seed.RunID, 1)
-				requireLifecycleEventCount(t, rt, seed.RunID, issue2564EventName(t, rt, seed.RunID, "hub.result"), 1)
+				if count := len(rt.events(t, seed.RunID, issue2564EventName(t, rt, seed.RunID, "hub.result"))); count != 1 {
+					t.Fatalf("late result event count=%d, want 1", count)
+				}
 				t.Log("D4 target: working -> review, both NONTERMINAL. Terminal implicit retirement remains #2269; no terminate/timeout/canceled semantics tested or changed.")
 			})
 		}
@@ -381,13 +385,9 @@ func issue2564ToolResults(value any) []any {
 	return nil
 }
 
-func startIssue2564Served(t *testing.T, backend, root string, p *issue2564Provider, hook func(context.Context, string, events.Event) error) (*serveRuntimeTestProcess, servedControlProofRuntime) {
+func startIssue2564Served(t *testing.T, backend, root string, p *issue2564Provider, hook func(context.Context, string, events.Event) error) (*serveRuntimeTestProcess, issue2564ServedFixture) {
 	t.Helper()
-	opts, start := lifecycleRestartHarness(t, backend, root)
-	var selected servedControlProofRuntime
-	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
-		selected.DB, selected.Postgres, selected.SQLite = selectedRuntimeStoreForTest(t, persistence)
-	})
+	opts, start := issue2564ServeHarness(t, backend, root, false)
 	opts.TestWorkflowNodeHandlerStartHook = hook
 	server := httptest.NewServer(p)
 	t.Cleanup(server.Close)
@@ -403,7 +403,6 @@ func startIssue2564Served(t *testing.T, backend, root string, p *issue2564Provid
 		t.Fatal(err)
 	}
 	process, rt := start()
-	rt.Postgres, rt.SQLite = selected.Postgres, selected.SQLite
 	// Cleanup order releases HTTP barriers before joining the real serve owner.
 	t.Cleanup(func() {
 		if code := process.stop(); code != 0 {
@@ -420,31 +419,40 @@ func startIssue2564Served(t *testing.T, backend, root string, p *issue2564Provid
 	return process, rt
 }
 
-func issue2564Entity(t *testing.T, rt servedControlProofRuntime, runID, entityID string) operatorread.OperatorEntityFull {
+func issue2564Entity(t *testing.T, rt issue2564ServedFixture, runID, entityID string) operatorread.OperatorEntityFull {
 	t.Helper()
 	var entity operatorread.OperatorEntityFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
 	return entity
 }
 
-func requireIssue2564Pending(t *testing.T, rt servedControlProofRuntime, runID, kind, event string) {
+func requireIssue2564Pending(t *testing.T, rt issue2564ServedFixture, runID, kind, event string) {
 	t.Helper()
 	var pending int
 	event = issue2564EventName(t, rt, runID, event)
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND d.subscriber_type=$2 AND e.event_name=$3 AND d.status IN ('pending','in_progress') AND d.retry_count=0`, runID, kind, event).Scan(&pending); err != nil {
+	var deliveryID string
+	for _, e := range rt.events(t, runID, event) {
+		for _, row := range storetest.ObserveDeliveryEventEvidence(t, context.Background(), rt.selected, e.EventID).Deliveries {
+			if row.RunID == runID && row.SubscriberType == kind && (row.Status == "pending" || row.Status == "in_progress") {
+				if row.RetryCount == 0 {
+					pending++
+				}
+				if deliveryID == "" {
+					deliveryID = row.DeliveryID
+				}
+			}
+		}
+	}
+	header, err := rt.selected.LoadRunHeader(context.Background(), runID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var status string
-	var ended bool
-	if err := rt.DB.QueryRow(`SELECT status, ended_at IS NOT NULL FROM runs WHERE run_id=$1`, runID).Scan(&status, &ended); err != nil {
-		t.Fatal(err)
-	}
+	status, ended := header.Status, header.EndedAt != nil
 	if pending != 1 || status != "running" || ended {
 		t.Fatalf("premature completion/lost obligation: %s %s pending=%d run=%s ended=%v", kind, event, pending, status, ended)
 	}
-	var deliveryID string
-	if err := rt.DB.QueryRow(`SELECT d.delivery_id FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND d.subscriber_type=$2 AND e.event_name=$3 AND d.status IN ('pending','in_progress')`, runID, kind, event).Scan(&deliveryID); err != nil {
-		t.Fatal(err)
+	if deliveryID == "" {
+		t.Fatal("exact pending delivery absent")
 	}
 	summary := issue2564DeliverySummary(t, rt, runID)
 	if summary.Settled() || summary.Pending+summary.InProgress < 1 {
@@ -460,24 +468,14 @@ func requireIssue2564Pending(t *testing.T, rt servedControlProofRuntime, runID, 
 	}
 }
 
-func issue2564EventName(t *testing.T, rt servedControlProofRuntime, runID, local string) string {
+func issue2564EventName(t *testing.T, rt issue2564ServedFixture, runID, local string) string {
 	t.Helper()
-	var instance string
-	if err := rt.DB.QueryRow(`SELECT instance_path FROM flow_instances WHERE run_id=$1 AND flow_template='hub'`, runID).Scan(&instance); err != nil {
-		t.Fatal(err)
-	}
-	return instance + "/" + local
+	return storetest.ObserveWriterFlow(t, context.Background(), rt.selected, runID, "").InstancePath + "/" + local
 }
 
-func issue2564DeliverySummary(t *testing.T, rt servedControlProofRuntime, runID string) runtimedelivery.RunSummary {
+func issue2564DeliverySummary(t *testing.T, rt issue2564ServedFixture, runID string) runtimedelivery.RunSummary {
 	t.Helper()
-	var summary runtimedelivery.RunSummary
-	var err error
-	if rt.SQLite != nil {
-		summary, err = rt.SQLite.SummarizeRun(context.Background(), runID)
-	} else {
-		summary, err = rt.Postgres.SummarizeRun(context.Background(), runID)
-	}
+	summary, err := rt.selected.SummarizeRun(context.Background(), runID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,42 +485,29 @@ func issue2564DeliverySummary(t *testing.T, rt servedControlProofRuntime, runID 
 	return summary
 }
 
-func requireIssue2564Settled(t *testing.T, rt servedControlProofRuntime, runID string, agents int) {
+func requireIssue2564Settled(t *testing.T, rt issue2564ServedFixture, runID string, agents int) {
 	t.Helper()
-	var delivered, failed, retries, badClaims, live, total, settled int
-	for query, dest := range map[string]*int{
-		`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`: &total,
-		`SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND a.closure_kind='settled' AND a.outcome='delivered'`:                            &settled,
-		`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND status='delivered'`:                                                                                                  &delivered,
-		`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`:                                                                                                                            &failed,
-		`SELECT COALESCE(SUM(retry_count),0) FROM event_deliveries WHERE run_id=$1`:                                                                                                                                 &retries,
-		`SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND (a.claim_version<>1 OR (a.closure_kind='settled' AND a.outcome<>'delivered'))`: &badClaims,
-		`SELECT COUNT(DISTINCT agent_id) FROM agent_turns WHERE run_id=$1 AND execution_mode='live' AND parse_ok=TRUE`:                                                                                              &live,
-	} {
-		if err := rt.DB.QueryRow(query, runID).Scan(dest); err != nil {
-			t.Fatal(err)
-		}
-	}
+	evidence := storetest.ObserveWriterRunDelivery(t, context.Background(), rt.selected, runID)
+	delivered, failed, retries, badClaims, total, settled := evidence.DeliveredAgents, evidence.DeadLetters, evidence.Retries, evidence.BadClaims, evidence.Total, evidence.SettledDelivered
+	live := storetest.ObserveLiveWriterCount(t, context.Background(), rt.selected, runID)
 	if delivered != agents || live != agents || failed != 0 || retries != 0 || badClaims != 0 || settled != total || !issue2564DeliverySummary(t, rt, runID).Settled() {
-		t.Fatalf("real turn/delivery accounting: delivered=%d live=%d failed=%d retries=%d bad_claims=%d settled=%d/%d\n%s", delivered, live, failed, retries, badClaims, settled, total, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		t.Fatalf("real turn/delivery accounting: delivered=%d live=%d failed=%d retries=%d bad_claims=%d settled=%d/%d\n%s", delivered, live, failed, retries, badClaims, settled, total, rt.debug(t, runID))
 	}
 }
 
-func requireIssue2564MutationReceipts(t *testing.T, rt servedControlProofRuntime, runID, entityID string, want map[string]int, actors int) {
+func requireIssue2564MutationReceipts(t *testing.T, rt issue2564ServedFixture, runID, entityID string, want map[string]int, actors int) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT m.path,m.writer_id,m.handler_step,COALESCE(CAST(m.caused_by_event AS TEXT),''),CAST(m.old_value AS TEXT),CAST(m.new_value AS TEXT) FROM entity_mutations m JOIN agents a ON a.run_id=m.run_id AND a.agent_id=m.writer_id JOIN events e ON e.event_id=m.caused_by_event WHERE m.run_id=$1 AND m.entity_id=$2 AND m.writer_type='agent' AND m.domain='authored_field' AND e.event_name=$3 ORDER BY m.created_at,m.mutation_id`, runID, entityID, issue2564EventName(t, rt, runID, "hub.work"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
+	rows := storetest.ObserveEntityMutationHistory(t, context.Background(), rt.selected, runID)
+	eventName := issue2564EventName(t, rt, runID, "hub.work")
+	slices.Reverse(rows)
 	got, writers := map[string]int{}, map[string]bool{}
 	type change struct{ before, after any }
 	changes := map[string][]change{}
-	for rows.Next() {
-		var path, writer, step, cause, before, after string
-		if err := rows.Scan(&path, &writer, &step, &cause, &before, &after); err != nil {
-			t.Fatal(err)
+	for _, row := range rows {
+		if row.EntityID != entityID || row.WriterType != "agent" || row.Domain != "authored_field" || row.EventName != eventName || !row.RegisteredAgent {
+			continue
 		}
+		path, writer, step, cause, before, after := row.Path, row.WriterID, row.HandlerStep, row.CausedByEvent, string(row.OldValue), string(row.NewValue)
 		if writer == "" || step == "" || cause == "" {
 			t.Fatalf("lost agent attribution: %s %s %s %s", path, writer, step, cause)
 		}
@@ -536,9 +521,6 @@ func requireIssue2564MutationReceipts(t *testing.T, rt servedControlProofRuntime
 			t.Fatal(err)
 		}
 		changes[path] = append(changes[path], c)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got, want) || len(writers) != actors {
 		t.Fatalf("acknowledged operation mutation receipts=%v writers=%v, want %v/%d", got, writers, want, actors)
@@ -568,9 +550,24 @@ func requireIssue2564MutationReceipts(t *testing.T, rt servedControlProofRuntime
 	}
 }
 
-func requireIssue2564TimerReceipt(t *testing.T, rt servedControlProofRuntime, runID, entityID string) {
+func requireIssue2564TimerReceipt(t *testing.T, rt issue2564ServedFixture, runID, entityID string) {
 	t.Helper()
-	history := readLifecycleTransitionHistory(t, rt, runID, entityID)
+	flow := storetest.ObserveWriterFlow(t, context.Background(), rt.selected, runID, entityID)
+	var config struct {
+		History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
+	}
+	if err := json.Unmarshal(flow.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	history := config.History
+	for _, record := range history {
+		if err := record.Evidence.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if record.TransitionID != record.Evidence.ID() || record.From != record.Evidence.From() || record.To != record.Evidence.To() {
+			t.Fatalf("contradictory record: %#v", record)
+		}
+	}
 	var timers int
 	for _, entry := range history {
 		compiled, ok := entry.Evidence.Compiled()
@@ -582,8 +579,10 @@ func requireIssue2564TimerReceipt(t *testing.T, rt servedControlProofRuntime, ru
 			t.Fatalf("M33 substituted terminal deadline: %#v", entry)
 		}
 		var accepted int
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2 AND event_name='platform.stage_timer'`, runID, entry.TriggerEventID).Scan(&accepted); err != nil {
-			t.Fatal(err)
+		for _, event := range rt.events(t, runID, "platform.stage_timer") {
+			if event.EventID == entry.TriggerEventID {
+				accepted++
+			}
 		}
 		if accepted != 1 {
 			t.Fatalf("transition lacks exact accepted timer event: %#v", entry)
