@@ -1459,29 +1459,39 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 		_ = lease.Done()
 		return releaseOnFailure(err)
 	}
+	if eb.canTransferPreparedNodeDeliveries(prepared) {
+		defer closeDispatchContext()
+		defer func() { _ = lease.Done() }()
+		// Finish the fenced handoff before returning durable acceptance. Moving
+		// this settlement to another goroutine would retain the same unbounded
+		// post-ACK publication-session backlog; node execution is still queued.
+		return eb.transferPreparedNodeDeliveries(dispatchCtx, prepared)
+	}
 	go func() {
 		defer closeDispatchContext()
 		defer func() { _ = lease.Done() }()
-		if err := eb.dispatchPreparedPublishAsyncBody(dispatchCtx, prepared); err != nil {
+		if err := eb.dispatchPreparedPublish(dispatchCtx, prepared); err != nil {
 			eb.reportLocalDispatchFailure("async_dispatch_failed", prepared.Event, err)
 		}
 	}()
 	return nil
 }
 
-func (eb *EventBus) dispatchPreparedPublishAsyncBody(ctx context.Context, prepared PreparedPublish) (err error) {
-	if !prepared.durableHandoffReady || prepared.direct || prepared.receiver.completion != nil || prepared.receiver.channelExecution != nil {
-		return eb.dispatchPreparedPublish(ctx, prepared)
+func (eb *EventBus) canTransferPreparedNodeDeliveries(prepared PreparedPublish) bool {
+	if !prepared.durableHandoffReady || !prepared.requiresReceiver() || prepared.direct ||
+		prepared.receiver.completion != nil || prepared.receiver.channelExecution != nil {
+		return false
 	}
 	authority, err := eb.DeliveryAuthority()
-	if err != nil {
-		return errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(ctx)))
-	}
-	if authority.Kind() != runtimedelivery.ExecutionAuthorityNormalRuntime ||
-		!eb.canTransferNodeDeliveries(prepared.Event, prepared.plan, prepared.committedHandoffs) {
-		return eb.dispatchPreparedPublish(ctx, prepared)
-	}
+	return err == nil && authority.Kind() == runtimedelivery.ExecutionAuthorityNormalRuntime &&
+		eb.canTransferNodeDeliveries(prepared.Event, prepared.plan, prepared.committedHandoffs)
+}
+
+func (eb *EventBus) transferPreparedNodeDeliveries(ctx context.Context, prepared PreparedPublish) (err error) {
 	defer func() { err = errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(ctx))) }()
+	if !eb.canTransferPreparedNodeDeliveries(prepared) {
+		return errors.New("committed publication is not eligible for node continuation handoff")
+	}
 	if err := eb.AcceptCommittedDeliveryHandoffs(prepared.committedHandoffs); err != nil {
 		return err
 	}

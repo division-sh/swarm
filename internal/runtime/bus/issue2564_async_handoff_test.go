@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/channelactivation"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -79,7 +81,7 @@ func (i issue2564HandoffRouteInterceptor) InterceptDeliveryRoute(ctx context.Con
 }
 
 func TestIssue2564AsyncHandoffPreservesForegroundCompletion(t *testing.T) {
-	for _, name := range []string{"synchronous", "local_completion", "direct", "unacknowledged"} {
+	for _, name := range []string{"synchronous", "local_completion", "channel_execution", "direct", "unacknowledged"} {
 		t.Run(name, func(t *testing.T) {
 			bus, prepared, owner, _ := issue2564PreparedHandoff(t)
 			interceptor := issue2564HandoffRouteInterceptor{entered: make(chan struct{}), release: make(chan struct{})}
@@ -89,18 +91,32 @@ func TestIssue2564AsyncHandoffPreservesForegroundCompletion(t *testing.T) {
 			switch name {
 			case "local_completion":
 				prepared.receiver.completion = newLocalDeliveryCompletionGroup()
+			case "channel_execution":
+				publication, err := channelonboarding.NewChannelActivationPublication(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				activation, err := channelactivation.NewOwner(publication)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lease, found := activation.AcquirePresentation()
+				if !found {
+					t.Fatal("channel presentation was not acquired")
+				}
+				t.Cleanup(lease.Release)
+				prepared.receiver.channelExecution = lease
 			case "direct":
 				prepared.direct = true
 			case "unacknowledged":
 				prepared.durableHandoffReady = false
 			}
 			done := make(chan error, 1)
+			if bus.canTransferPreparedNodeDeliveries(prepared) && name != "synchronous" {
+				t.Fatal("completion obligation was eligible for generic handoff")
+			}
 			go func() {
-				if name == "synchronous" {
-					done <- bus.DispatchPreparedPublish(context.Background(), prepared)
-				} else {
-					done <- bus.dispatchPreparedPublishAsyncBody(context.Background(), prepared)
-				}
+				done <- bus.DispatchPreparedPublish(context.Background(), prepared)
 			}()
 			select {
 			case <-interceptor.entered:
@@ -276,7 +292,7 @@ func TestIssue2564AsyncNodeHandoffSettlementFailureRetainsRecovery(t *testing.T)
 			bus, prepared, owner, continuations := issue2564PreparedHandoff(t)
 			failure := errors.New("injected settlement failure")
 			owner.settleErr, owner.committed = failure, committed
-			if err := bus.dispatchPreparedPublishAsyncBody(context.Background(), prepared); !errors.Is(err, failure) {
+			if err := bus.transferPreparedNodeDeliveries(context.Background(), prepared); !errors.Is(err, failure) {
 				t.Fatalf("settlement error = %v", err)
 			}
 			continuations.mu.Lock()
@@ -293,5 +309,46 @@ func TestIssue2564AsyncNodeHandoffSettlementFailureRetainsRecovery(t *testing.T)
 				t.Fatalf("signals=%d settlements=%d retained=%d, want %d/%d/0", signals, owner.settlements, retained, want, want)
 			}
 		})
+	}
+}
+
+func TestIssue2564AsyncNodeHandoffRejectsStaleClaimAndKeepsSuccessor(t *testing.T) {
+	bus, prepared, owner, continuations := issue2564PreparedHandoff(t)
+	ctx := context.Background()
+	if err := owner.Release(ctx, prepared.publicationClaim.Claim()); err != nil {
+		t.Fatal(err)
+	}
+	successor, err := owner.ClaimPublication(ctx, prepared.Event.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Release(ctx, successor) })
+	if err := bus.transferPreparedNodeDeliveries(ctx, prepared); !errors.Is(err, pipelineobligation.ErrStaleClaim) {
+		t.Fatalf("stale transfer error = %v", err)
+	}
+	owner.mu.Lock()
+	current, retained := owner.current[prepared.Event.ID()]
+	owner.mu.Unlock()
+	continuations.mu.Lock()
+	signals := continuations.signals
+	continuations.mu.Unlock()
+	if !retained || current != successor || owner.settlements != 0 || signals != 0 {
+		t.Fatalf("stale transfer affected successor: retained=%t current=%v settlements=%d signals=%d", retained, current, owner.settlements, signals)
+	}
+}
+
+func TestIssue2564NodeHandoffReadinessRequiresAcknowledgedFinalization(t *testing.T) {
+	bus, prepared, _, _ := issue2564PreparedHandoff(t)
+	for _, acknowledged := range []bool{false, true} {
+		result, err := bus.finalizeCommittedPublicationConsequences(context.Background(), prepared, CommittedPublication{
+			AppendOutcome: EventAppendInserted, DeliveryHandoffs: prepared.committedHandoffs, Acknowledged: acknowledged,
+		}, false)
+		if err != nil || !result.ready || result.prepared.durableHandoffReady != acknowledged {
+			t.Fatalf("acknowledged=%t: ready=%t transferable=%t err=%v", acknowledged, result.ready, result.prepared.durableHandoffReady, err)
+		}
+	}
+	result, err := bus.finalizeCommittedPublicationConsequences(context.Background(), prepared, CommittedPublication{}, false)
+	if err == nil || result.ready || result.prepared.durableHandoffReady {
+		t.Fatalf("invalid current evidence retained prior handoff readiness: ready=%t transferable=%t err=%v", result.ready, result.prepared.durableHandoffReady, err)
 	}
 }
