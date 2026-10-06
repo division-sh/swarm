@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -10,8 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"slices"
 	"strings"
 	"testing"
 
@@ -680,7 +679,8 @@ func TestPersistenceAuthorityDebtConstructionDistinguishesNativeOwnerFromRecover
 }
 
 func TestPersistenceAuthorityDebtRatchetIsSelectedInEveryTier(t *testing.T) {
-	file, err := os.Open(filepath.Join(persistenceAuthorityRepoRoot(t), ".github/test-proof-plan.yaml"))
+	repo := persistenceAuthorityRepoRoot(t)
+	file, err := os.Open(filepath.Join(repo, ".github/test-proof-plan.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,27 +689,36 @@ func TestPersistenceAuthorityDebtRatchetIsSelectedInEveryTier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const unitID = "store-admission-full"
-	unit, ok := policy.Units[unitID]
-	if !ok || !slices.Contains(unit.Packages, "github.com/division-sh/swarm/internal/store") {
-		t.Fatal("ratchet owner is not in the existing admission unit")
+	inventory, err := testplanning.DiscoverRootInventory(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
-		if !slices.Contains(policy.Profiles[tier].Units, unitID) {
-			t.Fatalf("%s omits the ratchet", tier)
-		}
+	proofs, err := testplanning.LoadParityProofs(filepath.Join(repo, "internal/apiv1/testdata/public_surface_backend_matrix.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	const root = "TestPersistenceAuthorityDebtRatchet"
-	if unit.Run != "" {
-		selection, err := regexp.Compile(unit.Run)
-		if err != nil || !selection.MatchString(root) {
-			t.Fatal("admission selector omits ratchet")
-		}
+	var packages []string
+	for pkg := range inventory.Packages {
+		packages = append(packages, pkg)
 	}
-	if unit.Skip != "" {
-		skip, err := regexp.Compile(unit.Skip)
-		if err != nil || skip.MatchString(root) {
-			t.Fatal("admission selector skips ratchet")
+	model := testplanning.WeightModel{Version: testplanning.WeightModelVersion, SourceRunID: "census-membership"}
+	for _, venue := range []string{testplanning.VenueCI, testplanning.VenueLocal} {
+		for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+			plan, err := testplanning.BuildPlan(policy, model, packages, tier, "mandatory census", "test-head", testplanning.BuildOptions{Venue: venue})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := testplanning.BindExecution(&plan, inventory, proofs, policy); err != nil {
+				t.Fatal(err)
+			}
+			unit, err := plan.Unit("persistence-authority-debt-census")
+			if err != nil || unit.Run != "^TestPersistenceAuthorityDebtRatchet$" || unit.CountMode != "count-1" || unit.Skip != "" || len(unit.RequiredTests) != 1 || len(unit.SelectedRoots) != 1 {
+				t.Fatalf("%s/%s changed mandatory census execution: %+v, %v", venue, tier, unit, err)
+			}
+			root := unit.RequiredTests[0]
+			if root.Name != "TestPersistenceAuthorityDebtRatchet" || root.Package != "github.com/division-sh/swarm/internal/store" {
+				t.Fatalf("census requires a different root: %+v", root)
+			}
 		}
 	}
 }

@@ -482,8 +482,19 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatal(err)
 	}
 	storeUnit, ok := policy.Units["store-admission-full"]
-	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage, testPostgresPackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
-		t.Fatalf("store-admission-full unit = %#v, want complete uncached facade and admission proof", storeUnit)
+	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage, testPostgresPackage}) || storeUnit.Run == "" || storeUnit.Skip != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
+		t.Fatalf("store-admission-full unit = %#v, want uncached facade/admission complement without skips", storeUnit)
+	}
+	censusUnit, ok := policy.Units["persistence-authority-debt-census"]
+	if !ok || !slices.Equal(censusUnit.Packages, []string{storePackage}) || censusUnit.Run != "^TestPersistenceAuthorityDebtRatchet$" || censusUnit.Skip != "" || censusUnit.CountMode != "count-1" || censusUnit.BudgetClass != "broad" {
+		t.Fatalf("dedicated persistence census changed execution envelope: %+v", censusUnit)
+	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "store"), []*regexp.Regexp{regexp.MustCompile(storeUnit.Run), regexp.MustCompile(censusUnit.Run)})
+	assertGoProofPartition(t, filepath.Join(root, "internal", "testpostgres"), []*regexp.Regexp{regexp.MustCompile(storeUnit.Run)})
+	for name, profile := range policy.Profiles {
+		if !slices.Contains(profile.Units, "persistence-authority-debt-census") {
+			t.Fatalf("profile %s lost mandatory persistence census", name)
+		}
 	}
 	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-full-06"}
 	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
