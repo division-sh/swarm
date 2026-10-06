@@ -140,7 +140,18 @@ func TestRunForkRevisionProductionWriterCensusIsClosed(t *testing.T) {
 		}
 	}
 	if !reflect.DeepEqual(sortedStringKeys(got), sortedStringKeys(want)) {
-		t.Fatalf("run-fork revision production writer census drifted:\ngot  %q\nwant %q", sortedStringKeys(got), sortedStringKeys(want))
+		var unexpected, missing []string
+		for _, key := range sortedStringKeys(got) {
+			if _, exists := want[key]; !exists {
+				unexpected = append(unexpected, key)
+			}
+		}
+		for _, key := range sortedStringKeys(want) {
+			if _, exists := got[key]; !exists {
+				missing = append(missing, key)
+			}
+		}
+		t.Fatalf("run-fork revision production writer census drifted:\nunexpected %q\nmissing %q", unexpected, missing)
 	}
 
 	selectedDiscard, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go"))
@@ -553,7 +564,8 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 
 		row("internal/store/internal/backend/delivery/adapter.go", []string{"activateNormalAuthorityTx", "prepareProviderOriginRecovery", "renewClaimWrite"}, []string{"event_deliveries", "event_delivery_attempts"}, "event_deliveries", "delivery lifecycle/effect named mutation", "claim lifecycle", "locked delivery snapshot run ID", "outer delivery/effect owner finalizer", matrixProof),
 		row("internal/store/internal/backend/delivery/adapter.go", []string{"bindAgentSessionTx", "closeAttemptForTerminalization", "completeAttempt", "expireAttempt", "insertAttempt", "insertTerminalizedAttempt"}, []string{"event_delivery_attempts"}, "event_deliveries", "delivery lifecycle/effect named mutation", "attempt lifecycle", "locked delivery snapshot run ID", "outer delivery/effect owner finalizer", matrixProof),
-		row("internal/store/internal/backend/delivery/adapter.go", []string{"terminalizeDeliveries", "claimLocked", "settle"}, []string{"event_deliveries"}, "event_deliveries", "event/pipeline/delivery/run-lifecycle named mutation", "delivery row lifecycle", "event or delivery snapshot run ID", "outer named owner finalizer", matrixProof),
+		row("internal/store/internal/backend/delivery/adapter.go", []string{"terminalizeDeliveries", "claimLocked", "settleExactClaim"}, []string{"event_deliveries"}, "event_deliveries", "event/pipeline/delivery/run-lifecycle named mutation", "delivery row lifecycle", "event or delivery snapshot run ID", "outer named owner finalizer", matrixProof+"; TestRetriedBusinessTurnTerminationAndTimeoutRecoveryBothStores"),
+		row("internal/store/internal/backend/delivery/queued_cancellation.go", []string{"cancelQueuedAgent"}, []string{"event_deliveries"}, "event_deliveries", "authored turn cancellation named mutation", "exact queued/unstarted agent origin cancellation", "locked exact origin run and delivery identity", "outer mutation publishes exact delivery revision fact", "TestQueuedTurnTerminationBothStores; TestUnstartedClaimedTurnTerminationBothStores"),
 		row("internal/store/internal/backend/delivery/adapter.go", []string{"persistPipelineHandoffTx", "persistExactObligation"}, []string{"event_deliveries"}, "event_deliveries", "original selected event/pipeline/delivery mutation or named compound fixture transaction", "shared exact obligation and continuation persistence", "canonical obligation or returned physical delivery run ID", "ordinary wrappers declare exact facts for the outer finalizer; revisionless fixture retains its history frontier", matrixProof+"; TestCompoundEventFixturesAtomicReplayAndRevisionBothStores; TestUnrevisionedSemanticEventFixtureMatchesCanonicalMutationProjection"),
 		row("internal/store/internal/backend/delivery/adapter.go", []string{"persistHandlerRuleSelectionSQL"}, []string{"event_delivery_handler_rule_selections"}, "event_deliveries joined selection", "delivery settlement/terminalization", "exact immutable selection insert", "owning delivery ID and run, not selection text", "same outer delivery/effect finalizer", matrixProof+"; TestRunForkExactFactsTransitiveBothStores"),
 		row("internal/store/internal/adminpersistence/destructive_reset_cleanup.go", []string{"destructiveResetCleanupStatementsForTable"}, []string{"event_delivery_handler_rule_selections"}, "event_deliveries joined selection", "ApplyDestructiveResetCleanup", "whole-parent destructive cleanup", "validated cleanup plan delivery membership", "parent deletion cascades complete revision ledger", "TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores"),
@@ -614,5 +626,6 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 		row("internal/store/internal/runtimepersistence/test_decision_card_refusal.go", []string{"SupersedeDecisionCardAnchorForTest"}, []string{"flow_instances"}, "test fixture only", "selected backend RunTransaction", "hostile pending-card/superseded-anchor cut", "exact card/source and anchor identity", "intentional corruption fixture, not production run-fork revision evidence", "TestMailboxRefusalAtPreparationAndCommitBothStores"),
 		row("internal/store/internal/runtimepersistence/test_event_key_observation_fixture.go", []string{"SeedEventKeyCardinalityObservationForTest"}, []string{"events"}, "test fixture only", "selected backend RunTransaction", "closed physical idempotency-key cardinality witness", "three exact fixture events across distinct run/class coordinates", "physical fixture only, not production run-fork revision evidence", "TestEventKeyCardinalityObservationPreservesExactPhysicalPredicateBothStores"),
 		row("internal/store/internal/runtimepersistence/test_receiver_construction_observation_fault.go", []string{"PrepareReceiverNullableConstructionObservationForTest"}, []string{"flow_instances"}, "test fixture only", "selected backend RunTransaction", "nullable-header physical observation fault after lawful construction", "exact admitted run/entity/instance header", "intentional corruption fixture, not production run-fork revision evidence", "TestReceiverConstructionStoragePreservesExactPhysicalWitnessBothStores"),
+		row("internal/store/internal/backend/pipelinepersistence/test_issue2564_evidence.go", []string{"advanceGateHeaderRevision"}, []string{"flow_instances"}, "test fixture only", "selected backend RunTransaction", "exact header-only CAS contention fault", "exact run/entity and expected header revision", "intentional revision-only contention fixture, not production run-fork revision evidence", "TestIssue2269HeaderContentionPreservesCompanionBothStores; TestIssue2564DecisionCardReevaluatesSameLeaseAfterRealCASLossBothStores"),
 	}
 }
