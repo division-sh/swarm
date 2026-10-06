@@ -18,10 +18,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
 func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time) {
@@ -32,21 +30,11 @@ func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, backen
 func seedSelectedAgentExecutionSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time, mode executionmode.Mode) {
 	t.Helper()
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
-	fixture := runlifecyclefixture.Fixture{
-		RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: loaded.SourceArtifactFact,
+	fixture := storetest.RunFixture{
+		RunID: runID, Origin: storetest.ScenarioSetupOrigin(),
 		Artifact: artifact, StartedAt: at.Add(-time.Minute),
 	}
-	if backend == "sqlite" {
-		if _, err := selected.(*store.SQLiteRuntimeStore).EnsureSourceArtifact(ctx, artifact); err != nil {
-			t.Fatal(err)
-		}
-		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-	} else {
-		if _, err := selected.(*store.PostgresStore).EnsureSourceArtifact(ctx, artifact); err != nil {
-			t.Fatal(err)
-		}
-		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-	}
+	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), fixture)
 	root := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
 	worker, err := flowidentity.KeylessChild(loaded.Source, root, "worker")
 	if err != nil {
