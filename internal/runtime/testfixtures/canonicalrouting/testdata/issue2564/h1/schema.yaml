@@ -1,0 +1,7 @@
+name: lu-h1
+pins: {inputs: [hub.start, hub.bump, hub.close, hub.again]}
+connect:
+  - {event: hub.start, from: ., to: hub, resolution: select-or-create}
+  - {event: hub.bump, from: ., to: hub, resolution: select}
+  - {event: hub.close, from: ., to: hub, resolution: select}
+  - {event: hub.again, from: ., to: hub, resolution: select}

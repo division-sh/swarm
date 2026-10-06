@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
@@ -43,7 +44,8 @@ const (
 )
 
 func TestIssue2564H1EquivalentCorpus(t *testing.T) {
-	files := issue2564H1Corpus()
+	root := issue2564H1WriteCorpus(t)
+	files := issue2564H1Corpus(t, root)
 	if len(files) != 7 || files["entities.yaml"] != "" || strings.Contains(files["hub/nodes.yaml"], "has(") {
 		t.Fatal("published fieldless root / explicit-counter corpus drift")
 	}
@@ -55,7 +57,6 @@ func TestIssue2564H1EquivalentCorpus(t *testing.T) {
 			}
 		}
 	}
-	root := issue2564H1WriteCorpus(t, files)
 	t.Logf("reconstructed equivalent H1 admitted bundle=%s", servedEventPublishFixtureBundleHash(t, root))
 }
 
@@ -70,7 +71,7 @@ func TestIssue2564ServedH1ReconstructedEquivalentBothStores(t *testing.T) {
 				ctx, cancel := context.WithDeadline(t.Context(), deadline)
 				defer cancel()
 				provider := &issue2564H1Provider{t: t, sessions: map[string]*issue2564H1Session{}}
-				rt := issue2564H1StartServed(t, backend, issue2564H1WriteCorpus(t, issue2564H1Corpus()), provider)
+				rt := issue2564H1StartServed(t, backend, issue2564H1WriteCorpus(t), provider)
 				seed := issue2564H1Publish(t, ctx, rt.Endpoint, map[string]any{
 					"event_name": "hub.start", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "h1-start-h01",
@@ -115,64 +116,33 @@ func TestIssue2564ServedH1ReconstructedEquivalentBothStores(t *testing.T) {
 	}
 }
 
-func issue2564H1Corpus() map[string]string {
-	files := map[string]string{
-		"schema.yaml": `name: lu-h1
-pins: {inputs: [hub.start, hub.bump, hub.close, hub.again]}
-connect:
-  - {event: hub.start, from: ., to: hub, resolution: select-or-create}
-  - {event: hub.bump, from: ., to: hub, resolution: select}
-  - {event: hub.close, from: ., to: hub, resolution: select}
-  - {event: hub.again, from: ., to: hub, resolution: select}
-`,
-		"events.yaml": `hub.start: {key: hub_id, hub_id: text}
-hub.bump: {key: hub_id, hub_id: text, n: integer}
-hub.close: {key: hub_id, hub_id: text}
-hub.again: {key: hub_id, hub_id: text, wave: integer}
-`,
-		"hub/schema.yaml": `name: hub
-instance: hub_id
-stages: {open: {initial: true}, active: {}, closed: {terminal: true}}
-pins: {inputs: [hub.start, hub.bump, hub.close, hub.again]}
-`,
-		"hub/events.yaml": "hub.work: {hub_id: text, wave: integer}\n",
-		"hub/nodes.yaml": `hub-node:
-  execution_type: system_node
-  subscribes_to: [hub.start, hub.bump, hub.close, hub.again]
-  event_handlers:
-    hub.start:
-      data_accumulation:
-        writes:
-          - {source_field: hub_id, target_field: hub_id}
-          - {target_field: count, value: 0}
-      advances_to: active
-      emit: {event: hub.work, fields: {hub_id: payload.hub_id, wave: 1}}
-    hub.again:
-      emit: {event: hub.work, fields: {hub_id: payload.hub_id, wave: payload.wave}}
-    hub.bump:
-      data_accumulation:
-        writes:
-          - {target_field: count, value: entity.count + 1}
-    hub.close: {advances_to: closed}
-`,
-	}
-	var entities, agents strings.Builder
-	entities.WriteString("hub:\n  hub_id: text\n  count: {type: integer, initial: 0}\n")
-	for _, side := range []string{"a", "b"} {
-		fields := make([]string, issue2564H1Fields)
-		for n := 1; n <= issue2564H1Fields; n++ {
-			fields[n-1] = fmt.Sprintf("%s%02d", side, n)
-			fmt.Fprintf(&entities, "  %s: {type: integer, initial: 0}\n", fields[n-1])
+func issue2564H1Corpus(t *testing.T, root string) map[string]string {
+	t.Helper()
+	files := make(map[string]string)
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
 		}
-		fmt.Fprintf(&agents, "marker-%s:\n  role: marker_%s\n  intent: {inline: 'H1_MARKER_%s: write every assigned field to 1 then stop'}\n  model: regular\n  subscriptions: [hub.work]\n  entity_writes: {hub: {save: [%s]}}\n", side, side, side, strings.Join(fields, ", "))
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(relative)] = string(contents)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
-	files["hub/entities.yaml"], files["hub/agents.yaml"] = entities.String(), agents.String()
 	return files
 }
 
-func issue2564H1WriteCorpus(t *testing.T, files map[string]string) string {
+func issue2564H1WriteCorpus(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root := canonicalrouting.CopyIssue2564H1Equivalent(t)
+	files := issue2564H1Corpus(t, root)
 	paths := make([]string, 0, len(files))
 	for path := range files {
 		paths = append(paths, path)
@@ -184,7 +154,6 @@ func issue2564H1WriteCorpus(t *testing.T, files map[string]string) string {
 		checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(contents)))
 		fmt.Fprintf(manifest, "%s  %s\n", checksum, path)
 		t.Logf("H1_EQUIVALENT_SHA256 %s  %s", checksum, path)
-		writeWorkflowValidationFixtureFile(t, filepath.Join(root, path), contents)
 	}
 	checksum := fmt.Sprintf("%x", manifest.Sum(nil))
 	if checksum != issue2564H1CorpusSHA {

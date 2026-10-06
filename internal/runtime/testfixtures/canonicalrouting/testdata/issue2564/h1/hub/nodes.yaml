@@ -1,0 +1,18 @@
+hub-node:
+  execution_type: system_node
+  subscribes_to: [hub.start, hub.bump, hub.close, hub.again]
+  event_handlers:
+    hub.start:
+      data_accumulation:
+        writes:
+          - {source_field: hub_id, target_field: hub_id}
+          - {target_field: count, value: 0}
+      advances_to: active
+      emit: {event: hub.work, fields: {hub_id: payload.hub_id, wave: 1}}
+    hub.again:
+      emit: {event: hub.work, fields: {hub_id: payload.hub_id, wave: payload.wave}}
+    hub.bump:
+      data_accumulation:
+        writes:
+          - {target_field: count, value: entity.count + 1}
+    hub.close: {advances_to: closed}

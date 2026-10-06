@@ -1,0 +1,5 @@
+hub:
+  hub_id: text
+  count: {type: integer, initial: 0}
+  c1: {type: integer, initial: 0}
+  c2: {type: integer, initial: 0}
