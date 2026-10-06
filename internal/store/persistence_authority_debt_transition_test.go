@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// Only the reviewed identity pair is separate from the two hashed policy files,
-// avoiding a self-referential digest. Permission checks remain hashed policy.
-const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5"
-const debtG01CollectorTo = "de36becf443af2b3da7724f72e7a664e6f3f83f1a84b9ec02a365536629ce749"
+// Only the destination is outside the hashed policy to avoid a self-referential
+// digest. The origin and permission checks are hashed, so the transition cannot
+// be reactivated after landing by editing this destination alone.
+const debtG01CollectorTo = "b42ea974646e7b666459091174645baa501d91da16871813568db23858def7b7"
 
 func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.T) {
 	digest, err := debtCollectorDigest(persistenceAuthorityRepoRoot(t))
