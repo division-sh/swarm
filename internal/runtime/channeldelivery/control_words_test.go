@@ -27,7 +27,7 @@ func TestVisibleControlWordsStayDeliverableAcrossRenderFamilies(t *testing.T) {
 		"empty_after_projection": {"\u202e\u202c", "Accepted"},
 		"truncation":             {"Long caption left with identical suffix", "Long caption right with identical suffix"},
 	} {
-		for _, family := range []string{"card", "prompt", "chooser", "recovery"} {
+		for _, family := range []string{"card", "card_prompt", "prompt", "chooser", "recovery"} {
 			for _, labelBound := range []int{1, 8, 24, 64} {
 				t.Run(fmt.Sprintf("%s/%s/label_%d", name, family, labelBound), func(t *testing.T) {
 					frozen := freezeControlWordsFixture(t, family, captions, audience)
@@ -101,11 +101,13 @@ func freezeControlWordsFixture(t *testing.T, family string, captions []string, a
 			choices[i] = RecoveryChoice{DeliveryID: uuid.NewString(), Label: label}
 		}
 		frozen, err = FreezeRecoveryInbox(uuid.NewString(), strings.Repeat("retained history\n", 30), choices, audience)
-	case "card", "prompt":
+	case "card", "card_prompt", "prompt":
 		card := controlWordsCard(t, captions)
+		prompt := DraftPrompt{DraftID: uuid.NewString(), Verdict: "choice00", ExpiresAt: time.Now().Add(time.Hour)}
 		if family == "prompt" {
-			frozen, err = FreezeInputCardPrompt(uuid.NewString(), card, DraftPrompt{DraftID: uuid.NewString(), Verdict: "choice00",
-				ExpiresAt: time.Now().Add(time.Hour)}, uuid.NewString(), audience)
+			frozen, err = FreezeInputCardPrompt(uuid.NewString(), card, prompt, uuid.NewString(), audience)
+		} else if family == "card_prompt" {
+			frozen, err = FreezeCard(card, 1, "", audience, prompt)
 		} else {
 			frozen, err = FreezeCard(card, 1, "", audience, DraftPrompt{})
 		}
