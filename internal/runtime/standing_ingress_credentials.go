@@ -146,6 +146,7 @@ func (rt *Runtime) observeStandingCredentials(ctx context.Context) (*standingCre
 	if err != nil {
 		return nil, err
 	}
+	declarations = selectStandingClockBindings(declarations, rt.Options.EnableDeclaredClockBinding)
 	admission := &standingCredentialAdmission{declarations: declarations, bindings: map[string]standingBindingCredentials{}}
 	var owner *runtimecredentials.SnapshotOwner
 	if rt.Options.ProviderCredentials != nil {

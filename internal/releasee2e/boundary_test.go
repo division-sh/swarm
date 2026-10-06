@@ -96,6 +96,10 @@ func releaseE2EImportAllowed(file, name, alias string) bool {
 		(file == "golden_agent_workload_test.go" || file == "postgres_capacity_admission_test.go") {
 		return true
 	}
+	// DSN-only sandbox allocation is fixture setup, not in-process execution.
+	if name == "github.com/division-sh/swarm/internal/testutil" && alias == "" && file == "golden_agent_workload_test.go" {
+		return true
+	}
 	// Compilation and qualification support is not in-process product execution.
 	return name == "github.com/division-sh/swarm/internal/testplanning" && alias == "" &&
 		(file == "process_harness_test.go" || file == "golden_agent_workload_test.go")
@@ -120,6 +124,9 @@ func TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning(t *testing.T)
 		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/runtime/bootverify", "bootverify", false},
 		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/runtime/bootverify", ".", false},
 		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/cliapp", "", false},
+		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/testutil", "", true},
+		{"other_test.go", "github.com/division-sh/swarm/internal/testutil", "", false},
+		{"golden_agent_workload_test.go", "github.com/division-sh/swarm/internal/testutil", "fixture", false},
 		{"other_test.go", "net/http", "", true},
 	} {
 		t.Run(tc.file+"/"+tc.name+"/"+tc.alias, func(t *testing.T) {

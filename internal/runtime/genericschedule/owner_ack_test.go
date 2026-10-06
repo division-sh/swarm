@@ -44,3 +44,32 @@ func TestLifecycleRejectsUnacknowledgedScheduleValuesWithoutProjection(t *testin
 		t.Fatalf("unacknowledged cancellation=%+v err=%v retired=%+v", cancelled, err, scheduler.retired)
 	}
 }
+
+func TestInstanceClockUnacknowledgedAdmissionCannotProjectWakeup(t *testing.T) {
+	fault := errors.New("instance clock commit acknowledgment lost")
+	for _, commitErr := range []error{nil, fault} {
+		activation := instanceRecoveryActivation(t)
+		standing, _ := instanceRecoveryWorkOwner(t, activation.Command.RunID)
+		lease, err := standing.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := lease.Done(); err != nil {
+				t.Error(err)
+			}
+		}()
+		store := &unacknowledgedScheduleStore{Store: &lifecycleProofStore{activation: activation}, activation: activation, err: commitErr}
+		scheduler := &lifecycleProofScheduler{}
+		lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer stopLifecycleProof(t, lifecycle)
+		result, admitErr := lifecycle.Admit(lease.Context(), activation.Command)
+		if admitErr == nil || result.Outcome != "" || len(scheduler.registered) != 0 ||
+			(commitErr != nil && !errors.Is(admitErr, fault)) {
+			t.Fatalf("unacknowledged instance clock projected authority: result=%+v err=%v registered=%+v", result, admitErr, scheduler.registered)
+		}
+	}
+}
