@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 )
 
-func recoverUnstartedCanceledTurn(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, row canceledTurnRecoveryRow) (effects.TurnExecutionResult, error) {
+func recoverUnstartedCanceledTurn(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, row canceledTurnRecoveryRow) (effects.TurnExecutionResult, error) {
 	if !row.originEvidence.Valid || row.firstAttempt.Valid || row.bound.Valid || row.emit.Valid || row.timeoutEvent.Valid || row.launched != nil || row.reason != string(deliverylifecycle.CancellationTerminate) {
 		return effects.TurnExecutionResult{}, fmt.Errorf("unstarted recovery has incomplete or contradictory origin evidence")
 	}
@@ -18,14 +19,24 @@ func recoverUnstartedCanceledTurn(ctx context.Context, tx *sql.Tx, delivery prov
 		return effects.TurnExecutionResult{}, err
 	}
 	id, _, err := businessTurnIdentity(origin)
-	if err != nil || id != row.turnID || origin.Kind != effects.CompletionOriginDelivery || owner.RunID != row.runID || owner.Route.InstancePath != row.flow || delivery == nil {
+	if err != nil || id != row.turnID || owner.RunID != row.runID || owner.Route.InstancePath != row.flow {
 		return effects.TurnExecutionResult{}, fmt.Errorf("unstarted recovery contradicts its actual origin/owner")
 	}
-	if err := delivery.ValidateUnstartedClaimOwnerTx(ctx, tx, origin.Delivery, owner, row.agentID); err != nil {
+	var directive agentcontrol.DirectiveOperation
+	if origin.Kind == effects.CompletionOriginDirective {
+		if directives == nil {
+			return effects.TurnExecutionResult{}, fmt.Errorf("unstarted recovery lacks its directive owner")
+		}
+		directive, err = directives.DirectiveTurnOriginTx(ctx, tx, origin.Directive, false)
+		if err != nil {
+			return effects.TurnExecutionResult{}, err
+		}
+	}
+	if err := validateUnstartedTurnOwner(ctx, tx, delivery, origin, owner, row.agentID, directive); err != nil {
 		return effects.TurnExecutionResult{}, err
 	}
-	var physical int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE origin_kind='delivery' AND origin_delivery_id=$1`, origin.Delivery.DeliveryID()).Scan(&physical); err != nil {
+	physical, err := unstartedPhysicalAttemptCount(ctx, tx, origin)
+	if err != nil {
 		return effects.TurnExecutionResult{}, err
 	}
 	if physical != 0 {

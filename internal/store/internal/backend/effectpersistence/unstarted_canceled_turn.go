@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -13,11 +15,26 @@ import (
 func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, origin effects.CompletionOrigin) (effects.CanceledTurnCommit, error) {
 	result := effects.CanceledTurnCommit{Origin: origin}
 	err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		if origin.Kind != effects.CompletionOriginDelivery || delivery == nil {
-			return fmt.Errorf("unstarted cancellation requires its real delivery owner")
-		}
-		if _, err := delivery.ProviderOriginPendingTx(ctx, tx, origin.Delivery); err != nil {
-			return err
+		var directive agentcontrol.DirectiveOperation
+		switch origin.Kind {
+		case effects.CompletionOriginDelivery:
+			if delivery == nil {
+				return fmt.Errorf("unstarted cancellation requires its delivery owner")
+			}
+			if _, err := delivery.ProviderOriginPendingTx(ctx, tx, origin.Delivery); err != nil {
+				return err
+			}
+		case effects.CompletionOriginDirective:
+			if directives == nil {
+				return fmt.Errorf("unstarted cancellation requires its directive owner")
+			}
+			var err error
+			directive, err = directives.DirectiveTurnOriginTx(ctx, tx, origin.Directive, true)
+			if err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unstarted cancellation requires a real work origin")
 		}
 		turnID, _, err := businessTurnIdentity(origin)
 		if err != nil {
@@ -40,7 +57,7 @@ func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol
 		if err != nil || !stored.Same(origin) || owner.RunID != runID || owner.Route.InstancePath != path {
 			return fmt.Errorf("unstarted settlement contradicts its persisted origin")
 		}
-		if err := delivery.ValidateUnstartedClaimOwnerTx(ctx, tx, origin.Delivery, owner, agentID); err != nil {
+		if err := validateUnstartedTurnOwner(ctx, tx, delivery, origin, owner, agentID, directive); err != nil {
 			return err
 		}
 		now, err := selectedStoreGrantDecisionNowTx(ctx, tx, postgres)
@@ -55,18 +72,38 @@ func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol
 		if err := result.Cancellation.ValidateFacts(); err != nil {
 			return err
 		}
-		var physical int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE origin_kind='delivery' AND origin_delivery_id=$1`, origin.Delivery.DeliveryID()).Scan(&physical); err != nil {
+		physical, err := unstartedPhysicalAttemptCount(ctx, tx, origin)
+		if err != nil {
 			return err
 		}
 		if physical != 0 {
 			return fmt.Errorf("origin-only cancellation cannot bypass provider-attempt ownership")
 		}
-		result.Delivery, err = delivery.SettleProviderCanceledOriginTx(ctx, mutation, origin.Delivery, deliverylifecycle.CancellationTerminate, 0)
+		if origin.Kind == effects.CompletionOriginDelivery {
+			result.Delivery, err = delivery.SettleProviderCanceledOriginTx(ctx, mutation, origin.Delivery, deliverylifecycle.CancellationTerminate, 0)
+		} else {
+			result.Directive, err = directives.SettleProviderCanceledDirectiveTx(ctx, mutation, origin.Directive, deliverylifecycle.CancellationTerminate, now)
+		}
 		if err != nil {
 			return err
 		}
 		return completeCanceledTurnTx(ctx, tx, postgres, turnID, now)
 	})
 	return result, err
+}
+
+func validateUnstartedTurnOwner(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, origin effects.CompletionOrigin, owner flowidentity.RunScopedFlowInstance, agentID string, directive agentcontrol.DirectiveOperation) error {
+	if origin.Kind == effects.CompletionOriginDelivery {
+		if delivery == nil {
+			return fmt.Errorf("unstarted cancellation lacks its delivery owner")
+		}
+		return delivery.ValidateUnstartedClaimOwnerTx(ctx, tx, origin.Delivery, owner, agentID)
+	}
+	if owner.Validate() != nil || directive.ResolvedRunID != owner.RunID || directive.AgentID() != agentID || !owner.MatchesAgentRoute(directive.AgentIdentity) {
+		return fmt.Errorf("unstarted directive contradicts its recorded constructed owner")
+	}
+	if directive.State != agentcontrol.DirectiveOperationExecuting && (directive.State != agentcontrol.DirectiveOperationCanceled || directive.CancellationReason != deliverylifecycle.CancellationTerminate) {
+		return fmt.Errorf("unstarted directive has incompatible settlement evidence")
+	}
+	return nil
 }

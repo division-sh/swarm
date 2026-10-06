@@ -85,7 +85,7 @@ func TestManagerOwnsDirectiveLaunchTimeoutAndReactionBothStores(t *testing.T) {
 }
 
 func TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores(t *testing.T) {
-	for _, phase := range []string{"prelaunch", "launched"} {
+	for _, phase := range []string{"unstarted", "prelaunch", "launched"} {
 		t.Run(phase, func(t *testing.T) {
 			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
 				store := backend.store.(completionControllerTestStore)
@@ -104,9 +104,13 @@ func TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores(t *t
 						AgentIdentity: token.Identity, FlowInstance: token.Identity.FlowInstance(), SessionID: uuid.NewString()}
 					ctx = runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewCompletionController(store, store, store, nil).WithExecutionPosture(executionposture.Live))
 					ctx = withManagedCompletionTestSurface(t, ctx, authority, "anthropic_api")
-					handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("manager-owned-termination"))
-					if err != nil {
-						t.Fatal(err)
+					var handle *runtimeeffects.Handle
+					if phase != "unstarted" {
+						var err error
+						handle, err = beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("manager-owned-termination"))
+						if err != nil {
+							t.Fatal(err)
+						}
 					}
 					if phase == "launched" {
 						if err := handle.MarkLaunched(ctx); err != nil {
@@ -142,6 +146,12 @@ func TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores(t *t
 					var authored *runtimeeffects.AuthoredTurnCancellationError
 					if !errors.As(context.Cause(ctx), &authored) || authored.Cancellation.Reason != deliverylifecycle.CancellationTerminate || authored.Cancellation.CauseEvent != event.ID() {
 						t.Fatal("Manager substituted termination reason or cause")
+					}
+					if phase == "unstarted" {
+						if _, err := beginManagedCompletionForTest(t, context.WithoutCancel(ctx), "anthropic_api", []byte("after-unstarted-termination")); err == nil {
+							t.Fatal("canceled unstarted directive admitted a provider attempt")
+						}
+						return "", context.Canceled
 					}
 					failure := runtimefailures.FromError(context.Canceled, "manager-termination-test", "physical_cleanup").Failure
 					state := runtimeeffects.StateOutcomeUncertain

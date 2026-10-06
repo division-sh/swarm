@@ -21,7 +21,7 @@ type canceledTurnRecoveryRow struct {
 	reason, cause                   string
 }
 
-func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, request runtimeeffects.RecoveryRequest) ([]runtimeeffects.TurnExecutionResult, error) {
+func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, request runtimeeffects.RecoveryRequest) ([]runtimeeffects.TurnExecutionResult, error) {
 	// One bounded snapshot includes only canceled origins whose entire physical
 	// set is closed. Selected-fork possession remains with its separate owner.
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(t.turn_id AS TEXT),CAST(t.admitted_attempt_id AS TEXT),CAST(t.first_attempt_id AS TEXT),CAST(t.run_id AS TEXT),t.agent_id,t.flow_instance,
@@ -61,7 +61,7 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 	turns := make([]runtimeeffects.TurnExecutionResult, 0, len(pending))
 	for _, row := range pending {
 		if !row.admittedAttempt.Valid {
-			turn, err := recoverUnstartedCanceledTurn(ctx, tx, delivery, row)
+			turn, err := recoverUnstartedCanceledTurn(ctx, tx, delivery, directives, row)
 			if err != nil {
 				return nil, err
 			}
@@ -202,7 +202,7 @@ func (s *EffectPostgresOwner) ListCanceledTurnRecoveries(ctx context.Context, re
 	}
 	var turns []runtimeeffects.TurnExecutionResult
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
-		turns, err = listCanceledTurnRecoveries(ctx, tx, true, s.delivery, request)
+		turns, err = listCanceledTurnRecoveries(ctx, tx, true, s.delivery, s.directives, request)
 		return err
 	})
 	if err != nil {
@@ -220,7 +220,7 @@ func (s *EffectSQLiteOwner) ListCanceledTurnRecoveries(ctx context.Context, requ
 	}
 	var turns []runtimeeffects.TurnExecutionResult
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
-		turns, err = listCanceledTurnRecoveries(ctx, tx, false, s.delivery, request)
+		turns, err = listCanceledTurnRecoveries(ctx, tx, false, s.delivery, s.directives, request)
 		return err
 	})
 	if err != nil {

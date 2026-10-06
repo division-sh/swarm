@@ -43,7 +43,7 @@ func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationproto
 		if err != nil {
 			return err
 		}
-		result.Active, err = requestUnstartedClaimedTurnTermination(ctx, tx, postgres, delivery, command)
+		result.Active, err = requestUnstartedClaimedTurnTermination(ctx, tx, postgres, delivery, directives, command)
 		if err != nil {
 			return err
 		}
