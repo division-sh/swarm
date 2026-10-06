@@ -3,6 +3,7 @@ package channeldelivery
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -35,9 +36,9 @@ func requireCurrentActionPageTx(ctx context.Context, tx *sql.Tx, resolved render
 // AdvanceActionPageTx moves one verified tap to the next immutable page
 // and settles that tap atomically with the selected plan pointer.
 func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
-	expected render.ResolvedAction, postgres bool) error {
+	expected render.ResolvedAction, mode render.ControlPageMode, postgres bool) error {
 	if tx == nil || expected.Action.Kind != "more_controls" ||
-		expected.Action.Token != action.Token {
+		expected.Action.Token != action.Token || (mode != render.ControlPageEdit && mode != render.ControlPageFreshCopy) {
 		return fmt.Errorf("card action page requires an exact verified control")
 	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
@@ -67,6 +68,15 @@ func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel
 	}
 	if err := requireCurrentActionPageTx(ctx, tx, resolved, plan, postgres); err != nil {
 		return err
+	}
+	if mode == render.ControlPageFreshCopy {
+		if err := planRequestedControlCopyTx(ctx, tx, action, resolved, plan, postgres); err != nil {
+			if errors.Is(err, errControlCopySuperseded) {
+				return SettleUnappliedActionIntentTx(ctx, tx, action, render.ActionStale, postgres)
+			}
+			return err
+		}
+		return settleControlNavigationTx(ctx, tx, action, postgres)
 	}
 	next := plan.ActionPageIndex + 1
 	query := `UPDATE channel_delivery_plans SET action_page_index=?
@@ -100,17 +110,21 @@ func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel
 	if _, err := EnsureRenderActionsTx(ctx, tx, renderID, frozen, postgres); err != nil {
 		return err
 	}
-	query = `UPDATE operator_channel_action_intents SET state='settled', disposition='navigation', settled_at=?
+	return settleControlNavigationTx(ctx, tx, action, postgres)
+}
+
+func settleControlNavigationTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, postgres bool) error {
+	query := `UPDATE operator_channel_action_intents SET state='settled', disposition='navigation', settled_at=?
 		WHERE publication_id=? AND state='pending'`
 	if postgres {
 		query = `UPDATE operator_channel_action_intents SET state='settled', disposition='navigation', settled_at=$1
 			WHERE publication_id=$2::uuid AND state='pending'`
 	}
-	result, err = tx.ExecContext(ctx, query, time.Now().UTC(), action.PublicationID)
+	result, err := tx.ExecContext(ctx, query, time.Now().UTC(), action.PublicationID)
 	if err != nil {
 		return err
 	}
-	rows, err = result.RowsAffected()
+	rows, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}

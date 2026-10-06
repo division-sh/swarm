@@ -832,6 +832,9 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 }
 
 func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {
+	if err := candidate.Plan.RequireExecutableProvider(); err != nil {
+		return Result{Operation: op, Candidate: &candidate}, err
+	}
 	current, err := s.store.GetChannelOnboarding(ctx, op.OperationID)
 	if err != nil {
 		return Result{}, err
@@ -1800,6 +1803,9 @@ func (s *Service) bindCurrentCandidate(ctx context.Context, op Operation) (Opera
 	candidate, err := s.currentCandidate(op)
 	if err != nil {
 		return op, Candidate{}, err
+	}
+	if err := candidate.Plan.RequireExecutableProvider(); err != nil {
+		return op, candidate, err
 	}
 	disposition := EffectRebindDisposition{RetryAllowed: true}
 	if phaseMayOwnExternalEffect(op.Phase) {

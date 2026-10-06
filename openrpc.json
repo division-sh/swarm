@@ -14807,6 +14807,42 @@
           }
         ]
       },
+      "ChannelCapabilityVector": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledgment": {
+            "type": "boolean"
+          },
+          "actions_as_buttons": {
+            "type": "boolean"
+          },
+          "actions_as_text": {
+            "type": "boolean"
+          },
+          "card_render": {
+            "type": "boolean"
+          },
+          "edit": {
+            "type": "boolean"
+          },
+          "inbox_listing": {
+            "type": "boolean"
+          },
+          "reply_to_reference": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "card_render",
+          "reply_to_reference",
+          "actions_as_buttons",
+          "actions_as_text",
+          "edit",
+          "acknowledgment",
+          "inbox_listing"
+        ],
+        "type": "object"
+      },
       "ChannelCredentialAdmission": {
         "additionalProperties": false,
         "properties": {
@@ -14865,6 +14901,9 @@
             ],
             "type": "string"
           },
+          "capabilities": {
+            "$ref": "#/components/schemas/ChannelCapabilityVector"
+          },
           "confirmation_operation": {
             "minLength": 1,
             "type": "string"
@@ -14877,8 +14916,7 @@
           },
           "identity_ceremony": {
             "enum": [
-              "authenticated_text_challenge",
-              "provider_pairing"
+              "authenticated_text_challenge"
             ],
             "type": "string"
           },
@@ -14890,7 +14928,6 @@
             "type": "string"
           },
           "provider_credential_role": {
-            "minLength": 1,
             "type": "string"
           },
           "signing_credential_role": {
@@ -14908,7 +14945,8 @@
           "activation_posture",
           "identity_ceremony",
           "provider_credential_role",
-          "confirmation_operation"
+          "confirmation_operation",
+          "capabilities"
         ],
         "type": "object"
       },
@@ -15022,8 +15060,7 @@
           },
           "identity_ceremony": {
             "enum": [
-              "authenticated_text_challenge",
-              "provider_pairing"
+              "authenticated_text_challenge"
             ],
             "type": "string"
           },
@@ -15322,6 +15359,9 @@
           "native_inbox": {
             "$ref": "#/components/schemas/NativeInboxQualification"
           },
+          "native_inbox_required": {
+            "type": "boolean"
+          },
           "observed_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
@@ -15352,7 +15392,8 @@
           "coordinate",
           "activation_revision",
           "binding_revision",
-          "observed_at"
+          "observed_at",
+          "native_inbox_required"
         ],
         "type": "object"
       },
@@ -20427,7 +20468,7 @@
             "type": "string"
           },
           "format": {
-            "const": "swarm-verified-account-proof-v2",
+            "const": "swarm-verified-account-proof-v3",
             "type": "string"
           },
           "interface": {

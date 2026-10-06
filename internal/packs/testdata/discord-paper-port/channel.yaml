@@ -1,0 +1,41 @@
+provider: discord
+transport: session
+capabilities:
+  card_render: true
+  reply_to_reference: true
+  actions_as_buttons: false
+  actions_as_text: true
+  edit: false
+  acknowledgment: false
+  inbox_listing: true
+onboarding:
+  ceremony: authenticated_text_challenge
+  provider_credential: discord_bot_token
+  confirmation: deliver
+  connection_health: provider_connection
+  learned_destination:
+    destination: conversation_reference
+opaque_types:
+  destination: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
+  delivery_reference: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
+  external_account_reference: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
+  conversation_reference: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
+operations:
+  deliver:
+    tool: discord.create_message
+    input:
+      channel_id: context.destination
+      content: input.presentation.text
+    output:
+      delivery_reference: result.id
+events:
+  text:
+    event: inbound.discord.text_message
+    fields:
+      text: event.text
+      external_account_reference: event.author_id
+      conversation_reference: event.channel_id
+      conversation_scope: event.scope
+      provider_message_reference: event.message_id
+      reply_to_message_reference: event.reply_id
+      entry_invocation: event.entry
