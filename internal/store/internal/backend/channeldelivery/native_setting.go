@@ -89,6 +89,9 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	if err := admission.Validate(); err != nil {
 		return channelnative.Setting{}, err
 	}
+	if err := LockPrincipalTx(ctx, tx, admission.PrincipalID, postgres); err != nil {
+		return channelnative.Setting{}, err
+	}
 	setting, err := admitNativeSettingScopeTx(ctx, tx, admission, postgres)
 	if err != nil {
 		return channelnative.Setting{}, err
