@@ -1364,7 +1364,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		return 3
 	}
 	if rt != nil {
-		standingReconciliations, err := reconcileServeStandingServices(ctx, rt.Pipeline, runtimeContexts)
+		standingReconciliations, err := reconcileServeStandingServices(ctx, rt.Pipeline, runtimeContexts, !opts.LocalRun)
 		if err != nil {
 			presenter.fail(5, "runtime_context", err)
 			return 1
@@ -1996,9 +1996,10 @@ func serveCancellationExitCode(ownershipLoss <-chan runtimestartupownership.Term
 
 type standingServiceSetReconciler interface {
 	ReconcileStandingServiceSet(context.Context, []runtimepipeline.StandingServiceCandidate) ([]runtimepipeline.StandingServiceReconciliation, error)
+	ReconcileStandingService(context.Context, runtimepipeline.StandingServiceCandidate) (runtimepipeline.StandingServiceReconciliation, error)
 }
 
-func reconcileServeStandingServices(ctx context.Context, owner standingServiceSetReconciler, contexts []serveRuntimeBundleContext) (map[string]runtimepipeline.StandingServiceReconciliation, error) {
+func reconcileServeStandingServices(ctx context.Context, owner standingServiceSetReconciler, contexts []serveRuntimeBundleContext, deployment bool) (map[string]runtimepipeline.StandingServiceReconciliation, error) {
 	var candidates []runtimepipeline.StandingServiceCandidate
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil || owner == nil {
@@ -2013,7 +2014,7 @@ func reconcileServeStandingServices(ctx context.Context, owner standingServiceSe
 	if owner == nil {
 		return nil, nil
 	}
-	results, err := owner.ReconcileStandingServiceSet(ctx, candidates)
+	results, err := reconcileStandingServiceCandidates(ctx, owner, candidates, deployment)
 	if err != nil {
 		return nil, err
 	}
@@ -2025,6 +2026,24 @@ func reconcileServeStandingServices(ctx context.Context, owner standingServiceSe
 		byServiceID[result.ServiceID] = result
 	}
 	return byServiceID, nil
+}
+
+func reconcileStandingServiceCandidates(ctx context.Context, owner standingServiceSetReconciler, candidates []runtimepipeline.StandingServiceCandidate, deployment bool) ([]runtimepipeline.StandingServiceReconciliation, error) {
+	if deployment {
+		return owner.ReconcileStandingServiceSet(ctx, candidates)
+	}
+	// A finite host does not own deployment selection or declaration removal.
+	results := make([]runtimepipeline.StandingServiceReconciliation, 0, len(candidates))
+	for _, candidate := range candidates {
+		result, err := owner.ReconcileStandingService(ctx, candidate)
+		if err != nil {
+			return nil, err
+		}
+		if result.RunID != "" {
+			results = append(results, result)
+		}
+	}
+	return results, nil
 }
 
 func reconcileServeRuntimeStandingTargets(

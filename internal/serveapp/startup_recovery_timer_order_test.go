@@ -123,7 +123,7 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 				t.Fatal(err)
 			}
 			installSelectedStoreTestGeneration(t, capability, candidate.runtime, plan, 1)
-			reconciled, err := reconcileServeStandingServices(ctx, candidate.runtime.Pipeline, candidates)
+			reconciled, err := reconcileServeStandingServices(ctx, candidate.runtime.Pipeline, candidates, true)
 			if err != nil {
 				t.Fatal(err)
 			}

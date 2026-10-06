@@ -165,7 +165,7 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 			t.Fatal(err)
 		}
 	}
-	reconciled, err := reconcileServeStandingServices(ctx, candidates[0].runtime.Pipeline, candidates)
+	reconciled, err := reconcileServeStandingServices(ctx, candidates[0].runtime.Pipeline, candidates, true)
 	if err != nil {
 		t.Fatal(err)
 	}
