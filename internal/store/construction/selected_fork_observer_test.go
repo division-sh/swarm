@@ -2,14 +2,12 @@ package construction_test
 
 import (
 	"context"
-	"database/sql"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/store/construction"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
-	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -29,13 +27,8 @@ func TestSelectedForkApplicationSnapshotObserverDoesNotAcquireRuntimeAuthorityBo
 				if err != nil {
 					t.Fatal(err)
 				}
-				schema, native, err := storeschema.OpenSQLiteReadOnlyForInspection(writer.Path())
+				selected, err := construction.OpenSQLiteRuntimeReadOnly(writer.Path())
 				if err != nil {
-					t.Fatal(err)
-				}
-				selected, err := private.ComposeSQLiteRuntimeStore(schema, native)
-				if err != nil {
-					_ = schema.Close()
 					t.Fatal(err)
 				}
 				t.Cleanup(func() {
@@ -48,10 +41,7 @@ func TestSelectedForkApplicationSnapshotObserverDoesNotAcquireRuntimeAuthorityBo
 					_, err := selected.ListActiveAgentDescriptors(ctx, unacceptedEvent)
 					return err
 				}
-				if err := native.RunTransaction(ctx, "read-only observer refusal", func(ctx context.Context, tx *sql.Tx) error {
-					_, err := tx.ExecContext(ctx, `CREATE TABLE snapshot_forbidden_writer (id TEXT)`)
-					return err
-				}); err == nil {
+				if err := private.AttemptSQLiteInspectionTableCreationForTest(ctx, selected); err == nil {
 					t.Fatal("read-only physical observer acquired write authority")
 				}
 				after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, observer)
