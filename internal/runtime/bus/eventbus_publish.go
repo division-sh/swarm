@@ -1492,9 +1492,16 @@ func (eb *EventBus) transferPreparedNodeDeliveries(ctx context.Context, prepared
 	if !eb.canTransferPreparedNodeDeliveries(prepared) {
 		return errors.New("committed publication is not eligible for node continuation handoff")
 	}
+	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(ctx, prepared.receiver, prepared.Event)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, closeReceiver()) }()
+	ctx = receiverCtx.Context
 	if err := eb.AcceptCommittedDeliveryHandoffs(prepared.committedHandoffs); err != nil {
 		return err
 	}
+	eb.logPublished(ctx, prepared.Event, 0)
 	// Pipeline acknowledgement enables exact durable deliveries atomically. A
 	// pending node retains its continuation, not a publication SQL session.
 	return prepared.publicationClaim.Settle(ctx, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
