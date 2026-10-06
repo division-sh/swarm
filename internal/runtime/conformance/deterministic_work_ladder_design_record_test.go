@@ -321,7 +321,7 @@ func TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec(t 
 	disposition := yamlMapAt(t, spec, "tool_model", "platform_builtin_tools", "handler_action_retirement")
 	for field, wants := range map[string][]string{
 		"rule":                 {"rejected on presence", "null, empty, alias", "no action interpreter", "compatibility spelling", "emit.template", "timer instructions", "connector tool operations"},
-		"supported_operations": {"typed initialize", "Typed state accumulation", "notify_human", "ask_human", "optional/entityless nodes"},
+		"supported_operations": {"Connection-owned input resolution", "canonical same-name constructor", "Typed state accumulation", "notify_human", "ask_human", "optional/entityless nodes"},
 		"local_git":            {"Built-in local Git commits are unavailable", "No activity, tool or provider alias", "#2029", "requires its own contract and proof"},
 	} {
 		got := yamlStringValue(t, disposition, field)
@@ -329,6 +329,9 @@ func TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec(t 
 			if !strings.Contains(got, want) {
 				t.Fatalf("platform spec handler_action_retirement.%s missing %q in:\n%s", field, want, got)
 			}
+		}
+		if field == "supported_operations" && strings.Contains(got, "typed initialize") {
+			t.Fatal("platform spec restores the retired input-pin initializer")
 		}
 	}
 
