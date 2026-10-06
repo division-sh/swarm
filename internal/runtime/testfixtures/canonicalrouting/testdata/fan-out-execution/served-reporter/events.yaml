@@ -1,6 +1,8 @@
 portfolio.opened:
   portfolio_id: text
   threshold: integer
+portfolio.close.requested:
+portfolio.close.forwarded:
 portfolio.opened.forwarded:
   portfolio_id: text
   threshold: integer
