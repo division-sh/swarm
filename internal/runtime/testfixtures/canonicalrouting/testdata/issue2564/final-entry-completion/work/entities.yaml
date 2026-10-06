@@ -1,0 +1,3 @@
+work:
+  case_id: text
+  acknowledgments: {type: integer, initial: 0}
