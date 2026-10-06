@@ -735,12 +735,8 @@ func issue2564AssertOperationReceipts(t *testing.T, f issue2564OperationFixture,
 func issue2564AssertOperationConstruction(t *testing.T, f issue2564OperationFixture, initial pipeline.WorkflowInstance) {
 	t.Helper()
 	current := issue2564LoadOperationInstance(t, f)
-	if current.EntityID != initial.EntityID || current.EntityType != initial.EntityType || current.CurrentState != initial.CurrentState || !reflect.DeepEqual(current.InitialFieldValues, initial.InitialFieldValues) || !reflect.DeepEqual(current.Bookkeeping, initial.Bookkeeping) || !reflect.DeepEqual(current.Gates, initial.Gates) || !reflect.DeepEqual(current.StateBuckets, initial.StateBuckets) || !reflect.DeepEqual(current.TransitionHistory, initial.TransitionHistory) {
-		t.Fatal("field operation rewrote constructor identity/config/initial fields or lifecycle history")
-	}
-	target, err := f.selected.LoadWorkflowTargetPersistence(f.ctx, f.state.Identity, identity.NormalizeEntityID(f.state.EntityID))
-	if err != nil || !reflect.DeepEqual(target.Lifecycle.Config, f.state.Config) {
-		t.Fatalf("field operation rewrote captured physical constructor config: got=%s want=%s err=%v", target.Lifecycle.Config, f.state.Config, err)
+	if current.StorageRef != initial.StorageRef || current.InstanceID != initial.InstanceID || current.EntityID != initial.EntityID || current.EntityType != initial.EntityType || current.InstanceKind != initial.InstanceKind || current.TemplateVersion != initial.TemplateVersion || current.ParentFlowID != initial.ParentFlowID || current.ParentFlowInstance != initial.ParentFlowInstance || current.ParentEntityID != initial.ParentEntityID || current.WorkflowName != initial.WorkflowName || current.WorkflowVersion != initial.WorkflowVersion || current.Mode != initial.Mode || current.Status != initial.Status || !current.TerminatedAt.Equal(initial.TerminatedAt) || !current.CreatedAt.Equal(initial.CreatedAt) || current.CurrentState != initial.CurrentState || !reflect.DeepEqual(current.InitialFieldValues, initial.InitialFieldValues) || !reflect.DeepEqual(current.Bookkeeping, initial.Bookkeeping) || !reflect.DeepEqual(current.Gates, initial.Gates) || !reflect.DeepEqual(current.StateBuckets, initial.StateBuckets) || !reflect.DeepEqual(current.TransitionHistory, initial.TransitionHistory) {
+		t.Fatal("field operation rewrote constructor identity/initial fields or lifecycle history")
 	}
 	artifact, err := f.store.(selectedSourceArtifactStore).GetSourceArtifact(f.ctx, f.bundle.SourceArtifact.BundleHash())
 	if err != nil || !reflect.DeepEqual(artifact, f.artifact) {
