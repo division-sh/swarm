@@ -434,6 +434,7 @@ type eventBusCommitPublishPlan struct {
 	publicationClaim      *pipelinePublicationClaim
 	dynamicFlowCreation   *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 	outputConsumers       *runtimepinrouting.OutputConsumerResolver
+	stageFeedback         *runtimepipeline.WorkflowPublicationStageRequest
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, bool, error) {
@@ -478,6 +479,14 @@ func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusComm
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
 	}
 	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
+	if err == nil && plan.stageFeedback != nil {
+		request := *plan.stageFeedback
+		if err := request.ValidateEvent(prepared.Event); err != nil {
+			return preparedCtx, PreparedPublish{}, PublicationCommand{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+		}
+		prepared.stageFeedback = &request
+		command.StageFeedback = &request
+	}
 	return preparedCtx, prepared, command, err
 }
 
@@ -870,6 +879,30 @@ type PreparedPublish struct {
 	hasAuthorScope        bool
 	authorDescriptor      runtimeauthoractivity.EventDescriptor
 	hasAuthorDescriptor   bool
+	stageFeedback         *runtimepipeline.WorkflowPublicationStageRequest
+	acceptedStage         *runtimepipelineobligation.CommittedStageReceipt
+}
+
+func (p PreparedPublish) AcceptedPublicationStage() (runtimepipelineobligation.CommittedStageReceipt, bool) {
+	if p.acceptedStage == nil {
+		return runtimepipelineobligation.CommittedStageReceipt{}, false
+	}
+	return *p.acceptedStage, true
+}
+
+func (p PreparedPublish) withAcceptedPublicationStage(receipt *runtimepipelineobligation.CommittedStageReceipt) (PreparedPublish, error) {
+	if p.stageFeedback == nil {
+		if receipt != nil {
+			return p, errors.New("publication returned unrequested stage feedback")
+		}
+		return p, nil
+	}
+	if receipt == nil || receipt.Validate() != nil || receipt.EventID() != p.Event.ID() || receipt.Stage().Instance != p.stageFeedback.Instance || receipt.Stage().EntityID != p.stageFeedback.EntityID {
+		return p, errors.New("publication omitted or contradicted its exact acceptance stage")
+	}
+	value := *receipt
+	p.acceptedStage = &value
+	return p, nil
 }
 
 func validateEventAppendOutcome(outcome EventAppendOutcome) error {

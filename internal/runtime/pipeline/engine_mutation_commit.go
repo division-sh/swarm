@@ -523,7 +523,7 @@ func CommittedWorkflowStage(record WorkflowEngineStateRecord) (runtimeengine.Com
 	}
 	return runtimeengine.CommittedStage{
 		Instance: record.Identity, EntityID: record.EntityID,
-		Stage: record.CurrentState, StageDefined: record.StageDefined, Revision: revision,
+		Stage: record.CurrentState, StageDefined: record.StageDefined, Revision: revision, UpdatedAt: record.UpdatedAt.UTC(),
 	}, nil
 }
 

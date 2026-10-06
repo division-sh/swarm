@@ -15032,6 +15032,8 @@ platform_tables:
         - entity_mutations
         - entity_state
         - workflow_instance_initial_materializations
+        - workflow_publication_stage_receipts
+        - workflow_handler_stage_receipts
         - flow_instance_runtime_readiness
         - agents
         - flow_instances
@@ -15088,6 +15090,7 @@ platform_tables:
         - runtime_generation_grants
         - runtime_external_effect_operations
         - runtime_external_effect_attempts
+        - runtime_agent_turn_lifetimes
         - runtime_provider_attempt_drains
         - operator_principals
         - operator_channel_operations
@@ -16805,6 +16808,41 @@ platform_tables:
             INDEX idx_runtime_external_effect_attempts_recovery (state, lease_expires_at, updated_at),
             INDEX idx_runtime_external_effect_attempts_target (usage_target_kind, usage_target_id) WHERE usage_target_id IS NOT NULL,
             UNIQUE INDEX idx_runtime_external_effect_attempts_active_continuation (origin_delivery_id) WHERE completion_continuation_active = TRUE
+        );
+    workflow_publication_stage_receipts:
+      description: >-
+        The publication transaction captures its author's own exact constructed
+        header at acceptance, separately from any receiver's handler result.
+        Queued or cross-flow publication never presents that snapshot as a
+        completed handler. Exact duplicate publication consumes this immutable
+        receipt, not a newer header. Missing or contradictory receipt fails closed.
+      ddl: |
+        CREATE TABLE workflow_publication_stage_receipts (
+            event_id UUID PRIMARY KEY REFERENCES events(event_id) ON DELETE CASCADE,
+            run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            instance_path TEXT NOT NULL,
+            receipt JSONB NOT NULL
+        );
+    workflow_handler_stage_receipts:
+      description: >-
+        Immutable exact post-handler workflow stage evidence, written by the
+        existing workflow mutation owner in the same transaction as the guarded
+        header mutation and exact node-delivery success. The key is the actual
+        delivery and claim version; no current-header read reconstructs a receipt.
+        Publication feedback selects only its own event/run/constructed instance.
+        A receipt is evidence, not handler dispatch or settlement authority.
+        Its guarded mutation timestamp and revision remain unchanged on readback.
+        Failed or unresolved commit cannot produce acknowledged stage feedback.
+      ddl: |
+        CREATE TABLE workflow_handler_stage_receipts (
+            delivery_id UUID NOT NULL REFERENCES event_deliveries(delivery_id) ON DELETE CASCADE,
+            claim_version BIGINT NOT NULL CHECK (claim_version > 0),
+            event_id UUID NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+            run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            instance_path TEXT NOT NULL,
+            receipt JSONB NOT NULL,
+            PRIMARY KEY (delivery_id, claim_version),
+            INDEX idx_workflow_handler_stage_receipts_event (event_id, run_id, instance_path)
         );
     runtime_agent_turn_lifetimes:
       description: >-

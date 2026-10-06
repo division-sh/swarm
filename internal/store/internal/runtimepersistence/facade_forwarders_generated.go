@@ -958,6 +958,14 @@ func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope timerobl
 	return s.timerObligationPostgresReader.ReadTimerObligations(ctx, scope, observedAt)
 }
 
+func (s *PostgresStore) ReadWorkflowHandlerStageReceipts(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) ([]pipelineobligation.CommittedStageReceipt, error) {
+	return s.pipelinePostgresOwner.ReadWorkflowHandlerStageReceipts(ctx, eventID, instance)
+}
+
+func (s *PostgresStore) ReadWorkflowPublicationStages(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowPublicationStageEvidence, bool, error) {
+	return s.pipelinePostgresOwner.ReadWorkflowPublicationStages(ctx, eventID, instance)
+}
+
 func (s *PostgresStore) ReconcileChannelOnboardingBinding(ctx context.Context, req channelonboarding.ReconcileBindingRequest) (channelonboarding.Operation, error) {
 	return s.channelOnboardingPostgresOwner.ReconcileChannelOnboardingBinding(ctx, req)
 }
@@ -2184,6 +2192,14 @@ func (s *SQLiteRuntimeStore) ReadResetInventory(ctx context.Context) (destructiv
 
 func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
 	return s.timerObligationSQLiteReader.ReadTimerObligations(ctx, scope, observedAt)
+}
+
+func (s *SQLiteRuntimeStore) ReadWorkflowHandlerStageReceipts(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) ([]pipelineobligation.CommittedStageReceipt, error) {
+	return s.pipelineSQLiteOwner.ReadWorkflowHandlerStageReceipts(ctx, eventID, instance)
+}
+
+func (s *SQLiteRuntimeStore) ReadWorkflowPublicationStages(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowPublicationStageEvidence, bool, error) {
+	return s.pipelineSQLiteOwner.ReadWorkflowPublicationStages(ctx, eventID, instance)
 }
 
 func (s *SQLiteRuntimeStore) ReconcileChannelOnboardingBinding(ctx context.Context, req channelonboarding.ReconcileBindingRequest) (channelonboarding.Operation, error) {

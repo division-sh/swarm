@@ -2,6 +2,7 @@ package pipelineobligation
 
 import (
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestExecutionOutcomeRetainsStageWithoutChangingSettlementRights(t *testing.T) {
-	stage := engine.CommittedStage{Instance: flowidentity.RunScopedFlowInstance{RunID: uuid.NewString(), Route: flowidentity.RouteForInstancePath("orders")}, EntityID: uuid.NewString(), Stage: "ready", StageDefined: true, Revision: 4}
+	stage := engine.CommittedStage{Instance: flowidentity.RunScopedFlowInstance{RunID: uuid.NewString(), Route: flowidentity.RouteForInstancePath("orders")}, EntityID: uuid.NewString(), Stage: "ready", StageDefined: true, Revision: 4, UpdatedAt: time.Now().UTC()}
 	ack, err := (ExecutionOutcome{Committed: true}).WithCommittedStage(uuid.NewString(), stage)
 	if err != nil {
 		t.Fatal(err)

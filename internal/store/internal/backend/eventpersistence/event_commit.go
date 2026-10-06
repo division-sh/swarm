@@ -39,6 +39,7 @@ type eventCommitTxStore interface {
 	CommitFlowInstanceActivationsTx(context.Context, *mutationprotocol.Attempt, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
 	ReplaceFlowInstanceRouteTopologyTx(context.Context, *sql.Tx, []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error)
 	MarkDynamicFlowCreationOccurrenceCommittedTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) error
+	CaptureWorkflowPublicationStageTx(context.Context, *sql.Tx, events.Event, runtimepipeline.WorkflowPublicationStageRequest, bool) (runtimepipelineobligation.CommittedStageReceipt, error)
 }
 
 type standaloneCompletionCapability interface {
@@ -621,6 +622,13 @@ func commitValidatedPublicationSQL(
 		return runtimebus.CommittedPublication{}, err
 	}
 	result := runtimebus.CommittedPublication{AppendOutcome: outcome}
+	if command.StageFeedback != nil {
+		receipt, err := store.CaptureWorkflowPublicationStageTx(ctx, tx, request.Event.Event(), *command.StageFeedback, outcome == runtimebus.EventAppendExactDuplicate)
+		if err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+		result.AcceptedStage = &receipt
+	}
 	if outcome == runtimebus.EventAppendExactDuplicate {
 		if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
 			return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow creation event exists before readiness completion")

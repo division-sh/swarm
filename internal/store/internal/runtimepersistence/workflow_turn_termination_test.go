@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
@@ -82,6 +83,13 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 				if mode == "late_rollback" && !strings.Contains(err.Error(), "settle workflow node delivery") {
 					t.Fatalf("rollback proof did not reach the post-intent settlement: %v", err)
 				}
+				reader := fixture.store.(interface {
+					ReadWorkflowHandlerStageReceipts(context.Context, string, flowidentity.RunScopedFlowInstance) ([]pipelineobligation.CommittedStageReceipt, error)
+				})
+				receipts, err := reader.ReadWorkflowHandlerStageReceipts(ctx, event.ID(), owner)
+				if err != nil || wantCommit && (len(receipts) != 1 || receipts[0].Stage() != result.Stage) || !wantCommit && len(receipts) != 0 {
+					t.Fatalf("atomic persisted handler stage receipt: %+v err=%v", receipts, err)
+				}
 				original := flowidentity.RunScopedFlowInstance{RunID: owner.RunID, Route: flowidentity.RouteForInstancePath(path)}
 				header, found, err := fixture.store.(pipeline.WorkflowInstancePersistenceReader).LoadWorkflowInstance(ctx, original)
 				if err != nil || !found {
@@ -108,6 +116,27 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 				}
 				if !prelaunch {
 					requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)
+					if mode == "committed" {
+						later := command
+						later.DeliverySuccess = nil
+						later.Lifecycle = pipeline.WorkflowLifecycleMutationPlan{}
+						later.State.ExpectedState, later.State.ExpectedRevision = "done", 2
+						later.State.CurrentState = "after"
+						later.State.UpdatedAt = command.State.UpdatedAt.Add(time.Second)
+						later.State.EnteredStageAt = later.State.UpdatedAt
+						advanced, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, later)
+						if err != nil || !advanced.Committed || advanced.Stage.Stage != "after" || advanced.Stage.Revision != 3 {
+							t.Fatalf("later independent advance: %+v err=%v", advanced, err)
+						}
+						restored, err := reader.ReadWorkflowHandlerStageReceipts(ctx, event.ID(), owner)
+						if err != nil || len(restored) != 1 || restored[0] != receipts[0] {
+							t.Fatalf("later header replaced the occurrence's stage: %+v err=%v", restored, err)
+						}
+						absent, err := reader.ReadWorkflowHandlerStageReceipts(ctx, uuid.NewString(), owner)
+						if err != nil || len(absent) != 0 {
+							t.Fatalf("unrelated publication inherited a stage receipt: %+v err=%v", absent, err)
+						}
+					}
 					return
 				}
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateAuthorized)

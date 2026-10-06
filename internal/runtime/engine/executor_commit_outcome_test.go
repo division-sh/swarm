@@ -28,7 +28,7 @@ func (o *outcomeMutationOwner) CommitEngineMutation(_ context.Context, mutation 
 	}
 	result := CommittedEngineMutation{Committed: true, ActivityIntents: mutation.ActivityIntents,
 		Stage: &CommittedStage{Instance: runtimeflowidentity.RunScopedFlowInstance{RunID: "run-1", Route: runtimeflowidentity.RouteForInstancePath("research")},
-			EntityID: mutation.Address.EntityID.String(), Stage: "committed-stage", StageDefined: true, Revision: 17},
+			EntityID: mutation.Address.EntityID.String(), Stage: "committed-stage", StageDefined: true, Revision: 17, UpdatedAt: time.Now().UTC()},
 		EmitIntents: []EmitIntent{{Event: eventtest.RunCreatingRootIngress("child", "source.requested", "", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Time{})}}}
 	if o.malformedClaim {
 		result.SettledDeliveryClaim = &runtimedelivery.Claim{}

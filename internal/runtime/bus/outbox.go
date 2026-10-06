@@ -323,6 +323,10 @@ func (eb *EventBus) finalizeCommittedPublicationConsequences(ctx context.Context
 	if err != nil {
 		return result, err
 	}
+	result.prepared, err = result.prepared.withAcceptedPublicationStage(committed.AcceptedStage)
+	if err != nil {
+		return result, err
+	}
 	result.bound = true
 	result.prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
 	activationErr := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.Activations)

@@ -102,8 +102,9 @@ type ExecutionOutcome struct {
 	stageReceipts []CommittedStageReceipt
 }
 
-// CommittedStageReceipt belongs to one acknowledged handler occurrence. It does
-// not acknowledge its enclosing dispatch or authorize another handler execution.
+// CommittedStageReceipt is one exact publication or handler stage fact. Its
+// enclosing commit result distinguishes acceptance from handler completion; the
+// receipt never acknowledges dispatch or authorizes another handler execution.
 type CommittedStageReceipt struct {
 	eventID string
 	stage   engine.CommittedStage
@@ -112,14 +113,21 @@ type CommittedStageReceipt struct {
 func (r CommittedStageReceipt) EventID() string              { return r.eventID }
 func (r CommittedStageReceipt) Stage() engine.CommittedStage { return r.stage }
 
+// StageReceiptEvidence describes the transaction's exact stage facts. It carries no
+// transaction acknowledgment or permission to run the handler again.
+func StageReceiptEvidence(eventID string, stage engine.CommittedStage) (CommittedStageReceipt, error) {
+	receipt := CommittedStageReceipt{eventID: eventID, stage: stage}
+	return receipt, receipt.Validate()
+}
+
 func (o ExecutionOutcome) WithCommittedStage(eventID string, stage engine.CommittedStage) (ExecutionOutcome, error) {
 	if !o.Committed || eventID == "" || strings.TrimSpace(eventID) != eventID {
 		return o, fmt.Errorf("stage receipt requires an acknowledged exact handler occurrence")
 	}
-	if err := stage.Validate(); err != nil {
+	receipt, err := StageReceiptEvidence(eventID, stage)
+	if err != nil {
 		return o, err
 	}
-	receipt := CommittedStageReceipt{eventID: eventID, stage: stage}
 	return o.RetainStageReceipts(ExecutionOutcome{stageReceipts: []CommittedStageReceipt{receipt}}), nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -15,7 +16,7 @@ func TestBusInterceptionRetainsCommittedStageThroughLaterDispositions(t *testing
 	for _, stop := range []string{"continue", "terminal", "retry", "uncommitted_error"} {
 		t.Run(stop, func(t *testing.T) {
 			event := receiverProjectionEvent("stage-receipt")
-			stage := engine.CommittedStage{Instance: flowidentity.RunScopedFlowInstance{RunID: uuid.NewString(), Route: flowidentity.RouteForInstancePath("orders")}, EntityID: uuid.NewString(), Stage: "done", StageDefined: true, Revision: 8}
+			stage := engine.CommittedStage{Instance: flowidentity.RunScopedFlowInstance{RunID: uuid.NewString(), Route: flowidentity.RouteForInstancePath("orders")}, EntityID: uuid.NewString(), Stage: "done", StageDefined: true, Revision: 8, UpdatedAt: time.Now().UTC()}
 			ack, err := (pipelineobligation.ExecutionOutcome{Committed: true}).WithCommittedStage(event.ID(), stage)
 			if err != nil {
 				t.Fatal(err)

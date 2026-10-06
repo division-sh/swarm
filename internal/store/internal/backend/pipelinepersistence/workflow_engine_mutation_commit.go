@@ -532,14 +532,15 @@ func commitWorkflowEngineMutation(
 				}
 			}
 			if success := command.DeliverySuccess; success != nil {
-				if _, err := store.SettleWorkflowNodeSuccessTx(
+				settled, err := store.SettleWorkflowNodeSuccessTx(
 					txctx,
 					attempt,
 					success.Claim,
 					append([]string(nil), success.SideEffects...),
 					success.Duration,
 					success.RuleSelection,
-				); err != nil {
+				)
+				if err != nil {
 					return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
 				}
 				if !command.Lifecycle.RequestCompletionCandidate {
@@ -548,6 +549,9 @@ func commitWorkflowEngineMutation(
 					}
 				}
 				claim := success.Claim
+				if err := persistWorkflowHandlerStageReceiptTx(txctx, tx, claim, settled, stage); err != nil {
+					return err
+				}
 				result.DeliverySuccess = &claim
 			}
 			return nil
