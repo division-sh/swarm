@@ -357,7 +357,7 @@ func TestChannelRenderNoticeIsRunlessAndHasNoDecisionActions(t *testing.T) {
 	}
 	summary, err := FreezeSummary(uuid.NewString(), 2, audience)
 	if err != nil || !strings.Contains(summary.FullText, "2 earlier notices") ||
-		!strings.Contains(summary.FullText, "Open inbox from the chat menu") ||
+		!strings.Contains(summary.FullText, "Send /inbox or reply with Open inbox") ||
 		strings.Contains(summary.FullText, "swarm mailbox") || len(summary.Choices) != 0 {
 		t.Fatalf("phone backlog summary = %#v, %v", summary, err)
 	}

@@ -418,21 +418,31 @@ func proveObjectChannelPages(t *testing.T, db *sql.DB, p *objectChannelProvider,
 				time.Sleep(20 * time.Millisecond)
 			}
 		}
-		parts := strings.SplitN(fmt.Sprint(page["body"]), "\n", 2)
-		if len(parts) != 2 {
-			t.Fatalf("page missing body: %#v", page)
-		}
-		complete.WriteString(parts[1])
 		token = ""
 		controls, _ := page["controls"].([]any)
+		words := make([]string, 0, len(controls))
 		for _, control := range controls {
 			row, _ := control.(map[string]any)
+			words = append(words, fmt.Sprint(row["name"]))
 			if row["name"] == "Next page" {
 				token, _ = row["value"].(string)
 			}
 		}
+		source, err := channelPageSourceText(fmt.Sprint(page["body"]), words)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parts := strings.SplitN(source, "\n", 2)
+		var ordinal, advertised int
+		if len(parts) != 2 {
+			t.Fatalf("page missing body: %#v", page)
+		}
+		if _, err := fmt.Sscanf(parts[0], "Page %d/%d", &ordinal, &advertised); err != nil || ordinal != index {
+			t.Fatalf("object full page order changed: %q: %v", parts[0], err)
+		}
+		complete.WriteString(parts[1])
 		if token == "" {
-			if index < 2 || complete.String() != input.FullText {
+			if index < 2 || index != advertised || complete.String() != input.FullText {
 				t.Fatalf("object pages changed immutable full text: pages=%d", index)
 			}
 			assertChannelHistoricalRender(t, db, card, frozen)
@@ -623,6 +633,7 @@ type objectChannelProvider struct {
 	editResponse      *objectChannelResponsePause
 	editReference     string
 	textOnly          bool
+	supportedPaths    map[string]bool
 }
 
 func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -636,8 +647,9 @@ func (p *objectChannelProvider) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 	}
 	p.calls[r.URL.Path] = append(p.calls[r.URL.Path], input)
-	if p.textOnly && r.URL.Path != "/v2/deliver" && r.URL.Path != "/v2/identify" &&
-		r.URL.Path != "/v2/register" && r.URL.Path != "/v2/registration" {
+	if p.supportedPaths != nil && !p.supportedPaths[r.URL.Path] ||
+		p.supportedPaths == nil && p.textOnly && r.URL.Path != "/v2/deliver" && r.URL.Path != "/v2/identify" &&
+			r.URL.Path != "/v2/register" && r.URL.Path != "/v2/registration" {
 		http.Error(w, "operation not provided by text/reply channel", http.StatusBadRequest)
 		return
 	}
