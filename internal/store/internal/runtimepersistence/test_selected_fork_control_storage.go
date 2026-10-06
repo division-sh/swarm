@@ -27,7 +27,14 @@ func ReadSelectedForkControlStorageForTest(ctx context.Context, selected any, ru
 	}
 	var out SelectedForkControlStorage
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, `SELECT status='running' AND (bundle_hash <> $2 OR completion_due_at IS NULL) FROM runs WHERE run_id=$1`, runID, loadedBundleHash).Scan(&out.AwaitingMutation); err != nil {
+		var err error
+		switch owner := selected.(type) {
+		case *PostgresStore:
+			out.AwaitingMutation, err = owner.runLifecyclePostgresOwner.ReadSelectedControlAwaitingMutationTx(ctx, tx, runID, loadedBundleHash)
+		case *SQLiteRuntimeStore:
+			out.AwaitingMutation, err = owner.runLifecycleSQLiteOwner.ReadSelectedControlAwaitingMutationTx(ctx, tx, runID, loadedBundleHash)
+		}
+		if err != nil {
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, runID).Scan(&out.BindingID); err != nil {

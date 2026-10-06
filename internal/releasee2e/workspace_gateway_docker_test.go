@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,10 +14,10 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 const realDockerProxyArgument = "--test-real-workspace-docker-proxy"
@@ -345,6 +346,7 @@ func TestWorkspaceMCPCompiledDockerConformance(t *testing.T) {
 	}
 	root := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, root)
+	observerBinary := buildOwnedWorkspaceInspectionBinary(t, root)
 	helper, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -371,13 +373,10 @@ func TestWorkspaceMCPCompiledDockerConformance(t *testing.T) {
 			if disconnect {
 				env = append(env, "RELEASE_E2E_WORKSPACE_DISCONNECT=1")
 			}
-			inspectionCtx, stopInspection := context.WithCancel(context.Background())
-			inspection := make(chan workspacePrivateStoreObservation, 1)
-			go func() { inspection <- observeWorkspacePrivateStore(inspectionCtx, tmp) }()
+			stopInspection := startWorkspacePrivateStoreObserver(t, observerBinary, tmp)
 			args := []string{"test", source, "tests/transport.yaml", "--workspace-backend", "docker", "--timeout", "10s", "--poll-interval", "25ms"}
 			result := runReleaseCommand(t, time.Minute, root, env, "", binary, args...)
-			stopInspection()
-			observed := <-inspection
+			observed := stopInspection()
 			if !disconnect && (result.err != nil || !strings.Contains(result.output, "swarm test ok: scenarios=1")) {
 				t.Fatalf("real Docker public read/emit/store assertion: %v\n%s", result.err, result.output)
 			}
@@ -518,39 +517,92 @@ func workspaceDockerProofConfig(t *testing.T, root string) []string {
 	return []string{"--config", path}
 }
 
-type workspacePrivateStoreObservation = storetest.WorkspaceMockInvocationStorage
+type workspacePrivateStoreObservation struct {
+	Observed        bool `json:"observed"`
+	Finished        bool `json:"finished"`
+	AgentDeliveries int  `json:"agent_deliveries"`
+	Delivered       int  `json:"delivered"`
+	Emitted         int  `json:"emitted"`
+}
 
-// Inspection is read-only and limited to this invocation's private store. It
-// runs before joined CLI cleanup removes that store; it cannot create one.
-func observeWorkspacePrivateStore(ctx context.Context, root string) workspacePrivateStoreObservation {
-	var observed workspacePrivateStoreObservation
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return observed
-		case <-tick.C:
-			paths, _ := filepath.Glob(filepath.Join(root, "swarm-test-session-*", "state.db"))
-			if len(paths) != 1 {
-				continue
+func startWorkspacePrivateStoreObserver(t *testing.T, binary, root string) func() workspacePrivateStoreObservation {
+	t.Helper()
+	cmd := exec.Command(binary, "-test.run=^TestWorkspaceInvocationReadOnlyObserverChild$")
+	cmd.Env = append(os.Environ(), "SWARM_TEST_WORKSPACE_OBSERVER_CHILD=1", "SWARM_TEST_WORKSPACE_OBSERVER_ROOT="+root)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	type joinedResult struct {
+		observation workspacePrivateStoreObservation
+		err         error
+	}
+	ready := make(chan error, 1)
+	joined := make(chan joinedResult, 1)
+	go func() {
+		decoder := json.NewDecoder(io.LimitReader(stdout, 4096))
+		decoder.DisallowUnknownFields()
+		var greeting struct {
+			Ready bool `json:"ready"`
+		}
+		err := decoder.Decode(&greeting)
+		if err == nil && !greeting.Ready {
+			err = errors.New("workspace observer did not become ready")
+		}
+		ready <- err
+		var observation workspacePrivateStoreObservation
+		for err == nil {
+			err = decoder.Decode(&observation)
+			if err == nil && !observation.Observed {
+				err = errors.New("workspace observer returned unobserved counts")
 			}
-			inspection, err := storetest.OpenReleaseProcessReadOnlyInspection("sqlite", paths[0])
-			if err != nil {
-				continue
-			}
-			var next workspacePrivateStoreObservation
-			err = inspection.InspectSnapshot(ctx, func(scoped context.Context) error {
-				var err error
-				next, err = storetest.ReadWorkspaceMockInvocationStorage(scoped, inspection)
-				return err
-			})
-			closeErr := inspection.Close()
-			if err == nil && closeErr == nil {
-				observed.AgentDeliveries = max(observed.AgentDeliveries, next.AgentDeliveries)
-				observed.Delivered = max(observed.Delivered, next.Delivered)
-				observed.Emitted = max(observed.Emitted, next.Emitted)
+			if err != nil || observation.Finished {
+				break
 			}
 		}
+		if err == nil {
+			var trailing any
+			if tail := decoder.Decode(&trailing); tail != io.EOF {
+				err = errors.New("workspace observer returned trailing protocol data")
+			}
+		}
+		joined <- joinedResult{observation, errors.Join(err, cmd.Wait())}
+	}()
+	var once sync.Once
+	var result joinedResult
+	stop := func() workspacePrivateStoreObservation {
+		t.Helper()
+		once.Do(func() {
+			if err := cmd.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				result.err = err
+			}
+			select {
+			case observed := <-joined:
+				result.observation, result.err = observed.observation, errors.Join(result.err, observed.err)
+			case <-time.After(5 * time.Second):
+				killErr := cmd.Process.Kill()
+				observed := <-joined
+				result.err = errors.Join(result.err, errors.New("workspace observer did not join graceful stop"), killErr, observed.err)
+			}
+		})
+		if result.err != nil || !result.observation.Observed {
+			t.Fatalf("independent workspace observation failed: %v\n%s", result.err, stderr.String())
+		}
+		return result.observation
 	}
+	t.Cleanup(func() { stop() })
+	select {
+	case err := <-ready:
+		if err != nil {
+			t.Fatalf("workspace observer startup: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("workspace observer did not acknowledge startup")
+	}
+	return stop
 }

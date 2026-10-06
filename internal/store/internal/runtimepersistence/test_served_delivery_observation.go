@@ -67,11 +67,20 @@ func ReadServedRunDebugSummaryForTest(ctx context.Context, selected any, runID s
 }
 
 func readServedRunDebugSection(ctx context.Context, selected any, backend, scope, runID string) string {
-	if scope == "event_deliveries" || scope == "settled_delivery_attempts" || scope == "delivery_agents" {
+	if scope == "runs" || scope == "event_deliveries" || scope == "settled_delivery_attempts" || scope == "delivery_agents" {
 		out, stage := []string{}, ""
 		err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 			var err error
-			out, stage, err = delivery.ReadRunDeliveryDebugSection(ctx, tx, backend == "postgres", scope, runID)
+			if scope == "runs" {
+				switch owner := selected.(type) {
+				case *PostgresStore:
+					out, stage, err = owner.runLifecyclePostgresOwner.ReadRunDebugStorageTx(ctx, tx, runID)
+				case *SQLiteRuntimeStore:
+					out, stage, err = owner.runLifecycleSQLiteOwner.ReadRunDebugStorageTx(ctx, tx, runID)
+				}
+			} else {
+				out, stage, err = delivery.ReadRunDeliveryDebugSection(ctx, tx, backend == "postgres", scope, runID)
+			}
 			return err
 		})
 		if err != nil {
@@ -137,8 +146,6 @@ func servedRunDebugSQL(backend, scope string) string {
 	switch backend {
 	case "postgres":
 		switch scope {
-		case "runs":
-			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at::text, ''), bundle_hash FROM runs WHERE run_id = $1::uuid`
 		case "entity_state":
 			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
@@ -154,8 +161,6 @@ func servedRunDebugSQL(backend, scope string) string {
 		}
 	case "sqlite":
 		switch scope {
-		case "runs":
-			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at, ''), bundle_hash FROM runs WHERE run_id = ?`
 		case "entity_state":
 			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":

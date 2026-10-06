@@ -13,6 +13,66 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
+func (s *RunLifecyclePostgresOwner) ReadSelectedControlAwaitingMutationTx(ctx context.Context, tx *sql.Tx, runID, loadedBundleHash string) (bool, error) {
+	return readSelectedControlAwaitingMutationTx(ctx, tx, runID, loadedBundleHash)
+}
+
+func (s *RunLifecycleSQLiteOwner) ReadSelectedControlAwaitingMutationTx(ctx context.Context, tx *sql.Tx, runID, loadedBundleHash string) (bool, error) {
+	return readSelectedControlAwaitingMutationTx(ctx, tx, runID, loadedBundleHash)
+}
+
+func readSelectedControlAwaitingMutationTx(ctx context.Context, tx *sql.Tx, runID, loadedBundleHash string) (bool, error) {
+	var awaiting bool
+	err := tx.QueryRowContext(ctx, `SELECT status='running' AND (bundle_hash <> $2 OR completion_due_at IS NULL) FROM runs WHERE run_id=$1`, runID, loadedBundleHash).Scan(&awaiting)
+	return awaiting, err
+}
+
+func (s *RunLifecyclePostgresOwner) ReadRunDebugStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]string, string, error) {
+	return readRunDebugStorageTx(ctx, tx, true, runID)
+}
+
+func (s *RunLifecycleSQLiteOwner) ReadRunDebugStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]string, string, error) {
+	return readRunDebugStorageTx(ctx, tx, false, runID)
+}
+
+func readRunDebugStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]string, string, error) {
+	query := `SELECT status, completion_revision, COALESCE(completion_due_at, ''), bundle_hash FROM runs WHERE run_id = ?`
+	if postgres {
+		query = `SELECT status, completion_revision, COALESCE(completion_due_at::text, ''), bundle_hash FROM runs WHERE run_id = $1::uuid`
+	}
+	rows, err := tx.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, " columns", err
+	}
+	var out []string
+	for rows.Next() {
+		values := make([]sql.NullString, len(columns))
+		scan := make([]any, len(values))
+		for i := range values {
+			scan[i] = &values[i]
+		}
+		if err := rows.Scan(scan...); err != nil {
+			return nil, " scan", err
+		}
+		cols := make([]string, len(values))
+		for i, value := range values {
+			if value.Valid {
+				cols[i] = value.String
+			}
+		}
+		out = append(out, fmt.Sprintf("%v", cols))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, " rows", err
+	}
+	return out, "", nil
+}
+
 func (s *RunLifecyclePostgresOwner) RegisterCompletionCandidateSink(
 	ctx context.Context,
 	scope runtimerunlifecycle.CandidateScope,

@@ -1185,3 +1185,40 @@ are the execution evidence; the regenerated ledger alone is not proof.
 The native PostgreSQL quoted-path control also requires a short disk-backed
 TMPDIR. Use `/home/youmew/g-2555-tmp` on server2 rather than relaxing the
 conservative Unix-socket bound or falling back to RAM-backed `/tmp`.
+
+## Post-core proof-boundary amendment
+
+The core run at `056211163` failed five unchanged ownership guards. This is
+branch-owned test composition debt, not an inherited failure or a runtime
+closure receipt. Reviewer-g's #2555 comment6022954398 and B's cross-lane
+owner check (#2542 comment6023041595, mirrored on #2555 comment6023041926)
+approve these exact repairs. No second delegate, collector exception,
+ratchet allowance, assertion relaxation or new semantic owner is authorized.
+
+| Boundary | Canonical consumption after repair | Named proof |
+| --- | --- | --- |
+| Release process observer | The public parent launches the real compiled command and an exact test-only construction child. Only the child opens the original read-only inspection and snapshot-count owner. Ready, observed and finished markers are distinct; absent/ambiguous/invalid stores and failed reads never manufacture zero counts. Stop joins the child and its bounded read. | `TestReleaseE2EPackageStaysAtPublicProcessBoundary`; `TestWorkspaceObserverRejectsAbsentAmbiguousAndInvalidStores`; `TestWorkspaceObserverActualSnapshotJoinsAndDoesNotMutate`; `TestWorkspaceObserverCompiledChildProtocol`; unchanged real Docker success/disconnect leaves remain mandatory. |
+| Event record codec | `test_event_support.go` holds the private Record-bearing fixture evidence and original adapter `Load`/`Record.Decode`. The readback orchestration consumes that closed fixture boundary in the same selected transaction. | `TestEventAdmittedPersistenceBoundaryGuard`; `TestCanonicalEventFixtureReadback*`; `TestSemanticEventFixtureEvidenceUsesOriginalReadOwnerBothStores`. |
+| Revision cardinality | Exact `CountActivityJournalRevisionsForTest` transferred from B's `ab709b124`, without the journal-family patch. Its `COUNT(*)` consumes the original selected read transaction on both stores. B reconciles the identical definition on landing. | `TestRunForkRevisionStateAccessorInventoryIsClosed`; the semantic fixture evidence root retains exact row count and one-read-snapshot assertions. |
+| Lifecycle candidate/debug observations | Two fixed reads live inside the selected store's existing bound lifecycle owner. The selected predicate stays in the binding/agent-count snapshot; debug keeps all four original fields and native NULL/text/error presentation. | `TestRunLifecycleOwnershipBoundaryGuard`; `TestSelectedForkControlStorage*`; `TestServedRunDebugStorage*` with the frozen native four-column oracle and no-mutation/snapshot controls. |
+| Native semantic fixtures | Acknowledged pause/resume, canonical candidate requests, the existing null-candidate recipe and successful `CompleteRunTx` replace direct status/candidate UPDATEs. No terminal resurrection; all six selected-control cases and receiver historical rows remain. | `TestSemanticRunFixturesUseLifecycleOwner`; `TestSelectedForkControlStorage*`; `TestReceiverJoinedInventory*`. |
+
+The original 48 manifestations and PC49-PC51 proof accounting are unchanged;
+these repairs restore their admissible execution/observation boundaries, not
+new product scope. The inventory records original private-backend,
+private-runtime-adapter and closed-fixture roles only; roles grant no new debt
+permission. No spec delta is needed for this test-only composition correction.
+
+The test-only revision counter is consumed directly by the existing named
+`ReadSemanticEventFixtureEvidenceForTest` entrance, not its general helper.
+The original read order and selected snapshot are preserved. This satisfies
+fixture confinement without renaming a helper or changing collector policy.
+
+Latest qualification ruling supersedes the earlier full-local sequencing:
+CI-Tier full, Local-Tier core, plus the quiet exact-head uninstrumented
+`TestGoldenNumericDataScatterParkRestartBothStores` root (both stores,
+SLOTS1) and affected host/Docker/refusal/restart/fork/worker-cleanup receipts.
+Those supplements are not a local full or lifecycle pass. New core remains
+subject to the observer ruling's preceding real Docker proof. A firewall-
+blocked local probe or skip earns no transport credit; hosted Ubuntu default-
+network acceptance and exact-head CI/full remain mandatory before closure.
