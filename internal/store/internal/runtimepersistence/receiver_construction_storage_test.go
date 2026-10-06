@@ -68,6 +68,19 @@ func TestReceiverConstructionStoragePreservesExactPhysicalWitnessBothStores(t *t
 				if counts := probe.Snapshot(); counts.Total.Begun != 2 || counts.Total.ReadCommits != 1 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
 					t.Fatalf("physical observation escaped original read owner: %+v", counts)
 				}
+				if shape == "fields" {
+					owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: child.Identity.Route()}
+					if err := PrepareReceiverNullableConstructionObservationForTest(f.ctx, f.store, owner, child.Identity.EntityID); err != nil {
+						t.Fatal(err)
+					}
+					want := got
+					want.EntityType, want.EntityTypePresent, want.ReadinessPresent = "", false, false
+					want.Phase, want.PlanHash, want.Plan = "", "", []byte{}
+					physical, err := ReadReceiverConstructionStorageForTest(f.ctx, f.store, runID, child.Identity.InstancePath, child.Identity.EntityID, child.Instance.EntityType)
+					if err != nil || !reflect.DeepEqual(physical, want) {
+						t.Fatalf("nullable header/absent attachment lost native clocks or fields: got=%+v want=%+v err=%v", physical, want, err)
+					}
+				}
 			})
 		}
 	}
@@ -89,6 +102,13 @@ func TestReceiverConstructionStorageRefusesRawCancelledClosedAndUnavailableOwner
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			refuse(t, ctx, fixture.store)
+			if err := SetReceiverConstructionObservationUnavailableForTest(context.Background(), fixture.store, true); err != nil {
+				t.Fatal(err)
+			}
+			refuse(t, context.Background(), fixture.store)
+			if err := SetReceiverConstructionObservationUnavailableForTest(context.Background(), fixture.store, false); err != nil {
+				t.Fatal(err)
+			}
 			if err := fixture.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}
