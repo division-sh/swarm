@@ -122,23 +122,17 @@ func receiverInitializationPublishParams(rt servedControlProofRuntime, key, acco
 
 func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRuntime, seed servedEventPublishRPCResult, want map[string]any, executions int) (string, string) {
 	t.Helper()
-	var path, entityID, raw, fieldsRaw string
-	if err := rt.DB.QueryRow(`SELECT f.instance_path,e.entity_id,CAST(f.config AS TEXT),CAST(e.fields AS TEXT) FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.flow_template='account'`, seed.RunID).Scan(&path, &entityID, &raw, &fieldsRaw); err != nil {
-		t.Fatal(err)
-	}
+	record, receiver := requireSingleReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "account")
+	path, entityID, raw := receiver.StorageRef, receiver.EntityID, record.Lifecycle.Config
 	var config map[string]any
-	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(raw), &config); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &config); err != nil {
 		t.Fatal(err)
 	}
 	if config["flow_path"] != path || config["storage_ref"] != path || config["instance_kind"] != "template" {
 		t.Fatalf("receiver config has wrong durable coordinates: %s", raw)
 	}
 	// Business state has one field owner; the companion contains runtime controls only.
-	var persisted map[string]any
-	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(fieldsRaw), &persisted); err != nil {
-		t.Fatal(err)
-	}
-	got, err := canonicaljson.CloneRuntimeValue(persisted)
+	got, err := canonicaljson.CloneRuntimeValue(receiver.Fields)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,13 +143,6 @@ func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRunt
 	}
 	if !reflect.DeepEqual(fields, want) {
 		t.Fatalf("persisted initialization=%#v, want %#v (raw %s)", got, want, raw)
-	}
-	var companions int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='account'`, seed.RunID).Scan(&companions); err != nil {
-		t.Fatal(err)
-	}
-	if companions != 1 {
-		t.Fatalf("receiver companions=%d, want 1", companions)
 	}
 	var entity operatorread.OperatorEntityFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)

@@ -44,22 +44,16 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			// Internal state literals are not ingress and retain their double kind.
 			want := map[string]any{"account_id": "business-key", "count": int64(7), "ratio": int64(7), "active": false, "label": "recorded business config", "attributes": map[string]any{"nested": []any{int64(7), int64(7)}},
 				"status": false, "flow_path": "business/path", "instance_id": "business-instance", "workflow_version": float64(7)}
-			var raw, fieldsRaw string
-			if err := rt.DB.QueryRow(`SELECT CAST(fi.config AS TEXT), CAST(es.fields AS TEXT) FROM flow_instances fi JOIN entity_state es ON es.run_id=fi.run_id AND es.entity_id=fi.entity_id WHERE fi.run_id=$1 AND fi.instance_path=$2 AND fi.flow_template='account'`, seed.RunID, path).Scan(&raw, &fieldsRaw); err != nil {
-				t.Fatal(err)
-			}
+			record, receiver := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "account", path, entityID)
+			raw := record.Lifecycle.Config
 			var envelope map[string]any
-			if err := canonicaljson.DecodePreservingNumberLexemes([]byte(raw), &envelope); err != nil {
+			if err := canonicaljson.DecodePreservingNumberLexemes(raw, &envelope); err != nil {
 				t.Fatal(err)
 			}
 			if _, found := envelope["config"]; found {
 				t.Fatal("recorded header contains a business config copy")
 			}
-			var fields map[string]any
-			if err := canonicaljson.DecodePreservingNumberLexemes([]byte(fieldsRaw), &fields); err != nil {
-				t.Fatal(err)
-			}
-			cloned, err := canonicaljson.CloneRuntimeValue(fields)
+			cloned, err := canonicaljson.CloneRuntimeValue(receiver.Fields)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -71,7 +65,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			if !reflect.DeepEqual(state, want) {
 				gotWire, _ := canonicaljson.MarshalPreservingNumberKinds(state)
 				wantWire, _ := canonicaljson.MarshalPreservingNumberKinds(want)
-				t.Fatalf("recorded state lost kinds/business identity: got=%s want=%s raw=%s", gotWire, wantWire, fieldsRaw)
+				t.Fatalf("recorded state lost kinds/business identity: got=%s want=%s raw=%s", gotWire, wantWire, record.State.Fields)
 			}
 			if envelope["instance_id"] != "ti-138096d2b56ac1568ac40ea7" || envelope["flow_path"] != path || envelope["storage_ref"] != path {
 				t.Fatalf("business names overwrote physical control identity: %#v", envelope)
