@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -250,4 +251,52 @@ func requireWorkspaceProofWorkReadyEvent(t *testing.T, endpoint string, owner ru
 		t.Fatalf("work-ready lookup disagrees with the canonical stored record: %+v", stored)
 	}
 	return stored.ID()
+}
+
+func readWorkspaceProofReceiverRows(t *testing.T, owner runtimebus.EventStore, runID string) map[string]forkReceiverRow {
+	t.Helper()
+	rows, err := storetest.ReadReceiverJoinedInventoryStorage(context.Background(), owner, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := workspaceProofReceiverRowsByFlow(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func workspaceProofReceiverRowsByFlow(rows []storetest.ReceiverJoinedInventoryStorageRow) (map[string]forkReceiverRow, error) {
+	out := map[string]forkReceiverRow{}
+	for _, stored := range rows {
+		row := forkReceiverRow{ID: stored.EntityID, Flow: stored.FlowInstance, Type: stored.EntityType, State: stored.CurrentState}
+		if err := json.Unmarshal([]byte(stored.Fields), &row.Fields); err != nil {
+			return nil, err
+		}
+		if _, duplicate := out[row.Flow]; duplicate {
+			return nil, fmt.Errorf("fixture has duplicate owner rows for %s", row.Flow)
+		}
+		out[row.Flow] = row
+	}
+	return out, nil
+}
+
+func TestWorkspaceProofReceiverInventoryRefusesDuplicateOrMalformedRows(t *testing.T) {
+	row := storetest.ReceiverJoinedInventoryStorageRow{
+		EntityID: uuid.NewString(), FlowInstance: "consumer", EntityType: "receipt", CurrentState: "done",
+		Fields: `{"integer":7,"decimal":7.0,"nested":[null,{"flag":true}]}`,
+	}
+	got, err := workspaceProofReceiverRowsByFlow([]storetest.ReceiverJoinedInventoryStorageRow{row})
+	if err != nil || len(got) != 1 || got[row.FlowInstance].ID != row.EntityID || got[row.FlowInstance].State != "done" || got[row.FlowInstance].Fields["integer"] != float64(7) || got[row.FlowInstance].Fields["decimal"] != float64(7) {
+		t.Fatalf("original receiver field decoding changed: %+v %v", got, err)
+	}
+	duplicate := row
+	duplicate.EntityID = uuid.NewString()
+	malformed := row
+	malformed.FlowInstance, malformed.Fields = "other", "{"
+	for _, rows := range [][]storetest.ReceiverJoinedInventoryStorageRow{{row, duplicate}, {row, malformed}} {
+		if got, err := workspaceProofReceiverRowsByFlow(rows); err == nil || got != nil {
+			t.Fatalf("duplicate or late malformed row leaked partial evidence: %+v %v", got, err)
+		}
+	}
 }
