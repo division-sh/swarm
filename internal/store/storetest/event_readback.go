@@ -7,7 +7,6 @@ import (
 )
 
 type SemanticEventFixtureEvidence = private.SemanticEventFixtureEvidence
-type ReplyReturnStorageEvidence = private.ReplyReturnStorageEvidence
 
 func ReadSemanticEventFixtureEvidence(t testing.TB, ctx context.Context, selected any, runID, eventID string) private.SemanticEventFixtureEvidence {
 	t.Helper()
@@ -17,10 +16,3 @@ func ReadSemanticEventFixtureEvidence(t testing.TB, ctx context.Context, selecte
 	}
 	return evidence
 }
-
-func ReadReplyReturnStorage(ctx context.Context, selected any, runID string) (ReplyReturnStorageEvidence, error) {
-	return private.ReadReplyReturnStorageForTest(ctx, selected, runID)
-}
-
-// LoadCanonicalEventRecord exercises the complete-record decoder through the
-// original selected owner's read snapshot, without recovering a query handle.

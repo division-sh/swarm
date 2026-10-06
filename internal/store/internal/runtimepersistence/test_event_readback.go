@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	"github.com/google/uuid"
 	"strings"
 )
 
@@ -171,39 +170,3 @@ func readSemanticEventPipelineReceipt(ctx context.Context, tx *sql.Tx, eventID s
 	}
 	return nil
 }
-
-// LoadCanonicalEventRecordForTest exposes only decoded evidence. Record and
-// inherited-owner validation share the selected backend's read snapshot.
-
-type ReplyReturnStorageEvidence struct {
-	Contexts, EventLinkedDeadLetters int
-}
-
-func ReadReplyReturnStorageForTest(ctx context.Context, selected any, runID string) (ReplyReturnStorageEvidence, error) {
-	id, err := uuid.Parse(runID)
-	if err != nil || id == uuid.Nil || id.String() != runID {
-		return ReplyReturnStorageEvidence{}, fmt.Errorf("reply return evidence requires an exact canonical run identity")
-	}
-	if _, err := eventFixtureDialectForTest(selected); err != nil {
-		return ReplyReturnStorageEvidence{}, err
-	}
-	var evidence ReplyReturnStorageEvidence
-	read := func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT
-			(SELECT COUNT(*) FROM reply_contexts WHERE run_id=$1),
-			(SELECT COUNT(*) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE e.run_id=$1)`, runID).
-			Scan(&evidence.Contexts, &evidence.EventLinkedDeadLetters)
-	}
-	switch owner := selected.(type) {
-	case *PostgresStore:
-		err = owner.backend.RunReadTransaction(ctx, read)
-	case *SQLiteRuntimeStore:
-		err = owner.backend.RunReadTransaction(ctx, read)
-	}
-	if err != nil {
-		return ReplyReturnStorageEvidence{}, err
-	}
-	return evidence, nil
-}
-
-// SemanticEventFixtureEvidence is exact storage evidence, not a query capability.
