@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
@@ -114,5 +115,63 @@ func TestReceiverConstructionPublicationFieldsRefusesInvalidCancelledAndClosedOw
 				t.Fatalf("closed owner became missing/successful evidence: %#v %v", evidence, err)
 			}
 		})
+	}
+}
+
+func TestReceiverConstructionPublicationObservesStandingTypedAbsenceBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, fielded := range []bool{false, true} {
+			name := "fieldless"
+			if fielded {
+				name = "fielded"
+			}
+			t.Run(backend+"/"+name, func(t *testing.T) {
+				documents := map[string]string{
+					"schema.yaml":         "name: standing-absence\n",
+					"service/schema.yaml": "name: service\n",
+				}
+				if fielded {
+					documents["entities.yaml"] = "receipt:\n  marker: {type: text, initial: unchanged}\n"
+					documents["service/entities.yaml"] = documents["entities.yaml"]
+				}
+				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
+				runID := correlation.RunIDFromContext(f.ctx)
+				req := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+				var err error
+				req.Instance, err = flowidentity.StandingForGeneration(req.ContractBundle, ".", runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				created, finish, err := f.manager.PrepareStandingFlowInstance(f.ctx, req)
+				if err != nil || !created || finish == nil {
+					t.Fatalf("no-argument standing construction: created=%t completion=%t %v", created, finish != nil, err)
+				}
+				if err := finish(); err != nil {
+					t.Fatal(err)
+				}
+				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, flowID := range []string{".", "service"} {
+					instance, err := flowidentity.StandingForGeneration(req.ContractBundle, flowID, runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: instance.Route()}
+					evidence, err := ReadReceiverConstructionPublicationForTest(f.ctx, f.store, owner, instance.EntityID)
+					if err != nil || evidence.CreatingInput != (pipeline.FlowConstructionInput{}) {
+						t.Fatalf("%s typed absence became missing or forged provenance: %#v %v", flowID, evidence, err)
+					}
+					if fielded && evidence.Fields["marker"] != "unchanged" || !fielded && len(evidence.Fields) != 0 {
+						t.Fatalf("%s no-publication receipt lost initial fields: %#v", flowID, evidence.Fields)
+					}
+				}
+				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("typed-absence observation mutated or could not re-observe the selected store: %v", err)
+				}
+			})
+		}
 	}
 }
