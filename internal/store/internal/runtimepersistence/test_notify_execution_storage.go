@@ -3,7 +3,9 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+
 	"fmt"
+	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
@@ -239,7 +241,9 @@ func ReadNotifyAgentDeliveryStatusForTest(ctx context.Context, selected any, run
 	}
 	var out string
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT status FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND subscriber_id=$2 AND agent_flow_instance_path=$3 ORDER BY created_at DESC,delivery_id DESC LIMIT 1`, runID, agentID, instance).Scan(&out)
+		var err error
+		out, err = delivery.ReadLatestNamedAgentDeliveryStatus(ctx, tx, runID, agentID, instance)
+		return err
 	})
 	if err != nil {
 		return "", err
