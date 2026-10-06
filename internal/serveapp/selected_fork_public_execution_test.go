@@ -69,7 +69,6 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			writeSelectedForkAgentProofFixture(t, root, "loaded-decoy", "[receiver.closed]", "SOURCE CONFIGURATION MUST NOT EXECUTE IN THE FORK", "return {'text': 'Source-only delivery.', 'usage': {'input_tokens': 2, 'output_tokens': 2}}")
 			rt, gatewayFault := startSelectedForkTransportProofRuntime(t, backend, root, options)
 			if reset {
-				_, rt.Postgres, rt.SQLite = selectedRuntimeStoreForTest(t, projectServeRuntimePersistence(selected))
 				supervisor := <-supervisors
 				predecessor := supervisor.selected
 				params := map[string]any{"include_source_artifacts": false, "idempotency_key": "selected-reset"}
@@ -112,12 +111,15 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					if !t.Failed() {
 						return
 					}
-					var forkRun string
-					if err := rt.DB.QueryRow(`SELECT run_id FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forkRun); err != nil {
-						t.Logf("selected failure run lookup: %v", err)
+					snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), selected.RuntimeDeps().EventStore)
+					if err != nil {
+						t.Logf("selected failure storage snapshot: %v", err)
 					} else {
-						summary, err := storetest.ReadServedRunDebugSummary(context.Background(), selected.RuntimeDeps().EventStore, forkRun)
-						t.Logf("selected failure evidence: %s error=%v", summary, err)
+						// Keep every child's physical rows, including a failed preparation
+						// whose public operation never returned a fork run identity.
+						for table, rows := range snapshot {
+							t.Logf("selected failure storage %s: columns=%v rows=%v", table, rows.Columns, rows.Rows)
+						}
 					}
 					rows, err := storetest.ReadWorkspaceEffectFailures(context.Background(), selected.RuntimeDeps().EventStore)
 					if err != nil {
@@ -129,16 +131,13 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					}
 				})
 			}
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, seed.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "public-selected-request",
 			})
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-			var frontier string
-			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
-				t.Fatal(err)
-			}
+			waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, seed.RunID)
+			frontier := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, selected.RuntimeDeps().EventStore, seed.RunID)
 			sourceBefore := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
 			targetRoot := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 			body := "return {'text': 'Observed delivery.', 'usage': {'input_tokens': 1, 'output_tokens': 1}}"
@@ -170,7 +169,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				}
 			}
 			target := loadWorkflowValidationBundleAt(t, targetRoot)
-			fact, err := prepareServeSourceArtifact(servedControlProofAuthorActivityContext(t, rt), selected.SourceArtifactWriter(), target)
+			fact, err := prepareServeSourceArtifact(servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), selected.SourceArtifactWriter(), target)
 			if err != nil || fact.BundleHash() == rt.BundleHash {
 				t.Fatalf("admit distinct target fixture: hash=%q err=%v", fact.BundleHash(), err)
 			}
@@ -189,11 +188,8 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("public fork lost execution/source evidence: %+v", fork)
 			}
-			var childEvent, childHash string
-			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, fork.ForkRunID).Scan(&childEvent); err != nil {
-				t.Fatal(err)
-			}
-			childHash, err = storetest.ReadSelectedForkRunBundleHash(context.Background(), selected.RuntimeDeps().EventStore, fork.ForkRunID)
+			childEvent := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, selected.RuntimeDeps().EventStore, fork.ForkRunID)
+			childHash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), selected.RuntimeDeps().EventStore, fork.ForkRunID)
 			if err != nil || childHash != fact.BundleHash() {
 				t.Fatalf("public fork selected a loaded source instead of target: hash=%q err=%v", childHash, err)
 			}
