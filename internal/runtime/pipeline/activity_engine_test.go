@@ -1681,14 +1681,15 @@ func VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutT
 	}
 }
 
-func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *testing.T) {
+func VerifyLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatchForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-	runner := &activityCommitAckLossRunner{db: db}
-	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
-	activation, flowInstance, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(fixture.Context, runID), executionmode.Live)
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	store := fixture.Persistence.store
+	activation, flowInstance, entityID := seedNativeLoopActivityInstance(t, fixture, ctx, "review")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
@@ -1699,67 +1700,30 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 		"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
 	}})
 	bus := &recordingPipelineBus{}
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), entityID)
 	intent.FlowInstance = flowInstance
 	intent.Generation, intent.LoopStage = activation.Generation(), activation.CurrentStage
-	runner.failNext.Store(true)
+	pc, lost := fixture.ClaimReplyLossCoordinator(ctx, bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}}, runID, activityRequestEventID(intent), errors.New("simulated commit acknowledgment loss"))
 	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
 		t.Fatalf("execute after commit acknowledgment loss: %v", err)
 	}
-	if !runner.ackLost.Load() {
-		callbackErr, _ := runner.callbackErr.Load().(string)
-		t.Fatalf("commit acknowledgment loss was not reached; callback error=%q", callbackErr)
+	if lost() != 1 {
+		t.Fatalf("commit acknowledgment loss was not reached exactly once: %d", lost())
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("provider calls = %d, want no blind dispatch", calls.Load())
 	}
 	record, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
 	if err != nil || !ok || record.Status != ActivityAttemptStatusStarted || !record.Generation.Equal(intent.Generation) {
-		rows, queryErr := db.QueryContext(ctx, `SELECT request_event_id, status FROM activity_attempts ORDER BY request_event_id`)
+		journalRows, queryErr := fixture.ReadAttemptStatuses(ctx)
 		if queryErr != nil {
 			t.Fatalf("reconciled claim = %#v found=%v err=%v; inspect journal: %v", record, ok, err, queryErr)
-		}
-		defer rows.Close()
-		var journalRows []string
-		for rows.Next() {
-			var requestEventID, status string
-			if scanErr := rows.Scan(&requestEventID, &status); scanErr != nil {
-				t.Fatalf("reconciled claim = %#v found=%v err=%v; scan journal: %v", record, ok, err, scanErr)
-			}
-			journalRows = append(journalRows, requestEventID+":"+status)
 		}
 		t.Fatalf("reconciled claim = %#v found=%v err=%v expected=%s journal=%v", record, ok, err, activityRequestEventID(intent), journalRows)
 	}
 	if len(bus.publishes) != 0 {
 		t.Fatalf("published results after indeterminate claim: %#v", bus.publishes)
 	}
-}
-
-type activityCommitAckLossRunner struct {
-	db          *sql.DB
-	failNext    atomic.Bool
-	ackLost     atomic.Bool
-	callbackErr atomic.Value
-}
-
-func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
-	runner := &recordingRuntimeMutationRunner{db: r.db, dialect: workflowStoreDialectSQLite}
-	acknowledged, err := runner.RunRuntimeMutationContextAcknowledged(ctx, func(attemptCtx context.Context) error {
-		err := fn(attemptCtx)
-		if err != nil {
-			r.callbackErr.Store(err.Error())
-		}
-		return err
-	})
-	if err != nil || !acknowledged {
-		return err
-	}
-	if r.failNext.Swap(false) {
-		r.ackLost.Store(true)
-		return errors.New("simulated commit acknowledgment loss")
-	}
-	return nil
 }
 
 func VerifyPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResultForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {

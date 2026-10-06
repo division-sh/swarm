@@ -61,7 +61,7 @@ func mockWorkloadAndAssertions(t *testing.T, source string) []string {
 			}
 		}
 		if loop, ok := node.(*ast.ForStmt); ok {
-			facts = append(facts, formattedNativeReadNode(loop.Init), formattedNativeReadNode(loop.Cond), formattedNativeReadNode(loop.Post))
+			facts = append(facts, nativeWorkloadLoopHeader(loop)...)
 		}
 		if call, ok := node.(*ast.CallExpr); ok && mockProofWorkloadCall(call) {
 			facts = append(facts, formattedNativeReadNode(call))
@@ -72,6 +72,23 @@ func mockWorkloadAndAssertions(t *testing.T, source string) []string {
 		facts[index] = strings.NewReplacer("observed.Attempts", "attempts", "observed.MockAttemptStories", "storyModes").Replace(fact)
 	}
 	return facts
+}
+
+func nativeWorkloadLoopHeader(loop *ast.ForStmt) []string {
+	if loop.Cond != nil && formattedNativeReadNode(loop.Cond) == "rows.Next()" {
+		// SQL diagnostic iteration moves into the exact detached read owner;
+		// provider/delivery iteration remains a consumer workload obligation.
+		return nil
+	}
+	var fields []string
+	for _, node := range []ast.Node{loop.Init, loop.Cond, loop.Post} {
+		if node == nil {
+			fields = append(fields, "<absent>")
+		} else {
+			fields = append(fields, formattedNativeReadNode(node))
+		}
+	}
+	return fields
 }
 
 func mockIntentAssignment(assignment *ast.AssignStmt) bool {

@@ -5,15 +5,18 @@ import "context"
 // Component proofs consume the original native semantic owner, never a pool
 // or a test transaction runner reconstructed around the selected database.
 type WorkflowActivityNativeFixtureForTest struct {
-	Persistence             WorkflowPersistence
-	Context                 context.Context
-	RequireRun              func(context.Context, string) error
-	NewCoordinator          func(Bus, PipelineCoordinatorOptions) *PipelineCoordinator
-	Reopen                  func() WorkflowActivityNativeFixtureForTest
-	ReadJournal             func(context.Context, string) (WorkflowJournalStorageForTest, error)
-	CreateReply             func(context.Context, string, string, string) error
-	CleanupFault            func(error) (WorkflowPersistence, func() int32)
-	CleanupFaultCoordinator func(Bus, PipelineCoordinatorOptions, error) (*PipelineCoordinator, func() int32)
+	Persistence               WorkflowPersistence
+	Context                   context.Context
+	RequireRun                func(context.Context, string) error
+	NewCoordinator            func(Bus, PipelineCoordinatorOptions) *PipelineCoordinator
+	Reopen                    func() WorkflowActivityNativeFixtureForTest
+	ReadJournal               func(context.Context, string) (WorkflowJournalStorageForTest, error)
+	CreateReply               func(context.Context, string, string, string) error
+	CleanupFault              func(error) (WorkflowPersistence, func() int32)
+	CleanupFaultCoordinator   func(Bus, PipelineCoordinatorOptions, error) (*PipelineCoordinator, func() int32)
+	Construct                 func(context.Context, WorkflowInstance) error
+	ClaimReplyLossCoordinator func(context.Context, Bus, PipelineCoordinatorOptions, string, string, error) (*PipelineCoordinator, func() int32)
+	ReadAttemptStatuses       func(context.Context) ([]string, error)
 }
 
 type WorkflowJournalStorageForTest struct {

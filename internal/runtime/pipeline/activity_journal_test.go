@@ -8,6 +8,7 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -179,13 +180,19 @@ func VerifyActivityAttemptJournalPreservesReplyContextAcrossRestartForTest(t *te
 	}
 }
 
-func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
+func VerifyLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStoresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := open(t, backend)
+			store, ctx := fixture.Persistence.store, fixture.Context
+			runID := uuid.NewString()
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
+			ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
 
 			t.Run("claim_wins", func(t *testing.T) {
-				activation, flowInstance, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+				activation, flowInstance, entityID := seedNativeLoopActivityInstance(t, fixture, ctx, "review")
 				record := loopActivityStartRecord(ctx, activation, flowInstance, entityID, uuid.NewString())
 				started, inserted, err := store.ClaimActivityAttemptForLoopGeneration(ctx, record)
 				if err != nil || !inserted || started.Status != ActivityAttemptStatusStarted {
@@ -200,7 +207,7 @@ func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) 
 
 			for _, operation := range []string{"repeat", "close"} {
 				t.Run(operation+"_wins", func(t *testing.T) {
-					activation, flowInstance, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+					activation, flowInstance, entityID := seedNativeLoopActivityInstance(t, fixture, ctx, "review")
 					record := loopActivityStartRecord(ctx, activation, flowInstance, entityID, uuid.NewString())
 					advanceLoopActivityInstance(t, store, ctx, flowInstance, operation)
 					if _, _, err := store.ClaimActivityAttemptForLoopGeneration(ctx, record); !isFailureClass(err, runtimefailures.ClassStaleArrival) {
@@ -213,7 +220,7 @@ func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) 
 			}
 
 			t.Run("duplicate_claim", func(t *testing.T) {
-				activation, flowInstance, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+				activation, flowInstance, entityID := seedNativeLoopActivityInstance(t, fixture, ctx, "review")
 				record := loopActivityStartRecord(ctx, activation, flowInstance, entityID, uuid.NewString())
 				if _, inserted, err := store.ClaimActivityAttemptForLoopGeneration(ctx, record); err != nil || !inserted {
 					t.Fatalf("first claim inserted=%v err=%v", inserted, err)
@@ -226,7 +233,7 @@ func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) 
 	}
 }
 
-func seedLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, stage string) (loopruntime.Activation, string, string) {
+func seedNativeLoopActivityInstance(t *testing.T, fixture WorkflowActivityNativeFixtureForTest, ctx context.Context, stage string) (loopruntime.Activation, string, string) {
 	t.Helper()
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	path := "validation/" + uuid.NewString()
@@ -240,7 +247,7 @@ func seedLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx co
 		t.Fatal(err)
 	}
 	carrier := runtimeengine.NewStateCarrier(map[string]any{}, nil, buckets)
-	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: runtimeflowidentity.LogicalInstanceID(path), StorageRef: path, EntityID: entityID,
 		WorkflowName: "validation", WorkflowVersion: "1.0.0",
 		CurrentState: stage, EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
