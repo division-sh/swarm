@@ -636,12 +636,14 @@ func (s *lifecycleProofScheduler) RetireGenericScheduleWakeup(wakeup Wakeup) err
 }
 
 type lifecycleProofPlanner struct {
-	prepareErr error
-	releases   int
-	finalizes  int
+	prepareErr   error
+	prepareCalls int
+	releases     int
+	finalizes    int
 }
 
 func (p *lifecycleProofPlanner) PrepareEnginePublications(_ context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+	p.prepareCalls++
 	if p.prepareErr != nil {
 		return nil, p.prepareErr
 	}
@@ -663,6 +665,14 @@ func (p *lifecycleProofPlanner) FinalizeEnginePublications(context.Context, []ru
 type lifecycleProofDispatcher struct{ calls int }
 
 func (d *lifecycleProofDispatcher) DispatchPostCommit(context.Context, []runtimeengine.EmitIntent) error {
+	d.calls++
+	return nil
+}
+
+func (d *lifecycleProofDispatcher) DispatchCommittedPublication(_ context.Context, publication runtimeengine.CommittedDurablePublication) error {
+	if err := publication.ValidateCommittedDurablePublication(); err != nil {
+		return err
+	}
 	d.calls++
 	return nil
 }

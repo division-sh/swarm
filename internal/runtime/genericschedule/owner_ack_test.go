@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
 
@@ -13,6 +14,43 @@ type unacknowledgedScheduleStore struct {
 	Store
 	activation Activation
 	err        error
+}
+
+type ordinaryOnlyClockDispatcher struct{ calls int }
+
+func (d *ordinaryOnlyClockDispatcher) DispatchPostCommit(context.Context, []engine.EmitIntent) error {
+	d.calls++
+	return nil
+}
+
+func TestInstanceClockRequiresHandoffOwnerBeforeAdmissionOrOccurrence(t *testing.T) {
+	activation := instanceRecoveryActivation(t)
+	standing, _ := instanceRecoveryWorkOwner(t, activation.Command.RunID)
+	lease, err := standing.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Done() }()
+	var order []string
+	store := &lifecycleProofStore{activation: activation, order: &order}
+	planner := &lifecycleProofPlanner{}
+	dispatcher := &ordinaryOnlyClockDispatcher{}
+	scheduler := &lifecycleProofScheduler{}
+	lifecycle, err := NewLifecycle(store, scheduler, planner, dispatcher, nil, executionposture.Live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopLifecycleProof(t, lifecycle)
+	if _, err := lifecycle.Admit(lease.Context(), activation.Command); err == nil || len(order) != 0 || len(scheduler.registered) != 0 {
+		t.Fatalf("missing handoff owner admitted a clock: order=%v err=%v", order, err)
+	}
+	wake, err := activation.Wakeup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lifecycle.fire(lease.Context(), wake); err == nil || store.commitCalls != 0 || planner.prepareCalls != 0 || dispatcher.calls != 0 {
+		t.Fatalf("restored clock bypassed handoff admission: commits=%d prepares=%d dispatches=%d err=%v", store.commitCalls, planner.prepareCalls, dispatcher.calls, err)
+	}
 }
 
 func (s *unacknowledgedScheduleStore) AdmitGenericScheduleOutcome(context.Context, AdmissionCommand) (AdmissionCommit, error) {

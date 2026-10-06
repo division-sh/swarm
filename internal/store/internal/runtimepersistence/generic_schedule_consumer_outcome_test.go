@@ -23,6 +23,7 @@ type scheduleConsumerOutcomeStore struct {
 	reads                atomic.Int32
 	commitErr            error
 	prepareErr           error
+	afterCommit          func()
 }
 
 func (s *scheduleConsumerOutcomeStore) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparationCommit, error) {
@@ -40,6 +41,9 @@ func (s *scheduleConsumerOutcomeStore) CommitGenericScheduleOccurrence(ctx conte
 	result, err := s.Store.CommitGenericScheduleOccurrence(ctx, command)
 	if result.Outcome != "" {
 		err = errors.Join(err, s.postCommitErr)
+		if s.afterCommit != nil {
+			s.afterCommit()
+		}
 	}
 	s.commitErr = err
 	return result, err

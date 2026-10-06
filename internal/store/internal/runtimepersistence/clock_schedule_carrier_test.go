@@ -217,6 +217,7 @@ func TestClockScheduleRestoreTerminalizesMalformedCadenceOnBothStores(t *testing
 				if persisted != value || status != string(genericschedule.StatusFailed) || hash != activation.ImmutableHash || code != "malformed_persisted_activation" || !strings.Contains(message, hostile.reason) {
 					t.Fatalf("malformed clock was not terminalized with exact evidence: value=%q status=%q hash=%q code=%q message=%q", persisted, status, hash, code, message)
 				}
+				requireClockTimerRetention(t, ctx, store, runID, 0)
 			})
 		}
 	}
