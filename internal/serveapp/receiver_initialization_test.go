@@ -79,6 +79,9 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			}
 			want := map[string]any{"account_id": account, "values": tc.config}
 			path, entityID := requireServedReceiverInitialization(t, rt, seed, want, 1)
+			t.Run("inspection_cleanup_boundary", func(t *testing.T) {
+				requireReceiverInspectionCleanupFailures(t, rt.ReceiverStateReader, seed.RunID, "account", path, entityID)
+			})
 			before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			companions := readForkReceiverCompanions(t, rt, seed.RunID)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
