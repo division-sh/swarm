@@ -8,21 +8,22 @@ import (
 // ClockReadback projects admitted lifecycle evidence, never source declarations
 // or a newly computed recurrence.
 type ClockReadback struct {
-	ActivationID string        `json:"activation_id"`
-	Name         string        `json:"name"`
-	RunID        string        `json:"run_id"`
-	FlowID       string        `json:"flow_id"`
-	FlowInstance string        `json:"flow_instance"`
-	Emit         string        `json:"emit"`
-	Cron         string        `json:"cron,omitempty"`
-	Every        string        `json:"every,omitempty"`
-	Status       Status        `json:"status"`
-	InitialDueAt time.Time     `json:"initial_due_at"`
-	NextDueAt    *time.Time    `json:"next_due_at,omitempty"`
-	RetainsRun   bool          `json:"retains_run"`
-	CancelCause  string        `json:"cancel_cause,omitempty"`
-	CancelledAt  *time.Time    `json:"cancelled_at,omitempty"`
-	Failure      *ClockFailure `json:"failure,omitempty"`
+	ActivationID string           `json:"activation_id"`
+	Name         string           `json:"name"`
+	RunID        string           `json:"run_id"`
+	FlowID       string           `json:"flow_id"`
+	FlowInstance string           `json:"flow_instance"`
+	Emit         string           `json:"emit"`
+	Cron         string           `json:"cron,omitempty"`
+	Every        string           `json:"every,omitempty"`
+	Status       Status           `json:"status"`
+	InitialDueAt time.Time        `json:"initial_due_at"`
+	NextDueAt    *time.Time       `json:"next_due_at,omitempty"`
+	RetainsRun   bool             `json:"retains_run"`
+	CancelCause  string           `json:"cancel_cause,omitempty"`
+	CancelledAt  *time.Time       `json:"cancelled_at,omitempty"`
+	Failure      *ClockFailure    `json:"failure,omitempty"`
+	Suspension   *ClockSuspension `json:"suspension,omitempty"`
 }
 
 type ClockFailure struct {
@@ -44,6 +45,7 @@ func ProjectClockReadback(activation Activation, runActive bool) (ClockReadback,
 		FlowID: command.OwnerID, FlowInstance: command.FlowInstance, Emit: command.EventType,
 		Cron: command.Due.Cron, Status: activation.Status, InitialDueAt: activation.InitialDueAt,
 		CancelCause: activation.CancelCause,
+		Suspension:  activation.ClockSuspension.Canonical(),
 	}
 	if command.Due.Kind == DueEvery {
 		view.Every = command.Due.Every.String()

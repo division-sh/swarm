@@ -20,6 +20,15 @@ func diagnosticClockRows(clocks []genericschedule.ClockReadback) []cliLabeledDet
 		if clock.CancelCause != "" {
 			value += "; " + clock.CancelCause
 		}
+		if clock.Suspension != nil {
+			s := clock.Suspension
+			if !s.ParkedAt.IsZero() {
+				value += "; suspended since " + s.ParkedAt.Format(time.RFC3339Nano)
+			}
+			if !s.ResumedAt.IsZero() {
+				value += fmt.Sprintf("; suspended %s to %s, %d occurrences skipped", s.SuspendedFrom.Format(time.RFC3339Nano), s.ResumedAt.Format(time.RFC3339Nano), s.SkippedOccurrences)
+			}
+		}
 		if clock.Failure != nil {
 			value += "; " + clock.Failure.Message
 		}

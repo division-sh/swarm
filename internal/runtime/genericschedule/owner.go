@@ -137,7 +137,7 @@ func (r CommitResult) Validate() error {
 		if err := r.Next.Validate(); err != nil {
 			return err
 		}
-		if r.Next.Status != StatusActive && r.Next.Status != StatusFired {
+		if r.Next.Status != StatusActive && r.Next.Status != StatusFired && !(r.PublicationAlreadyCommitted && r.Next.Status == StatusParked) {
 			return errors.New("committed generic schedule occurrence has invalid successor state")
 		}
 		if r.Publication == nil {

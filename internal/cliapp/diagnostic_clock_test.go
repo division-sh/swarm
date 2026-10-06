@@ -30,6 +30,19 @@ func TestDiagnosticClockRowsUseDurableStatusAndDue(t *testing.T) {
 	}
 }
 
+func TestDiagnosticClockRowsRenderParkedAndSkippedInterval(t *testing.T) {
+	from := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	through := from.Add(time.Hour)
+	rows := diagnosticClockRows([]genericschedule.ClockReadback{
+		{FlowID: ".", Name: "poll", Status: genericschedule.StatusParked, Suspension: &genericschedule.ClockSuspension{ParkedAt: from}},
+		{FlowID: ".", Name: "poll", Status: genericschedule.StatusActive, Suspension: &genericschedule.ClockSuspension{SuspendedFrom: from, ResumedAt: through, SkippedOccurrences: 12}},
+	})
+	if rows[0].Value != "./poll: parked; suspended since 2026-10-06T10:00:00Z" ||
+		rows[1].Value != "./poll: active; suspended 2026-10-06T10:00:00Z to 2026-10-06T11:00:00Z, 12 occurrences skipped" {
+		t.Fatalf("clock suspension lost durable evidence=%+v", rows)
+	}
+}
+
 func TestRunStatusReadsClockEvidenceWithoutArming(t *testing.T) {
 	runID := "11111111-1111-4111-8111-111111111111"
 	due := time.Date(2026, 10, 2, 14, 32, 0, 0, time.UTC)
