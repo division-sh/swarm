@@ -183,7 +183,7 @@ func TestNotifyAllChildrenObservationRefusesRawCancelledClosedAndFailedSectionsB
 					t.Fatal("failed diagnostics lost sections")
 				}
 				for _, s := range sections {
-					if s.Failure == "" || s.Rows != nil {
+					if s.Failure == "" || s.Rows != nil || s.Columns != nil {
 						t.Fatal("failed section granted success")
 					}
 				}
@@ -198,7 +198,7 @@ func TestNotifyAllChildrenObservationRefusesRawCancelledClosedAndFailedSectionsB
 				t.Fatal(err)
 			}
 			sections, err := ReadNotifyAllChildrenDiagnosticStorageForTest(ctx, fixture.store)
-			if err != nil || len(sections) != 6 || sections[0].Failure == "" || sections[0].Rows != nil {
+			if err != nil || len(sections) != 6 || sections[0].Failure == "" || sections[0].Rows != nil || sections[0].Columns != nil {
 				t.Fatalf("failed first section=%v/%v", sections, err)
 			}
 			for _, s := range sections[1:] {

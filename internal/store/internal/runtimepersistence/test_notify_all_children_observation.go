@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -53,34 +54,9 @@ func ReadNotifyAllChildrenDiagnosticStorageForTest(ctx context.Context, selected
 	for _, query := range queries {
 		var section NotifyAllChildrenDiagnosticStorage
 		err := read(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			rows, err := tx.QueryContext(ctx, query)
-			if err != nil {
-				return err
-			}
-			defer rows.Close()
-			section.Columns, err = rows.Columns()
-			if err != nil {
-				return err
-			}
-			for rows.Next() {
-				values, destinations := make([]any, len(section.Columns)), make([]any, len(section.Columns))
-				for i := range values {
-					destinations[i] = &values[i]
-				}
-				if err := rows.Scan(destinations...); err != nil {
-					return err
-				}
-				for i, value := range values {
-					if raw, ok := value.([]byte); ok {
-						values[i] = string(raw)
-					}
-				}
-				section.Rows = append(section.Rows, values)
-			}
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			return rows.Close()
+			var err error
+			section, err = readNotifyAllChildrenDiagnosticSection(ctx, tx, query)
+			return err
 		})
 		if err != nil {
 			section = NotifyAllChildrenDiagnosticStorage{Failure: err.Error()}
@@ -88,6 +64,47 @@ func ReadNotifyAllChildrenDiagnosticStorageForTest(ctx context.Context, selected
 		evidence = append(evidence, section)
 	}
 	return evidence, nil
+}
+
+func readNotifyAllChildrenDiagnosticSection(ctx context.Context, tx *sql.Tx, query string) (section NotifyAllChildrenDiagnosticStorage, err error) {
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return NotifyAllChildrenDiagnosticStorage{}, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			section = NotifyAllChildrenDiagnosticStorage{}
+		}
+	}()
+	section.Columns, err = rows.Columns()
+	if err != nil {
+		return NotifyAllChildrenDiagnosticStorage{}, err
+	}
+	for rows.Next() {
+		values, scanErr := readNotifyAllChildrenDiagnosticRow(rows, len(section.Columns))
+		if scanErr != nil {
+			return NotifyAllChildrenDiagnosticStorage{}, scanErr
+		}
+		section.Rows = append(section.Rows, values)
+	}
+	return section, rows.Err()
+}
+
+func readNotifyAllChildrenDiagnosticRow(rows *sql.Rows, columns int) ([]any, error) {
+	values, destinations := make([]any, columns), make([]any, columns)
+	for i := range values {
+		destinations[i] = &values[i]
+	}
+	if err := rows.Scan(destinations...); err != nil {
+		return nil, err
+	}
+	for i, value := range values {
+		if raw, ok := value.([]byte); ok {
+			values[i] = string(raw)
+		}
+	}
+	return values, nil
 }
 
 func ReadNotifyAllChildrenItemStorageForTest(ctx context.Context, selected any, runID, sourceEventID string) ([]NotifyAllChildrenItemStorage, error) {

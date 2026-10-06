@@ -60,7 +60,7 @@ uncertainties remain. The previous 143-removal local snapshot was not raised,
 reseeded or used to authorize this extraction. These are occurrences, not
 bugs or a whole-parent closure percentage.
 
-The original registry is separately reconciled:98 new rows in the four
+The original registry is separately reconciled:101 new rows in the four
 private bounded runtime operation files retain private-runtime-adapter, and
 three rows for the canonical ledger witness retain private-backend, matching
 the existing timer-revision witness. No ordinary fixture SQL gains a
@@ -130,6 +130,39 @@ passes. Debt remains15183 with133 removed/0 added and67 uncertainties.
 Repair-head explicit core plus the complete named remote supplements is still
 pending the next user-assigned server2 window; old partial cores are not
 substituted for that obligation.
+
+PR2572 review cycle1 identified authored-code complexity growth, not a
+persistence owner defect. The server2 core started at5f7071d9f was stopped at
+the user's instruction through its supervisor's signal/join/cleanup path.
+No B worker, descendant or PostgreSQL service remained; its interrupted receipt
+is preserved without qualification credit. No named remote supplement ran.
+
+The bounded revision narrows the committed codemod to this batch's conformance
+families. Unrelated served/channel/runtime/history transforms and their companion
+controls remain preserved in integration888cb4958, not shipped here. Current
+finite/type/alias/effect/oracle/whole-family/refusal/idempotence controls remain.
+Discovery, fixed family matching/rendering and edit application are separated;
+every edited file is formatted before any file is written. A planted invalid
+later edit proves no earlier file can be partially rewritten. Unselected family
+ASTs remain untouched; unknown/deferred families cannot gain a rewrite.
+
+Diagnostic row materialization and section reading are private, operation-specific
+helpers within the existing observation owner, not a new shared reader or public
+callback/selector. The original six SQL statements, independent original-owner
+transactions, detached string/NULL values and section ordering remain unchanged.
+Query/scan/iteration/close/commit failure discards the complete section; close
+errors are retained with the primary error, and later sections remain independent.
+The existing both-store failure control now rejects partial columns as well as
+partial rows.
+
+Focused local controls pass:13 codemod roots/79 test records, six CLI guard
+roots/13 records, both notification physical/refusal roots under race with
+actual SQLite/PostgreSQL children, four read-only census/registry/completed-family
+roots, no-edit codemod repetition and vet. Collector, roles and debt baseline
+remain unchanged apart from exact private helper registry reconciliation;
+133 removed/0 added,67 uncertainties retained. Independent complexity must
+pass on the committed repair snapshot before push. Explicit repaired-head core
+and all18 named race roots remain pending a new server2 assignment.
 
 Chosen-class commitment: eliminate raw authority from these fixed observation
 owners and their enumerated shared consumers, not the full raw-test corpus.
