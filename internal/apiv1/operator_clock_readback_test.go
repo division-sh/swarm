@@ -19,6 +19,7 @@ import (
 
 type clockReadbackStore interface {
 	RunReadStore
+	storetest.RunFixtureStore
 	AdmitGenericScheduleOutcome(context.Context, genericschedule.AdmissionCommand) (genericschedule.AdmissionCommit, error)
 	CancelGenericScheduleOutcome(context.Context, genericschedule.CancelCommand) (genericschedule.CancelCommit, error)
 }
@@ -40,11 +41,7 @@ func TestClockScheduleHTTPReadbackOnBothStores(t *testing.T) {
 			ctx := testAuthorActivityContextForSource(context.Background(), sourceartifactfixture.FactFor(artifact))
 			runID := uuid.NewString()
 			fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: artifact, StartedAt: time.Now().UTC()}
-			if backend == "sqlite" {
-				storetest.RequireSQLiteRun(t, ctx, db, fixture)
-			} else {
-				storetest.RequirePostgresRun(t, ctx, db, fixture)
-			}
+			storetest.RequireRun(t, ctx, selected, fixture)
 			source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID})
 			if err != nil {
 				t.Fatal(err)

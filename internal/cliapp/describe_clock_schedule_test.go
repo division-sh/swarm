@@ -12,7 +12,7 @@ import (
 
 func TestDescribeClockScheduleCompiledProjection(t *testing.T) {
 	root := t.TempDir()
-	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\nschedules:\n  poll: {every: 5m, emit: poll.tick}\n  morning: {cron: '0 9 * * *', emit: poll.tick}\npins:\n  outputs:\n    events: [poll.tick]\n")
+	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\nschedules:\n  poll: {every: 5m, emit: poll.tick}\n  morning: {cron: '0 9 * * *', emit: poll.tick}\npins:\n  outputs: [poll.tick]\n")
 	writeDescribeTestFile(t, filepath.Join(root, "events.yaml"), "poll.tick:\n")
 	writeDescribeTestFile(t, filepath.Join(root, "worker/schema.yaml"), "stages: []\nschedules:\n  poll: {every: 1m, emit: poll.tick}\n")
 	writeDescribeTestFile(t, filepath.Join(root, "worker/events.yaml"), "poll.tick:\n")

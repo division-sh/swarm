@@ -2195,24 +2195,13 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 		}
 		copied := *entry.context
 		copied.StandingTargets = nil
-		copied.StandingActivations = nil
-		changed := false
-		for _, existing := range entry.context.StandingActivations {
-			if existing.ServiceID != serviceID {
-				copied.StandingActivations = append(copied.StandingActivations, existing)
-			}
+		publishedActivations, added, err := standingActivationsForPublication(entry.context.StandingActivations, activations, serviceID, bundleHash)
+		if err != nil {
+			return err
 		}
-		for _, activation := range activations {
-			if activation.ServiceID != serviceID {
-				return fmt.Errorf("standing activation service_id does not match publication")
-			}
-			if activation.BundleHash != bundleHash {
-				continue
-			}
-			copied.StandingActivations = append(copied.StandingActivations, activation)
-			replaced++
-			changed = true
-		}
+		copied.StandingActivations = publishedActivations
+		replaced += added
+		changed := added > 0
 		for _, existing := range entry.context.StandingTargets {
 			if strings.TrimSpace(existing.ServiceID) != serviceID {
 				copied.StandingTargets = append(copied.StandingTargets, existing)

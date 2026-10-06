@@ -573,22 +573,7 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 			if candidate.Target.Generation > 0 && (candidate.Target.Generation != uint64(current.Generation) || candidate.Target.PublicationSequence != current.PublicationSequence) {
 				return nil, nil, fmt.Errorf("%w: channel standing target changed before promotion", channelonboarding.ErrRevisionConflict)
 			}
-			instance, err := runtimeflowidentity.StandingForGeneration(rt.Options.WorkflowModule.SemanticSource(), current.FlowPath, current.RunID)
-			if err != nil || instance.InstanceID != current.InstanceID || instance.EntityID != current.EntityID {
-				return nil, nil, errors.Join(err, fmt.Errorf("channel target has inconsistent constructed coordinates"))
-			}
-			activation := StandingActivation{
-				BundleHash: current.BundleHash, ServiceID: current.ServiceID, FlowPath: current.FlowPath,
-				RunID: current.RunID, Generation: current.Generation, PublicationSequence: current.PublicationSequence,
-				InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
-				EffectiveState: current.EffectiveState, RestartDisposition: current.RestartDisposition,
-			}
-			targets := append([]StandingTarget(nil), plan.targets...)
-			for i := range targets {
-				targets[i].RunID, targets[i].Generation, targets[i].PublicationSequence = current.RunID, current.Generation, current.PublicationSequence
-				targets[i].InstanceID, targets[i].FlowInstance, targets[i].EntityID = instance.InstanceID, instance.InstancePath, instance.EntityID
-			}
-			return targets, []StandingActivation{activation}, nil
+			return rt.projectCommittedStandingTargets(plan.targets, current)
 		}
 	}
 	targets, activations, err := rt.EnsureStandingServiceTargets(ctx, candidate.Target.ServiceID)
@@ -599,6 +584,25 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 		return nil, nil, fmt.Errorf("channel target %s has no executable standing owner; inspect standing service %s", candidate.Target.Selector, candidate.Target.ServiceID)
 	}
 	return targets, activations, nil
+}
+
+func (rt *Runtime) projectCommittedStandingTargets(planned []StandingTarget, current runtimepipeline.StandingServiceReconciliation) ([]StandingTarget, []StandingActivation, error) {
+	instance, err := runtimeflowidentity.StandingForGeneration(rt.Options.WorkflowModule.SemanticSource(), current.FlowPath, current.RunID)
+	if err != nil || instance.InstanceID != current.InstanceID || instance.EntityID != current.EntityID {
+		return nil, nil, errors.Join(err, fmt.Errorf("channel target has inconsistent constructed coordinates"))
+	}
+	activation := StandingActivation{
+		BundleHash: current.BundleHash, ServiceID: current.ServiceID, FlowPath: current.FlowPath,
+		RunID: current.RunID, Generation: current.Generation, PublicationSequence: current.PublicationSequence,
+		InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
+		EffectiveState: current.EffectiveState, RestartDisposition: current.RestartDisposition,
+	}
+	targets := append([]StandingTarget(nil), planned...)
+	for i := range targets {
+		targets[i].RunID, targets[i].Generation, targets[i].PublicationSequence = current.RunID, current.Generation, current.PublicationSequence
+		targets[i].InstanceID, targets[i].FlowInstance, targets[i].EntityID = instance.InstanceID, instance.InstancePath, instance.EntityID
+	}
+	return targets, []StandingActivation{activation}, nil
 }
 
 func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selected string) error {

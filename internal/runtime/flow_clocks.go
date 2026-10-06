@@ -33,34 +33,37 @@ func (rt *Runtime) ArmDeclaredFlowClocks(ctx context.Context, activations []Stan
 			if declaration.FlowID != activation.FlowPath {
 				continue
 			}
-			if rt.GenericSchedules == nil || owner == nil {
-				return fmt.Errorf("clock deployment requires its durable schedule and execution owners")
-			}
-			command, err := flowClockCommand(source, activation, declaration, rt.ExecutionPosture.RootMode())
-			if err != nil {
+			if err := rt.armFlowClock(ctx, source, activation, declaration, owner); err != nil {
 				return err
-			}
-			if activation.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
-				return fmt.Errorf("clock deployment activation belongs to another source")
-			}
-			origin, err := runlifecycle.StandingGenerationRunOrigin(activation.ServiceID, activation.Generation)
-			if err != nil {
-				return err
-			}
-			lease, err := owner.BeginStandingRunRecovery(ctx, activation.RunID, origin)
-			if err != nil {
-				return fmt.Errorf("acquire clock deployment: %w", err)
-			}
-			runCtx := correlation.WithRunID(lease.Context(), activation.RunID)
-			runCtx = correlation.WithSourceArtifactFact(runCtx, rt.Options.SourceArtifactFact)
-			_, admitErr := rt.GenericSchedules.Admit(runCtx, command)
-			doneErr := lease.Done()
-			if admitErr != nil || doneErr != nil {
-				return errors.Join(admitErr, doneErr)
 			}
 		}
 	}
 	return nil
+}
+
+func (rt *Runtime) armFlowClock(ctx context.Context, source semanticview.Source, activation StandingActivation, declaration semanticview.ClockSchedule, owner runtimebus.StandingRunWorkOwner) error {
+	if rt.GenericSchedules == nil || owner == nil {
+		return fmt.Errorf("clock deployment requires its durable schedule and execution owners")
+	}
+	command, err := flowClockCommand(source, activation, declaration, rt.ExecutionPosture.RootMode())
+	if err != nil {
+		return err
+	}
+	if activation.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
+		return fmt.Errorf("clock deployment activation belongs to another source")
+	}
+	origin, err := runlifecycle.StandingGenerationRunOrigin(activation.ServiceID, activation.Generation)
+	if err != nil {
+		return err
+	}
+	lease, err := owner.BeginStandingRunRecovery(ctx, activation.RunID, origin)
+	if err != nil {
+		return fmt.Errorf("acquire clock deployment: %w", err)
+	}
+	runCtx := correlation.WithRunID(lease.Context(), activation.RunID)
+	runCtx = correlation.WithSourceArtifactFact(runCtx, rt.Options.SourceArtifactFact)
+	_, admitErr := rt.GenericSchedules.Admit(runCtx, command)
+	return errors.Join(admitErr, lease.Done())
 }
 
 func flowClockCommand(source semanticview.Source, activation StandingActivation, schedule semanticview.ClockSchedule, mode executionmode.Mode) (genericschedule.AdmissionCommand, error) {
