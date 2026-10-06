@@ -12,23 +12,28 @@ import (
 )
 
 type canceledTurnRecoveryRow struct {
-	turnID, admittedAttempt, runID, agentID, flow string
-	firstAttempt                                  sql.NullString
-	bound                                         sql.NullInt64
-	emit, timeoutEvent                            sql.NullString
-	launched, requested                           any
-	reason, cause                                 string
+	turnID, runID, agentID, flow    string
+	admittedAttempt, originEvidence sql.NullString
+	firstAttempt                    sql.NullString
+	bound                           sql.NullInt64
+	emit, timeoutEvent              sql.NullString
+	launched, requested             any
+	reason, cause                   string
 }
 
-func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, request runtimeeffects.RecoveryRequest) ([]runtimeeffects.TurnExecutionResult, error) {
+func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, request runtimeeffects.RecoveryRequest) ([]runtimeeffects.TurnExecutionResult, error) {
 	// One bounded snapshot includes only canceled origins whose entire physical
 	// set is closed. Selected-fork possession remains with its separate owner.
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(t.turn_id AS TEXT),CAST(t.admitted_attempt_id AS TEXT),CAST(t.first_attempt_id AS TEXT),CAST(t.run_id AS TEXT),t.agent_id,t.flow_instance,
-		t.bound_ns,t.bound_emit,CAST(t.timeout_event_id AS TEXT),t.first_launched_at,t.cancel_reason,CAST(t.cancel_cause_event_id AS TEXT),t.cancel_requested_at
+		t.bound_ns,t.bound_emit,CAST(t.timeout_event_id AS TEXT),t.first_launched_at,t.cancel_reason,CAST(t.cancel_cause_event_id AS TEXT),t.cancel_requested_at,CAST(t.origin_evidence AS TEXT)
 		FROM runtime_agent_turn_lifetimes t
 		LEFT JOIN runtime_external_effect_attempts admitted ON admitted.attempt_id=t.admitted_attempt_id
 		LEFT JOIN runtime_external_effect_operations o ON o.operation_id=admitted.operation_id
-		WHERE t.cancel_reason IS NOT NULL AND t.settled_at IS NULL AND (o.authority_kind='normal_agent' OR o.operation_id IS NULL)
+		LEFT JOIN event_deliveries d ON t.origin_kind='delivery' AND d.delivery_id=t.origin_id
+		WHERE t.cancel_reason IS NOT NULL AND t.settled_at IS NULL AND
+		  (o.authority_kind='normal_agent' OR (o.operation_id IS NULL AND
+		    (t.admitted_attempt_id IS NOT NULL OR d.execution_authority_kind='normal_runtime' OR
+		      (d.delivery_id IS NULL AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_bindings b WHERE b.fork_run_id=t.run_id)))))
 		  AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_attempts a
 		    WHERE ((t.origin_kind='delivery' AND a.origin_delivery_id=t.origin_id) OR
 		      (t.origin_kind='directive' AND a.origin_directive_operation_id=t.origin_id))
@@ -40,7 +45,7 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 	var pending []canceledTurnRecoveryRow
 	for rows.Next() {
 		var row canceledTurnRecoveryRow
-		if err := rows.Scan(&row.turnID, &row.admittedAttempt, &row.firstAttempt, &row.runID, &row.agentID, &row.flow, &row.bound, &row.emit, &row.timeoutEvent, &row.launched, &row.reason, &row.cause, &row.requested); err != nil {
+		if err := rows.Scan(&row.turnID, &row.admittedAttempt, &row.firstAttempt, &row.runID, &row.agentID, &row.flow, &row.bound, &row.emit, &row.timeoutEvent, &row.launched, &row.reason, &row.cause, &row.requested, &row.originEvidence); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -55,12 +60,23 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 	}
 	turns := make([]runtimeeffects.TurnExecutionResult, 0, len(pending))
 	for _, row := range pending {
-		admitted, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.admittedAttempt, request.Now())
+		if !row.admittedAttempt.Valid {
+			turn, err := recoverUnstartedCanceledTurn(ctx, tx, delivery, row)
+			if err != nil {
+				return nil, err
+			}
+			turns = append(turns, turn)
+			continue
+		}
+		if row.originEvidence.Valid {
+			return nil, fmt.Errorf("physical cancellation carries contradictory origin-only evidence")
+		}
+		admitted, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.admittedAttempt.String, request.Now())
 		if err != nil {
 			return nil, err
 		}
 		attempt := admitted
-		if row.firstAttempt.Valid && row.firstAttempt.String != row.admittedAttempt {
+		if row.firstAttempt.Valid && row.firstAttempt.String != row.admittedAttempt.String {
 			attempt, err = loadCanceledFirstAttempt(ctx, tx, postgres, row.firstAttempt.String, request.Now())
 			if err != nil {
 				return nil, err
@@ -186,7 +202,7 @@ func (s *EffectPostgresOwner) ListCanceledTurnRecoveries(ctx context.Context, re
 	}
 	var turns []runtimeeffects.TurnExecutionResult
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
-		turns, err = listCanceledTurnRecoveries(ctx, tx, true, request)
+		turns, err = listCanceledTurnRecoveries(ctx, tx, true, s.delivery, request)
 		return err
 	})
 	if err != nil {
@@ -204,7 +220,7 @@ func (s *EffectSQLiteOwner) ListCanceledTurnRecoveries(ctx context.Context, requ
 	}
 	var turns []runtimeeffects.TurnExecutionResult
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
-		turns, err = listCanceledTurnRecoveries(ctx, tx, false, request)
+		turns, err = listCanceledTurnRecoveries(ctx, tx, false, s.delivery, request)
 		return err
 	})
 	if err != nil {

@@ -62,7 +62,7 @@ func TestRootTurnTerminationUsesConstructedRunOwnerBothStores(t *testing.T) {
 					t.Fatal("root usage target or declaration identity was rewritten")
 				}
 				canceled := store.(runtimeeffects.CanceledTurnStore)
-				command := runtimeeffects.CanceledTurnCommand{Attempt: handle.Attempt()}
+				command := runtimeeffects.CanceledTurnCommandForAttempt(handle.Attempt(), nil)
 				if result, err := canceled.CommitCanceledTurn(ctx, command); err == nil || result.Acknowledged {
 					t.Fatalf("root origin skipped its physical cleanup: %+v err=%v", result, err)
 				}
@@ -78,7 +78,7 @@ func TestRootTurnTerminationUsesConstructedRunOwnerBothStores(t *testing.T) {
 				if err != nil || len(recovered) != 1 || !recovered[0].Attempt.Origin.Same(handle.Attempt().Origin) || (recovered[0].Clock != nil) != (phase == "launched") {
 					t.Fatalf("root recovery lost origin or launch evidence: %+v err=%v", recovered, err)
 				}
-				command.Attempt = recovered[0].Attempt
+				command = runtimeeffects.CanceledTurnCommandForAttempt(recovered[0].Attempt, nil)
 				settled, err := canceled.CommitCanceledTurn(ctx, command)
 				if err != nil || settled.Validate() != nil || settled.Delivery.Status != deliverylifecycle.StatusCanceled || settled.Delivery.ReasonCode != "terminate" {
 					t.Fatalf("root recovery did not settle its exact origin: %+v err=%v", settled, err)
@@ -140,7 +140,7 @@ func TestRootTurnTimeoutRecoveryKeepsExactReactionBothStores(t *testing.T) {
 				t.Error(err)
 			}
 		}()
-		command := runtimeeffects.CanceledTurnCommand{Attempt: turns[0].Attempt, Publication: plan}
+		command := runtimeeffects.CanceledTurnCommandForAttempt(turns[0].Attempt, plan)
 		canceled := store.(runtimeeffects.CanceledTurnStore)
 		result, err := canceled.CommitCanceledTurn(ctx, command)
 		if err != nil || result.Validate() != nil || result.Delivery.ReasonCode != "turn_timeout" || result.Publication == nil {

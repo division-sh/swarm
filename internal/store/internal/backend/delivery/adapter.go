@@ -1241,13 +1241,17 @@ func (a *Adapter) providerOriginPendingTx(ctx context.Context, tx *sql.Tx, claim
 }
 
 func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql.Tx, claim Claim) (providerOriginRecoveryDisposition, error) {
+	return a.readProviderOriginRecoveryDisposition(ctx, tx, claim, true)
+}
+
+func (a *Adapter) readProviderOriginRecoveryDisposition(ctx context.Context, tx *sql.Tx, claim Claim, lock bool) (providerOriginRecoveryDisposition, error) {
 	if tx == nil {
 		return 0, fmt.Errorf("provider origin recovery transaction is required")
 	}
 	if claim.Validate() != nil {
 		return 0, fmt.Errorf("provider origin recovery requires an exact claim")
 	}
-	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), true)
+	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), lock)
 	if err != nil {
 		return 0, err
 	}

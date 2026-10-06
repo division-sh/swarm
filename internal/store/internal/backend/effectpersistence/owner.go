@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -29,6 +30,8 @@ type schemaQueryer interface {
 }
 
 type providerDrainDeliveryOwner interface {
+	ClaimedAgentFlowOriginsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]storedelivery.ClaimedFlowTurn, error)
+	ValidateUnstartedClaimOwnerTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeflowidentity.RunScopedFlowInstance, string) error
 	QueuedAgentFlowSnapshotsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimedelivery.Snapshot, error)
 	CancelQueuedAgentTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Snapshot) (runtimedelivery.Snapshot, error)
 	ProviderOriginPendingTx(context.Context, *sql.Tx, runtimedelivery.Claim) (bool, error)

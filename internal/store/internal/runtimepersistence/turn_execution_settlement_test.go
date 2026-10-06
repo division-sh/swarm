@@ -40,7 +40,7 @@ func TestLogicalTurnExecutionCancelsAndSettlesRealDeliveryOriginBothStores(t *te
 			t.Fatalf("owned cancellation join: %+v err=%v", joined, err)
 		}
 		canceled := store.(runtimeeffects.CanceledTurnStore)
-		command := runtimeeffects.CanceledTurnCommand{Attempt: joined.Attempt, Publication: prepareCanceledReactionForTest(t, parent, fixture, *joined.Clock, joined.Cancellation.RequestedAt)}
+		command := runtimeeffects.CanceledTurnCommandForAttempt(joined.Attempt, prepareCanceledReactionForTest(t, parent, fixture, *joined.Clock, joined.Cancellation.RequestedAt))
 		if result, err := canceled.CommitCanceledTurn(parent, command); err == nil || result.Acknowledged {
 			t.Fatalf("live physical tail was skipped: %+v err=%v", result, err)
 		}
@@ -77,7 +77,7 @@ func TestLogicalTurnExecutionCancelsRealDirectiveWithoutDeliveryBothStores(t *te
 			t.Fatalf("directive cancellation join: %+v err=%v", joined, err)
 		}
 		canceled := store.(runtimeeffects.CanceledTurnStore)
-		command := runtimeeffects.CanceledTurnCommand{Attempt: joined.Attempt, Publication: prepareCanceledReactionForTest(t, parent, fixture, *joined.Clock, joined.Cancellation.RequestedAt)}
+		command := runtimeeffects.CanceledTurnCommandForAttempt(joined.Attempt, prepareCanceledReactionForTest(t, parent, fixture, *joined.Clock, joined.Cancellation.RequestedAt))
 		if result, err := store.RecordDirectiveExecuted(parent, origin.OperationID, origin.ExecutionOwnerID, []byte(`{"reply":"too late"}`), time.Now().UTC()); err == nil || result.Acknowledged {
 			t.Fatalf("ordinary directive response bypassed canceled intent: %+v err=%v", result, err)
 		}
@@ -163,7 +163,7 @@ func TestCanceledTurnPreservesCapturedProviderDrainBothStores(t *testing.T) {
 					t.Fatalf("authored cancellation blocked accepted captured-tail settlement: %+v err=%v", result, err)
 				}
 				assertCanceledReactionCount(t, ctx, fixture, clock.TimeoutEvent, 0)
-				command := runtimeeffects.CanceledTurnCommand{Attempt: handle.Attempt(), Publication: prepareCanceledReactionForTest(t, ctx, fixture, clock, intent.RequestedAt)}
+				command := runtimeeffects.CanceledTurnCommandForAttempt(handle.Attempt(), prepareCanceledReactionForTest(t, ctx, fixture, clock, intent.RequestedAt))
 				commit, err := fixture.store.(runtimeeffects.CanceledTurnStore).CommitCanceledTurn(ctx, command)
 				if err != nil || !commit.Acknowledged || commit.Validate() != nil {
 					t.Fatalf("captured origin and reaction did not settle atomically: %+v err=%v", commit, err)
@@ -301,7 +301,7 @@ func settleRecoveredCanceledTurnForTest(t *testing.T, fixture completionSettleme
 		t.Fatalf("recovery substituted original execution evidence: %+v", turn)
 	}
 	assertCanceledReactionCount(t, ctx, fixture, turn.Cancellation.CauseEvent, 0)
-	command := runtimeeffects.CanceledTurnCommand{Attempt: turn.Attempt, Publication: prepareCanceledReactionForTest(t, ctx, fixture, *turn.Clock, turn.Cancellation.RequestedAt)}
+	command := runtimeeffects.CanceledTurnCommandForAttempt(turn.Attempt, prepareCanceledReactionForTest(t, ctx, fixture, *turn.Clock, turn.Cancellation.RequestedAt))
 	store := fixture.store.(runtimeeffects.CanceledTurnStore)
 	installCanceledReactionCut(t, ctx, fixture)
 	if result, err := store.CommitCanceledTurn(ctx, command); err == nil || result.Acknowledged {

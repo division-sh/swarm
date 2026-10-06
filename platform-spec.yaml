@@ -16941,8 +16941,24 @@ platform_tables:
         a provider or execution attempt, and consumes the recipient's exact
         persisted run/flow identity rather than its target's entity. The logical
         row records the real delivery ID and terminal cause; its authorization
-        anchor may be absent only for this already-settled, unlaunched terminate
-        case. An open physical provider set refuses premature queued settlement.
+        anchor may be absent for an already-settled queued terminate origin, or
+        for claimed work terminated before any provider authorization. Claimed
+        unstarted work persists a closed versioned origin_evidence record with
+        the exact claim and constructor-owned run/scope/instance coordinate; it
+        never fabricates a provider attempt, launch, deadline or usage target.
+        Provider authorization and termination serialize on the real claim.
+        Termination winning that lock forbids later authorization; authorization
+        winning retains its actual attempt and owes physical cleanup. The Manager
+        retains the real origin before invocation and finishes owned cleanup before
+        passing an origin-only CommitCanceledTurn command. The same operation
+        validates either explicit physical-attempt evidence or exact origin-only
+        evidence, never an implicit fallback between them. Origin-only settlement
+        refuses any physical attempt for the origin and cannot declare a timeout
+        reaction. Normal startup reconstructs unresolved origin-only cancellation
+        without minting provider authority or execution mode, and keeps selected
+        delivery authority out of its normal snapshot. Exact constructor identity
+        is read from persisted evidence, not reconstructed from an instance path.
+        An open physical provider set refuses premature queued settlement.
         The committed lifecycle result carries exact canceled snapshots for owned
         post-commit continuation release. Rolled-back stage/node settlement cannot
         leave cancellation evidence or grant this release.
@@ -16957,6 +16973,7 @@ platform_tables:
             bound_ns BIGINT CHECK (bound_ns > 0),
             bound_emit TEXT CHECK (bound_emit IS NULL OR NULLIF(TRIM(bound_emit), '') IS NOT NULL),
             admitted_attempt_id UUID,
+            origin_evidence JSONB,
             first_attempt_id UUID,
             first_launched_at TIMESTAMPTZ,
             timeout_event_id UUID,
@@ -16966,7 +16983,8 @@ platform_tables:
             settled_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL,
             UNIQUE (origin_kind, origin_id),
-            CHECK (admitted_attempt_id IS NOT NULL OR (origin_kind = 'delivery' AND cancel_reason IS NOT NULL AND cancel_reason = 'terminate' AND settled_at IS NOT NULL AND first_attempt_id IS NULL AND first_launched_at IS NULL AND bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL)),
+            CHECK (admitted_attempt_id IS NOT NULL OR (cancel_reason IS NOT NULL AND cancel_reason = 'terminate' AND first_attempt_id IS NULL AND first_launched_at IS NULL AND bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL AND (origin_evidence IS NOT NULL OR (origin_kind = 'delivery' AND settled_at IS NOT NULL)))),
+            CHECK (origin_evidence IS NULL OR admitted_attempt_id IS NULL),
             CHECK ((bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL) OR (bound_ns IS NOT NULL AND bound_emit IS NOT NULL AND timeout_event_id IS NOT NULL)),
             CHECK ((first_attempt_id IS NULL AND first_launched_at IS NULL) OR (first_attempt_id IS NOT NULL AND first_launched_at IS NOT NULL)),
             CHECK ((cancel_reason IS NULL AND cancel_cause_event_id IS NULL AND cancel_requested_at IS NULL) OR (cancel_reason IS NOT NULL AND cancel_cause_event_id IS NOT NULL AND cancel_requested_at IS NOT NULL)),

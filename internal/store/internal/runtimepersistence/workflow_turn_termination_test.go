@@ -152,7 +152,7 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 					t.Fatalf("terminate-wins admitted a provider launch: %+v err=%v", launched, err)
 				}
 				canceled := fixture.store.(runtimeeffects.CanceledTurnStore)
-				if result, err := canceled.CommitCanceledTurn(cleanupCtx, runtimeeffects.CanceledTurnCommand{Attempt: handle.Attempt()}); err == nil || result.Acknowledged {
+				if result, err := canceled.CommitCanceledTurn(cleanupCtx, runtimeeffects.CanceledTurnCommandForAttempt(handle.Attempt(), nil)); err == nil || result.Acknowledged {
 					t.Fatalf("prelaunch cancellation skipped owned physical cleanup: %+v err=%v", result, err)
 				}
 				failure := runtimefailures.FromError(context.Canceled, "termination-test", "prelaunch_cleanup").Failure
@@ -166,11 +166,11 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 					}
 					turn = recovered[0]
 				}
-				settled, err := canceled.CommitCanceledTurn(cleanupCtx, runtimeeffects.CanceledTurnCommand{Attempt: turn.Attempt})
+				settled, err := canceled.CommitCanceledTurn(cleanupCtx, runtimeeffects.CanceledTurnCommandForAttempt(turn.Attempt, nil))
 				if err != nil || settled.Validate() != nil || settled.Delivery.Status != deliverylifecycle.StatusCanceled || settled.Delivery.ReasonCode != "terminate" || settled.Publication != nil {
 					t.Fatalf("prelaunch exact canceled settlement: %+v err=%v", settled, err)
 				}
-				repeat, err := canceled.CommitCanceledTurn(cleanupCtx, runtimeeffects.CanceledTurnCommand{Attempt: turn.Attempt})
+				repeat, err := canceled.CommitCanceledTurn(cleanupCtx, runtimeeffects.CanceledTurnCommandForAttempt(turn.Attempt, nil))
 				if err != nil || repeat.Validate() != nil || !repeat.Delivery.SettledAt.Equal(settled.Delivery.SettledAt) {
 					t.Fatalf("prelaunch repeat changed outcome: %+v err=%v", repeat, err)
 				}

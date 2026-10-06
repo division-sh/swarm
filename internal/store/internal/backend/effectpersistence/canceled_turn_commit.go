@@ -16,7 +16,13 @@ import (
 )
 
 func commitCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, publications canceledTurnPublicationOwner, command runtimeeffects.CanceledTurnCommand) (runtimeeffects.CanceledTurnCommit, error) {
-	attempt := command.Attempt
+	if err := command.Validate(); err != nil {
+		return runtimeeffects.CanceledTurnCommit{}, err
+	}
+	if command.Attempt == nil {
+		return commitUnstartedCanceledTurn(ctx, mutation, postgres, delivery, directives, command.Origin)
+	}
+	attempt := *command.Attempt
 	if attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || attempt.Origin.Validate() != nil {
 		return runtimeeffects.CanceledTurnCommit{}, fmt.Errorf("canceled turn requires its exact admitted business origin")
 	}
@@ -120,6 +126,7 @@ func acknowledgedCanceledTurn(result runtimeeffects.CanceledTurnCommit, acknowle
 		return runtimeeffects.CanceledTurnCommit{}
 	}
 	result.Acknowledged = true
+	result.Cancellation.Committed = true
 	result.Directive.Acknowledged = result.Origin.Kind == runtimeeffects.CompletionOriginDirective
 	if result.Publication != nil {
 		result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()

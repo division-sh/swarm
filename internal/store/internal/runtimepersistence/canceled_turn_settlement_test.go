@@ -38,7 +38,7 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 			t.Fatalf("launch: %+v err=%v", launch, err)
 		}
 		second := beginLogicalClockCompletion(t, ctx, "canceled-authorized-tool-round")
-		command := runtimeeffects.CanceledTurnCommand{Attempt: first.Attempt()}
+		command := runtimeeffects.CanceledTurnCommandForAttempt(first.Attempt(), nil)
 		if result, err := canceled.CommitCanceledTurn(ctx, command); err == nil || result.Acknowledged {
 			t.Fatalf("missing authored intent admitted cancellation: %+v err=%v", result, err)
 		}
@@ -156,7 +156,7 @@ func TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores(t *testing.T) 
 		if err != nil || !intent.Requested {
 			t.Fatalf("timeout: %+v err=%v", intent, err)
 		}
-		command := runtimeeffects.CanceledTurnCommand{Attempt: handle.Attempt(), Publication: prepareCanceledReactionForTest(t, ctx, fixture, *launch.Turn, intent.RequestedAt)}
+		command := runtimeeffects.CanceledTurnCommandForAttempt(handle.Attempt(), prepareCanceledReactionForTest(t, ctx, fixture, *launch.Turn, intent.RequestedAt))
 		failure := runtimefailures.FromError(context.Canceled, "provider-test", "physical_join").Failure
 		if err := handle.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{"physical_joined": true}); err != nil {
 			t.Fatal(err)

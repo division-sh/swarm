@@ -12,8 +12,29 @@ import (
 // selected-store owner commits it with the exact canceled origin, not before
 // physical work has settled and not in a second publication transaction.
 type CanceledTurnCommand struct {
-	Attempt     Attempt
+	Origin      CompletionOrigin
+	Attempt     *Attempt
 	Publication TurnReactionPlan
+}
+
+func CanceledTurnCommandForAttempt(attempt Attempt, publication TurnReactionPlan) CanceledTurnCommand {
+	return CanceledTurnCommand{Origin: attempt.Origin, Attempt: &attempt, Publication: publication}
+}
+
+func (c CanceledTurnCommand) Validate() error {
+	if err := c.Origin.Validate(); err != nil {
+		return err
+	}
+	if c.Attempt == nil {
+		if c.Publication != nil {
+			return fmt.Errorf("unstarted cancellation cannot invent a timeout reaction")
+		}
+		return nil
+	}
+	if c.Attempt.Kind != KindProviderTurn || c.Attempt.AttemptID == "" || c.Attempt.OperationID == "" || !c.Origin.Same(c.Attempt.Origin) {
+		return fmt.Errorf("canceled turn command requires exact provider-attempt evidence")
+	}
+	return nil
 }
 
 // These are the existing publication evidence contracts restricted to the

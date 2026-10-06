@@ -21,7 +21,10 @@ func (am *AgentManager) prepareCanceledTurn(ctx context.Context, turn effects.Tu
 	if !ok {
 		return nil, nil, effects.CanceledTurnCommand{}, fmt.Errorf("cancellation requires its selected-store commit owner")
 	}
-	command := effects.CanceledTurnCommand{Attempt: turn.Attempt}
+	command := effects.CanceledTurnCommand{Origin: turn.Cancellation.Origin}
+	if turn.Attempt.AttemptID != "" {
+		command = effects.CanceledTurnCommandForAttempt(turn.Attempt, nil)
+	}
 	if turn.Cancellation.Reason != deliverylifecycle.CancellationTurnTimeout {
 		return store, nil, command, nil
 	}

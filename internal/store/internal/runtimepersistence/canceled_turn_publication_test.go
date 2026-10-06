@@ -38,7 +38,7 @@ func TestCanceledTurnReactionCommitsAtomicallyBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("cancellation owner has no atomic reaction commit")
 				}
-				command := runtimeeffects.CanceledTurnCommand{Attempt: handle.Attempt()}
+				command := runtimeeffects.CanceledTurnCommandForAttempt(handle.Attempt(), nil)
 				if result, err := store.CommitCanceledTurn(ctx, command); err == nil || result.Acknowledged {
 					t.Fatalf("missing reaction or open physical tail accepted: %+v err=%v", result, err)
 				}

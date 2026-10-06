@@ -987,6 +987,7 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[S-Z].*$
     required_children:
+      TestUnstartedClaimedTurnTerminationBothStores: [waiting/sqlite, waiting/postgres, waiting_restart/sqlite, waiting_restart/postgres, rollback/sqlite, rollback/postgres, authorization_wins/sqlite, authorization_wins/postgres]
       TestWorkflowPublicationAcceptanceStageBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
       TestWorkflowEmitFeedbackBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
       TestWorkflowEmitBusReadbackBothStores: [sqlite, postgres]

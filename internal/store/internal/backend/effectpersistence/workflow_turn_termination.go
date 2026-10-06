@@ -43,7 +43,11 @@ func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationproto
 		if err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT CAST(turn_id AS TEXT),CAST(admitted_attempt_id AS TEXT) FROM runtime_agent_turn_lifetimes WHERE run_id=$1 AND flow_instance=$2 AND settled_at IS NULL ORDER BY origin_kind,origin_id`, owner.RunID, owner.Route.InstancePath)
+		result.Active, err = requestUnstartedClaimedTurnTermination(ctx, tx, postgres, delivery, command)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT CAST(turn_id AS TEXT),CAST(admitted_attempt_id AS TEXT) FROM runtime_agent_turn_lifetimes WHERE run_id=$1 AND flow_instance=$2 AND settled_at IS NULL AND admitted_attempt_id IS NOT NULL ORDER BY origin_kind,origin_id`, owner.RunID, owner.Route.InstancePath)
 		if err != nil {
 			return err
 		}
