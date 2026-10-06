@@ -248,6 +248,41 @@ func TestIssue2564AsyncNodeHandoffRetiresPublicationBeforeExecution(t *testing.T
 	}
 }
 
+func TestIssue2564AsyncNodeHandoffSpentClaimCannotReuseAcknowledgement(t *testing.T) {
+	for _, cleanupFault := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "acknowledged_cleanup_error"}[cleanupFault], func(t *testing.T) {
+			bus, prepared, owner, continuations := issue2564PreparedHandoff(t)
+			fault := errors.New("acknowledged handoff cleanup failed")
+			if cleanupFault {
+				owner.settleErr, owner.committed = fault, true
+			}
+			if err := bus.DispatchPreparedPublishAsync(context.Background(), prepared); (!cleanupFault && err != nil) || (cleanupFault && !errors.Is(err, fault)) {
+				t.Fatalf("first handoff: %v", err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := bus.WaitForQuiescence(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := bus.DispatchPreparedPublishAsync(context.Background(), prepared); !errors.Is(err, pipelineobligation.ErrStaleClaim) {
+				t.Fatalf("spent claim must refuse, got %v", err)
+			}
+			if err := bus.WaitForQuiescence(ctx); err != nil {
+				t.Fatal(err)
+			}
+			continuations.mu.Lock()
+			dispatches, signals := continuations.dispatches, continuations.signals
+			continuations.mu.Unlock()
+			owner.mu.Lock()
+			retained := len(owner.current)
+			owner.mu.Unlock()
+			if dispatches != 1 || signals != 1 || owner.settlements != 1 || retained != 0 {
+				t.Fatalf("spent claim admitted work: dispatches=%d signals=%d settlements=%d retained=%d", dispatches, signals, owner.settlements, retained)
+			}
+		})
+	}
+}
+
 type issue2564BlockedPublicationLogger struct {
 	issue2564HandoffDiagnosticLogger
 	entered chan struct{}
@@ -435,7 +470,7 @@ func TestIssue2564AsyncNodeHandoffSettlementFailureRetainsRecovery(t *testing.T)
 			bus, prepared, owner, continuations := issue2564PreparedHandoff(t)
 			failure := errors.New("injected settlement failure")
 			owner.settleErr, owner.committed = failure, committed
-			if err := bus.transferPreparedNodeDeliveries(context.Background(), prepared); !errors.Is(err, failure) {
+			if _, err := bus.transferPreparedNodeDeliveries(context.Background(), prepared); !errors.Is(err, failure) {
 				t.Fatalf("settlement error = %v", err)
 			}
 			continuations.mu.Lock()
@@ -466,7 +501,7 @@ func TestIssue2564AsyncNodeHandoffRejectsStaleClaimAndKeepsSuccessor(t *testing.
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = owner.Release(ctx, successor) })
-	if err := bus.transferPreparedNodeDeliveries(ctx, prepared); !errors.Is(err, pipelineobligation.ErrStaleClaim) {
+	if _, err := bus.transferPreparedNodeDeliveries(ctx, prepared); !errors.Is(err, pipelineobligation.ErrStaleClaim) {
 		t.Fatalf("stale transfer error = %v", err)
 	}
 	owner.mu.Lock()

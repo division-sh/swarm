@@ -643,7 +643,8 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 	}
 	settle := func(disposition runtimepipelineobligation.Disposition) error {
 		if publicationClaim != nil {
-			return publicationClaim.Settle(ctx, disposition)
+			_, err := publicationClaim.Settle(ctx, disposition)
+			return err
 		}
 		if d.bus.pipelineObligations == nil {
 			return nil

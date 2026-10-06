@@ -317,7 +317,8 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 		if err := settlement.flushBeforeNestedPublication(); err != nil {
 			return errors.Join(dispatchErr, err)
 		}
-		return errors.Join(dispatchErr, claim.Settle(ctx, disposition))
+		_, settleErr := claim.Settle(ctx, disposition)
+		return errors.Join(dispatchErr, settleErr)
 	}
 	if err := settlement.collect(claim, disposition); err != nil {
 		return errors.Join(dispatchErr, err)

@@ -724,10 +724,6 @@ func (c *Coordinator) dispatchAttempt(ctx context.Context, job dispatchJob) (boo
 	return deferred, errors.Join(err, job.lease.Done())
 }
 
-func (c *Coordinator) completeDispatch(deliveryID string, err error) {
-	c.completeDispatchWithWake(deliveryID, err, false, 0)
-}
-
 func (c *Coordinator) completeDispatchWithWake(deliveryID string, err error, deferred bool, wakeVersion uint64) {
 	c.mu.Lock()
 	delete(c.reserved, deliveryID)
