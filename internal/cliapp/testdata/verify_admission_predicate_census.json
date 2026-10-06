@@ -1641,7 +1641,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.releaseAutonomousStartupProducers",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "a2f25f30af8526d59ca5e52f3a9de4c331ce84d756ce5a749efd09cc366c3048"
+    "body_sha256": "85df860eeac55c4de3b89dfb5bd45594033dc41f3eb95abbc03a4986af9345ce"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.replaceFanOutServing",
@@ -2703,13 +2703,13 @@
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.mutateStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "553e7fb29b87135835dd2699be4cf6720a896794d91e5738578c017721621c5c"
+    "body_sha256": "79d7759207da35cb159e23ae5fe776f8586bf3bc75189e59dab6854590dbcb80"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.publishActiveService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "ab8de093d4f02a8d1c707871f066aade9a0cc16db92b82fce6b272e3eb799c39"
+    "body_sha256": "d9f346f0b7de0b90926ef88fd26ed17683816d14a6eeeee0a4870438d550fe79"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.restoreAdmission",
@@ -2739,7 +2739,7 @@
     "owner": "internal/serveapp/main.go::*serveStartupStandingRecoveryOwner.BeginStandingRunRecovery",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "0cfe931aa0350fe6f2282f4a728e649b92df53671d7fdee066a9b93d16675702"
+    "body_sha256": "bd53052da86e405a2ca5e89852765fcbf267c461bce78b7176c55558396075b9"
   },
   {
     "owner": "internal/serveapp/main.go::Run",
@@ -2763,13 +2763,13 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "250b71d984ec9309972c59afe58b62be0f72836ee2d6b398fad5de3825fe00a6"
+    "body_sha256": "24d1436c5fbde603ca250efd39bc545987ecf29b4687b31c8320e95f8d8c4ea1"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "902db28d9c308fb75abc5e47e7612015cccf67176f2a7dedb51aa293aa6c00fd"
+    "body_sha256": "3867e41fa17b634dbde5a122ed2c0fe4f8ee38d1a833c301f93e3c07f064433a"
   },
   {
     "owner": "internal/serveapp/main.go::buildStores",
@@ -2889,7 +2889,7 @@
     "owner": "internal/serveapp/main.go::newServeStartupStandingRecoveryOwner",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "804a1ab1cfd7dbc911f3a6977816cb926f412dd37fca45cdd9ecddf5d70b9de4"
+    "body_sha256": "901af23f179f2bf70c7aa7b42b1afb2fb639e527a78d93fd2c15a639a1a26f99"
   },
   {
     "owner": "internal/serveapp/main.go::plannedServeRuntimeContexts",
@@ -2919,7 +2919,7 @@
     "owner": "internal/serveapp/main.go::prepareServeRuntimeContextSet",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "1114fef92ba8fb4622eb0b2ba12b12f36fadd3edb0b2db09980ec326c75c2a1e"
+    "body_sha256": "58e55ee861a2101d342192e667d6d11dfabebad9ef61cd324870e2e6ca8533cc"
   },
   {
     "owner": "internal/serveapp/main.go::prepareServeRuntimeContexts",
@@ -2955,7 +2955,13 @@
     "owner": "internal/serveapp/main.go::reconcileServeStandingServices",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "9efb72e16089f1b029fec9ae809172d7f990bbd04705c0a6561fb1fd2a848a58"
+    "body_sha256": "87bb16d19a2c740e0abfc1fd8bf73b95eec6f753df12acc0c78e254a71a701b1"
+  },
+  {
+    "owner": "internal/serveapp/main.go::reconcileStandingServiceCandidates",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "b7da14e1078cd173eb0201aae85cd6563238bc43de6f4acdce972231007694ea"
   },
   {
     "owner": "internal/serveapp/main.go::remainingServeShutdownGrace",
