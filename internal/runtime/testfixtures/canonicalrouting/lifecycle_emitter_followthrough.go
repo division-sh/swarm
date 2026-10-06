@@ -37,7 +37,7 @@ func CopyLifecycleEmitterCompetingExit(t testing.TB, timer bool) string {
 	t.Helper()
 	root := CopyLifecycleEmitter(t, LifecycleGateLocal)
 	schema := lifecycleStaticRead(t, root, "schema.yaml")
-	schema = strings.Replace(schema, "  done: {terminal: true}", "  done: {terminal: true}\n  cancelled: {terminal: true}", 1)
+	schema = strings.Replace(schema, "  done: {final: true}", "  done: {final: true}\n  cancelled: {final: true}", 1)
 	nodes := lifecycleStaticRead(t, root, "nodes.yaml")
 	nodes = strings.Replace(nodes, "    work.completed:\n", "    work.completed:\n      guard: {id: approved_stage, check: _entity.current_state == 'approved'}\n", 1)
 	if timer {

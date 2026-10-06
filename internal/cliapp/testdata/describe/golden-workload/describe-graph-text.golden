@@ -74,8 +74,8 @@ stage graph:
       - pending [initial]
       - scouting
       - collecting
-      - complete [terminal]
-      - failed [terminal]
+      - complete [final]
+      - failed [final]
     edges:
       - collecting -> collecting (handler.advances_to Lg.c2NvdXQtY29sbGVjdG9y on scout.completed)
       - collecting -> complete (handler.join.on_complete Lg.Y2FuZGlkYXRlLWNvbGxlY3Rvcg on candidate.completed)
@@ -93,7 +93,7 @@ stage graph:
     nodes:
       - pending [initial]
       - active
-      - complete [terminal]
+      - complete [final]
     edges:
       - active -> active (handler.advances_to Y2FuZGlkYXRl.Y2FuZGlkYXRlLWludGFrZQ on candidate.requested)
       - active -> complete (handler.advances_to Y2FuZGlkYXRl.Y2FuZGlkYXRlLWNvbXBsZXRpb24 on candidate.analyzed)
@@ -103,7 +103,7 @@ stage graph:
     nodes:
       - pending [initial]
       - active
-      - complete [terminal]
+      - complete [final]
     edges:
       - active -> active (handler.advances_to c2NvdXQ.c2NvdXQtaW50YWtl on scout.requested)
       - active -> complete (handler.advances_to c2NvdXQ.c2NvdXQtY29tcGxldGlvbg on scout.completed)

@@ -634,7 +634,7 @@ telegram.send_message:
 		delete(files, "entities.yaml")
 	}
 	if ordinaryRootLoop {
-		files["schema.yaml"] += "  closed: {terminal: true}\n  exhausted: {terminal: true}\nloops:\n  revision:\n    revision_field: opaque_revision\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
+		files["schema.yaml"] += "  closed: {final: true}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: opaque_revision\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
 		files["events.yaml"] = "ordinary.ready:\n  opaque_revision: text\nordinary.start:\nordinary.retry:\n  opaque_revision: text\nordinary.close:\n  opaque_revision: text\n"
 		files["nodes.yaml"] = `reader:
   execution_type: system_node
@@ -655,7 +655,7 @@ telegram.send_message:
 `
 	}
 	if activityLoop {
-		files["flow-a/schema.yaml"] += "  review: {}\n  closed: {terminal: true}\n  exhausted: {terminal: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
+		files["flow-a/schema.yaml"] += "  review: {}\n  closed: {final: true}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
 		files["flow-a/events.yaml"] = "review.accepted:\n  revision_id: text\nreview.inspect:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n"
 		files["flow-a/nodes.yaml"] = `writer:
   execution_type: system_node

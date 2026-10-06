@@ -81,7 +81,7 @@ func TestSchemaAdmissionRootAndMarkerlessPosture(t *testing.T) {
 }
 
 func TestSchemaAdmissionDiagnosticPaths(t *testing.T) {
-	_, err := loadSchemaFragment(t, "stages:\n  waiting:\n    initial: true\n    gate:\n      decision: review\n      outcomes:\n        approve:\n          advances_to: done\n          input:\n            note: {type: text, unexpected: true}\n  done: {terminal: true}\n")
+	_, err := loadSchemaFragment(t, "stages:\n  waiting:\n    gate:\n      decision: review\n      outcomes:\n        approve:\n          advances_to: done\n          input:\n            note: {type: text, unexpected: true}\n  done: {final: true}\n")
 	if err == nil || !strings.Contains(err.Error(), `["stages"]["waiting"]["gate"]["outcomes"]["approve"]["input"]["note"]`) || !strings.Contains(err.Error(), "schema.yaml:") {
 		t.Fatalf("nested path/coordinates lost: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestSchemaAdmissionInvalidSourceParity(t *testing.T) {
 		"mode: static\n", "mode: template\n", "mode: singleton\n", "mode: null\n", "mode: ''\n", "mode: {}\n", "mode: []\n",
 		"mode: static\nmode: template\n", "name: &shape static\nmode: *shape\n",
 		"tool_surface: null\n",
-		"stages: {waiting: {initial: 'true'}}\n",
+		"stages: {waiting: {final: 'true'}}\n",
 		"instance_variables: {variables: {note: {type: text, length: {min: -0.5}}}}\n",
 		"ingress: {alias: hooks, providers: [{provider: partner, admission: {kind: pack, event: ''}}]}\n",
 	} {
@@ -206,7 +206,7 @@ func TestSchemaAdmissionDocumentExpansionBudget(t *testing.T) {
 	for _, variant := range []string{"alias", "merge"} {
 		t.Run(variant, func(t *testing.T) {
 			var source strings.Builder
-			source.WriteString("stages:\n  waiting:\n    initial: true\n    gate:\n      decision: test\n      context:\n")
+			source.WriteString("stages:\n  waiting:\n    gate:\n      decision: test\n      context:\n")
 			for i := 0; i < 15; i++ {
 				if i == 0 {
 					fmt.Fprintf(&source, "        a%d: &a%d [x, x]\n", i, i)
@@ -258,8 +258,8 @@ func TestSchemaAdmissionAliasesMergesAndDerivedProvenance(t *testing.T) {
 	for _, source := range []string{
 		"name: &a [*a]\n",
 		"instance_variables: {variables: {a: &v {type: text}, b: {<<: *v, type: number}}}\n",
-		"stages: {waiting: {}, waiting: {initial: true}}\n",
-		"stages: {waiting: {}, ' waiting ': {initial: true}}\n",
+		"stages: {waiting: {}, waiting: {}}\n",
+		"stages: {waiting: {}, ' waiting ': {}}\n",
 		"name: &legacy {tool_surface: false}\n<<: *legacy\n",
 	} {
 		if _, err := admitSchemaFragment(source); err == nil {

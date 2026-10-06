@@ -20,7 +20,7 @@ func CopyReceiverOptionalChild(t testing.TB, existing bool) string {
 		"schema.yaml": `name: receiver-composition
 stages:
   waiting: {}
-` + activeStage + `  done: {terminal: true}
+` + activeStage + `  done: {final: true}
 pins:
   inputs:
     - work.requested

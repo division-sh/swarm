@@ -859,7 +859,7 @@ func runA2MapLaterEntries(t *testing.T, selected gateRecoveryStoreCase) {
 	files := a2MapFanOutFiles(true)
 	// Completing this stage is intentionally nonterminal: re-entry is legal
 	// workflow execution, not new ingress into a completed run.
-	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "ready: {terminal: true}", "ready: {}", 1)
+	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "ready: {final: true}", "ready: {}", 1)
 	p := newA2MapFanOutExecutionFromFiles(t, selected, true, files)
 	var previous joinruntime.Activation
 	var previousReceipt a2CompositeMapReceipt

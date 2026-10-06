@@ -34515,16 +34515,6 @@
       }
     },
     {
-      "path": "schemas[\"telegram-ingress\"].stages.active.initial",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "telegram-ingress/schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "schemas[\"telegram-ingress\"].stages.done",
       "provenance": {
         "origin": "authored",
@@ -34535,7 +34525,7 @@
       }
     },
     {
-      "path": "schemas[\"telegram-ingress\"].stages.done.terminal",
+      "path": "schemas[\"telegram-ingress\"].stages.done.final",
       "provenance": {
         "origin": "authored",
         "source_file": "telegram-ingress/schema.yaml",

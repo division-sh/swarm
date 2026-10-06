@@ -19,7 +19,7 @@ func TestReceiverConstructionStoragePreservesExactPhysicalWitnessBothStores(t *t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, shape := range []string{"fieldless", "fields"} {
 			t.Run(backend+"/"+shape, func(t *testing.T) {
-				documents := map[string]string{"schema.yaml": "name: physical-receiver\n", "review/schema.yaml": "name: review\nstages:\n  queued: {initial: true}\n"}
+				documents := map[string]string{"schema.yaml": "name: physical-receiver\n", "review/schema.yaml": "name: review\nstages:\n  queued: {}\n"}
 				if shape == "fields" {
 					documents["review/entities.yaml"] = "test_entity:\n  amount: {type: json, initial: 75.0}\n  literal: {type: text, initial: '${x}'}\n"
 				}

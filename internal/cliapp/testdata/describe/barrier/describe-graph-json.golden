@@ -358,11 +358,11 @@
         },
         {
           "id": "complete",
-          "terminal": true
+          "final": true
         },
         {
           "id": "failed",
-          "terminal": true
+          "final": true
         }
       ],
       "edges": [
@@ -37572,17 +37572,7 @@
         "source_file": "portfolio/period/schema.yaml",
         "source_line": 1,
         "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "schemas[\"portfolio/period\"].stages.collecting.initial",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "portfolio/period/schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
+        "source_presence": "empty_mapping"
       }
     },
     {
@@ -37596,7 +37586,7 @@
       }
     },
     {
-      "path": "schemas[\"portfolio/period\"].stages.complete.terminal",
+      "path": "schemas[\"portfolio/period\"].stages.complete.final",
       "provenance": {
         "origin": "authored",
         "source_file": "portfolio/period/schema.yaml",
@@ -37616,7 +37606,7 @@
       }
     },
     {
-      "path": "schemas[\"portfolio/period\"].stages.failed.terminal",
+      "path": "schemas[\"portfolio/period\"].stages.failed.final",
       "provenance": {
         "origin": "authored",
         "source_file": "portfolio/period/schema.yaml",

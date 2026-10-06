@@ -54,8 +54,11 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 				stage, status string
 			}{{"ready", "running"}, {"Ready", "completed"}} {
 				t.Run(tc.stage, func(t *testing.T) {
-					initialReady := tc.stage == "ready"
-					artifact := sourceartifactfixture.New("schema.yaml", []byte(fmt.Sprintf("name: exact-stage-completion\nstages:\n  ready: {initial: %t}\n  Ready: {initial: %t, terminal: true}\n", initialReady, !initialReady)))
+					stages := "  ready: {}\n  Ready: {final: true}\n"
+					if tc.stage == "Ready" {
+						stages = "  Ready: {final: true}\n  ready: {}\n"
+					}
+					artifact := sourceartifactfixture.New("schema.yaml", []byte("name: exact-stage-completion\nstages:\n"+stages))
 					fact := sourceartifactfixture.FactFor(artifact)
 					ctx := testAuthorActivityContextForSource(context.Background(), fact)
 					repo := runCompletionRepoRoot(t)
