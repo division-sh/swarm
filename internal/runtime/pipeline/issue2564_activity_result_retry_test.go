@@ -2,7 +2,6 @@ package pipeline_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -76,7 +76,7 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			owner := &issue2564M25CASOwner{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), db: selected.db, t: t, success: resultEvents.SuccessEvent, source: fact}
+			owner := &issue2564M25CASOwner{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), events: selected.events.(operatorread.ObservabilityReader), t: t, success: resultEvents.SuccessEvent, source: fact}
 			selected.persistence = pipeline.NewWorkflowPersistence(owner)
 			module := proposedEffectProofModule{source: source, nodes: []pipeline.WorkflowNode{
 				{Node: externalPipelineSourceNode(t, source, ".", "scanner"), Subscriptions: []events.EventType{"source.requested"}, Produces: []events.EventType{events.EventType(resultEvents.SuccessEvent), events.EventType(resultEvents.FailureEvent)}, ExecutionType: contracts.SystemNodeExecutionType},
@@ -100,19 +100,17 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 			if calls.Load() != 1 || attempts != 2 || losses != 1 || rival != 1 || committed != 1 || !reflect.DeepEqual(drafts, []float64{1, 41}) {
 				t.Fatalf("M25 actual HTTP/CAS/fresh fold: calls=%d attempts=%d losses=%d rival=%d committed=%d drafts=%v", calls.Load(), attempts, losses, rival, committed, drafts)
 			}
-			var raw []byte
-			var entityID string
-			if err := selected.db.QueryRow(`SELECT entity_id,fields FROM entity_state WHERE run_id=$1`, runID).Scan(&entityID, &raw); err != nil {
-				t.Fatal(err)
+			entityID := runID
+			state, found, err := owner.LoadWorkflowEntityState(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
+			if err != nil || !found {
+				t.Fatalf("load actual M25 entity: found=%t err=%v", found, err)
 			}
+			raw := state.Fields
 			var fields map[string]any
 			if err := json.Unmarshal(raw, &fields); err != nil || fields["local"] != float64(40) || fields["folded"] != float64(41) || fields["received"] != float64(1) || fields["title"] != "M25 external" {
 				t.Fatalf("result consumer lost local/result effects: %s %v", raw, err)
 			}
-			var requestID string
-			if err := selected.db.QueryRow(`SELECT request_event_id FROM activity_attempts WHERE run_id=$1`, runID).Scan(&requestID); err != nil {
-				t.Fatal(err)
-			}
+			requestID := owner.requestEventID(ctx, runID)
 			journal, found, err := activityReplayJournal(selected).LoadActivityAttempt(ctx, requestID)
 			if err != nil || !found || journal.Status != pipeline.ActivityAttemptStatusSucceeded || journal.Attempt != 1 || journal.SourceEventID != event.ID() || journal.ResultEventID != eventID || journal.CompletedAt == nil {
 				t.Fatalf("actual result journal: found=%t journal=%+v err=%v", found, journal, err)
@@ -141,9 +139,9 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 			if err != nil || !found || !reflect.DeepEqual(journal, stored) || calls.Load() != 1 || !reflect.DeepEqual(result, loadActivityResultForProof(t, ctx, selected, eventID)) {
 				t.Fatal("M25 replay changed the retained result or repeated HTTP")
 			}
-			var after []byte
-			if err := selected.db.QueryRow(`SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&after); err != nil || string(after) != string(raw) {
-				t.Fatalf("M25 duplicate result repeated field fold: %s %v", after, err)
+			after, found, err := owner.LoadWorkflowEntityState(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
+			if err != nil || !found || string(after.Fields) != string(raw) {
+				t.Fatalf("M25 duplicate result repeated field fold: %s found=%t err=%v", after.Fields, found, err)
 			}
 			issue2564M25AssertReceipt(t, selected, runID, eventID, claim)
 			t.Logf("M25 store=%s HTTP=1 journal=1 result=1 native_CAS_losses=1 result_attempts=2 delivery_claim=%s/%d retry_count=0 folded=41 received=1 source=%s", backend.name, claim.DeliveryID(), claim.Version(), fact.BundleHash())
@@ -153,7 +151,7 @@ func TestIssue2564ActivityResultHandlerNativeCASRetryBothStores(t *testing.T) {
 
 type issue2564M25CASOwner struct {
 	pipeline.WorkflowPersistenceOwner
-	db                                 *sql.DB
+	events                             operatorread.ObservabilityReader
 	t                                  *testing.T
 	mu                                 sync.Mutex
 	success                            string
@@ -163,6 +161,17 @@ type issue2564M25CASOwner struct {
 	selection                          deliverylifecycle.HandlerRuleSelectionFact
 	resultID                           string
 	drafts                             []float64
+}
+
+func (o *issue2564M25CASOwner) requestEventID(ctx context.Context, runID string) string {
+	o.t.Helper()
+	page, err := o.events.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
+		Filter: operatorread.OperatorEventListFilter{RunID: runID, EventName: "platform.activity_requested"}, Limit: 2,
+	})
+	if err != nil || len(page.Events) != 1 || page.NextCursor != "" {
+		o.t.Fatalf("M25 exact durable activity request: count=%d cursor=%s err=%v", len(page.Events), page.NextCursor, err)
+	}
+	return page.Events[0].EventID
 }
 
 func (o *issue2564M25CASOwner) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
@@ -191,9 +200,10 @@ func (o *issue2564M25CASOwner) CommitWorkflowEngineMutation(ctx context.Context,
 	}
 	o.drafts = append(o.drafts, draft["folded"].(float64))
 	if o.attempts == 1 {
-		var journaled int
-		if err := o.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1 AND result_event_id=$2 AND status='succeeded'`, command.State.Identity.RunID, event.ID()).Scan(&journaled); err != nil || journaled != 1 {
-			o.t.Fatalf("M25 result reached CAS before its durable journal: count=%d err=%v", journaled, err)
+		journal, found, err := o.LoadActivityAttempt(ctx, o.requestEventID(ctx, command.State.Identity.RunID))
+		storage := storetest.ObserveActivityResultPublicationStorage(o.t, ctx, o.WorkflowPersistenceOwner)
+		if err != nil || !found || journal.Status != pipeline.ActivityAttemptStatusSucceeded || journal.ResultEventID != event.ID() || journal.RunID != command.State.Identity.RunID || storage.SuccessfulActivityAttempts != 1 {
+			o.t.Fatalf("M25 result reached CAS before its durable journal: count=%d found=%t journal=%+v err=%v", storage.SuccessfulActivityAttempts, found, journal, err)
 		}
 		current, err := o.WorkflowPersistenceOwner.LoadWorkflowTargetPersistence(ctx, command.State.Identity, identity.NormalizeEntityID(command.State.EntityID))
 		if err != nil || int64(current.State.Revision) != command.State.ExpectedRevision {
@@ -235,23 +245,31 @@ func (o *issue2564M25CASOwner) CommitWorkflowEngineMutation(ctx context.Context,
 
 func issue2564M25AssertReceipt(t *testing.T, selected gateRecoveryStoreCase, runID, resultID string, claim deliverylifecycle.Claim) {
 	t.Helper()
-	var status string
-	var retries, version int
-	if err := selected.db.QueryRow(`SELECT status,retry_count,claim_version FROM event_deliveries WHERE delivery_id=$1 AND run_id=$2 AND event_id=$3`, claim.DeliveryID(), runID, resultID).Scan(&status, &retries, &version); err != nil || status != "delivered" || retries != 0 || int64(version) != claim.Version() || version != 1 {
-		t.Fatalf("M25 result delivery not same successful attempt: status=%s retries=%d version=%d err=%v", status, retries, version, err)
+	snapshot, err := selected.events.Snapshot(context.Background(), claim.DeliveryID())
+	if err != nil || snapshot.RunID != runID || snapshot.EventID != resultID || snapshot.Status != deliverylifecycle.StatusDelivered || snapshot.RetryCount != 0 || snapshot.ClaimVersion != claim.Version() || snapshot.ClaimVersion != 1 {
+		t.Fatalf("M25 result delivery not same successful attempt: snapshot=%+v err=%v", snapshot, err)
 	}
-	for query, want := range map[string]int{
-		`SELECT COUNT(*) FROM events WHERE event_id=$1`: 1,
-		`SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.event_id=$1`:                                                                              1,
-		`SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.event_id=$1 AND a.claim_version=1 AND a.closure_kind='settled' AND a.outcome='delivered'`: 1,
-		`SELECT COUNT(*) FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id=s.delivery_id WHERE d.event_id=$1`:                                                               1,
-		`SELECT COUNT(*) FROM dead_letters WHERE original_event_id=$1`:                                                                                                                                           0,
-		`SELECT COUNT(*) FROM entity_mutations WHERE caused_by_event=$1 AND domain='authored_field' AND path='received'`:                                                                                         1,
-		`SELECT COUNT(*) FROM entity_mutations WHERE caused_by_event=$1 AND domain='authored_field' AND path='local'`:                                                                                            1,
+	ctx := context.Background()
+	delivery := storetest.ObserveDeliveryEventEvidence(t, ctx, selected.events, resultID)
+	mutations := storetest.ObserveActivityResultMutations(t, ctx, selected.events, resultID)
+	var attempts, delivered, selections int
+	for _, row := range delivery.Deliveries {
+		attempts += len(row.Attempts)
+		selections += row.HandlerSelections
+		for _, attempt := range row.Attempts {
+			if attempt.ClaimVersion == 1 && attempt.ClosureKind == "settled" && attempt.Outcome == "delivered" {
+				delivered++
+			}
+		}
+	}
+	for name, check := range map[string][2]int{
+		"events":       {storetest.ObserveEventCardinality(t, ctx, selected.events, resultID), 1},
+		"all attempts": {attempts, 1}, "delivered version-one attempts": {delivered, 1},
+		"all selections": {selections, 1}, "dead letters": {delivery.DeadLetters, 0},
+		"received mutations": {mutations.Received, 1}, "local mutations": {mutations.Local, 1},
 	} {
-		var count int
-		if err := selected.db.QueryRow(query, resultID).Scan(&count); err != nil || count != want {
-			t.Fatalf("M25 exact retained effect count=%d want=%d err=%v query=%s", count, want, err, query)
+		if check[0] != check[1] {
+			t.Fatalf("M25 exact retained effect %s count=%d want=%d", name, check[0], check[1])
 		}
 	}
 }

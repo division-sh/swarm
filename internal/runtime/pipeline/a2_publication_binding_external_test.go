@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
 )
@@ -373,9 +374,16 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				completed, completedCursor, err := probe.WaitAfter(waitCtx, lifecycleprobe.Cursor{}, lifecycleprobe.Signal{Kind: lifecycleprobe.HandlerCompleted, EventID: triggerID, SubscriberType: "node", SubscriberID: worker.Key()})
 				cancel()
 				if commit != nil {
-					var retries, attempts int
-					if err := selected.db.QueryRowContext(ctx, `SELECT d.retry_count,(SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id) FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_id=$2`, triggerID, worker.Key()).Scan(&retries, &attempts); err != nil || retries != 0 || attempts != 1 {
-						t.Fatalf("contention consumed delivery attempts: retries=%d attempts=%d err=%v", retries, attempts, err)
+					var retries, attempts, matches int
+					for _, row := range storetest.ObserveDeliveryEventEvidence(t, ctx, selected.events, triggerID).Deliveries {
+						if row.SubscriberID == worker.Key() {
+							matches++
+							retries = row.RetryCount
+							attempts = len(row.Attempts)
+						}
+					}
+					if matches != 1 || retries != 0 || attempts != 1 {
+						t.Fatalf("contention consumed delivery attempts: matches=%d retries=%d attempts=%d", matches, retries, attempts)
 					}
 				}
 				if scenario == 5 {
