@@ -16816,12 +16816,24 @@ platform_tables:
         Queued or cross-flow publication never presents that snapshot as a
         completed handler. Exact duplicate publication consumes this immutable
         receipt, not a newer header. Missing or contradictory receipt fails closed.
+        An entityless agent still names its exact run and constructed instance;
+        the transaction captures that header's entity, never another receiver's
+        entity. This feedback grants no targeting or routing permission.
+        The existing publication owner also freezes the emit call's result in
+        feedback: its exact acceptance or own-handler receipt and explicit
+        dispatch_returned, accepted_deferred, or post_commit_error disposition.
+        This describes the call, not queued receiver completion. The first
+        acknowledged result is immutable; exact retry consumes it without
+        repeating dispatch or substituting a newer stage. An unresolved feedback
+        commit grants no acknowledgment. This evidence grants no execution or
+        settlement rights and never mutates the workflow header.
       ddl: |
         CREATE TABLE workflow_publication_stage_receipts (
             event_id UUID PRIMARY KEY REFERENCES events(event_id) ON DELETE CASCADE,
             run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             instance_path TEXT NOT NULL,
-            receipt JSONB NOT NULL
+            receipt JSONB NOT NULL,
+            feedback JSONB
         );
     workflow_handler_stage_receipts:
       description: >-

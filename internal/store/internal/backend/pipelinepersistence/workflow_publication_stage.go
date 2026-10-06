@@ -28,7 +28,7 @@ func captureWorkflowPublicationStageTx(ctx context.Context, tx *sql.Tx, postgres
 			return pipelineobligation.CommittedStageReceipt{}, fmt.Errorf("exact duplicate publication lacks its acceptance stage receipt")
 		}
 		stage := receipt.Stage()
-		if receipt.EventID() != event.ID() || stage.Instance != request.Instance || stage.EntityID != request.EntityID {
+		if receipt.EventID() != event.ID() || stage.Instance != request.Instance || request.EntityID != "" && stage.EntityID != request.EntityID {
 			return pipelineobligation.CommittedStageReceipt{}, fmt.Errorf("publication acceptance receipt contradicts its exact source")
 		}
 		return receipt, nil
@@ -56,7 +56,7 @@ func captureWorkflowPublicationStageTx(ctx context.Context, tx *sql.Tx, postgres
 		}
 		stage.UpdatedAt = value.UTC()
 	}
-	if scope != request.Instance.Route.ScopeKey || stage.EntityID != request.EntityID {
+	if scope != request.Instance.Route.ScopeKey || request.EntityID != "" && stage.EntityID != request.EntityID {
 		return pipelineobligation.CommittedStageReceipt{}, fmt.Errorf("publication stage source contradicts its constructed header")
 	}
 	receipt, err := pipelineobligation.StageReceiptEvidence(event.ID(), stage)

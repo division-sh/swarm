@@ -234,6 +234,10 @@ func (s *PostgresStore) CommitSelectedForkEvent(ctx context.Context, request bus
 	return s.pipelinePostgresOwner.CommitSelectedForkEvent(ctx, request)
 }
 
+func (s *PostgresStore) CommitWorkflowEmitFeedback(ctx context.Context, candidate pipeline.WorkflowEmitFeedback) (pipeline.WorkflowEmitFeedbackCommit, error) {
+	return s.pipelinePostgresOwner.CommitWorkflowEmitFeedback(ctx, candidate)
+}
+
 func (s *PostgresStore) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
 	return s.pipelinePostgresOwner.CommitWorkflowEngineMutation(ctx, command)
 }
@@ -958,6 +962,10 @@ func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope timerobl
 	return s.timerObligationPostgresReader.ReadTimerObligations(ctx, scope, observedAt)
 }
 
+func (s *PostgresStore) ReadWorkflowEmitFeedback(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowEmitFeedback, bool, error) {
+	return s.pipelinePostgresOwner.ReadWorkflowEmitFeedback(ctx, eventID, instance)
+}
+
 func (s *PostgresStore) ReadWorkflowHandlerStageReceipts(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) ([]pipelineobligation.CommittedStageReceipt, error) {
 	return s.pipelinePostgresOwner.ReadWorkflowHandlerStageReceipts(ctx, eventID, instance)
 }
@@ -1496,6 +1504,10 @@ func (s *SQLiteRuntimeStore) CommitRuntimeLogEvent(ctx context.Context, admitted
 
 func (s *SQLiteRuntimeStore) CommitSelectedForkEvent(ctx context.Context, request bus.CommitSelectedForkEventRequest) (bus.CommittedSelectedForkEvent, error) {
 	return s.pipelineSQLiteOwner.CommitSelectedForkEvent(ctx, request)
+}
+
+func (s *SQLiteRuntimeStore) CommitWorkflowEmitFeedback(ctx context.Context, candidate pipeline.WorkflowEmitFeedback) (pipeline.WorkflowEmitFeedbackCommit, error) {
+	return s.pipelineSQLiteOwner.CommitWorkflowEmitFeedback(ctx, candidate)
 }
 
 func (s *SQLiteRuntimeStore) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
@@ -2192,6 +2204,10 @@ func (s *SQLiteRuntimeStore) ReadResetInventory(ctx context.Context) (destructiv
 
 func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
 	return s.timerObligationSQLiteReader.ReadTimerObligations(ctx, scope, observedAt)
+}
+
+func (s *SQLiteRuntimeStore) ReadWorkflowEmitFeedback(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowEmitFeedback, bool, error) {
+	return s.pipelineSQLiteOwner.ReadWorkflowEmitFeedback(ctx, eventID, instance)
 }
 
 func (s *SQLiteRuntimeStore) ReadWorkflowHandlerStageReceipts(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) ([]pipelineobligation.CommittedStageReceipt, error) {

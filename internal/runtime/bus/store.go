@@ -778,6 +778,7 @@ func (InMemoryEventStore) CommitPublication(_ context.Context, command Publicati
 		AppendOutcome: EventAppendInserted,
 		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 	}
+	result = result.WithCommitAcknowledgment()
 	return result, result.Validate()
 }
 

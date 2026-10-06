@@ -102,6 +102,7 @@ type EventBus struct {
 // DurableDependencies is the exact selected-store contract consumed by a
 // durable EventBus. EventStore is never inspected to discover these roles.
 type DurableDependencies struct {
+	EmitFeedback          runtimepipeline.WorkflowEmitFeedbackOwner
 	ScenarioSetup         ScenarioSetupCommitOwner
 	ReplyContext          runtimereplycontext.Store
 	RunLifecycle          runtimerunlifecycle.OperationOwner

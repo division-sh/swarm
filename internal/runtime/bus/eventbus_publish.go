@@ -447,7 +447,10 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 		return PreparedPublish{}, false, err
 	}
 	committed, commitErr := owner.CommitPublication(preparedCtx, command)
-	if commitErr != nil && !committed.Acknowledged {
+	if !committed.Acknowledged {
+		if commitErr == nil {
+			commitErr = errors.New("publication commit was not acknowledged")
+		}
 		return PreparedPublish{}, false, errors.Join(commitErr, prepared.publicationClaim.Release(preparedCtx))
 	}
 	if err := committed.Validate(); err != nil {
@@ -497,7 +500,7 @@ func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared Prep
 	}
 	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared, committed, false)
 	if !consequences.ready {
-		return PreparedPublish{}, false, errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
+		return consequences.prepared, false, errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 	}
 	return consequences.prepared, true, err
 }
@@ -897,7 +900,7 @@ func (p PreparedPublish) withAcceptedPublicationStage(receipt *runtimepipelineob
 		}
 		return p, nil
 	}
-	if receipt == nil || receipt.Validate() != nil || receipt.EventID() != p.Event.ID() || receipt.Stage().Instance != p.stageFeedback.Instance || receipt.Stage().EntityID != p.stageFeedback.EntityID {
+	if receipt == nil || receipt.Validate() != nil || receipt.EventID() != p.Event.ID() || receipt.Stage().Instance != p.stageFeedback.Instance || p.stageFeedback.EntityID != "" && receipt.Stage().EntityID != p.stageFeedback.EntityID {
 		return p, errors.New("publication omitted or contradicted its exact acceptance stage")
 	}
 	value := *receipt

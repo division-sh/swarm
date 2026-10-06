@@ -983,6 +983,11 @@ units:
     run: ^Test[S-Z].*$
     required_children:
       TestWorkflowPublicationAcceptanceStageBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
+      TestWorkflowEmitFeedbackBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
+      TestWorkflowEmitBusReadbackBothStores: [sqlite, postgres]
+      TestWorkflowEmitFeedbackConcurrentBothStores: [sqlite, postgres]
+      TestWorkflowEmitEntitylessSourceBothStores: [sqlite, postgres]
+      TestWorkflowEmitHandlerFeedbackBothStores: [sqlite/healthy, sqlite/post_commit_error, postgres/healthy, postgres/post_commit_error]
       TestScenarioConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
       TestSelectedBranchPointActivationAtomicityBothStores: [sqlite/event/running, sqlite/event/cancelled, sqlite/deployment_revision/running, sqlite/deployment_revision/cancelled, postgres/event/running, postgres/event/cancelled, postgres/deployment_revision/running, postgres/deployment_revision/cancelled]
       TestSelectedBranchPointCleanupIsolationBothStores: [sqlite/event/discard, sqlite/event/reset, sqlite/deployment_revision/discard, sqlite/deployment_revision/reset, postgres/event/discard, postgres/event/reset, postgres/deployment_revision/discard, postgres/deployment_revision/reset]

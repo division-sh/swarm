@@ -32,6 +32,7 @@ func CommitPublish(
 	}
 	result := runtimebus.CommittedPublication{AppendOutcome: outcome, RouteTopology: command.RouteTopology}
 	if outcome == runtimebus.EventAppendExactDuplicate {
+		result = result.WithCommitAcknowledgment()
 		return result, result.Validate()
 	}
 	if finalize != nil {
@@ -42,6 +43,7 @@ func CommitPublish(
 	for _, plan := range command.Activations {
 		result.Activations = append(result.Activations, runtimepipeline.CommittedFlowInstanceActivation{Plan: plan, Created: true, ReadinessAttemptOrdinal: 1})
 	}
+	result = result.WithCommitAcknowledgment()
 	return result, result.Validate()
 }
 

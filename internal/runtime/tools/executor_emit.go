@@ -9,10 +9,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -195,25 +198,58 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			}
 		}
 	}
-	if err := e.bus.Publish(ctx, emitted); err != nil {
+	agentIdentity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return nil, err
+	}
+	instance := flowidentity.RunScopedFlowInstance{RunID: agentIdentity.RunID, Route: flowidentity.Route{
+		ScopeKey: agentIdentity.Route.ScopeKey, InstanceID: agentIdentity.Route.InstanceID, InstancePath: agentIdentity.Route.InstancePath,
+	}}
+	if agentIdentity.Route.Presence == agentidentity.RouteRoot {
+		instance.Route = flowidentity.Route{ScopeKey: ".", InstanceID: instance.RunID, InstancePath: instance.RunID}
+	}
+	emitResult, publishErr := e.bus.PublishEmit(ctx, emitted, pipeline.WorkflowPublicationStageRequest{Instance: instance, EntityID: entityID})
+	if err := emitResult.Validate(); err != nil {
+		return nil, err
+	}
+	if publishErr == nil && (!emitResult.Accepted || !emitResult.FeedbackCommitted) {
+		return nil, fmt.Errorf("emit did not acknowledge its publication and feedback")
+	}
+	output := map[string]any{"status": "published", "event_id": emitted.ID(), "event_type": eventType,
+		"accepted": emitResult.Accepted, "feedback_committed": emitResult.FeedbackCommitted, "replayed_result": emitResult.Replay}
+	if emitResult.Accepted {
+		output["retry_write"] = false
+		if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
+			rec.Append(emitted)
+		}
+	}
+	if emitResult.FeedbackCommitted {
+		if err := emitResult.Feedback.Validate(); err != nil {
+			return output, err
+		}
+		stage := emitResult.Feedback.Receipt.Stage()
+		if emitResult.Feedback.Receipt.EventID() != emitted.ID() || stage.Instance != instance || entityID != "" && stage.EntityID != entityID {
+			return output, fmt.Errorf("emit feedback contradicts its exact author occurrence")
+		}
+		output["stage"], output["stage_defined"], output["revision"] = stage.Stage, stage.StageDefined, stage.Revision
+		output["stage_origin"], output["dispatch"] = emitResult.Feedback.StageOrigin, emitResult.Feedback.Dispatch
+	}
+	if publishErr != nil {
+		output["status"] = "publish_failed"
+		if emitResult.Accepted {
+			output["status"] = "accepted"
+		}
 		wrapped := failures.WrapDetail(
 			"event_publish_failed",
 			"tool-executor",
 			"handle_emit_tool.publish",
-			map[string]any{"event": eventType, "event_id": emitted.ID()},
-			err,
+			output,
+			publishErr,
 		)
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "event_publish_failed", "publish", "publish", wrapped)
-		return nil, wrapped
+		return output, wrapped
 	}
 	e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "published", "", "", nil)
 
-	if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
-		rec.Append(emitted)
-	}
-	return map[string]any{
-		"status":     "published",
-		"event_id":   emitted.ID(),
-		"event_type": eventType,
-	}, nil
+	return output, nil
 }

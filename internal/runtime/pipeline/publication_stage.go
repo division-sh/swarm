@@ -13,6 +13,7 @@ import (
 // independently of the publication's receivers.
 type WorkflowPublicationStageRequest struct {
 	Instance flowidentity.RunScopedFlowInstance
+	// Empty is an entityless producer, not an absent constructed instance.
 	EntityID string
 }
 
@@ -44,8 +45,8 @@ func (r WorkflowPublicationStageRequest) ValidateEvent(event events.Event) error
 		return err
 	}
 	source := event.SourceRoute()
-	if r.EntityID == "" || strings.TrimSpace(r.EntityID) != r.EntityID || event.RunID() != r.Instance.RunID || source.EntityID != r.EntityID {
-		return fmt.Errorf("publication stage feedback requires the exact source instance and entity")
+	if strings.TrimSpace(r.EntityID) != r.EntityID || event.RunID() != r.Instance.RunID || source.EntityID != r.EntityID {
+		return fmt.Errorf("publication stage feedback requires the exact source instance and entity (event run=%s requested run=%s source entity=%s requested entity=%s)", event.RunID(), r.Instance.RunID, source.EntityID, r.EntityID)
 	}
 	if event.RoutingSource().Kind() == events.RoutingSourceRoot {
 		if r.Instance.Route.ScopeKey != "." || r.Instance.Route.InstanceID != r.Instance.RunID || r.Instance.Route.InstancePath != r.Instance.RunID {
