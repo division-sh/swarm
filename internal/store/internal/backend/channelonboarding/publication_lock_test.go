@@ -119,7 +119,7 @@ func TestConnectedChannelPublicationPrincipalFirstBothStores(t *testing.T) {
 					t.Errorf("concurrent %s publication: %v", verb, err)
 				}
 				if !principalFirst {
-					t.Error("publication acquired a descendant before the principal fence")
+					t.Error("publication acquired an activation before the principal fence")
 				}
 				current, err := listActivations(context.Background(), r)
 				if err != nil || len(current) != 1 || current[0].ActivationID != request.ActivationID || current[0].Revision != old.Revision+1 {
@@ -167,7 +167,7 @@ func (c *publicationLockConn) observe(ctx context.Context, query string) {
 			<-c.probe.release
 		})
 	}
-	if strings.Contains(query, "channel_onboarding_operations") || strings.Contains(query, "connected_channel_activations") {
+	if strings.Contains(query, "connected_channel_activations") {
 		c.descendant = true
 	}
 }

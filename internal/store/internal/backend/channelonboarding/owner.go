@@ -379,12 +379,6 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 	var outOp domain.Operation
 	var out domain.ConnectedChannelActivation
 	err := r.mutate(ctx, "publish connected channel activation", func(txctx context.Context, tx *sql.Tx) error {
-		// Delivery locks principal before activation. Fence publication likewise,
-		// including the principal FK lock taken by the successor INSERT.
-		principal, principalFound, err := channeldelivery.LockCurrentPrincipalTx(txctx, tx, r.dialect() == dialectPostgres)
-		if err != nil {
-			return err
-		}
 		op, found, err := loadOperation(txctx, tx, r.dialect(), req.OperationID, true)
 		if err != nil {
 			return err
@@ -396,8 +390,11 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 			return domain.ErrRevisionConflict
 		case op.Phase != domain.PhasePublishingActivation:
 			return domain.ErrConflict
-		case !principalFound || principal != op.PrincipalID:
-			return domain.ErrConflict
+		}
+		// Keep binding confirmation's parent-before-principal order, then use
+		// delivery's principal-before-activation fence, including INSERT FK locks.
+		if err := channeldelivery.LockPrincipalTx(txctx, tx, op.PrincipalID, r.dialect() == dialectPostgres); err != nil {
+			return err
 		}
 		now := canonicalTime(req.Now)
 		if op.Verb == domain.VerbRebind {
