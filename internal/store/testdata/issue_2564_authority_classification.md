@@ -61,3 +61,13 @@ partial evidence, and row/connection cleanup failures remain visible.
 The source-bound ratchet, hostile alias/transitive-carrier/compound-event
 controls, both-store observation smoke/restart and the unchanged pressure tests
 are separate required proofs; inventory agreement alone does not discharge them.
+
+## Published Initial Dispatch
+
+`DeliveryContinuationOwner.DispatchPublished` is `typed-process-local`: it
+accepts exact event/route identities already covered by committed handoff proof,
+then admits an initial attempt through the existing generation owner, work
+lifetime and configured dispatcher. Recovery and initial dispatch consume the
+same exact election and typed result interpretation. No SQL, lease, callback or
+raw query capability escapes this port; it cannot invent durable eligibility.
+Selected/ephemeral owners explicitly reject the unsupported operation.

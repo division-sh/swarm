@@ -1470,9 +1470,9 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 		eb.notifyTestPostCommitDispatchStarted(dispatchCtx, prepared.Event)
 		// Finish the fenced handoff before returning durable acceptance. Moving
 		// this settlement to another goroutine would retain the same unbounded
-		// post-ACK publication-session backlog; node execution is still queued.
-		handoffErr := eb.transferPreparedNodeDeliveries(dispatchCtx, prepared)
-		if prepared.publicationClaim.settlementOutcome().DeliveryHandoffCommitted() {
+		// post-ACK publication-session backlog; node execution is still asynchronous.
+		handoff, handoffErr := eb.transferPreparedNodeDeliveries(dispatchCtx, prepared)
+		if handoff.DeliveryHandoffCommitted() {
 			handoffErr = errors.Join(handoffErr, eb.DeliveryContinuationOwner().DispatchPublished(prepared.Event, prepared.plan.DeliveryRoutes()))
 		}
 		go func() {
@@ -1509,13 +1509,13 @@ func (eb *EventBus) canTransferPreparedNodeDeliveries(prepared PreparedPublish) 
 		eb.canTransferNodeDeliveries(prepared.Event, prepared.plan, prepared.committedHandoffs)
 }
 
-func (eb *EventBus) transferPreparedNodeDeliveries(ctx context.Context, prepared PreparedPublish) (err error) {
+func (eb *EventBus) transferPreparedNodeDeliveries(ctx context.Context, prepared PreparedPublish) (outcome runtimepipelineobligation.SettlementOutcome, err error) {
 	defer func() { err = errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(ctx))) }()
 	if !eb.canTransferPreparedNodeDeliveries(prepared) {
-		return errors.New("committed publication is not eligible for node continuation handoff")
+		return outcome, errors.New("committed publication is not eligible for node continuation handoff")
 	}
 	if err := eb.AcceptCommittedDeliveryHandoffs(prepared.committedHandoffs); err != nil {
-		return err
+		return outcome, err
 	}
 	// Pipeline acknowledgement enables exact durable deliveries atomically. A
 	// pending node retains its continuation, not a publication SQL session.
@@ -1646,7 +1646,8 @@ func (eb *EventBus) settleCommittedPublish(ctx context.Context, claim *pipelineP
 		}
 		return nil
 	}
-	return claim.Settle(ctx, disposition)
+	_, err := claim.Settle(ctx, disposition)
+	return err
 }
 
 type deliveryRouteInterception struct {
