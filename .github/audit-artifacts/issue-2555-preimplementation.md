@@ -1371,3 +1371,16 @@ unused serve listener wrappers removed in39f. Regeneration removes exactly
 those five dead roots; existing live `cliapp/workspace_listener.go` owners,
 their hashes, proof mappings and mutation-rejection controls remain unchanged.
 This repairs PC58 bookkeeping, not an admission exception or weakened guard.
+
+Thec25 hosted broad03 failure is G-owned and deterministic, not inherited or
+flaky: `TestDirectPrimitiveOwnershipManifestIsTotal` rejects exactly8 missing
+compiled-cache classifications (one sync.Once fingerprint and7 private cache
+write/publication sites). Clean master060 passes3/3; untouchedc25 fails3/3.
+Classify all8 under existing `compute_sandbox`, as the interpreter artifact
+and harness primitives already are. The lexical `http_do` entry is sync.Once,
+not a network request. No collector/guard exception or production/deadline
+change is required. Add an exact interpreter-family ownership assertion and
+rerun the total-manifest/managed-delegation controls, then broaden the local
+selection to manifest/ownership families so these semantic censuses are not
+missed by a name-only Census/Inventory/Registry sweep. The previous415/78
+receipts remain valid finite proof, not evidence this separate guard ran.

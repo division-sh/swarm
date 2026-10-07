@@ -93,6 +93,14 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:2":                                                       ownerOperatorInfra,
 	"internal/runtime/pipeline/generic_test_module.go:init:http_do:1":                                                                     ownerBuildTest,
 	"internal/runtime/pythonmodule/artifact_cache.go:materializedArtifactDir:http_do:1":                                                   ownerComputeSandbox,
+	"internal/runtime/pythonmodule/compiled_cache.go:currentCompiledInterpreterIdentity:http_do:1":                                        ownerComputeSandbox, // sync.Once executable fingerprint, not HTTP.
+	"internal/runtime/pythonmodule/compiled_cache.go:loadCompiledInterpreter:filesystem_write:1":                                          ownerComputeSandbox, // Private compiled-code directory.
+	"internal/runtime/pythonmodule/compiled_cache.go:loadCompiledInterpreter:filesystem_write:2":                                          ownerComputeSandbox, // Compiler-owned staging file.
+	"internal/runtime/pythonmodule/compiled_cache.go:loadCompiledInterpreter:filesystem_write:3":                                          ownerComputeSandbox, // Deferred staging cleanup.
+	"internal/runtime/pythonmodule/compiled_cache.go:loadCompiledInterpreter:filesystem_write:4":                                          ownerComputeSandbox, // Identity/size/digest header.
+	"internal/runtime/pythonmodule/compiled_cache.go:loadCompiledInterpreter:filesystem_write:5":                                          ownerComputeSandbox, // Immutable serialized code.
+	"internal/runtime/pythonmodule/compiled_cache.go:loadCompiledInterpreter:filesystem_write:6":                                          ownerComputeSandbox, // Publication durability fence.
+	"internal/runtime/pythonmodule/compiled_cache.go:loadCompiledInterpreter:filesystem_write:7":                                          ownerComputeSandbox, // Atomic publication.
 	"internal/runtime/pythonmodule/internal/genartifactmanifest/main.go:main:filesystem_write:1":                                          ownerBuildTest,
 	"internal/runtime/pythonmodule/runtime.go:newInterpreterModule:http_do:1":                                                             ownerComputeSandbox,
 	"internal/runtime/pythonmodule/runtime.go:runHarness:filesystem_write:1":                                                              ownerComputeSandbox,
@@ -231,6 +239,14 @@ func TestDirectPrimitiveOwnershipManifestIsTotal(t *testing.T) {
 	sort.Strings(stale)
 	if len(missing) != 0 || len(stale) != 0 {
 		t.Fatalf("direct primitive ownership manifest drift\nmissing:\n%s\nstale:\n%s", strings.Join(missing, "\n"), strings.Join(stale, "\n"))
+	}
+}
+
+func TestCompiledInterpreterPrimitivesRetainComputeSandboxOwnership(t *testing.T) {
+	for key, owner := range sourcePrimitiveOwners {
+		if strings.HasPrefix(key, "internal/runtime/pythonmodule/") && !strings.Contains(key, "/internal/genartifactmanifest/") && owner != ownerComputeSandbox {
+			t.Errorf("interpreter primitive %s has owner %s, want %s", key, owner, ownerComputeSandbox)
+		}
 	}
 }
 
