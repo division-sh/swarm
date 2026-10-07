@@ -10891,7 +10891,7 @@
     {
       "file": "platform-spec.yaml",
       "before_hash": "1053af933001000d2d017ea7b8b0b6e151b850fa20042e6f255a618ea16f65cc",
-      "after_hash": "34f1e053a8b0e43b39026511882e08f531535f253ddd7f605b4a97107de59697",
+      "after_hash": "d82fd1362e41afcdbb4e8a70b06b1404b57e859c126efcf7ec520b4dec94ada2",
       "edits": [
         {
           "offset": 33293,
@@ -10981,7 +10981,7 @@
         {
           "offset": 2721182,
           "before": "",
-          "after": "        Before either atomic creation owner, require an explicit final stage for the selected root,\n        eagerly constructed keyless descendants, and possible compiled routing receivers/templates and\n        their constructor children. Independently selected nested imports and pins seed this closure\n        with the exact receivers matched by their already-admitted declaration/routing evidence;\n        they do not instantiate the source producer or select its unrelated output routes.\n        Unknown or contradictory catalog evidence fails closed. Do not\n        infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or\n        treat stateless instances as exempt containers. A no-final service is structurally valid but\n        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow. Committed\n        idempotency replay/conflicts retain their existing owners; existing-run event.publish and\n        standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,\n        resource, feed and permanent-receipt effects.\n\n"
+          "after": "        After exact source/input/feed admission, including canonical event payload preflight,\n        and before either atomic creation owner, require an explicit final stage for the selected root,\n        eagerly constructed keyless descendants, and possible compiled routing receivers/templates and\n        their constructor children. Independently selected nested imports and pins seed this closure\n        with the exact receivers matched by their already-admitted declaration/routing evidence;\n        they do not instantiate the source producer or select its unrelated output routes.\n        Unknown or contradictory catalog evidence fails closed. Do not\n        infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or\n        treat stateless instances as exempt containers. A no-final service is structurally valid but\n        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow.\n        Malformed event payloads fail PAYLOAD_VALIDATION_FAILED before this finite-eligibility\n        check; a valid payload cannot waive the no-final refusal. Committed\n        idempotency replay/conflicts retain their existing owners; existing-run event.publish and\n        standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,\n        resource, feed and permanent-receipt effects.\n\n"
         },
         {
           "offset": 2723961,
