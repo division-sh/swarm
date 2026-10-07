@@ -76,7 +76,7 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 					defer cancel()
 					select {
 					case <-firstCommitted:
-						child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, workerPath, false)
+						child, found, err := h.workflow.Load(ctx, catalogExactWorkflowRoute(workerPath))
 						if err != nil || !found {
 							return fmt.Errorf("read first handler state: found=%t err=%v", found, err)
 						}
@@ -95,7 +95,7 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 					for _, step := range group.steps {
 						var preservedChild *runtimepipeline.WorkflowInstance
 						if transcript.expected.Expected.RefusedPublication != nil && step.ReceiptOutcome == "success" {
-							child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, workerPath, false)
+							child, found, err := h.workflow.Load(h.ctx, catalogExactWorkflowRoute(workerPath))
 							if err != nil || !found {
 								t.Fatalf("capture receiver before duplicate: found=%t err=%v", found, err)
 							}
@@ -125,7 +125,7 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 							t.Fatal(err)
 						}
 						if preservedChild != nil {
-							child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, workerPath, false)
+							child, found, err := h.workflow.Load(h.ctx, catalogExactWorkflowRoute(workerPath))
 							if err != nil || !found || !reflect.DeepEqual(*preservedChild, child) {
 								t.Fatalf("duplicate changed receiver: found=%t err=%v before=%+v after=%+v", found, err, preservedChild, child)
 							}
