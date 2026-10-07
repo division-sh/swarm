@@ -217,7 +217,7 @@ func (p *sdkPeer) serve(w http.ResponseWriter, r *http.Request) {
 			if err := peer.send(p.ctx, response); err != nil {
 				return
 			}
-		} else if node.Tag == "ack" {
+		} else if node.Tag == "ack" || node.Tag == "receipt" {
 			select {
 			case p.protocol <- sdkPeerFrame{peer: peer, node: node}:
 			case <-p.ctx.Done():

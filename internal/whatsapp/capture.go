@@ -135,31 +135,25 @@ func (s *captureStore) capture(ctx context.Context, event capturedEvent) error {
 		return err
 	}
 	defer tx.Rollback()
-	var previous, previousDigest []byte
-	err = tx.QueryRowContext(ctx, `SELECT envelope, digest FROM whatsapp_incoming_capture
-		WHERE connection_id=? AND account_ref=? AND conversation_ref=? AND event_id=? AND event_kind=?`,
-		s.connectionID, event.Scope.Session.AccountRef, event.Conversation, event.EventID, event.Kind).Scan(&previous, &previousDigest)
-	if err == nil {
-		stored, err := decodeCapture(previous, previousDigest)
-		if err != nil {
-			return err
+	stored, err := s.readCapturedRows(ctx, tx)
+	if err != nil {
+		return err
+	}
+	var totalBytes int
+	for _, prior := range stored {
+		totalBytes += len(prior.Body)
+		if prior.Scope.Session.AccountRef != event.Scope.Session.AccountRef || prior.Conversation != event.Conversation ||
+			prior.EventID != event.EventID || prior.Kind != event.Kind {
+			continue
 		}
-		// A recovered occurrence may see the same provider delivery again. Its
-		// original capture facts remain unchanged; a new scope is never adopted.
-		if stored.Scope != event.Scope || !bytes.Equal(stored.Body, event.Body) {
+		// A recovered occurrence may see the same provider delivery again. All
+		// stored routing and quota evidence was validated before this success.
+		if prior.Scope != event.Scope || !bytes.Equal(prior.Body, event.Body) {
 			return errCaptureConflict
 		}
 		return tx.Commit()
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	var count, totalBytes int64
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(body_bytes),0)
-		FROM whatsapp_incoming_capture WHERE connection_id=?`, s.connectionID).Scan(&count, &totalBytes); err != nil {
-		return err
-	}
-	if count >= maxPendingCaptureCount || totalBytes+int64(len(event.Body)) > maxPendingCaptureBytes {
+	if len(stored) >= maxPendingCaptureCount || totalBytes+len(event.Body) > maxPendingCaptureBytes {
 		return errCaptureCapacity
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO whatsapp_incoming_capture
@@ -189,7 +183,17 @@ func decodeCapture(raw, digest []byte) (capturedEvent, error) {
 }
 
 func (s *captureStore) pending(ctx context.Context) ([]capturedEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT envelope,digest,connection_id,body_bytes,
+	return s.readCapturedRows(ctx, s.db)
+}
+
+type captureRowQuery interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+// Every admission and readback consumer validates the same complete rows. A
+// corrupt routing index cannot hide a row from duplicate or quota admission.
+func (s *captureStore) readCapturedRows(ctx context.Context, query captureRowQuery) ([]capturedEvent, error) {
+	rows, err := query.QueryContext(ctx, `SELECT envelope,digest,connection_id,body_bytes,
 		account_ref,conversation_ref,event_id,event_kind
 		FROM whatsapp_incoming_capture ORDER BY sequence`)
 	if err != nil {
