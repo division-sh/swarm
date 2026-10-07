@@ -359,10 +359,10 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			if details["event_name"] != "scan.missing" || details["reason"] != "not_declared_root_input" {
 				t.Fatalf("undeclared event details = %#v", details)
 			}
-			if got := stringSliceFromAny(t, details["declared_events"]); len(got) != 1 || got[0] != "scan.requested" {
+			if got := stringSliceFromAny(t, details["declared_events"]); len(got) != 2 || got[0] != "fixture.close.requested" || got[1] != "scan.requested" {
 				t.Fatalf("undeclared declared_events = %#v", got)
 			}
-			if got := stringSliceFromAny(t, details["routable_events"]); len(got) != 1 || got[0] != "scan.requested" {
+			if got := stringSliceFromAny(t, details["routable_events"]); len(got) != 2 || got[0] != "fixture.close.requested" || got[1] != "scan.requested" {
 				t.Fatalf("undeclared routable_events = %#v", got)
 			}
 		}
@@ -402,7 +402,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if details["event_name"] != eventName || details["reason"] != "declared_root_input_not_routable" {
 			t.Fatalf("declared unroutable event details = %#v", details)
 		}
-		if got := stringSliceFromAny(t, details["declared_events"]); len(got) != 1 || got[0] != eventName {
+		if got := stringSliceFromAny(t, details["declared_events"]); len(got) != 2 || got[0] != "fixture.close.requested" || got[1] != eventName {
 			t.Fatalf("declared unroutable declared_events = %#v", got)
 		}
 		if got := stringSliceFromAny(t, details["routable_events"]); len(got) != 0 {
