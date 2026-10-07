@@ -47,6 +47,8 @@ type sdkPeer struct {
 	closing  bool
 	peers    []*sdkPeerSocket
 	wg       sync.WaitGroup
+	paired   bool
+	ready    chan *sdkPeerSocket
 }
 
 type sdkPeerSocket struct {
@@ -54,6 +56,7 @@ type sdkPeerSocket struct {
 	read  sdkPeerCipher
 	write sdkPeerCipher
 	mu    sync.Mutex
+	done  chan struct{}
 }
 
 type sdkPeerCipher struct {
@@ -74,10 +77,15 @@ type sdkPeerFrame struct {
 }
 
 func newSDKPeer(t *testing.T) *sdkPeer {
+	return newSDKPeerMode(t, true)
+}
+
+func newSDKPeerMode(t *testing.T, paired bool) *sdkPeer {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	p := &sdkPeer{ctx: ctx, cancel: cancel, static: keys.NewKeyPair(),
-		frames: make(chan sdkPeerFrame, 64), protocol: make(chan sdkPeerFrame, 64), failures: make(chan error, 8)}
+		frames: make(chan sdkPeerFrame, 64), protocol: make(chan sdkPeerFrame, 64), failures: make(chan error, 8),
+		paired: paired, ready: make(chan *sdkPeerSocket, 1)}
 	root, intermediate := keys.NewKeyPair(), keys.NewKeyPair()
 	oldRoot := whatsmeow.WACertPubKey
 	whatsmeow.WACertPubKey = *root.Pub
@@ -167,7 +175,8 @@ func (p *sdkPeer) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(socket.FrameMaxSize)
-	peer := &sdkPeerSocket{conn: conn}
+	peer := &sdkPeerSocket{conn: conn, done: make(chan struct{})}
+	defer close(peer.done)
 	p.mu.Lock()
 	p.peers = append(p.peers, peer)
 	p.mu.Unlock()
@@ -175,11 +184,20 @@ func (p *sdkPeer) serve(w http.ResponseWriter, r *http.Request) {
 		p.fail(err)
 		return
 	}
-	if err = peer.send(p.ctx, waBinary.Node{Tag: "success", Attrs: waBinary.Attrs{
-		"lid": types.NewJID("100000000001", types.HiddenUserServer), "t": time.Now().Unix(),
-	}}); err != nil {
-		p.fail(err)
-		return
+	if p.paired {
+		if err = peer.send(p.ctx, waBinary.Node{Tag: "success", Attrs: waBinary.Attrs{
+			"lid": types.NewJID("100000000001", types.HiddenUserServer), "t": time.Now().Unix(),
+		}}); err != nil {
+			p.fail(err)
+			return
+		}
+	}
+	if !p.paired {
+		select {
+		case p.ready <- peer:
+		case <-p.ctx.Done():
+			return
+		}
 	}
 	for {
 		frame, err := readSDKPeerFrame(p.ctx, conn, nil)
@@ -209,7 +227,13 @@ func (p *sdkPeer) serve(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		if node.Tag == "iq" {
+		if node.Tag == "iq" && node.AttrGetter().OptionalString("type") == "error" {
+			select {
+			case p.protocol <- sdkPeerFrame{peer: peer, node: node}:
+			case <-p.ctx.Done():
+				return
+			}
+		} else if node.Tag == "iq" {
 			response := waBinary.Node{Tag: "iq", Attrs: waBinary.Attrs{"id": node.Attrs["id"], "type": "result"}}
 			if node.AttrGetter().OptionalString("xmlns") == "encrypt" && node.AttrGetter().OptionalString("type") == "get" {
 				response.Content = []waBinary.Node{{Tag: "count", Attrs: waBinary.Attrs{"value": "100"}}}
