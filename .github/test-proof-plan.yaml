@@ -1010,7 +1010,7 @@ units:
       TestScenarioConstructionFieldlessStateBothStores: [sqlite, postgres]
       TestStandingPreparationVerifiesCompleteRootTreeBothStores: [sqlite/intact, sqlite/missing_sibling, sqlite/missing_fields, sqlite/foreign_parent, postgres/intact, postgres/missing_sibling, postgres/missing_fields, postgres/foreign_parent]
       TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores: [sqlite, postgres]
-      TestStandingKeyedAncestryRefusesBeforeMutationBothStores: [sqlite/., sqlite/parent, postgres/., postgres/parent]
+      TestA9KeyedStandingGenerationDoesNotConstructBothStores: [sqlite/., sqlite/parent, postgres/., postgres/parent]
       TestSelectedContractOrdinarySourceStatePresenceBothStores:
         - sqlite/absent
         - sqlite/zero
