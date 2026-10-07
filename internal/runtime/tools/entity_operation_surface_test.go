@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,15 +19,18 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 type operationSurfaceReader struct {
@@ -415,14 +419,34 @@ func TestEntityOperationSurfaceSchemaAndMCPParity(t *testing.T) {
 		t.Fatalf("generated schema closure: %v", errs)
 	}
 	inbound, _ := runtimebus.InboundEventFromContext(ctx)
-	allowed := map[string]struct{}{}
+	names := make([]string, 0, len(plain))
 	for name := range plain {
-		allowed[name] = struct{}{}
+		names = append(names, name)
 	}
-	turn := mcp.TurnContext{RunID: entityToolTestRunID, Actor: actor, Inbound: inbound, HasInbound: true, ForkSandboxAllowed: allowed}
+	planned, err := llm.CompileManagedCapabilityAdmission(actor, llm.ClaudeCLIProviderContract(), defs, exec.ToolCapabilitiesForActorInContext(ctx, actor, names, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorIdentity: actor.Identity, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "entity-operation-schema-parity",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent,
+			ExecutionAuthorityID: actor.ID, RunID: entityToolTestRunID, SessionID: uuid.NewString(), TurnOrdinal: 1,
+		},
+		Tools: planned,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := mcp.NewTurnContextRegistry(runtimetools.ActorFromContext)
+	registry.PutTurnContextForTest("operation-context", mcp.TurnContext{
+		RunID: entityToolTestRunID, Actor: actor, Inbound: inbound, HasInbound: true, CapabilitySurface: &surface,
+	})
+	defer registry.UnregisterTurnContext("operation-context")
 	gateway := mcp.NewGateway(exec, "operation-token", mcp.GatewayHooks{
 		WithActor: runtimetools.WithActor, WithInboundEvent: runtimebus.WithInboundEvent,
-		ResolveTurnContext: func(string) (mcp.TurnContext, bool) { return turn, true },
+		ResolveTurnContext: registry.ResolveTurnContext, ObserveCapabilityEvidence: registry.ObserveCapabilityEvidence,
+		ObserveCapabilityMismatch: registry.ObserveCapabilityMismatch,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":"schemas","method":"tools/list"}`)).WithContext(ctx)
 	req.Header.Set("Authorization", "Bearer operation-token")
@@ -440,6 +464,22 @@ func TestEntityOperationSurfaceSchemaAndMCPParity(t *testing.T) {
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &rpc); err != nil || rpc.Error != nil {
 		t.Fatalf("MCP tools/list: %s, %v", response.Body.String(), err)
+	}
+	observed, ok := registry.ResolveManagedCapabilitySurface("operation-context")
+	if !ok || observed.Validate() != nil {
+		t.Fatal("MCP listing lost the planned capability surface")
+	}
+	for _, tool := range observed.Tools {
+		if !strings.HasPrefix(tool.Name, "save_case_") {
+			continue
+		}
+		listed := slices.ContainsFunc(tool.Evidence, func(evidence managedcapabilities.DeliveryEvidence) bool {
+			return evidence.BindingKind == managedcapabilities.BindingMCPTool && evidence.Kind == "mcp_listed" && evidence.Status == managedcapabilities.EvidenceConfirmed
+		})
+		// Listing delivers schemas; it cannot invent provider-side visibility.
+		if !listed || tool.EffectiveCallable {
+			t.Fatalf("incorrect MCP listing evidence for %s: %+v", tool.Name, tool.Evidence)
+		}
 	}
 	matched := 0
 	for _, tool := range rpc.Result.Tools {
