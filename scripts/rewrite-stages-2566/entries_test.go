@@ -74,6 +74,22 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 		expected []entryGolden
 	}
 	fixtures := []generatedFixture{
+		{"numeric-scenario-overlay", func(t testing.TB) string {
+			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+			canonicalrouting.InstallNovelNumericScenarioLifecycle(t, root)
+			return root
+		}, []entryGolden{
+			{Flow: ".", Entry: "done", Order: []string{"done"}, Finals: []string{"done"}},
+			{Flow: "fulfillment", Entry: "pending", Order: []string{"pending", "done"}, Finals: []string{"done"}},
+		}},
+		{"authored-response-scenario-overlay", func(t testing.TB) string {
+			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+			canonicalrouting.InstallNovelAuthoredScenarioLifecycle(t, root)
+			return root
+		}, []entryGolden{
+			{Flow: ".", Entry: "active", Order: []string{"active", "done"}, Finals: []string{"done"}},
+			{Flow: "fulfillment", Entry: "pending", Order: []string{"pending", "done"}, Finals: []string{"done"}},
+		}},
 		{"stopped-readiness-source-replacement", func(t testing.TB) string {
 			root := canonicalrouting.CopyRootIngressLegacyTemplateTargetRoute(t)
 			canonicalrouting.RenameStoppedRunReadinessSource(t, root)
