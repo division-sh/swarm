@@ -13,6 +13,7 @@ Runtime entries are in `internal/runtime/runtime.go`; serve entries are in
 
 | Audited Body | Owner / Consumer Change | Execution Witness |
 | --- | --- | --- |
+| `Runtime.prepareStartLocked` | After grant and Manager admission, completes the exact prepared standing finalizers before source-scoped startup verification. A newly credential-enabled generation can be constructed after the initial snapshot; unrelated pending rows still need their own admission. The finalizer and unchanged readiness guard retain all source, attempt, and generation checks. This refresh changes only this body's hash. | `TestServedClockRetainsWithoutIngressCredentialsBothStores` (SQLite/PostgreSQL), `TestStartupTopologyRefusesUnfinalizedPostSnapshotConstruction`, `TestInterruptedStandingPreRunRequiresExplicitRecovery`, `TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStores` |
 | `Runtime.releaseAutonomousStartupProducers` | Startup restores only generic control families through `RestoreControlSchedules`. Declared instance clocks require their selected deployment owner; the recovery, continuation and scheduler-release ordering is unchanged. | `TestRuntimeControlRestorationDoesNotArmInstanceClocks`, `TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStores` |
 | `buildServeRuntimeBundleContext` | The existing composition selects clock binding only for deployment, never finite `LocalRun`. | `TestServedClockStartupAndFiniteHostFrontierBothStores`, `TestDeclaredClockBindingRequiresDeploymentSelection` |
 | `buildRuntimeComposition` | The existing standing reconciler receives deployment selection explicitly. | `TestServedClockStartupAndFiniteHostFrontierBothStores`, `TestFiniteStandingReconciliationCannotOwnDeclarationAbsence` |
@@ -32,4 +33,7 @@ must leave that variable absent and run the census plus all three
 The core failure remains a failed receipt, including its interrupted and
 unstarted units. Focused execution does not substitute for a complete core,
 lifecycle or hosted-CI run. #2411's exact E-owned dormant-sibling restart
-exception is unchanged and is not a CI waiver.
+exception was the historical disposition, not a CI waiver. The final #2526
+correction now repairs that restart ordering through the existing release
+owner; the original failed receipts remain retained and the same served
+reproducer must pass on both stores before this correction is qualified.

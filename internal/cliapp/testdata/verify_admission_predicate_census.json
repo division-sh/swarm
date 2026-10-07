@@ -1611,7 +1611,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "c0ce4a099390d78c0e4e2f6d81c880cbac6e582ca457b58d068c5e2bdae19cc0"
+    "body_sha256": "41457d9ef47038b3ad4536774d0a26ca06c742896965012d681e276f36febfb8"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartupLifecycleLocked",

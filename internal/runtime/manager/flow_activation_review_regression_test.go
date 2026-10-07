@@ -525,3 +525,42 @@ func TestInterruptedStandingPreRunRequiresExplicitRecovery(t *testing.T) {
 		t.Fatalf("explicit recovery did not admit interrupted successor: %v", err)
 	}
 }
+
+func TestStartupTopologyRefusesUnfinalizedPostSnapshotConstruction(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	bundle := testFlowBundle(t, "")
+	ctx := testAuthorActivityContext(context.Background())
+	initial := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	if err := activateFlowInstanceForTest(am, ctx, initial); err != nil {
+		t.Fatal(err)
+	}
+	startup, err := am.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestSourceArtifactFact, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unfinalized := testActivationRequest(bundle, "review", "inst-2", "ent-2", "review/inst-2")
+	plan, err := am.PrepareFlowInstanceActivation(ctx, unfinalized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := am.roles.FlowActivation.CommitFlowInstanceActivation(ctx, plan)
+	if err != nil || !committed.Acknowledged {
+		t.Fatalf("commit new construction: %+v err=%v", committed, err)
+	}
+	before, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, plan.Readiness.RunID, unfinalized.Instance.Route())
+	if err != nil || !found || !before.Pending() {
+		t.Fatalf("unfinalized construction: %+v found=%v err=%v", before, found, err)
+	}
+	if err := am.CompleteDynamicFlowRuntimeStartupTopology(ctx, startup); err == nil || !strings.Contains(err.Error(), "lacks pending authorization") {
+		t.Fatalf("post-snapshot construction bypassed its exact finalizer: %v", err)
+	}
+	after, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, plan.Readiness.RunID, unfinalized.Instance.Route())
+	if err != nil || !found || !reflect.DeepEqual(before, after) || bus.HasFlowInstanceRoute(testActivationFlowIdentity(unfinalized)) {
+		t.Fatalf("refusal changed unfinalized topology: before=%+v after=%+v found=%v err=%v", before, after, found, err)
+	}
+	if err := am.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+}

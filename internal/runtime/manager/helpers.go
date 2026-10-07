@@ -125,22 +125,6 @@ func FirstNonEmptyString(vals ...string) string {
 	return ""
 }
 
-func stringifyPromptTemplateValue(value any) string {
-	switch typed := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return strings.TrimSpace(typed)
-	case json.RawMessage:
-		return strings.TrimSpace(string(typed))
-	default:
-		if raw, err := json.MarshalIndent(value, "", "  "); err == nil {
-			return strings.TrimSpace(string(raw))
-		}
-		return strings.TrimSpace(fmt.Sprint(value))
-	}
-}
-
 func DeterministicOutputEventID(inbound events.Event, identity runtimeagentidentity.Identity, index int, out events.Event) (string, error) {
 	fingerprint, err := identity.Fingerprint()
 	if err != nil {
