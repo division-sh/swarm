@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -54,7 +55,27 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			node := pipelineSourceNode(t, pc.SemanticSource(), "validation", "w-node")
 			route := seedExactOnceEventDelivery(t, pc, ctx, evt, node)
 			ctx = withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, route)
-			seedConstructorUnitInstance(t, pc, runtimecorrelation.WithInboundEvent(ctx, evt), "validation")
+			initial := seedConstructorUnitInstance(t, pc, runtimecorrelation.WithInboundEvent(ctx, evt), "validation")
+			// Accept the event timer while the instance is still non-final. Final
+			// entry must preserve this work, not permit a new post-completion arm.
+			effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(testWorkflowInstanceRoute(initial.StorageRef), runtimeidentity.NormalizeEntityID(initial.EntityID), evt, "new", "new", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared, err := pc.prepareWorkflowLifecycleMutation(ctx, testRunScopedWorkflowInstanceFromContext(ctx, initial.StorageRef), &initial, []runtimeworkflowlifecycle.Effect{effect}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
+				_, err := commitPipelineTestWorkflowLifecycle(txctx, pc.workflowStore, prepared.Commit)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := pc.workflowStore.listWorkflowTimerActivations(ctx, runtimecorrelation.RunIDFromContext(ctx), initial.EntityID, true)
+			if err != nil || len(accepted) != 1 {
+				t.Fatalf("pre-final accepted timers = %#v, err=%v", accepted, err)
+			}
 			result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, node, exactOnceCreateEntityHandler(), workflowTriggerContext{
 				Event:           evt,
 				HandlerEventKey: "thing.created",
@@ -92,6 +113,9 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			}
 			if len(activations) != 1 || strings.TrimSpace(activations[0].EventType) != "validation/timer.check" {
 				t.Fatalf("canonical workflow timers = %#v, want one validation/timer.check activation", activations)
+			}
+			if activations[0].Ref != accepted[0].Ref {
+				t.Fatal("final entry replaced the already accepted timer")
 			}
 			if got := strings.TrimSpace(instance.CurrentState); got != "done" {
 				t.Fatalf("current state = %q, want done", got)

@@ -2733,7 +2733,7 @@ func workflowTimerFirstDeclarationRevisionBundle(t *testing.T, revised bool) *ru
 	t.Helper()
 	schema := "name: workflow-timer-first-revision\nstages:\n  waiting: {}\n"
 	if revised {
-		schema += "    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
+		schema = "name: workflow-timer-first-revision\nstages:\n  waiting:\n    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   schema,

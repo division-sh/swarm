@@ -9,38 +9,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 )
 
 func TestReviewer2566FeedOnlyRejectsNestedServiceBothStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
-		root := t.TempDir()
-		files := map[string]string{
-			"schema.yaml":            "stages: {ready: {}, done: {final: true}}\npins:\n  inputs: [start.requested]\nconnect:\n  - {event: work.requested, from: producer, to: worker, resolution: create}\n  - {event: work.safe, from: producer, to: safe, resolution: create}\n",
-			"events.yaml":            "start.requested:\n",
-			"nodes.yaml":             "starter:\n  execution_type: system_node\n  event_handlers:\n    start.requested: {advances_to: done}\n",
-			"producer/schema.yaml":   "instance: producer_id\nstages: {done: {final: true}}\npins:\n  outputs: [work.requested, work.safe]\n",
-			"producer/entities.yaml": "Producer:\n  producer_id: {type: text, _unused_reason: dormant identity}\n",
-			"producer/events.yaml":   "work.requested:\n  worker_id: text\nwork.safe:\n  worker_id: text\n",
-			"worker/schema.yaml":     "instance: worker_id\nstages: {active: {}}\npins:\n  inputs: [work.requested]\n",
-			"worker/entities.yaml":   "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-			"worker/nodes.yaml":      "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
-			"safe/schema.yaml":       "instance: worker_id\nstages: {done: {final: true}}\npins:\n  inputs: [work.safe]\n",
-			"safe/entities.yaml":     "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-			"safe/nodes.yaml":        "worker:\n  execution_type: system_node\n  event_handlers:\n    work.safe: {}\n",
-		}
-		for name, body := range files {
-			path := filepath.Join(root, name)
-			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
+		root := canonicalrouting.CopyFiniteAPIServiceFeed(t)
 		repo := canonicalrouting.RepoRoot(t)
 		bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 		if err != nil {

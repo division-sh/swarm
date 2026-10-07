@@ -128,7 +128,9 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 		if flowID != "." {
 			child, known := bundle.FlowSchemas[flowID]
 			if !known {
-				return ExecutionResult{}, fmt.Errorf("isolated handler fixture has no flow %s", flowID)
+				// Missing-source tests must reach the executor's own rejection,
+				// without a fixture graph inventing membership for that flow.
+				return e.Execute(ctx, req)
 			}
 			schema = &child
 		}

@@ -305,6 +305,10 @@ func TestSemanticFixtureCannotInferStageMembership(t *testing.T) {
 			node := testFlowExecutableNode(t, flowID, "worker")
 			original := stubSource()
 			source := sourceWithFixtureStages(original, flowID, "ready", "ready")
+			declared, found := source.FlowSchemaByID(flowID)
+			if !found || !reflect.DeepEqual(declared.LoweredStates(), []string{"ready"}) {
+				t.Fatal("fixture source did not declare its sole stage")
+			}
 			exec, recorder := transitionTestExecutor(t, source)
 			req := transitionTestRequest(t, node, "work.requested", contracts.SystemNodeEventHandler{AdvancesTo: "undeclared"}, "ready")
 			req.ExecutionFlowID = identity.NormalizeFlowID(flowID)
@@ -312,7 +316,8 @@ func TestSemanticFixtureCannotInferStageMembership(t *testing.T) {
 			if !errors.Is(err, ErrInvalidTransition) || len(recorder.mutations) != 0 || result.StateMutation.Transition != nil {
 				t.Fatalf("isolated fixture invented target membership: result=%#v mutations=%d err=%v", result, len(recorder.mutations), err)
 			}
-			if _, exists := semanticview.WorkflowStageTopology(source, flowID); exists || !reflect.DeepEqual(source.FlowStates(flowID), []string{"ready"}) {
+			unchanged, found := source.FlowSchemaByID(flowID)
+			if _, exists := semanticview.WorkflowStageTopology(source, flowID); exists || !found || !reflect.DeepEqual(unchanged, declared) {
 				t.Fatal("isolated execution mutated its shared fixture source")
 			}
 			if len(original.FlowStates(flowID)) != 0 {

@@ -1,5 +1,39 @@
 # #2566 Early Review Repairs
 
+## Core 497985965 Integration Repair
+
+Core at `497985965d25882531d5c2932b79258675fda404` completed on server2:
+21 of 22 units passed; `broad-01` failed. Build and vet passed both on that
+candidate and independently checked `origin/master@06018d2e1`. These were not
+compile failures. The same routing-owner and proof-partition defects reproduced
+in the local repository-wide census. The failed core receipt remains evidence,
+not qualification of the repaired head.
+
+| Failure family | Repair / exact preservation proof |
+| --- | --- |
+| Complete run-start routing sources authored outside the closed fixture owner | Moved the five API/runstart consumers to named `canonicalrouting.CopyFinite*` construction recipes. `TestCanonicalRoutingRepositoryUsesClosedConstructionAPI`, `TestFiniteStart*`, `TestFiniteRunStart*`, `TestDeploymentRunStartFeedOnlyAcrossSelectedStores`, and both reviewer feed witnesses preserve real loading, exact routes, both stores, replay, and refusal-before-effects assertions. No whitelist change. |
+| Reporter proof absent from the original late partition/envelope oracle | The oracle now includes `TestIssue2566ReporterFiniteFixtureCanCloseBothStores` and its sqlite/postgres children, matching its existing actual policy owner. `TestServeappLateSplitRetainsProofEnvelopes` and `TestServeappLateSplitPreservesOriginalRootPartition` preserve exact once-only selection. No policy, budget, count, timeout, or environment change. |
+| Engine fixture rejected missing flow before the production rejection boundary | An absent declared flow is left absent and passed to `Executor.Execute`; no topology is invented. Original ambiguous-handler, accumulator, and missing-carrier rejection tests retain their assertions. |
+| Stage-fixture immutability oracle demanded an invalid raw-schema fallback | `TestSemanticFixtureCannotInferStageMembership` now checks the explicit declaration before execution and exact schema equality plus absent compiled topology after refusal; the original source remains untouched and no target is inferred. |
+| Manager value-copied fixture tree disagreed with constructor schemas/parents | The existing fixture preparation synchronizes its declared schemas, exact parent pointers, and ByID references before compilation. Its nested container is explicitly declared. All originally failing readiness, ownership, recovery, retirement and compiled-initial roots retain their assertions. Hostile mutations after compilation remain hostile. |
+| Exact-once test attempted its first timer activation after final entry | Accept the original event-anchored timer through the existing lifecycle owner while still in `new`, before executing the handler. `TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations` retains every event/outbox/gate/field-mutation assertion and additionally proves the identical activation reference survives `done` on both stores. This is component-fixture setup, not a new production arm or selected-store construction proof. |
+| Revised timer generator attached nested YAML to `waiting: {}` | The revised source declares `waiting:` with its timer child; the timer-free source still declares `waiting: {}`. `TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeOnBothStores` preserves first-revision, runtime-mode, restart and both-store assertions. |
+| Pin-rewrite untouched-section oracle disagreed with its input | Its lifecycle section uses the current valid `idle: {}` spelling on both sides. `TestRewriteRetainsCommentsOnUntouchedSections` still proves that the pins rewrite changes neither unrelated data nor comments. |
+
+The local full census and the managed reproduction of all 74 previously failing
+roots pass after these repairs. The committed rewrite output was refreshed while
+retaining all 553 independently reviewed entry decisions; `-prove` still replays
+417 exact files and is byte-idempotent. No ratchet/ceiling increase, production
+compatibility seam, alternate owner, or final-stage authorization exemption is
+introduced. Core, lifecycle and named supplements must qualify the fixed head
+after an explicit server2 handoff; this repair record does not claim they passed.
+The extra combined race/count-three command passed its API, runstart and
+testplanning packages but timed out in the repository-wide routing AST/type
+inventory at its ad-hoc three-minute package limit. The stack remains in Go's
+package importer; no assertion failed. The full non-race census and the managed
+74-root reproduction both pass that guard. The timed-out extra is retained as a
+failed receipt, not reported green; no supported workload limit is changed.
+
 Supersedes the incomplete consumer/proof inventory at review pin
 `8781de3d251227f4b3db233a8c37802f61c98b67`. Binding Gate D6019841561 and
 review6024587950 remain unchanged. This is checkpoint evidence, not the final

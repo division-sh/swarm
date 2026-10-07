@@ -1878,6 +1878,7 @@ func testNestedFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"child": {},
 			"grandchild": {
 				Instance: mustManagerTemplateField(t, "instance_key"),
 				Pins: runtimecontracts.FlowPins{
@@ -1940,9 +1941,37 @@ func loadFlowActivationEntityContracts(
 
 func compileFlowActivationFixture(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
+	prepareFlowActivationFixtureTree(bundle)
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("compile final flow activation declarations: %v", err)
 	}
+}
+
+// Reconcile the fixture's value-copied tree with its final declarations before
+// compilation. Tests that corrupt a compiled source do so after this boundary.
+func prepareFlowActivationFixtureTree(bundle *runtimecontracts.WorkflowContractBundle) {
+	if bundle.FlowTree.Root == nil {
+		return
+	}
+	if bundle.RootSchema == nil {
+		bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{}
+	}
+	bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{}
+	var index func(*runtimecontracts.FlowContractView, *runtimecontracts.FlowContractView)
+	index = func(view, parent *runtimecontracts.FlowContractView) {
+		view.Parent = parent
+		if parent == nil {
+			view.Paths.FlowPath = "."
+			view.Schema = *bundle.RootSchema
+		} else {
+			view.Schema = bundle.FlowSchemas[view.Paths.FlowPath]
+		}
+		bundle.FlowTree.ByID[view.Paths.FlowPath] = view
+		for i := range view.Children {
+			index(&view.Children[i], view)
+		}
+	}
+	index(bundle.FlowTree.Root, nil)
 }
 
 func mustManagerTemplateField(t testing.TB, field string) runtimecontracts.TemplateInstanceField {
@@ -2004,6 +2033,7 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 	}
+	prepareFlowActivationFixtureTree(bundle)
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(fmt.Sprintf("compile static flow test semantics: %v", err))
 	}
