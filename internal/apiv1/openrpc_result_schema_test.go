@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/google/uuid"
 )
 
@@ -55,6 +56,68 @@ func TestChannelOnboardingCheckpointPhasesMatchOpenRPC(t *testing.T) {
 				validator.validateMethodResult(t, methodName, result)
 			})
 		}
+	}
+}
+
+func TestChannelOnboardingCapabilitiesMatchStrictOpenRPC(t *testing.T) {
+	root := repoRoot(t)
+	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
+	validator := newOpenRPCResultSchemaValidator(t, openRPC)
+	for _, methodName := range []string{"channel.onboarding_start", "channel.onboarding_get", "channel.onboarding_retry"} {
+		t.Run(methodName, func(t *testing.T) {
+			result := successfulOperatorChannelRuntimeResult(methodName).(map[string]any)
+			candidate := result["candidate"].(map[string]any)
+			want := packs.ChannelCapabilityVector{
+				CardRender: true, ReplyToReference: true, ActionsAsButtons: true,
+				ActionsAsText: true, Edit: true, Acknowledgment: true, InboxListing: true,
+			}
+			if !jsonValueEqual(candidate["capabilities"], want) {
+				t.Fatalf("candidate capabilities differ from canonical vector: %s", compactJSON(candidate["capabilities"]))
+			}
+			validator.validateMethodResult(t, methodName, result)
+			t.Run("text_reply", func(t *testing.T) {
+				result := successfulOperatorChannelRuntimeResult(methodName).(map[string]any)
+				capabilities := result["candidate"].(map[string]any)["capabilities"].(map[string]any)
+				for _, optional := range []packs.ChannelCapability{packs.ChannelCapabilityActionsAsButtons, packs.ChannelCapabilityEdit, packs.ChannelCapabilityAcknowledgment} {
+					capabilities[string(optional)] = false
+				}
+				validator.validateMethodResult(t, methodName, result)
+			})
+
+			path := "$." + methodName + ".result.candidate.capabilities"
+			type capabilityCase struct {
+				name, field, want string
+				remove            bool
+				value             any
+			}
+			cases := []capabilityCase{
+				{name: "missing_vector", want: path + " is required"},
+				{name: "unknown_field", field: "unexpected", value: true, want: path + ".unexpected is not allowed"},
+			}
+			for _, capability := range packs.ChannelCapabilityNames() {
+				field := string(capability)
+				cases = append(cases,
+					capabilityCase{name: "missing_" + field, field: field, remove: true, want: path + "." + field + " is required"},
+					capabilityCase{name: "invalid_" + field, field: field, value: "true", want: path + "." + field + " must be boolean, got string"})
+			}
+			for _, test := range cases {
+				t.Run(test.name, func(t *testing.T) {
+					result := successfulOperatorChannelRuntimeResult(methodName).(map[string]any)
+					candidate := result["candidate"].(map[string]any)
+					if test.field == "" {
+						delete(candidate, "capabilities")
+					} else if test.remove {
+						delete(candidate["capabilities"].(map[string]any), test.field)
+					} else {
+						candidate["capabilities"].(map[string]any)[test.field] = test.value
+					}
+					err := validator.validateValue("$."+methodName+".result", validator.methods[methodName].Result.Schema, result)
+					if err == nil || err.Error() != test.want {
+						t.Fatalf("invalid capabilities error = %v, want %q", err, test.want)
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -379,6 +442,10 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 		}
 		candidate := map[string]any{
 			"provider": "telegram", "interface": identity, "coordinate": coordinate,
+			"capabilities": map[string]any{
+				"card_render": true, "reply_to_reference": true, "actions_as_buttons": true,
+				"actions_as_text": true, "edit": true, "acknowledgment": true, "inbox_listing": true,
+			},
 			"target": map[string]any{
 				"selector": "ingress:support:telegram", "service_id": "00000000-0000-0000-0000-000000000807",
 				"flow_path": "support", "flow_id": "telegram", "alias": "telegram", "provider": "telegram",
