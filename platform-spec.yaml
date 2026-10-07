@@ -11221,6 +11221,17 @@ tool_model:
         state before Swarm's incoming capture; pre-capture redelivery and decryption-failure acknowledgments are not
         claimed durably recoverable. This limitation never grants a successful Swarm capture acknowledgment. The
         bounded incoming-only capture owner must prove its separate commit, publication and acknowledgment boundaries.
+      session_incoming_capture: >
+        WhatsApp incoming capture commits exact payload bytes together with the original session admission,
+        connection occurrence, source identity, onboarding responsibility, principal and binding revision before
+        reporting its local successful-capture status. A repeated provider event may retain its original occurrence;
+        different payload or scope evidence conflicts rather than overwriting history. Account, conversation,
+        provider event and message/edit/revoke kind are distinct identity dimensions. Captured work survives ordinary
+        private-state reopen and is never reinterpreted using a replacement account, source, principal or binding.
+        Limits are one MiB per event, 1024 pending events and 16 MiB total pending payload per connection; overflow
+        preserves existing evidence and refuses the new capture. Corruption and I/O failures are non-success.
+        Provider transport acknowledgment, local capture commit and selected-store atomic publication remain
+        separate boundaries; a local capture fixture alone does not establish supported end-to-end delivery.
       text_reply_controls: >
         Without buttons, semantic text controls use the finite text_reply_controls schema (16 controls per page,
         64 runes per label, 128 runes per private control token). These are neutral render limits, not invented provider
