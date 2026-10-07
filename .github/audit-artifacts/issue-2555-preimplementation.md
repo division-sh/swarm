@@ -1384,3 +1384,20 @@ rerun the total-manifest/managed-delegation controls, then broaden the local
 selection to manifest/ownership families so these semantic censuses are not
 missed by a name-only Census/Inventory/Registry sweep. The previous415/78
 receipts remain valid finite proof, not evidence this separate guard ran.
+
+### Rebase Integration: merged #2526 at92cb596c3
+
+Preserve master's declared-clock public roots and required SQLite/PostgreSQL
+children alongside this PR's compiled-workspace roots. Regenerate the
+admission predicate artifact from combined source; do not hand-merge hashes.
+The merged cleanup deleted the previously unused entity-tool UUID helper.
+This branch's selected source-outcome fixture must consume the existing exact
+selected-fork identity validator for run/event/entity, not restore that duplicate.
+Its SQL, native mutation boundary, source/time checks and outcome assertions
+remain unchanged. The pure coordinate negative control refuses absent, nil,
+malformed and noncanonical identities before source/store admission. No new
+port, raw test-SQL site, baseline, guard exception or product behavior.
+Rerun the complete executable census/manifest/inventory/ownership/registry
+selection and finite structural guard unit at the clean signed rebased head.
+Do not push or alter the golden context pending the user's separate ruling;
+previous9d receipts retain their original SHA and are not rebased-head proof.

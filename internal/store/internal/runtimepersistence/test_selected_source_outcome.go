@@ -21,11 +21,10 @@ type SelectedSourceOutcomeFixture struct {
 // These two exact predecessor facts deliberately must not suppress fork work.
 // Caller SQL and transaction authority never cross the fixture boundary.
 func SeedSelectedSourceOutcomeForTest(ctx context.Context, selected any, fixture SelectedSourceOutcomeFixture) error {
-	if err := validateEntityToolStorageIdentity(fixture.RunID, fixture.EventID); err != nil {
-		return err
-	}
-	if err := validateSelectedForkStorageIdentity(fixture.EntityID); err != nil {
-		return err
+	for _, identity := range []string{fixture.RunID, fixture.EventID, fixture.EntityID} {
+		if err := validateSelectedForkStorageIdentity(identity); err != nil {
+			return err
+		}
 	}
 	source, ok := correlation.SourceArtifactFactFromContext(ctx)
 	if !ok || source.BundleHash() == "" || fixture.CreatedAt.IsZero() {
