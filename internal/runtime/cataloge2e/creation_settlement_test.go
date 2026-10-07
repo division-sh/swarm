@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 )
 
@@ -97,6 +98,20 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 							}
 						}
 						if err := h.publishRuntimeEventResultForStep(step, catalogRuntimePublishTimeout, true); err != nil {
+							var reader operatorread.ObservabilityReader = h.pg
+							if h.sqlite != nil {
+								reader = h.sqlite
+							}
+							logs, readErr := reader.ListOperatorRuntimeLogs(h.ctx, operatorread.OperatorRuntimeLogListOptions{RunID: catalogRuntimeRunID, Limit: 30})
+							t.Logf("creation event=%s diagnostics error=%v", step.Event, readErr)
+							for _, log := range logs.Logs {
+								t.Logf("creation diagnostic: %+v", log)
+							}
+							observed, observedErr := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+							t.Logf("creation event readback error=%v", observedErr)
+							for id, event := range observed {
+								t.Logf("creation event id=%s type=%s deliveries=%+v no_delivery=%+v dead_letters=%+v", id, event.EventName, event.Deliveries, event.NoDelivery, event.DeadLetters)
+							}
 							t.Fatal(err)
 						}
 					}
