@@ -1,0 +1,6 @@
+observer:
+  execution_type: system_node
+  subscribes_to: [poll.tick]
+  event_handlers:
+    poll.tick:
+      guard: {id: admit, check: true}

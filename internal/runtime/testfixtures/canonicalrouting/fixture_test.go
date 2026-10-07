@@ -124,6 +124,23 @@ func TestPublicationSitesLoadAndVerify(t *testing.T) {
 	}
 }
 
+func TestClockDeploymentFixturesLoadAndVerify(t *testing.T) {
+	Prove(t, ArtifactID("internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment"))
+	for _, variant := range []string{"nested", "finite"} {
+		t.Run(variant, func(t *testing.T) {
+			repo := RepoRoot(t)
+			root := filepath.Join(repo, "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment", variant)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if findings := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
+				t.Fatalf("clock deployment hard invalidities: %#v", findings)
+			}
+		})
+	}
+}
+
 func TestNodeIdentityFixtureLoadsAndVerifies(t *testing.T) {
 	Prove(t, ArtifactID("internal/releasee2e/testdata/node_identity"))
 	repo := RepoRoot(t)

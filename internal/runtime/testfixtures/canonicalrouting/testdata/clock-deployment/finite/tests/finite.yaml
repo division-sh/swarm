@@ -1,0 +1,8 @@
+name: finite-clock-boundary
+steps:
+  - publish: start.requested
+    payload: {}
+expect:
+  events:
+    exact: [start.requested]
+  no_dead_letters: true
