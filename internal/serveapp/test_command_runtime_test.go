@@ -674,33 +674,7 @@ func runServedDerivedScenarioProof(t *testing.T, backend servedparity.Backend, a
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 	if authored {
-		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tools.yaml"), `
-scenario.send:
-  description: Authored response materialization proof.
-  category: provider_connector
-  credentials: [scenario_mock_secret]
-  handler_type: http
-  effect_class: non_idempotent_write
-  http: {method: POST, url: https://example.invalid/send}
-  output_schema:
-    type: object
-    required: [marker]
-    properties: {marker: {type: string}}
-  response_success: {kind: http_status_2xx}
-`)
-		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "fulfillment", "nodes.yaml"), `
-complete-request:
-  execution_type: system_node
-  subscribes_to: [fulfillment.requested]
-  event_handlers:
-    fulfillment.requested:
-      activity: {id: send, tool: scenario.send, input: {}}
-response:
-  execution_type: system_node
-  subscribes_to: [send.succeeded]
-  event_handlers:
-    send.succeeded: {}
-`)
+		canonicalrouting.InstallNovelAuthoredScenarioLifecycle(t, sourceRoot)
 		writeWorkflowValidationFixtureFile(t, filepath.Join(sourceRoot, "tests", "authored.yaml"), `
 name: authored-stage-profile
 seed: recorded
@@ -889,6 +863,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 		if !found || !responseFound {
 			t.Fatalf("%s authored payload/response absent from public trace: %#v", backend, trace)
 		}
+		closeServedScenarioFixtureRun(t, endpoint, bundleHash, beforeRestart.runID)
 		stdout.Reset()
 		stderr.Reset()
 		if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
@@ -906,6 +881,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 				continue
 			}
 			requireServedScenarioFixtureReadback(t, endpoint, run.RunID)
+			closeServedScenarioFixtureRun(t, endpoint, bundleHash, run.RunID)
 			fixtureRuns++
 		}
 		if fixtureRuns != 1 {

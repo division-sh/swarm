@@ -48,6 +48,16 @@ func TestRewrite2566FiniteInitiationSourcesHaveCompleteClosure(t *testing.T) {
 		}},
 		{"served-root-ingress", canonicalrouting.CopyRootIngressServedFollowUp},
 		{"novel-scenario-root-input", canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput},
+		{"numeric-scenario-overlay", func(t testing.TB) string {
+			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+			canonicalrouting.InstallNovelNumericScenarioLifecycle(t, root)
+			return root
+		}},
+		{"authored-response-scenario-overlay", func(t testing.TB) string {
+			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+			canonicalrouting.InstallNovelAuthoredScenarioLifecycle(t, root)
+			return root
+		}},
 		{"numeric-ingress", canonicalrouting.CopySemanticNumericIngress},
 		{"deployment-run-start", canonicalrouting.CopyDeploymentRunStart},
 	}
@@ -99,6 +109,30 @@ func TestRewrite2566FiniteReleaseRootsDoNotCompleteTheirWorkers(t *testing.T) {
 			if !ok || err != nil || entry.IsFinal() || worker.InitialStage != fixture.entry || !reflect.DeepEqual(worker.FinalStageIDs(), []string{fixture.final}) {
 				t.Fatalf("ended container incorrectly ended its worker: %+v / %v", worker, err)
 			}
+		})
+	}
+}
+
+func TestRewrite2566ScenarioOverlaysRejectMissingCompletion(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	for _, authored := range []bool{false, true} {
+		name := "numeric"
+		if authored {
+			name = "authored"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := canonicalrouting.CopyNovelScenarioMissingCompletion(t, authored)
+			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			findings := bootverify.Run(context.Background(), semanticview.Wrap(bundle), bootverify.Options{Purpose: bootverify.StructuralValidation}).HardInvalidities()
+			for _, finding := range findings {
+				if finding.CheckID == "semantic_drift_unreachable_state" && finding.Location == "fulfillment" && strings.Contains(finding.Message, "done") {
+					return
+				}
+			}
+			t.Fatalf("post-construction overlay lost completion without source refusal: %+v", findings)
 		})
 	}
 }
