@@ -140,3 +140,17 @@ func TestWhatsAppDirectQRJoinedOccurrenceKeepsAdmittedCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWhatsAppDirectQRRejectsPairedDeviceBeforeConnect(t *testing.T) {
+	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
+	device := newSDKDeviceFixture(t, container)
+	scope := pairingScopeFixture(t)
+	o, err := newClientOccurrence(context.Background(), scope.ConnectionID, scope.OccurrenceID, device, container.LIDMap, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.join(context.Background())
+	if q, err := o.bindPairing(scope); !errors.Is(err, errPairingScope) || q != nil || o.started {
+		t.Fatal("already-paired private state created a bootstrap QR occurrence")
+	}
+}
