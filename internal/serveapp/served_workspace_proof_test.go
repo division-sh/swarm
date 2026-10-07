@@ -52,6 +52,21 @@ type servedWorkspaceProofRuntime struct {
 	Restart     func() servedWorkspaceProofRuntime
 }
 
+func configureHostWorkspaceProofLifecycle(t *testing.T) {
+	t.Helper()
+	previous := cliapp.ConfiguredWorkspaceLifecycleForServe
+	root := t.TempDir()
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, _ cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		owner := workspace.NewHostManager()
+		cfg := workspace.DefaultHostConfig()
+		cfg.WorkspaceRoot, cfg.SourceProjection = root, projection
+		owner.SetConfig(cfg)
+		owner.SetSemanticSource(source)
+		return owner, nil
+	}
+	t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previous })
+}
+
 func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
 	t.Helper()
 	if len(hooks) > 1 {
@@ -73,20 +88,15 @@ func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backen
 		return projection
 	}
 	t.Cleanup(func() { projectRuntimePersistenceForServe = previousProjection })
-	previousWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-	root := t.TempDir()
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, _ cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
-		if factory != nil {
+	if factory == nil {
+		configureHostWorkspaceProofLifecycle(t)
+	} else {
+		previousWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, _ cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return factory(projection, source)
 		}
-		owner := workspace.NewHostManager()
-		cfg := workspace.DefaultHostConfig()
-		cfg.WorkspaceRoot, cfg.SourceProjection = root, projection
-		owner.SetConfig(cfg)
-		owner.SetSemanticSource(source)
-		return owner, nil
+		t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previousWorkspace })
 	}
-	t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previousWorkspace })
 	opts := cliapp.ServeOptions{
 		SourceRoot: sourceRoot, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		WorkspaceBackend: targetBackend, WorkspaceBackendSet: targetBackend != "",
