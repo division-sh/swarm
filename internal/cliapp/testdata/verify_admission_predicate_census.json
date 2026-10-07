@@ -3165,7 +3165,7 @@
     "owner": "internal/serveapp/main.go::serveReadyStandingIngress",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "298efa53f7b3edaa7cf748bfcf5bf9e183256662785952192b2e200882217da9"
+    "body_sha256": "95b5fe1f11822a17ba52954bab9ee73556310b62739ec3abdc341ccbe6a46356"
   },
   {
     "owner": "internal/serveapp/main.go::serveRuntimeBundle.serveIdentityDetail",
