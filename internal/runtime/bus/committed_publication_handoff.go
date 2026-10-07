@@ -49,7 +49,7 @@ func (d engineDispatcher) DispatchCommittedPublication(ctx context.Context, valu
 	// The same selected-store decision boundary used by finite fan-out makes
 	// the exact routes executable. The coordinator owns their bounded workers,
 	// independent receiver lifetimes, retry, restart recovery and shutdown join.
-	if err := operation.publicationClaim.Settle(ctx, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+	if _, err := operation.publicationClaim.Settle(ctx, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		return err
 	}
 	d.bus.clearPendingInternalDeliveryRoutes(operation.intent.Event.ID())
