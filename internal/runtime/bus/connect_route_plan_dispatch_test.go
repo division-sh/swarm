@@ -2930,7 +2930,23 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 				source = connectRoutePlanCarriedKeyResolutionSource(t, tc.mode)
 			}
 			plan := mustInstanceKeyConnectRoutePlan(t, source)
-			owner := newTemplateInstanceLifecycleOwner(source, nil, nil)
+			root := ConstructedFlowInstanceIdentityFixture(source, ".", busInternalTestRunID, busInternalTestRunID)
+			producer := ConstructedFlowInstanceIdentityFixture(source, "producer", "", busInternalTestRunID)
+			keyMaterial, failure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, runtimepinrouting.AdmitConnectRouteMatchValues(values))
+			if !failure.Empty() {
+				t.Fatal(failure)
+			}
+			instance := ConstructedFlowInstanceIdentityFixture(source, plan.ReceiverEndpoint().Readback().FlowID, templateInstanceLifecycleInstanceID(plan, keyMaterial.Keys), busInternalTestRunID)
+			descriptors[0].FlowInstance, descriptors[0].EntityID = instance.InstancePath, instance.EntityID
+			sourceRoute, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: producer.TemplateID, FlowInstance: producer.InstancePath, EntityID: producer.EntityID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			evt = eventtest.ExistingRunRootIngressWithRoutingSource(evt.ID(), evt.Type(), "", "", evt.Payload(), 0, busInternalTestRunID, events.EventEnvelope{}, sourceRoute, evt.CreatedAt())
+			table := &RouteTable{instanceOwners: map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance{
+				testRunScopedFlowRoute(root.Route()): root, testRunScopedFlowRoute(producer.Route()): producer,
+			}}
+			owner := newTemplateInstanceLifecycleOwner(source, table, nil)
 			materialization, decision, handled, err := owner.Materialize(context.Background(), evt, plan, values, descriptors)
 			if err != nil {
 				t.Fatalf("Materialize: %v", err)
@@ -2955,17 +2971,23 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 	if !ok {
 		t.Fatal("canonical resolution source does not expose a bundle")
 	}
-	instanceContract, err := plan.ReceiverTemplate(bundle)
+	_, err := plan.ReceiverTemplate(bundle)
 	if err != nil {
 		t.Fatalf("ResolveFlowTemplateInstance: %v", err)
 	}
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	owner := newTemplateInstanceLifecycleOwner(source, nil, nil)
-	request, decision, err := owner.activationRequest(evt, plan, instanceContract, []runtimecontracts.TemplateInstanceKeyValue{{
+	keys := []runtimecontracts.TemplateInstanceKeyValue{{
 		Field: plan.InstanceKey().Field(),
 		Value: "acct-1",
-	}})
+	}}
+	root := runtimeflowidentity.Stored(source, ".", evt.RunID(), evt.RunID(), evt.RunID(), "")
+	instance, err := runtimeflowidentity.KeyedChild(source, root, plan.ReceiverEndpoint().Readback().FlowID, templateInstanceLifecycleInstanceID(plan, keys))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, decision, err := owner.activationRequest(evt, plan, instance, keys)
 	if err != nil {
 		t.Fatalf("activationRequest failure = %v", err)
 	}

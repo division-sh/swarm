@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -41,7 +42,12 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 				}
 			}
 			keys := []runtimecontracts.TemplateInstanceKeyValue{{Field: mustBusTemplateInstanceField(t, "account_id"), Value: "acct-1"}}
-			instance := plan.DeriveReceiverIdentity(source, templateInstanceLifecycleInstanceID(plan, keys))
+			root := ConstructedFlowInstanceIdentityFixture(source, ".", busInternalTestRunID, busInternalTestRunID)
+			producer := ConstructedFlowInstanceIdentityFixture(source, "producer", "", busInternalTestRunID)
+			instance, err := flowidentity.KeyedChild(source, root, "account", templateInstanceLifecycleInstanceID(plan, keys))
+			if err != nil {
+				t.Fatal(err)
+			}
 			store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
 			if tc.descriptor {
 				store.flowInstances = []ActiveFlowInstanceDescriptor{{InstanceID: instance.InstanceID, EntityID: instance.EntityID, FlowInstance: instance.InstancePath, FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}}}
@@ -52,6 +58,11 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 				t.Fatal(err)
 			}
 			store.bus = bus
+			for _, construction := range []flowidentity.Instance{root, producer} {
+				if err := bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(construction.Route()), Instance: construction}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if tc.reuse {
 				store.setTargetOwnerRoutes(plan.ReceiverRoute(instance.InstancePath, instance.EntityID))
 				store.workflowInstances = []runtimepipeline.WorkflowInstance{{
@@ -59,12 +70,12 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 					StorageRef: instance.InstancePath, EntityType: "account_state", CurrentState: "active", Status: "active",
 					Fields: map[string]any{"account_id": "acct-1"},
 				}}
-				if err := bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instance.Route())}); err != nil {
+				if err := bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instance.Route()), Instance: instance}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			eventID := eventtest.UUID("initialize-" + tc.name)
-			event := connectRoutePlanStaticProducerEvent(eventID, events.EventType("producer/account.ready"), "", "", json.RawMessage(tc.payload), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+			event := connectRoutePlanStaticProducerEvent(eventID, events.EventType("producer/account.ready"), "", "", json.RawMessage(tc.payload), 0, busInternalTestRunID, "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: producer.TemplateID, FlowInstance: producer.InstancePath, EntityID: producer.EntityID}}, time.Now().UTC())
 			preview, err := bus.CheckPublishRecipientPlan(context.Background(), event)
 			if tc.invalid {
 				if err == nil && preview.TargetFailure == "" {

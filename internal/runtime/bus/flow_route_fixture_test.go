@@ -24,10 +24,9 @@ func ConstructedFlowInstanceIdentityFixture(source semanticview.Source, flowID, 
 	if source == nil {
 		return runtimeflowidentity.Instance{}
 	}
-	instance := runtimeflowidentity.Derive(source, flowID, instanceID)
 	schema, found := source.FlowSchemaByID(flowID)
-	if !found || !schema.Instance.Empty() {
-		return instance
+	if !found {
+		return runtimeflowidentity.Instance{}
 	}
 	if flowID == semanticview.RootExecutionFlowID(source) {
 		return runtimeflowidentity.Stored(source, flowID, runID, runID, runtimeflowidentity.EntityID(runID), "")
@@ -41,7 +40,13 @@ func ConstructedFlowInstanceIdentityFixture(source semanticview.Source, flowID, 
 		return runtimeflowidentity.Instance{}
 	}
 	parent := ConstructedFlowInstanceIdentityFixture(source, view.Parent.Paths.FlowPath, "", runID)
-	child, err := runtimeflowidentity.KeylessChild(source, parent, flowID)
+	var child runtimeflowidentity.Instance
+	var err error
+	if schema.Instance.Empty() {
+		child, err = runtimeflowidentity.KeylessChild(source, parent, flowID)
+	} else {
+		child, err = runtimeflowidentity.KeyedChild(source, parent, flowID, instanceID)
+	}
 	if err != nil {
 		return runtimeflowidentity.Instance{}
 	}

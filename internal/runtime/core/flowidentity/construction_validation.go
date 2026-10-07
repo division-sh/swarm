@@ -37,30 +37,29 @@ func (i Instance) ValidateConstruction(source semanticview.Source, runID string)
 	expected := Derive(source, i.TemplateID, i.InstanceID)
 	if i.TemplateID == semanticview.RootExecutionFlowID(source) {
 		expected = Stored(source, i.TemplateID, runID, runID, EntityID(runID), "")
-	} else if schema.Instance.Empty() {
+	} else {
 		parent := i.ParentRoute
 		if !parent.Complete() || parent != parent.Normalized() || parent.EntityID != i.ParentEntityID || parent.EntityID != EntityID(parent.FlowInstance) {
-			return fmt.Errorf("keyless construction identity requires its exact parent")
+			return fmt.Errorf("construction identity requires its exact structural parent")
 		}
 		if parent.FlowID == semanticview.RootExecutionFlowID(source) && parent.FlowInstance != runID {
-			return fmt.Errorf("keyless construction identity has a foreign run root")
+			return fmt.Errorf("construction identity has a foreign run root")
 		}
 		parentInstance := Stored(source, parent.FlowID, parent.FlowInstance, LogicalInstanceID(parent.FlowInstance), parent.EntityID, "")
 		var err error
-		expected, err = KeylessChild(source, parentInstance, i.TemplateID)
+		if schema.Instance.Empty() {
+			expected, err = KeylessChild(source, parentInstance, i.TemplateID)
+		} else {
+			expected, err = KeyedChild(source, parentInstance, i.TemplateID, i.InstanceID)
+		}
 		if err != nil {
 			return err
 		}
-	} else {
-		// Keyed constructors retain the creating source's parent metadata. It
-		// is not ancestry or recipient authority and need not name a child owner.
-		if i.ParentRoute != i.ParentRoute.Normalized() || i.ParentRoute.EntityID != i.ParentEntityID {
-			return fmt.Errorf("keyed construction identity has inconsistent parent context")
-		}
-		expected.ParentRoute, expected.ParentEntityID = i.ParentRoute, i.ParentEntityID
 		// Keyed admission owns the stored entity fact. It is not derived again
 		// from a route during restoration or publication.
-		expected.EntityID = i.EntityID
+		if !schema.Instance.Empty() {
+			expected.EntityID = i.EntityID
+		}
 	}
 	if expected != i {
 		return fmt.Errorf("construction identity disagrees with its canonical constructor")

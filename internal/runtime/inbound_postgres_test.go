@@ -5,7 +5,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -147,24 +146,24 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, pg, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, pg, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, pg, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
 	requireNoInboundBusEvent(t, ch, "paused GitHub webhook before resume")
-	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, pg, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows while paused = %d, want 1", got)
 	}
-	if got := loadPostgresAgentDeliveryStatus(t, ctx, db, eventID, agentID); got != "pending" {
+	if got := loadInboundAgentDeliveryStatus(t, ctx, pg, eventID, agentID); got != "pending" {
 		t.Fatalf("agent delivery status while paused = %q, want pending", got)
 	}
-	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+	if got := countInboundPipelineReceipts(t, ctx, pg, runID, eventID); got != 0 {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
-	if got := countPostgresAgentReceiptsForEvent(t, ctx, db, eventID, agentID); got != 0 {
+	if got := countInboundNonPlatformReceipts(t, ctx, pg, runID, eventID); got != 0 {
 		t.Fatalf("agent receipts while paused = %d, want 0", got)
 	}
 
@@ -186,13 +185,13 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("delivered event type = %s, want %s", got.Type(), eventType)
 	}
 	requireNoInboundBusEvent(t, ch, "paused GitHub webhook releases exactly once")
-	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countInboundPipelineReceipts(t, ctx, pg, runID, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
 	}
-	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, pg, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows after resume = %d, want 1", got)
 	}
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+	if got := countInboundProviderEvents(t, ctx, pg, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
 	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
@@ -249,24 +248,24 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, pg, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, pg, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, pg, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
 	requireNoInboundBusEvent(t, ch, "paused Slack webhook before resume")
-	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, pg, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows while paused = %d, want 1", got)
 	}
-	if got := loadPostgresAgentDeliveryStatus(t, ctx, db, eventID, agentID); got != "pending" {
+	if got := loadInboundAgentDeliveryStatus(t, ctx, pg, eventID, agentID); got != "pending" {
 		t.Fatalf("agent delivery status while paused = %q, want pending", got)
 	}
-	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+	if got := countInboundPipelineReceipts(t, ctx, pg, runID, eventID); got != 0 {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
-	if got := countPostgresAgentReceiptsForEvent(t, ctx, db, eventID, agentID); got != 0 {
+	if got := countInboundNonPlatformReceipts(t, ctx, pg, runID, eventID); got != 0 {
 		t.Fatalf("agent receipts while paused = %d, want 0", got)
 	}
 
@@ -288,13 +287,13 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 		t.Fatalf("delivered event type = %s, want %s", got.Type(), eventType)
 	}
 	requireNoInboundBusEvent(t, ch, "paused Slack webhook releases exactly once")
-	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countInboundPipelineReceipts(t, ctx, pg, runID, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
 	}
-	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, pg, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows after resume = %d, want 1", got)
 	}
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+	if got := countInboundProviderEvents(t, ctx, pg, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
 	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
@@ -350,27 +349,27 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, pg, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, pg, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, pg, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
-	if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != "invoice_paid" {
+	if got := loadInboundProviderEventPayloadField(t, ctx, pg, eventID, "provider_event_type"); got != "invoice_paid" {
 		t.Fatalf("provider_event_type = %q, want invoice_paid", got)
 	}
 	requireNoInboundBusEvent(t, ch, "paused Stripe webhook before resume")
-	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, pg, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows while paused = %d, want 1", got)
 	}
-	if got := loadPostgresAgentDeliveryStatus(t, ctx, db, eventID, agentID); got != "pending" {
+	if got := loadInboundAgentDeliveryStatus(t, ctx, pg, eventID, agentID); got != "pending" {
 		t.Fatalf("agent delivery status while paused = %q, want pending", got)
 	}
-	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+	if got := countInboundPipelineReceipts(t, ctx, pg, runID, eventID); got != 0 {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
-	if got := countPostgresAgentReceiptsForEvent(t, ctx, db, eventID, agentID); got != 0 {
+	if got := countInboundNonPlatformReceipts(t, ctx, pg, runID, eventID); got != 0 {
 		t.Fatalf("agent receipts while paused = %d, want 0", got)
 	}
 
@@ -392,13 +391,13 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("delivered event type = %s, want %s", got.Type(), eventType)
 	}
 	requireNoInboundBusEvent(t, ch, "paused Stripe webhook releases exactly once")
-	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countInboundPipelineReceipts(t, ctx, pg, runID, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
 	}
-	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, pg, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows after resume = %d, want 1", got)
 	}
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+	if got := countInboundProviderEvents(t, ctx, pg, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
 	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
@@ -437,17 +436,17 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, sqliteStore, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID)
-	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, sqliteStore, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, sqliteStore, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
-	if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "customer_created" {
+	if got := loadInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "customer_created" {
 		t.Fatalf("provider_event_type = %q, want customer_created", got)
 	}
-	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, sqliteStore, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
 	select {
@@ -502,17 +501,17 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, pg, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, pg, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, pg, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
-	if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != "message_received" {
+	if got := loadInboundProviderEventPayloadField(t, ctx, pg, eventID, "provider_event_type"); got != "message_received" {
 		t.Fatalf("provider_event_type = %q, want message_received", got)
 	}
-	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, pg, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
 	select {
@@ -564,17 +563,17 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, sqliteStore, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID)
-	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, sqliteStore, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, sqliteStore, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
-	if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "message_received" {
+	if got := loadInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "message_received" {
 		t.Fatalf("provider_event_type = %q, want message_received", got)
 	}
-	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, sqliteStore, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
 	select {
@@ -625,17 +624,17 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, pg, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, pg, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, pg, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
-	if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != "orders_create" {
+	if got := loadInboundProviderEventPayloadField(t, ctx, pg, eventID, "provider_event_type"); got != "orders_create" {
 		t.Fatalf("provider_event_type = %q, want orders_create", got)
 	}
-	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, pg, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
 	select {
@@ -683,17 +682,17 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
-	if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, sqliteStore, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID)
-	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, sqliteStore, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, sqliteStore, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
-	if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "orders_updated" {
+	if got := loadInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "orders_updated" {
 		t.Fatalf("provider_event_type = %q, want orders_updated", got)
 	}
-	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, sqliteStore, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
 	select {
@@ -745,24 +744,24 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	if strings.Contains(rec.Body.String(), webhookSecret) {
 		t.Fatal("Telegram secret token leaked into response")
 	}
-	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, pg, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
-	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, pg, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, pg, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
-	if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != "update" {
+	if got := loadInboundProviderEventPayloadField(t, ctx, pg, eventID, "provider_event_type"); got != "update" {
 		t.Fatalf("provider_event_type = %q, want update", got)
 	}
-	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, pg, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
-	requireInboundGatewayAuthorProjection(t, ctx, pg, runID, entityID, "chat", "42")
 	record, found, err := pg.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, provider, providerEventID))
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
+	requireInboundGatewayAuthorProjection(t, ctx, pg, runID, record.PublicationID, "chat", "42")
 	requireInboundTelegramPatternProjection(t, record, "start", "other_bot")
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram PostgreSQL post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
@@ -814,24 +813,24 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	if strings.Contains(rec.Body.String(), webhookSecret) {
 		t.Fatal("Telegram secret token leaked into response")
 	}
-	if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, providerEventID, entityID, provider); got != 1 {
+	if got := countInboundMarkers(t, ctx, sqliteStore, target, provider, providerEventID); got != 1 {
 		t.Fatalf("inbound marker rows = %d, want 1", got)
 	}
-	eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID)
-	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
+	eventID := loadInboundProviderEventID(t, ctx, sqliteStore, target, provider, providerEventName, providerEventID)
+	if got := countInboundProviderEvents(t, ctx, sqliteStore, runID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows = %d, want 1", got)
 	}
-	if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "update" {
+	if got := loadInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "update" {
 		t.Fatalf("provider_event_type = %q, want update", got)
 	}
-	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
+	if got := countInboundAgentDeliveries(t, ctx, sqliteStore, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
-	requireInboundGatewayAuthorProjection(t, ctx, sqliteStore, runID, entityID, "chat", "42")
 	record, found, err := sqliteStore.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, provider, providerEventID))
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
+	requireInboundGatewayAuthorProjection(t, ctx, sqliteStore, runID, record.PublicationID, "chat", "42")
 	requireInboundTelegramPatternProjection(t, record, "start", "other_bot")
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram SQLite post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
@@ -912,7 +911,7 @@ func requireInboundGatewayAuthorProjection(
 	ctx context.Context,
 	reader inboundAuthorActivityReader,
 	runID string,
-	entityID string,
+	publicationID string,
 	wantSubjectType string,
 	wantSubjectID string,
 ) {
@@ -931,8 +930,9 @@ func requireInboundGatewayAuthorProjection(
 		t.Fatalf("inbound author occurrences = %d, want one: %#v", len(matches), result.Occurrences)
 	}
 	occurrence := matches[0]
-	if occurrence.EntityID != entityID {
-		t.Fatalf("inbound author entity_id = %q, want %q", occurrence.EntityID, entityID)
+	if occurrence.EntityID != "" || occurrence.FlowID != boundedProviderFlowID ||
+		occurrence.Projection.SubjectType != "inbound_publication" || occurrence.Projection.SubjectID != publicationID {
+		t.Fatalf("inbound author scope must identify the binding publication without a receiver: %+v", occurrence)
 	}
 	if occurrence.Projection.AuthorSubjectType != wantSubjectType || occurrence.Projection.AuthorSubjectID != wantSubjectID {
 		t.Fatalf(
@@ -1019,17 +1019,17 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			if rec.Code != http.StatusAccepted {
 				t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 			}
-			if got := countPostgresInboundMarkers(t, ctx, db, tc.providerEventID, tc.entityID, tc.provider); got != 1 {
+			if got := countInboundMarkers(t, ctx, pg, target, tc.provider, tc.providerEventID); got != 1 {
 				t.Fatalf("inbound marker rows = %d, want 1", got)
 			}
-			eventID := loadPostgresInboundProviderEventID(t, ctx, db, tc.runID, tc.entityID, tc.providerEventName, tc.providerEventID)
-			if got := countPostgresInboundProviderEvents(t, ctx, db, tc.runID, tc.entityID, tc.providerEventName, tc.providerEventID); got != 1 {
+			eventID := loadInboundProviderEventID(t, ctx, pg, target, tc.provider, tc.providerEventName, tc.providerEventID)
+			if got := countInboundProviderEvents(t, ctx, pg, tc.runID, tc.providerEventName, tc.providerEventID); got != 1 {
 				t.Fatalf("provider event rows = %d, want 1", got)
 			}
-			if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != tc.providerEventType {
+			if got := loadInboundProviderEventPayloadField(t, ctx, pg, eventID, "provider_event_type"); got != tc.providerEventType {
 				t.Fatalf("provider_event_type = %q, want %s", got, tc.providerEventType)
 			}
-			if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, tc.agentID); got != 1 {
+			if got := countInboundAgentDeliveries(t, ctx, pg, eventID, tc.agentID); got != 1 {
 				t.Fatalf("agent delivery rows = %d, want 1", got)
 			}
 			select {
@@ -1108,17 +1108,17 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			if rec.Code != http.StatusAccepted {
 				t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 			}
-			if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, tc.providerEventID, tc.entityID, tc.provider); got != 1 {
+			if got := countInboundMarkers(t, ctx, sqliteStore, target, tc.provider, tc.providerEventID); got != 1 {
 				t.Fatalf("inbound marker rows = %d, want 1", got)
 			}
-			eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.providerEventName, tc.providerEventID)
-			if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.providerEventName, tc.providerEventID); got != 1 {
+			eventID := loadInboundProviderEventID(t, ctx, sqliteStore, target, tc.provider, tc.providerEventName, tc.providerEventID)
+			if got := countInboundProviderEvents(t, ctx, sqliteStore, tc.runID, tc.providerEventName, tc.providerEventID); got != 1 {
 				t.Fatalf("provider event rows = %d, want 1", got)
 			}
-			if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != tc.providerEventType {
+			if got := loadInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != tc.providerEventType {
 				t.Fatalf("provider_event_type = %q, want %s", got, tc.providerEventType)
 			}
-			if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, tc.agentID); got != 1 {
+			if got := countInboundAgentDeliveries(t, ctx, sqliteStore, eventID, tc.agentID); got != 1 {
 				t.Fatalf("agent delivery rows = %d, want 1", got)
 			}
 			select {
@@ -1372,207 +1372,6 @@ func installInboundStandingRecoveryOwner(
 			t.Errorf("join inbound process occurrence: %v", err)
 		}
 	})
-}
-
-func loadPostgresInboundProviderEventID(t *testing.T, ctx context.Context, db *sql.DB, runID string, entityID string, eventName string, providerEventID string) string {
-	t.Helper()
-	var eventID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT event_id::text
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND event_name = $3
-		  AND payload->>'provider_event_id' = $4
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, runID, entityID, eventName, providerEventID).Scan(&eventID); err != nil {
-		t.Fatalf("load inbound provider event id: %v", err)
-	}
-	return eventID
-}
-
-func loadPostgresInboundProviderEventPayloadField(t *testing.T, ctx context.Context, db *sql.DB, eventID string, field string) string {
-	t.Helper()
-	var value string
-	if err := db.QueryRowContext(ctx, `
-		SELECT payload->>$2
-		FROM events
-		WHERE event_id = $1::uuid
-	`, eventID, field).Scan(&value); err != nil {
-		t.Fatalf("load postgres inbound provider payload field %s: %v", field, err)
-	}
-	return value
-}
-
-func countPostgresInboundProviderEvents(t *testing.T, ctx context.Context, db *sql.DB, runID string, entityID string, eventName string, providerEventID string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND event_name = $3
-		  AND payload->>'provider_event_id' = $4
-	`, runID, entityID, eventName, providerEventID).Scan(&count); err != nil {
-		t.Fatalf("count inbound provider events: %v", err)
-	}
-	return count
-}
-
-func loadSQLiteInboundProviderEventID(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, runID string, entityID string, eventName string, providerEventID string) string {
-	t.Helper()
-	var eventID string
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT event_id
-		FROM events
-		WHERE run_id = ?
-		  AND entity_id = ?
-		  AND event_name = ?
-		  AND json_extract(payload, '$.provider_event_id') = ?
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, runID, entityID, eventName, providerEventID).Scan(&eventID); err != nil {
-		t.Fatalf("load sqlite inbound provider event id: %v", err)
-	}
-	return eventID
-}
-
-func countSQLiteInboundProviderEvents(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, runID string, entityID string, eventName string, providerEventID string) int {
-	t.Helper()
-	var count int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE run_id = ?
-		  AND entity_id = ?
-		  AND event_name = ?
-		  AND json_extract(payload, '$.provider_event_id') = ?
-	`, runID, entityID, eventName, providerEventID).Scan(&count); err != nil {
-		t.Fatalf("count sqlite inbound provider events: %v", err)
-	}
-	return count
-}
-
-func loadSQLiteInboundProviderEventPayloadField(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, eventID string, field string) string {
-	t.Helper()
-	var value string
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT json_extract(payload, ?)
-		FROM events
-		WHERE event_id = ?
-	`, "$."+field, eventID).Scan(&value); err != nil {
-		t.Fatalf("load sqlite inbound provider payload field %s: %v", field, err)
-	}
-	return value
-}
-
-func countSQLiteInboundMarkers(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, providerEventID string, entityID string, provider string) int {
-	t.Helper()
-	var count int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE event_name = 'platform.inbound_recorded'
-		  AND entity_id = ?
-		  AND json_extract(payload, '$.provider_event_id') = ?
-		  AND json_extract(payload, '$.provider') = ?
-	`, entityID, providerEventID, provider).Scan(&count); err != nil {
-		t.Fatalf("count sqlite inbound marker events: %v", err)
-	}
-	return count
-}
-
-func countSQLiteAgentDeliveriesForEvent(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, eventID string, agentID string) int {
-	t.Helper()
-	var count int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = ?
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = ?
-	`, eventID, agentID).Scan(&count); err != nil {
-		t.Fatalf("count sqlite agent deliveries for %s: %v", eventID, err)
-	}
-	return count
-}
-
-func countPostgresInboundMarkers(t *testing.T, ctx context.Context, db *sql.DB, providerEventID string, entityID string, provider string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE event_name = 'platform.inbound_recorded'
-		  AND entity_id = $1::uuid
-		  AND payload->>'provider_event_id' = $2
-		  AND payload->>'provider' = $3
-	`, entityID, providerEventID, provider).Scan(&count); err != nil {
-		t.Fatalf("count inbound marker events: %v", err)
-	}
-	return count
-}
-
-func countPostgresAgentDeliveriesForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string, agentID string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
-	`, eventID, agentID).Scan(&count); err != nil {
-		t.Fatalf("count agent deliveries for %s: %v", eventID, err)
-	}
-	return count
-}
-
-func loadPostgresAgentDeliveryStatus(t *testing.T, ctx context.Context, db *sql.DB, eventID string, agentID string) string {
-	t.Helper()
-	var status string
-	if err := db.QueryRowContext(ctx, `
-		SELECT status
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
-	`, eventID, agentID).Scan(&status); err != nil {
-		t.Fatalf("load agent delivery status for %s: %v", eventID, err)
-	}
-	return status
-}
-
-func countPostgresPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&count); err != nil {
-		t.Fatalf("count pipeline receipts for %s: %v", eventID, err)
-	}
-	return count
-}
-
-func countPostgresAgentReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string, agentID string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
-	`, eventID, agentID).Scan(&count); err != nil {
-		t.Fatalf("count agent receipts for %s: %v", eventID, err)
-	}
-	return count
 }
 
 func requireInboundBusEvent(t testing.TB, ch <-chan *runtimebus.LocalDelivery, context string) events.Event {
