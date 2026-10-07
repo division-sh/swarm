@@ -336,3 +336,57 @@ Existing watchlist mappings remain
 `workflow_stage_lifecycle_identity_carriage`; reviewer-d already refined their
 selected-feed, explicit-source and non-disk-oracle manifestations. No new issue,
 compatibility, migration, alternate router or semantic owner is introduced.
+
+## Lifecycle Inventory Stop And Complete Guard Sweep
+
+Lifecycle at `8bdd49d8d9d230d51289514f64d75dbcdaf050dd` stopped red on
+`TestCompiledTransitionOwnershipGuard` in `contracts-first`. The joined receipt
+is `lifecycle-20261007T111658.155166164`, plan
+`987c0392ec98403d1d273c6f6d21a30e2b88fb5dea1c5b15ffde089468da22a2`:
+15 units passed, one failed, three siblings were cancelled, and 36 did not start.
+The cancelled serveapp process-temporal, native and runtime units are not
+independent diagnosed failures or qualification receipts. No supplement, soak,
+hosted CI or PR started. Server2 was released for the next lane.
+
+The omitted guard was not selected by the earlier Census/Inventory/Registry
+sweep. Its exact caller inventory now registers the approved canonical catalog
+consumers rather than permitting a package, file or family wholesale:
+
+| Exact caller / operation | Inventory reconciliation |
+| --- | --- |
+| `BuildWorkflowStageTopology` / graph metadata | 12 to 14: the compiler records declaration order in its private catalog. |
+| `WorkflowContractBundle.flowStageCatalog` / `WorkflowStageTopology` | One canonical catalog lookup, not schema reconstruction. |
+| `WorkflowStageTopology.FinalStageIDs` / graph metadata | One private final-set projection. |
+| `WorkflowStageTopology.HandlerSourceErrors` / graph metadata | One copied diagnostic projection, not executable authority. |
+| `WorkflowStageTopology.explicitHandlerSources` / graph metadata | Three exact accesses retain explicit final-source rejection in the compiler. |
+| `WorkflowStageTopology.StageIDs` / graph metadata | Two to one: copied declaration order replaces the old map enumeration. |
+| `workflowTimerMayArmAtStage` / `semanticview.WorkflowStageTopology` | One exact lookup for new timer arms; accepted work remains outside this predicate. |
+| `runstart.ValidateFinite` / `semanticview.WorkflowStageTopology` | One exact lookup for each constructor/routing activation root. |
+| `runstart.ValidateFinite` / graph metadata | One exact flow-identity check, not transition admission. |
+
+The guard collector, exact-count comparison and hostile overlays are unchanged.
+No production code, authority/debt baseline, complexity policy, deadline,
+capability check or supported assertion changed in this repair.
+`TestCompiledTransitionOwnershipGuard` and
+`TestCompiledTransitionOwnershipGuardRejectsHostileUses` pass `-race -count=3`
+(95.213s), including extra-use rejection inside an already registered function.
+
+The complete managed local sweep now selects every
+`Guard|Inventory|Census|Registry` test across `internal/...`, `cmd/...` and
+`scripts/...`, plus the existing closed-construction and partition controls.
+It passes: 200 package test commands, of which 65 execute selected
+tests; 82 additional packages have no test files. All 40 touched executable
+packages are covered. The only excluded touched Go directory is the retained
+non-executable specimen under `pipeline/testdata/diagnostics`. Contracts passes
+all selected roots in 151.866s; pipeline, engine, serveapp and private store
+packages also pass. The actual persistence debt ratchet passes separately through
+the managed wrapper (29.586s). The exact 78-root structural selection passes
+through the same wrapper across all four required packages, without changing
+the selection, assertions or inventories. These are local repair checks, not a
+replacement lifecycle receipt.
+
+This is inventory repair under the existing gate, not a new semantic class or
+closure claim. Core's earlier 22/22 receipt is not relabelled as this head.
+Lifecycle and all 13 named supplements remain due on the replacement head;
+composed A/E proof and hosted full remain merge obligations. The existing
+watchlist mappings above remain sufficient.
