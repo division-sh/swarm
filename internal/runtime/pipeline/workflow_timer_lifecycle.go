@@ -16,11 +16,36 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
 var errWorkflowTimerUncommittedInterruption = errors.New("authorized workflow timer transition interrupted before acknowledgment")
+
+func workflowTimerInterceptionOutcome(recognized, advanced bool, err error) (runtimepipelineobligation.ExecutionOutcome, bool) {
+	outcome := runtimepipelineobligation.Continue()
+	if !recognized {
+		return outcome, false
+	}
+	if advanced {
+		outcome.Committed = true
+		return outcome, false
+	}
+	if runtimefailures.IsStateContention(err) {
+		failure := runtimefailures.Normalize(err, runtimeWorkflowID, "workflow_timer_transition")
+		return runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, &failure), true
+	}
+	if !errors.Is(err, errWorkflowTimerUncommittedInterruption) {
+		return outcome, false
+	}
+	class := runtimefailures.ClassDependencyUnavailable
+	if errors.Is(err, context.DeadlineExceeded) {
+		class = runtimefailures.ClassTimeout
+	}
+	failure := runtimefailures.Normalize(runtimefailures.Wrap(class, "workflow_timer_transition_interrupted", runtimeWorkflowID, "workflow_timer_transition", nil, err), runtimeWorkflowID, "workflow_timer_transition")
+	return runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, &failure), true
+}
 
 func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (handled bool, advanced bool, resultErr error) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.workflowTimers == nil {

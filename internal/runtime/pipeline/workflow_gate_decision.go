@@ -571,66 +571,13 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecisionAttempt(ctx context.Cont
 	if !found {
 		return false, fmt.Errorf("decision card workflow instance is missing")
 	}
-	evaluated, err := evaluatedWorkflowInstance(pc.SemanticSource(), address, snapshot)
-	if err != nil {
-		return false, err
-	}
-	instance := evaluated.instance
-	currentStage := strings.TrimSpace(instance.CurrentState)
-	carrier, err := workflowInstanceStateCarrier(instance)
-	if err != nil {
-		return false, err
-	}
-	activation, found, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
-	if err != nil {
-		return false, err
-	}
 	nextStage := strings.TrimSpace(route.AdvancesTo)
-	if found && activation.ActivationID == anchor.StageActivationID && activation.CardID == card.CardID && activation.Status == gateruntime.StatusRouted && activation.DecisionEventID == evt.ID() {
-		if currentStage != nextStage {
-			return false, fmt.Errorf("routed decision card state does not match its frozen outcome")
-		}
+	command, alreadyRouted, err := pc.prepareWorkflowGateDecisionMutation(ctx, card, anchor, evt, route, address, snapshot)
+	if err != nil {
+		return false, err
+	}
+	if alreadyRouted {
 		return true, nil
-	}
-	if currentStage != anchor.Stage {
-		return false, fmt.Errorf("decision card stage is no longer current")
-	}
-	if !found || activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID {
-		return false, fmt.Errorf("decision card activation is no longer authoritative")
-	}
-	if err := activation.Route(evt.ID(), evt.CreatedAt()); err != nil {
-		return false, err
-	}
-	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
-		return false, err
-	}
-	cause, err := runtimeworkflowlifecycle.NewCompiledTransition(route.Transition, handlerselection.NotApplicable(), nil)
-	if err != nil {
-		return false, err
-	}
-	preparedState, err := repo.prepareMutation(ctx, runtimeengine.EngineMutation{Address: address, EvaluatedState: snapshot, State: runtimeengine.StateMutation{
-		Transition: &cause,
-		NextState:  nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
-		TriggeredAt: evt.CreatedAt(), StateCarrier: carrier,
-	}})
-	if err != nil {
-		return false, err
-	}
-	effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(instanceRoute, address.EntityID, evt, currentStage, nextStage, &cause)
-	if err != nil {
-		return false, err
-	}
-	effect, err = effect.WithExecutionOccurrence("gate", card.CardID)
-	if err != nil {
-		return false, err
-	}
-	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, address.FlowInstance, &preparedState.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
-	if err != nil {
-		return false, err
-	}
-	state, err := preparedState.record()
-	if err != nil {
-		return false, err
 	}
 	var intents []runtimeengine.EmitIntent
 	var publications []runtimeengine.DurablePublicationPlan
@@ -649,10 +596,8 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecisionAttempt(ctx context.Cont
 			return false, errors.Join(fmt.Errorf("gate route planner returned %d plans", len(publications)), releaseErr)
 		}
 	}
-	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
-		State: state, GateRouteAdmissionRunID: card.RunID,
-		Lifecycle: lifecycle.Commit, Publications: publications,
-	})
+	command.Publications = publications
+	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, command)
 	if !committed.Committed {
 		if err == nil {
 			err = fmt.Errorf("workflow gate mutation has no acknowledged result")
@@ -677,6 +622,74 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecisionAttempt(ctx context.Cont
 	}
 	pc.notifyTestEntityStateUpdated(anchor.EntityID, nextStage)
 	return true, err
+}
+
+// The attempt retains its entity fence while this step prepares the exact R1
+// state and lifecycle evidence; publication and commit remain explicit callers.
+func (pc *PipelineCoordinator) prepareWorkflowGateDecisionMutation(ctx context.Context, card decisioncard.Card, anchor decisioncard.StageGateAnchor, evt events.Event, route gateruntime.Route, address runtimeengine.StateAddress, snapshot runtimeengine.StateSnapshot) (WorkflowEngineMutationCommand, bool, error) {
+	var command WorkflowEngineMutationCommand
+	evaluated, err := evaluatedWorkflowInstance(pc.SemanticSource(), address, snapshot)
+	if err != nil {
+		return command, false, err
+	}
+	instance := evaluated.instance
+	currentStage := strings.TrimSpace(instance.CurrentState)
+	carrier, err := workflowInstanceStateCarrier(instance)
+	if err != nil {
+		return command, false, err
+	}
+	activation, found, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
+	if err != nil {
+		return command, false, err
+	}
+	nextStage := strings.TrimSpace(route.AdvancesTo)
+	if found && activation.ActivationID == anchor.StageActivationID && activation.CardID == card.CardID && activation.Status == gateruntime.StatusRouted && activation.DecisionEventID == evt.ID() {
+		if currentStage != nextStage {
+			return command, false, fmt.Errorf("routed decision card state does not match its frozen outcome")
+		}
+		return command, true, nil
+	}
+	if currentStage != anchor.Stage {
+		return command, false, fmt.Errorf("decision card stage is no longer current")
+	}
+	if !found || activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID {
+		return command, false, fmt.Errorf("decision card activation is no longer authoritative")
+	}
+	if err := activation.Route(evt.ID(), evt.CreatedAt()); err != nil {
+		return command, false, err
+	}
+	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
+		return command, false, err
+	}
+	cause, err := runtimeworkflowlifecycle.NewCompiledTransition(route.Transition, handlerselection.NotApplicable(), nil)
+	if err != nil {
+		return command, false, err
+	}
+	preparedState, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, runtimeengine.EngineMutation{Address: address, EvaluatedState: snapshot, State: runtimeengine.StateMutation{
+		Transition: &cause,
+		NextState:  nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
+		TriggeredAt: evt.CreatedAt(), StateCarrier: carrier,
+	}})
+	if err != nil {
+		return command, false, err
+	}
+	effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(anchor.Route, address.EntityID, evt, currentStage, nextStage, &cause)
+	if err != nil {
+		return command, false, err
+	}
+	effect, err = effect.WithExecutionOccurrence("gate", card.CardID)
+	if err != nil {
+		return command, false, err
+	}
+	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, address.FlowInstance, &preparedState.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
+	if err != nil {
+		return command, false, err
+	}
+	state, err := preparedState.record()
+	if err != nil {
+		return command, false, err
+	}
+	return WorkflowEngineMutationCommand{State: state, GateRouteAdmissionRunID: card.RunID, Lifecycle: lifecycle.Commit}, false, nil
 }
 
 func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, route gateruntime.Route) (*events.Event, error) {

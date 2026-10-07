@@ -53,15 +53,7 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema) er
 
 	switch sourceType {
 	case "string":
-		if err := validateToolSchemaIntBoundsSubset(subject+" string length", admittedToolSchemaInt(source.MinLength), admittedToolSchemaInt(source.MaxLength), admittedToolSchemaInt(target.MinLength), admittedToolSchemaInt(target.MaxLength)); err != nil {
-			return err
-		}
-		if target.Pattern() != "" && source.Pattern() != target.Pattern() {
-			return fmt.Errorf("%s source pattern %q is not provably assignable to target pattern %q", subject, source.Pattern(), target.Pattern())
-		}
-		if target.Format() != "" && source.Format() != target.Format() {
-			return fmt.Errorf("%s source format %q is not provably assignable to target format %q", subject, source.Format(), target.Format())
-		}
+		return validateToolSchemaStringSubset(subject, source, target)
 	case "integer", "number":
 		if err := validateToolSchemaFloatBoundsSubset(subject+" numeric range", admittedToolSchemaFloat(source.Minimum), admittedToolSchemaFloat(source.Maximum), admittedToolSchemaFloat(target.Minimum), admittedToolSchemaFloat(target.Maximum)); err != nil {
 			return err
@@ -85,6 +77,19 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema) er
 	case "boolean", "null":
 	default:
 		return fmt.Errorf("%s has unsupported schema type %q", subject, sourceType)
+	}
+	return nil
+}
+
+func validateToolSchemaStringSubset(subject string, source, target ToolInputSchema) error {
+	if err := validateToolSchemaIntBoundsSubset(subject+" string length", admittedToolSchemaInt(source.MinLength), admittedToolSchemaInt(source.MaxLength), admittedToolSchemaInt(target.MinLength), admittedToolSchemaInt(target.MaxLength)); err != nil {
+		return err
+	}
+	if target.Pattern() != "" && source.Pattern() != target.Pattern() {
+		return fmt.Errorf("%s source pattern %q is not provably assignable to target pattern %q", subject, source.Pattern(), target.Pattern())
+	}
+	if target.Format() != "" && source.Format() != target.Format() {
+		return fmt.Errorf("%s source format %q is not provably assignable to target format %q", subject, source.Format(), target.Format())
 	}
 	return nil
 }

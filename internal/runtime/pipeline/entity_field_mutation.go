@@ -40,25 +40,8 @@ func (pc *PipelineCoordinator) ApplyEntityFieldMutation(ctx context.Context, com
 	if command.Mutation.ProjectionSource != "" {
 		return EntityFieldMutationResult{}, fmt.Errorf("agent mutation cannot claim materialized projection authority")
 	}
-	switch command.Mutation.Operation {
-	case "":
-		if command.Mutation.HasKey || command.Mutation.HasIndex {
-			return EntityFieldMutationResult{}, fmt.Errorf("whole-value set cannot carry key or index")
-		}
-	case "append":
-		if command.Mutation.HasKey || command.Mutation.HasIndex {
-			return EntityFieldMutationResult{}, fmt.Errorf("append cannot carry key or index")
-		}
-	case "update":
-		if !command.Mutation.HasIndex || command.Mutation.HasKey {
-			return EntityFieldMutationResult{}, fmt.Errorf("list update requires exactly its integer index")
-		}
-	case "set":
-		if !command.Mutation.HasKey || command.Mutation.HasIndex {
-			return EntityFieldMutationResult{}, fmt.Errorf("map set requires exactly its key")
-		}
-	default:
-		return EntityFieldMutationResult{}, fmt.Errorf("unsupported agent field operation %q", command.Mutation.Operation)
+	if err := validateAgentEntityFieldOperation(command.Mutation); err != nil {
+		return EntityFieldMutationResult{}, err
 	}
 	bundle, found := semanticview.Bundle(command.Source)
 	if !found || bundle == nil || bundle.SourceArtifact == nil {
@@ -83,6 +66,30 @@ func (pc *PipelineCoordinator) ApplyEntityFieldMutation(ctx context.Context, com
 			return result, err
 		}
 	}
+}
+
+func validateAgentEntityFieldOperation(mutation entityruntime.Mutation) error {
+	switch mutation.Operation {
+	case "":
+		if mutation.HasKey || mutation.HasIndex {
+			return fmt.Errorf("whole-value set cannot carry key or index")
+		}
+	case "append":
+		if mutation.HasKey || mutation.HasIndex {
+			return fmt.Errorf("append cannot carry key or index")
+		}
+	case "update":
+		if !mutation.HasIndex || mutation.HasKey {
+			return fmt.Errorf("list update requires exactly its integer index")
+		}
+	case "set":
+		if !mutation.HasKey || mutation.HasIndex {
+			return fmt.Errorf("map set requires exactly its key")
+		}
+	default:
+		return fmt.Errorf("unsupported agent field operation %q", mutation.Operation)
+	}
+	return nil
 }
 
 func (pc *PipelineCoordinator) applyEntityFieldMutationAttempt(ctx context.Context, command EntityFieldMutation, address runtimeengine.StateAddress) (EntityFieldMutationResult, error) {

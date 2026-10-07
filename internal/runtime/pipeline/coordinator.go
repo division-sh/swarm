@@ -617,19 +617,9 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 		return false, emitted, outcome, err
 	}
 	stageTimer, firedStageTimer, err := pc.handleWorkflowStageTimerFire(ctx, evt)
-	timerOutcome := runtimepipelineobligation.Continue()
-	if stageTimer && firedStageTimer {
-		timerOutcome.Committed = true
-	} else if stageTimer && runtimefailures.IsStateContention(err) {
-		failure := runtimefailures.Normalize(err, runtimeWorkflowID, "workflow_timer_transition")
-		return false, nil, runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, &failure), nil
-	} else if stageTimer && errors.Is(err, errWorkflowTimerUncommittedInterruption) {
-		class := runtimefailures.ClassDependencyUnavailable
-		if errors.Is(err, context.DeadlineExceeded) {
-			class = runtimefailures.ClassTimeout
-		}
-		failure := runtimefailures.Normalize(runtimefailures.Wrap(class, "workflow_timer_transition_interrupted", runtimeWorkflowID, "workflow_timer_transition", nil, err), runtimeWorkflowID, "workflow_timer_transition")
-		return false, nil, runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, &failure), nil
+	timerOutcome, retryTimer := workflowTimerInterceptionOutcome(stageTimer, firedStageTimer, err)
+	if retryTimer {
+		return false, nil, timerOutcome, nil
 	}
 	if err != nil {
 		return false, nil, timerOutcome, err
