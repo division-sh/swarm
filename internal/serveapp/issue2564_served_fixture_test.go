@@ -103,14 +103,16 @@ func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*clia
 func (f issue2564ServedFixture) waitEntityStage(t *testing.T, runID, entityID, stage string) string {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
+	lastState := ""
 	for time.Now().Before(deadline) {
 		state := storetest.ObserveWriterStage(t, context.Background(), f.selected, runID, entityID, stage)
+		lastState = state.State
 		if state.State == stage && state.EntityID != "" {
 			return state.EntityID
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("entity %s/%s did not reach %s", runID, entityID, stage)
+	t.Fatalf("entity %s/%s did not reach %s; last state=%q\n%s", runID, entityID, stage, lastState, f.debug(t, runID))
 	return ""
 }
 
