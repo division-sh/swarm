@@ -535,26 +535,6 @@ func (s *PipelineSQLiteOwner) ObserveH2OccurrencesForTest(ctx context.Context, r
 	return out, nil
 }
 
-func observeH2OccurrencesForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H2OccurrencesEvidence, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT e.event_id,e.task_id,e.flow_instance,COALESCE(r.outcome,''),COALESCE(r.reason_code,'') FROM events e LEFT JOIN event_receipts r ON r.event_id=e.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' WHERE e.run_id=$1 AND e.event_name='platform.stage_timer'`, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []H2OccurrencesEvidence
-	for rows.Next() {
-		var row H2OccurrencesEvidence
-		if err := rows.Scan(&row.ID, &row.Task, &row.Instance, &row.Outcome, &row.Reason); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		out = append(out, row)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 type H2CounterMutationsEvidence struct {
 	Entity string
 	Path   string
