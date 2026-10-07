@@ -228,6 +228,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -2008,6 +2009,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -2101,6 +2103,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -2205,6 +2208,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -2298,6 +2302,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -2418,6 +2423,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -2590,6 +2596,7 @@
         },
         "Guard": null,
         "AdvancesTo": "awaiting",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -3567,6 +3574,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -3638,6 +3646,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -3720,6 +3729,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -5378,6 +5388,7 @@
         },
         "Guard": null,
         "AdvancesTo": "completed",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -5426,6 +5437,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -5512,6 +5524,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -5598,6 +5611,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -5658,6 +5672,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -5774,6 +5789,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -5860,6 +5876,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -5949,6 +5966,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -6365,6 +6383,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -6413,6 +6432,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -6776,6 +6796,7 @@
         },
         "Guard": null,
         "AdvancesTo": "processed",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -6836,6 +6857,7 @@
         },
         "Guard": null,
         "AdvancesTo": "done",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -7546,6 +7568,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -7681,6 +7704,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -7741,6 +7765,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -8713,6 +8738,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -8773,6 +8799,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -8833,6 +8860,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -8904,6 +8932,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -8952,6 +8981,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -9012,6 +9042,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -9632,6 +9663,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -9680,6 +9712,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -9728,6 +9761,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -9788,6 +9822,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -10178,6 +10213,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -10226,6 +10262,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
@@ -10475,6 +10512,7 @@
         },
         "Guard": null,
         "AdvancesTo": "",
+        "Terminate": false,
         "SetsGate": null,
         "ClearGates": null,
         "DataAccumulation": {
