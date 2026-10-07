@@ -1,0 +1,9 @@
+name: clock-public-boundary
+stages:
+  pending: {initial: true}
+  done: {terminal: true}
+schedules:
+  poll: {every: 250ms, emit: poll.tick}
+pins:
+  inputs: [start.requested]
+  outputs: [poll.tick]

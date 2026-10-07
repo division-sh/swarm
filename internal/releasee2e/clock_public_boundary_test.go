@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -27,7 +26,8 @@ func TestDeclaredClockNestedBinaryDeliveryBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			root := filepath.Join(base, backend)
 			config, env := clockReleaseConfig(t, root, backend)
-			source := canonicalrouting.CopyClockDeployment(t, true)
+			source := filepath.Join(root, "contracts")
+			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/nested"), source)
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
 			assertFullLifecycleVerifySuccess(t, verify)
@@ -85,7 +85,8 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			root := filepath.Join(base, backend)
 			config, env := clockReleaseConfig(t, root, backend)
-			source := canonicalrouting.CopyClockFiniteDeployment(t)
+			source := filepath.Join(root, "contracts")
+			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/finite"), source)
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 			writeReleaseFile(t, filepath.Join(root, "home", ".config", "swarm", "swarm.yaml"),
 				fmt.Sprintf("serve:\n  api_token_file: %q\nconnection:\n  api_token_file: %q\n",

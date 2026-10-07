@@ -1,0 +1,6 @@
+complete:
+  execution_type: system_node
+  subscribes_to: [start.requested]
+  event_handlers:
+    start.requested:
+      advances_to: done

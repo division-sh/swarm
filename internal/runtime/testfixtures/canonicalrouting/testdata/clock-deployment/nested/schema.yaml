@@ -1,0 +1,4 @@
+name: clock-child-public
+stages: []
+connect:
+  - {event: poll.tick, from: clock, to: consumer}

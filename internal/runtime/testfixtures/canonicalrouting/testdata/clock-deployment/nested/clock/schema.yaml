@@ -1,0 +1,5 @@
+stages: []
+schedules:
+  poll: {every: 250ms, emit: poll.tick}
+pins:
+  outputs: [poll.tick]
