@@ -10595,7 +10595,9 @@ tool_model:
         Effective connector with at least one unsatisfied static or managed credential requirement, or effective
         authenticated provider-trigger target whose exact admitted signing requirement is UNBOUND, or an effective
         ingress declaration whose frozen deployment admission has binding_enabled=false. A credential becoming BOUND
-        does not make an unactivated declaration READY. Effective runtime trigger_admission includes binding_enabled,
+        does not make an unactivated declaration READY. Effective trigger_admission carries the exact declaring
+        flow_path. Its stable subject identity is selected source plus declaring flow plus provider, not its alias;
+        equal dormant endpoint aliases never collapse distinct declarations. Effective runtime trigger_admission includes binding_enabled,
         the finite binding_block_reason (credentials_absent or recovery_required), recovery_operation_id and recovery_command only for
         retained learned authority requiring recovery. Cleared admissions do not evaluate declaration keys as a fallback;
         their requirement remains unevaluated and NOT_READY until fresh explicit admission. The existing onboarding owner
@@ -13346,6 +13348,7 @@ flow_model:
       declaration_surface: 'schema.yaml ingress or compiled schedules; retention derives from an enabled binding or an active deployment clock'
       canonical_owners:
         declaration: internal/runtime.ResolveStandingTargetDeclarations over the admitted ingress and compiled clock declarations
+        alias: internal/runtime/contracts.WorkflowContractBundle.FlowIngressAlias compiled with the immutable workflow semantics and effective provenance
         verification: internal/runtime.ResolveStandingTargetDeclarations
         provider_catalog: internal/providertriggers.CatalogSnapshot
         admission_plan: internal/providertriggers.InboundAdmissionPlan
@@ -13375,8 +13378,10 @@ flow_model:
         - 'Restart verifies the complete committed root tree, canonical headers, and iff-declared field companions before attachment or standing-set publication. Missing or mismatched descendants refuse without constructing replacements. Reset constructs a fresh tree under the new selected generation; attachment retry preserves construction and creating receipts'
         - 'Standing preparation remains non-executable: process topology may be staged before the startup grant, but timers and committed initial-entry/creation publication finalize only after Manager startup. A construction failure prevents publication of a partial standing target set'
         - 'A deployment clock may retain its declaring service without ingress. Connect edges remain delivery authority, not independent service-retention declarations. An ingress binding retains its service only when the binding is admitted and enabled; dormant declarations grant no retention'
-        - ingress requires an explicit alias; it is never derived from the package flow id
+        - 'Omitted ingress.alias is derived once from the selected root flow name and declaration path: root shop becomes shop, child shop becomes shop.shop, and nested shop/leaf becomes shop.shop.leaf. The root name must be an exact single-segment addressable name; an absent or invalid name cannot be repaired from a host directory, execution hash or label. An explicit valid override does not require a derivable root name'
+        - 'Explicit alias presence is exact non-empty text and a valid URL segment; empty, null, malformed and normalized-equivalent spellings refuse rather than becoming omission. Provider composition, runtime declaration/lookup, describe/topology and registration consume the same compiled alias and its provenance, never raw-override reconstruction'
         - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
+        - 'Declaration inventory and dormant discovery preserve equal aliases with distinct source/flow/provider identity. An enabled alias can have only one declaring flow owner in the process; providers on that same declaration share its alias and retain their provider path segment. Complete-set startup admission and later channel promotion reject a collision naming both owners before durable mutation or publication, preserving incumbent state and readback'
         - ingress providers are a list so duplicate provider declarations remain visible to strict verification
         - admission omission is always pack-required; raw admission requires explicit kind plus its complete closed policy
         - signing_secret is an explicit deployment credential reference required only by the compiled authentication policy; package data never carries the value

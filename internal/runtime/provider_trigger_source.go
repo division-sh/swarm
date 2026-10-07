@@ -73,9 +73,9 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 		if view.Schema.Ingress == nil {
 			continue
 		}
-		alias := strings.TrimSpace(view.Schema.Ingress.Alias)
-		if alias == "" {
-			return nil, fmt.Errorf("%s ingress alias is required and is never derived from the flow path", flowSchemaLocation(view))
+		alias, present := bundle.FlowIngressAlias(flowID)
+		if !present {
+			return nil, fmt.Errorf("%s has no compiled ingress alias", flowSchemaLocation(view))
 		}
 		for _, binding := range view.Schema.Ingress.Providers {
 			plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{

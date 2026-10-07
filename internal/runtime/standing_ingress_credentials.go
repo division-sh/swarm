@@ -75,7 +75,7 @@ func (rt *Runtime) ineligibleStandingCapabilitySubjects() (map[string]standingIn
 				signingKey = binding.SigningSecret
 			}
 			subject, err := binding.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
-				BundleHash: rt.Options.SourceArtifactFact.BundleHash(), Alias: declaration.Alias,
+				BundleHash: rt.Options.SourceArtifactFact.BundleHash(), FlowPath: declaration.FlowPath, Alias: declaration.Alias,
 				SigningSecret: signingKey, SourcePath: declaration.SourcePath,
 			})
 			if err != nil {
@@ -173,7 +173,28 @@ func (rt *Runtime) observeStandingCredentials(ctx context.Context) (*standingCre
 	if err := admission.projection.ValidateCurrent(ctx); err != nil {
 		return nil, err
 	}
+	if err := validateEnabledStandingAliases(admission); err != nil {
+		return nil, err
+	}
 	return admission, nil
+}
+
+func validateEnabledStandingAliases(admission *standingCredentialAdmission) error {
+	aliases := map[string]StandingTargetDeclaration{}
+	for _, declaration := range admission.declarations {
+		enabled := false
+		for _, binding := range declaration.Ingress {
+			enabled = enabled || admission.bindings[standingIngressSelector(declaration.FlowPath, binding.Provider)].enabled
+		}
+		if !enabled {
+			continue
+		}
+		if previous, present := aliases[declaration.Alias]; present && previous.FlowPath != declaration.FlowPath {
+			return fmt.Errorf("duplicate enabled ingress alias %q: flow %q (%s) and flow %q (%s)", declaration.Alias, previous.FlowPath, previous.SourcePath, declaration.FlowPath, declaration.SourcePath)
+		}
+		aliases[declaration.Alias] = declaration
+	}
+	return nil
 }
 
 func (rt *Runtime) standingBindingCredentialRoles(selector string, binding StandingIngressBinding) (map[string]string, string, error) {

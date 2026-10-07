@@ -358,6 +358,19 @@ func TestCallbackURLReservesProbeNamespaceAndRequiresOrigin(t *testing.T) {
 	}
 }
 
+func TestA9CallbackURLUsesExactAlias(t *testing.T) {
+	generation := Generation{PublicOrigin: "https://hooks.example.test"}
+	for _, alias := range []string{" support", "support ", "/support", "support/", "support/child", ".support", "caf\u00e9"} {
+		if _, err := CallbackURL(generation, alias, "telegram", "token"); err == nil {
+			t.Fatalf("unadmitted alias %q was normalized into a callback", alias)
+		}
+	}
+	callback, err := CallbackURL(generation, "shop.support", "telegram", "token")
+	if err != nil || !strings.Contains(callback, "/webhooks/shop.support/telegram?") {
+		t.Fatalf("rooted alias not preserved in callback: %q err=%v", callback, err)
+	}
+}
+
 func testHTTPResponse(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,

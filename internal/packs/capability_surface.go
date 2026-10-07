@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/userfacing"
 )
 
@@ -101,6 +102,7 @@ type TriggerAdmission struct {
 	RecoveryOperationID   string               `json:"recovery_operation_id,omitempty"`
 	RecoveryCommand       string               `json:"recovery_command,omitempty"`
 	BundleHash            string               `json:"bundle_hash"`
+	FlowPath              string               `json:"flow_path"`
 	Alias                 string               `json:"alias"`
 	CatalogGeneration     string               `json:"catalog_generation"`
 	PolicySource          string               `json:"policy_source"`
@@ -546,7 +548,9 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 			return "", fmt.Errorf("effective provider trigger subject %q has contradictory recovery command evidence", subject.ID)
 		}
 		admission.BundleHash = strings.TrimSpace(admission.BundleHash)
-		admission.Alias = strings.Trim(strings.TrimSpace(admission.Alias), "/")
+		if err := runtimecontracts.ValidateIngressAlias(admission.Alias); err != nil {
+			return "", err
+		}
 		admission.CatalogGeneration = strings.TrimSpace(admission.CatalogGeneration)
 		admission.PolicySource = strings.TrimSpace(admission.PolicySource)
 		admission.RequestAuthentication = strings.TrimSpace(admission.RequestAuthentication)
@@ -556,7 +560,10 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 		if admission.BundleHash == "" || admission.Alias == "" || admission.CatalogGeneration == "" || admission.Event == "" {
 			return "", fmt.Errorf("effective provider trigger subject %q requires bundle_hash, alias, catalog_generation, and event", subject.ID)
 		}
-		wantID := "ingress:" + admission.BundleHash + ":" + admission.Alias + ":" + subject.Provider
+		wantID, err := IngressSubjectID(admission.BundleHash, admission.FlowPath, subject.Provider)
+		if err != nil {
+			return "", err
+		}
 		if subject.ID != wantID {
 			return "", fmt.Errorf("effective provider trigger subject %q must use stable target id %q", subject.ID, wantID)
 		}

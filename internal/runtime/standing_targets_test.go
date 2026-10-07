@@ -225,11 +225,11 @@ func TestA9NoProducerCannotRetain(t *testing.T) {
 	}
 }
 
-func TestResolveStandingTargetDeclarationsRejectsUnreachableIngressAlias(t *testing.T) {
-	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
+func TestCompileStandingIngressAliasRejectsUnreachableAlias(t *testing.T) {
+	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, _ := semanticview.Bundle(source)
 	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) { schema.Ingress.Alias = "chat/support" })
-	_, err := ResolveStandingTargetDeclarations(source, registry)
+	err := runtimecontracts.CompileWorkflowSemantics(bundle)
 	if err == nil || !strings.Contains(err.Error(), "one URL-safe path segment") || !strings.Contains(err.Error(), "[A-Za-z0-9][A-Za-z0-9._-]*") {
 		t.Fatalf("multi-segment alias error = %v", err)
 	}
@@ -299,7 +299,7 @@ func TestValidateWorkflowContractSurfaceWarnsForUnacknowledgedUnsignedRawAdmissi
 				t.Fatalf("unsigned warning found=%t, want %t: %#v", found, tc.wantWarning, warnings)
 			}
 			bundleHash := "bundle-v2:sha256:" + strings.Repeat("c", 64)
-			subject, err := declarations[0].Ingress[0].AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{BundleHash: bundleHash, Alias: declarations[0].Alias})
+			subject, err := declarations[0].Ingress[0].AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{BundleHash: bundleHash, FlowPath: declarations[0].FlowPath, Alias: declarations[0].Alias})
 			if err != nil {
 				t.Fatal(err)
 			}

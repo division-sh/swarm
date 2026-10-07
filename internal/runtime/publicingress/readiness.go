@@ -527,7 +527,6 @@ func (o *ReadinessOwner) CallbackTargetCurrent(ctx context.Context, now time.Tim
 		return RegistrationTarget{}, false
 	}
 	evaluated := o.evaluate(ctx, now)
-	alias = strings.TrimSpace(alias)
 	provider = strings.TrimSpace(provider)
 	token = strings.TrimSpace(token)
 	var selected RegistrationTarget

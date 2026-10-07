@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/google/uuid"
 )
 
@@ -638,10 +639,12 @@ func (p *execProcess) Stop() error {
 }
 
 func CallbackURL(generation Generation, alias, provider, token string) (string, error) {
-	alias = strings.TrimSpace(alias)
+	if err := runtimecontracts.ValidateIngressAlias(alias); err != nil {
+		return "", err
+	}
 	provider = strings.TrimSpace(provider)
 	token = strings.TrimSpace(token)
-	if !validCallbackRouteSegment(alias) || !validCallbackRouteSegment(provider) || token == "" || strings.HasPrefix(alias, "_") {
+	if !validCallbackRouteSegment(provider) || token == "" {
 		return "", fmt.Errorf("callback route identity is invalid")
 	}
 	parsed, err := admitPublicOrigin(generation.PublicOrigin)

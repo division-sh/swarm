@@ -20,6 +20,10 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		name, version = identity.WorkflowName, identity.WorkflowVersion
 	}
 	entitySchema := legacyWorkflowEntitySchema(bundle)
+	ingressAliases, err := compileFlowIngressAliases(bundle)
+	if err != nil {
+		return err
+	}
 	compositionConnects := make([]FlowConnect, 0)
 	for _, source := range sortedFlowSources(bundle.FlowSources) {
 		var schema FlowSchemaDocument
@@ -48,6 +52,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		FlowRules:              map[string]string{},
 		flowInputEventPins:     map[string][]CompiledFlowInputPin{},
 		flowOutputEventPins:    map[string][]CompiledFlowOutputPin{},
+		flowIngressAliases:     ingressAliases,
 		CompositionConnects:    compositionConnects,
 		FlowAgents:             map[string][]FlowRequiredAgent{},
 		RootAgentFacts:         nil,

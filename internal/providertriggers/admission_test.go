@@ -10,6 +10,21 @@ import (
 	"testing"
 )
 
+func TestA9CompileAdmissionUsesExactAlias(t *testing.T) {
+	catalog, err := NewCatalogSnapshot(admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, alias := range []string{"", " support", "support ", "/support", "support/", "support/child", ".support", "support%2Fchild"} {
+		if plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: alias, Provider: "acme", SigningSecret: "webhook_signing.acme"}); err == nil || plan.Valid() {
+			t.Fatalf("unadmitted alias %q was normalized into a plan: %v", alias, err)
+		}
+	}
+	if plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "shop.support", Provider: "acme", SigningSecret: "webhook_signing.acme"}); err != nil || !plan.Valid() {
+		t.Fatalf("rooted alias was rejected: %v", err)
+	}
+}
+
 func TestManifestRejectsSignedOptionalSecretAndEmptyKeyExecution(t *testing.T) {
 	for _, signatureType := range []string{signatureTypeHMACSHA256, signatureTypeHMACSHA1, signatureTypeTokenEquality} {
 		t.Run(signatureType, func(t *testing.T) {
@@ -170,7 +185,7 @@ func TestCompileAdmissionProjectsExactPackAuthentication(t *testing.T) {
 			if plan.RequestAuthentication() != tc.want || !plan.RequiresSecret() {
 				t.Fatalf("authentication = %s requires=%t", plan.RequestAuthentication(), plan.RequiresSecret())
 			}
-			subject, err := plan.EffectiveCapabilitySubject(EffectiveSubjectRequest{BundleHash: strings.Repeat("a", 64), Alias: "chat", SigningSecret: "webhook_signing.acme"})
+			subject, err := plan.EffectiveCapabilitySubject(EffectiveSubjectRequest{BundleHash: strings.Repeat("a", 64), FlowPath: ".", Alias: "chat", SigningSecret: "webhook_signing.acme"})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -144,6 +144,24 @@ func TestRequestRejectsNullTransportMetadata(t *testing.T) {
 	}
 }
 
+func TestA9ReceiptRequestUsesExactAlias(t *testing.T) {
+	request := evidenceProofRequest(t)
+	request.ExpectedGeneration = 1
+	if err := request.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, alias := range []string{" github", "github ", "/github", "github/", "github/child", ".github"} {
+		changed := request
+		changed.TargetAlias = alias
+		if changed.Normalized().TargetAlias != alias {
+			t.Fatalf("receipt coordinate %q was silently normalized", alias)
+		}
+		if err := changed.Validate(); err == nil {
+			t.Fatalf("unadmitted alias %q entered receipt admission", alias)
+		}
+	}
+}
+
 func evidenceProofRequest(t *testing.T) Request {
 	t.Helper()
 	entityID := uuid.NewString()

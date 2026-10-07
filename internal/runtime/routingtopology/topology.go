@@ -242,7 +242,10 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 			continue
 		}
 		flowPath := strings.TrimSpace(view.Paths.FlowPath)
-		alias := strings.TrimSpace(view.Schema.Ingress.Alias)
+		alias, present := bundle.FlowIngressAlias(flowPath)
+		if !present {
+			continue
+		}
 		target := RootInputTarget{FlowPath: flowPath}
 		sourceFile := strings.TrimSpace(view.Paths.SchemaFile)
 		for providerIndex, binding := range view.Schema.Ingress.Providers {
@@ -668,7 +671,7 @@ func edgeID(edge Edge) string {
 func rootInputSourceID(source RootInputSource) string {
 	parts := []string{
 		strings.TrimSpace(source.Kind),
-		strings.TrimSpace(source.Alias),
+		source.Alias,
 		strings.TrimSpace(source.Provider),
 		strings.TrimSpace(source.Target.FlowPath),
 		strings.TrimSpace(source.AuthoredLocation),

@@ -496,8 +496,8 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 			runtimeContextBundleLabel(collision.incoming),
 		)
 	}
-	if existing, incoming, alias, ok := m.duplicateLoadedIngressAliasLocked(contextDef); ok {
-		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+	if collision := m.duplicateLoadedIngressAliasLocked(contextDef); collision != nil {
+		return collision
 	}
 	m.nextPublicationGeneration++
 	contextDef.PublicationGeneration = m.nextPublicationGeneration
@@ -829,8 +829,16 @@ func equalRuntimeContextSlice[T any](left, right []T) bool {
 func validateRuntimeContextStandingTargets(contextDef BundleContext, executable bool) error {
 	bundleHash := contextDef.BundleHash()
 	seen := map[string]string{}
+	aliasOwners := map[string]StandingTarget{}
 	for _, target := range contextDef.StandingTargets {
 		target = target.normalized()
+		if err := runtimecontracts.ValidateIngressAlias(target.Alias); err != nil {
+			return err
+		}
+		if previous, present := aliasOwners[target.Alias]; present && previous.FlowPath != target.FlowPath {
+			return fmt.Errorf("duplicate enabled ingress alias %q: flow %q (%s) and flow %q (%s)", target.Alias, previous.FlowPath, previous.SourcePath, target.FlowPath, target.SourcePath)
+		}
+		aliasOwners[target.Alias] = target
 		if target.BundleHash != bundleHash {
 			return fmt.Errorf("runtime context %s standing target %q/%q bundle_hash %q does not match context", bundleHash, target.Alias, target.Provider, target.BundleHash)
 		}
@@ -928,7 +936,7 @@ func declaredStandingCapabilitySubjects(contextDef *BundleContext, executableSub
 	for _, declaration := range declarations {
 		for _, binding := range declaration.Ingress {
 			subject, err := binding.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
-				BundleHash: contextDef.BundleHash(), Alias: declaration.Alias, SigningSecret: binding.SigningSecret, SourcePath: declaration.SourcePath,
+				BundleHash: contextDef.BundleHash(), FlowPath: declaration.FlowPath, Alias: declaration.Alias, SigningSecret: binding.SigningSecret, SourcePath: declaration.SourcePath,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("derive standing ingress capability subject: %w", err)
@@ -1227,31 +1235,28 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 	return out, nil
 }
 
-func (m *RuntimeContextManager) duplicateLoadedIngressAliasLocked(incoming BundleContext) (BundleContext, BundleContext, string, bool) {
-	incomingAliases := map[string]struct{}{}
+func (m *RuntimeContextManager) duplicateLoadedIngressAliasLocked(incoming BundleContext) error {
+	incomingAliases := map[string]string{}
 	for _, target := range incoming.StandingTargets {
-		incomingAliases[target.normalized().Alias] = struct{}{}
+		incomingAliases[target.Alias] = target.FlowPath
 	}
 	return m.duplicateLoadedIngressAliasesLocked(incoming, incomingAliases)
 }
 
-func (m *RuntimeContextManager) duplicateLoadedIngressAliasesLocked(incoming BundleContext, incomingAliases map[string]struct{}) (BundleContext, BundleContext, string, bool) {
+func (m *RuntimeContextManager) duplicateLoadedIngressAliasesLocked(incoming BundleContext, incomingAliases map[string]string) error {
 	for _, bundleHash := range m.order {
-		if bundleHash == incoming.BundleHash() {
-			continue
-		}
 		entry := m.contexts[bundleHash]
 		if !runtimeContextEntryLoaded(entry) {
 			continue
 		}
 		for _, target := range entry.context.StandingTargets {
-			alias := target.normalized().Alias
-			if _, ok := incomingAliases[alias]; ok {
-				return *entry.context, incoming, alias, true
+			flowPath, collision := incomingAliases[target.Alias]
+			if collision && (bundleHash != incoming.BundleHash() || flowPath != target.FlowPath) {
+				return fmt.Errorf("duplicate enabled ingress alias %q: %s flow %q (%s) and %s flow %q", target.Alias, runtimeContextBundleLabel(*entry.context), target.FlowPath, target.SourcePath, runtimeContextBundleLabel(incoming), flowPath)
 			}
 		}
 	}
-	return BundleContext{}, BundleContext{}, "", false
+	return nil
 }
 
 func (m *RuntimeContextManager) duplicateLoadedAgentSlugLocked(incoming BundleContext) (runtimeContextAgentSlugCollision, bool, error) {
@@ -1612,7 +1617,6 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 	if m == nil {
 		return RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
 	}
-	alias = strings.Trim(strings.TrimSpace(alias), "/")
 	provider = strings.TrimSpace(provider)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -2164,10 +2168,10 @@ func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, 
 		m.mu.RUnlock()
 		return fmt.Errorf("channel target %s has no exact declaration owner", candidate.Target.Selector)
 	}
-	aliases := map[string]struct{}{candidate.Target.Alias: {}}
-	if existing, incoming, alias, collision := m.duplicateLoadedIngressAliasesLocked(*entry.context, aliases); collision {
+	aliases := map[string]string{candidate.Target.Alias: candidate.Target.FlowPath}
+	if collision := m.duplicateLoadedIngressAliasesLocked(*entry.context, aliases); collision != nil {
 		m.mu.RUnlock()
-		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+		return collision
 	}
 	use, err := m.acquireEntryLocked(ctx, entry)
 	m.mu.RUnlock()
@@ -2281,8 +2285,8 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 			if err := validateRuntimeContextStandingActivations(copied); err != nil {
 				return err
 			}
-			if existing, incoming, alias, collision := m.duplicateLoadedIngressAliasLocked(copied); collision {
-				return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
+			if collision := m.duplicateLoadedIngressAliasLocked(copied); collision != nil {
+				return collision
 			}
 			planned[bundleHash] = &copied
 		}
@@ -2713,7 +2717,6 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 	if m == nil {
 		return nil, RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, nil
 	}
-	alias = strings.Trim(strings.TrimSpace(alias), "/")
 	provider = strings.TrimSpace(provider)
 	m.mu.RLock()
 	defer m.mu.RUnlock()

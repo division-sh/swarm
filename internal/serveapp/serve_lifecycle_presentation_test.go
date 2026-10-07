@@ -631,7 +631,7 @@ func testServeIngressSubject(bundleHash, alias, provider, secret, status string)
 		ID: "ingress:" + bundleHash + ":" + alias + ":" + provider, Kind: packs.SubjectProviderTrigger,
 		Provider: provider, Source: "raw_declaration", Applicability: "effective",
 		TriggerAdmission: &packs.TriggerAdmission{
-			BundleHash: bundleHash, Alias: alias, CatalogGeneration: "catalog-generation",
+			BundleHash: bundleHash, FlowPath: alias, Alias: alias, CatalogGeneration: "catalog-generation",
 			PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound." + provider,
 		},
 		Requirements: []packs.Requirement{packs.RequirementWithStatus(packs.RequirementSecret, secret, packs.RequirementScopeTarget, status, "credential_store")},

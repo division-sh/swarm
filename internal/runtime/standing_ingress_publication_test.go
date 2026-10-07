@@ -91,7 +91,7 @@ func TestStandingChannelAdmissionRefusesBeforeDurableMutation(t *testing.T) {
 				Posture: channelonboarding.ActivationPosture(profile.ActivationPosture()), Ceremony: channelonboarding.IdentityCeremony(profile.IdentityCeremony()),
 				ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(), ConfirmationOperation: profile.ConfirmationOperation(),
 			}
-			want := "duplicate standing ingress alias"
+			want := "duplicate enabled ingress alias"
 			switch refusal {
 			case "undeclared_alias":
 				candidate.Target.Alias, want = "unowned", "no exact declaration owner"

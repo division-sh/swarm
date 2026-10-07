@@ -379,6 +379,11 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 	if !controller.CallbackCurrent(ctx, predecessor.Target.Alias, predecessor.Target.Provider, callbackToken) {
 		t.Fatal("rejected replacement revoked the predecessor callback")
 	}
+	for _, alias := range []string{" " + predecessor.Target.Alias, predecessor.Target.Alias + " ", "/" + predecessor.Target.Alias, predecessor.Target.Alias + "/"} {
+		if controller.CallbackCurrent(ctx, alias, predecessor.Target.Provider, callbackToken) {
+			t.Fatalf("unadmitted alias %q selected a current callback", alias)
+		}
+	}
 }
 
 func TestProviderRegistrationHandoffKeepsAuthoritiesDistinctUntilPromotion(t *testing.T) {

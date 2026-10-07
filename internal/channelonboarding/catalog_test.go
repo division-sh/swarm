@@ -9,6 +9,17 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
+func TestA9ChannelCandidateUsesExactAlias(t *testing.T) {
+	candidate := testCandidate(strings.Repeat("a", 64), "support")
+	for _, alias := range []string{" support", "support ", "/support", "support/", "support/child", ".support"} {
+		changed := candidate
+		changed.Target.Alias = alias
+		if _, err := NewCandidateCatalog([]Candidate{changed}); err == nil {
+			t.Fatalf("unadmitted alias %q entered channel discovery", alias)
+		}
+	}
+}
+
 func TestChannelOnboardingCandidateCatalogRequiresOneExactCandidate(t *testing.T) {
 	left := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
 	right := testCandidate("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "alerts")

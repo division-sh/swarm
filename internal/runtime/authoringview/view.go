@@ -523,7 +523,11 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			OutputPins: outputPinViews(source, flowID, source.FlowOutputEventPins(flowID)),
 		}
 		if schema.Ingress != nil {
-			ingress := &StandingIngressView{Alias: strings.TrimSpace(schema.Ingress.Alias)}
+			alias, present := bundle.FlowIngressAlias(flowID)
+			if !present {
+				return nil, fmt.Errorf("flow %q has no compiled ingress alias", flowID)
+			}
+			ingress := &StandingIngressView{Alias: alias}
 			for _, provider := range schema.Ingress.Providers {
 				ingress.Providers = append(ingress.Providers, standingIngressProviderView(provider))
 			}
