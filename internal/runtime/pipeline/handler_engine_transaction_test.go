@@ -1448,7 +1448,7 @@ func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *tes
 	if err != nil || !found {
 		t.Fatalf("constructed terminal-control owner: found=%v err=%v", found, err)
 	}
-	instance.CurrentState, instance.Status, instance.TerminatedAt = "done", "terminated", time.Now().UTC()
+	instance.CurrentState = "done"
 	if err := pc.workflowStore.upsert(ctx, instance); err != nil {
 		t.Fatal(err)
 	}

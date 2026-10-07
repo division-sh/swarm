@@ -227,3 +227,49 @@ Fresh integrated focused proof and the complete local census/structural/ratchet
 preflight must pass on the committed candidate before another allocated core.
 Lifecycle plus13 follows only green core; CI full / Local lifecycle unchanged.
 Neither the diagnostic pin nor this handoff conveys tier or merge approval.
+
+## Broad-Unit Integration Reconciliation
+
+The complete managed broad unit on clean master06018d2e1 passes: plan
+50ebcbc692165d760b31822621f74923b290c897082404ecd82b1675b672b140,
+270 packages, no failed package/test. Its995.185s receipt includes managed
+admission waiting; the pipeline package executes348.883s. This is a baseline
+unit comparison, not aggregate core or a qualification waiver for this branch.
+
+The22 failing branch roots are grouped by integration contract, not treated as
+22 independent production defects:
+- Twelve roots consume omitted A/#2564 retry, typed-refusal, native corpus and
+  partition handoffs. Integrated the relevant22e326648/a79171fb1 hunks and the
+  current fc55abaf0 A2 proof, retaining E's committed-stage evidence check and
+  all cancellation/emit required-child rows. A's H1/H2 tests are not in this
+  split: their units and inputs are not added. The complete existing served
+  partition is checked in both lifecycle/full, including hostile lost-proof cases.
+- Four roots are missing exact classification/census rows for E's two timeout
+  constructor sites, joined deadline observer, non-expression Terminate fields
+  and three canonical persistence tables. Closed census validators remain intact.
+- Four roots need complete selected emit-feedback dependency injection or an
+  actual exact business-turn origin before testing provider/frame authority.
+  Public selected construction already injects the owner; fixture construction
+  now does too, and the selected constructor rejects its absence before execution.
+  The authority competition uses the existing publication/claim owners, not
+  fabricated delivery history or weaker origin admission.
+- Two fixture controls conflated inactive lifecycle with final-stage refusal,
+  or Go time location identity with exact persisted timestamp/value equality.
+  Separate active-stage admission from the retained inactive guard; compare
+  canonical UTC instants while retaining every mutation field and payload byte.
+
+The timer timeout is the same missing A retry-oracle handoff: a fixture injected
+stale revision on EVERY retry. It now injects one real failed attempt, checks
+rollback/no leaked timer, then requires a fresh retry under the same claim.
+No production retry, deadline, graph eligibility, cancellation clock, replay
+right, provider adapter or cleanup authority changed. D/#2566 catalog/final-marker
+work is not used to disguise these failures and remains outside this split.
+
+Working-tree focused proof:24 exact roots, three race repetitions each,72 root
+passes, no failure/skip. This includes all22 originals, the complete both-store
+timer matrix and a new missing-feedback construction negative. A separate stale
+timer six-leaf race probe passes20.693s; selected origin and SQLite mock-Claude
+journey pass through real selected persistence. Native provider doubles are not
+paid-provider/public-launcher qualification. Earlier diagnostic compile/metadata
+failures remain recorded. The final committed head still requires the complete
+local census/structural/ratchet sweep and managed broad unit before server2 core.

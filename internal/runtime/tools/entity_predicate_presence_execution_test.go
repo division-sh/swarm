@@ -25,12 +25,18 @@ accounts:
 	ctx, exec := newEntityToolTestExecutorWithBundle(t, actor, bundle)
 	for _, populated := range []bool{false, true} {
 		if populated {
-			for _, region := range []string{"", "us"} {
+			for _, fixture := range []struct {
+				flowInstance string
+				region       string
+			}{
+				{"review/inst-1", ""},
+				{"review/inst-2", "us"},
+			} {
 				metadata := map[string]any{"notes": []any{map[string]any{}}, "by_name": map[string]any{"x": map[string]any{}}}
-				if region != "" {
-					metadata["region"] = region
+				if fixture.region != "" {
+					metadata["region"] = fixture.region
 				}
-				seedImportedEntityForToolTest(t, ctx, map[string]any{"flow_instance": "review/inst-1", "fields": map[string]any{"status": "open", "metadata": metadata}})
+				seedImportedEntityForToolTest(t, ctx, map[string]any{"flow_instance": fixture.flowInstance, "fields": map[string]any{"status": "open", "metadata": metadata}})
 			}
 		}
 		for _, tool := range []string{"query_entities", "query_metrics"} {

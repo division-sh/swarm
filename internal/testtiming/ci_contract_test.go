@@ -2,6 +2,7 @@ package testtiming
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -428,15 +429,17 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		"serveapp-mailbox", "serveapp-mailbox-p-q",
 		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-delayed-commit-preservation", "serveapp-standing",
 	}
-	var serveappPatterns []*regexp.Regexp
 	for _, id := range serveappUnits {
 		unit, exists := policy.Units[id]
 		if !exists || !slices.Equal(unit.Packages, []string{serveappPackage}) || unit.Run == "" || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
 			t.Fatalf("%s unit = %#v, want complete uncached serveapp partition with unchanged budget", id, unit)
 		}
-		serveappPatterns = append(serveappPatterns, regexp.MustCompile(unit.Run))
 	}
-	assertGoProofPartition(t, filepath.Join(root, "internal", "serveapp"), serveappPatterns)
+	for _, profileName := range []string{testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+		if err := validateServeappPolicyPartition(policy, filepath.Join(root, "internal", "serveapp"), profileName); err != nil {
+			t.Fatal(err)
+		}
+	}
 	contractsPatterns := make([]*regexp.Regexp, 0, 2)
 	for _, id := range []string{"contracts-first", "contracts-rest"} {
 		unit, exists := policy.Units[id]
@@ -606,6 +609,90 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	for _, required := range []string{"required-full", "catalog-full", "selected-store-fast"} {
 		if !used[required] {
 			t.Errorf("canonical projection %s has no consumer", required)
+		}
+	}
+}
+
+func validateServeappPolicyPartition(policy testplanning.Policy, dir, profileName string) error {
+	profile, ok := policy.Profiles[profileName]
+	if !ok {
+		return fmt.Errorf("missing serveapp proof profile %s", profileName)
+	}
+	var runs []string
+	for _, id := range profile.Units {
+		unit := policy.Units[id]
+		if !slices.Contains(unit.Packages, policy.Module+"/internal/serveapp") {
+			continue
+		}
+		if !slices.Equal(unit.Packages, []string{policy.Module + "/internal/serveapp"}) || unit.Run == "" || unit.Skip != "" || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
+			return fmt.Errorf("%s unit %s weakens the complete uncached serveapp partition: %+v", profileName, id, unit)
+		}
+		runs = append(runs, unit.Run)
+	}
+	if err := testplanning.ValidateGoProofPartition(dir, runs); err != nil {
+		return fmt.Errorf("%s serveapp partition: %w", profileName, err)
+	}
+	return nil
+}
+
+func TestServeappPolicyPartitionRejectsLostProof(t *testing.T) {
+	root := testTimingRepoRoot(t)
+	for _, id := range []string{"serveapp-other-late", "serveapp-delayed-commit-preservation"} {
+		for _, profileName := range []string{testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+			for _, change := range []struct {
+				name string
+				edit func(*testplanning.Policy)
+			}{
+				{"omitted_root", func(p *testplanning.Policy) {
+					unit := p.Units[id]
+					unit.Run = "^$"
+					p.Units[id] = unit
+				}},
+				{"overlap", func(p *testplanning.Policy) {
+					unit := p.Units[id]
+					unit.Run = "^TestIssue2564.*$"
+					p.Units[id] = unit
+				}},
+				{"partial_backend", func(p *testplanning.Policy) {
+					unit := p.Units[id]
+					unit.Run += "/sqlite"
+					p.Units[id] = unit
+				}},
+				{"skipped_backend", func(p *testplanning.Policy) {
+					unit := p.Units[id]
+					unit.Skip = "postgres"
+					p.Units[id] = unit
+				}},
+				{"cached", func(p *testplanning.Policy) {
+					unit := p.Units[id]
+					unit.CountMode = "cache-default"
+					p.Units[id] = unit
+				}},
+				{"missing_profile_owner", func(p *testplanning.Policy) {
+					profile := p.Profiles[profileName]
+					profile.Units = slices.DeleteFunc(profile.Units, func(member string) bool { return member == id })
+					p.Profiles[profileName] = profile
+				}},
+			} {
+				t.Run(id+"/"+profileName+"/"+change.name, func(t *testing.T) {
+					file, err := os.Open(filepath.Join(root, ".github", "test-proof-plan.yaml"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					policy, err := testplanning.LoadPolicy(file)
+					_ = file.Close()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := validateServeappPolicyPartition(policy, filepath.Join(root, "internal", "serveapp"), profileName); err != nil {
+						t.Fatalf("committed positive control: %v", err)
+					}
+					change.edit(&policy)
+					if err := validateServeappPolicyPartition(policy, filepath.Join(root, "internal", "serveapp"), profileName); err == nil {
+						t.Fatal("lost or weakened serveapp proof accepted")
+					}
+				})
+			}
 		}
 	}
 }

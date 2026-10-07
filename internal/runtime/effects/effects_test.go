@@ -602,6 +602,11 @@ func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T
 		ctx = WithLogicalOperationIdentity(ctx, "missing-agent-frame")
 		ctx = managedexecution.WithAdmission(ctx, admission)
 		ctx = managedcapabilities.WithContext(ctx, surface)
+		claim, err := deliverylifecycle.AdmitPersistedClaim(uuid.NewString(), forkRunID, "missing-frame-route", uuid.NewString(), 1, deliverylifecycle.SubscriberAgent, target.AgentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx = deliverylifecycle.WithClaim(ctx, claim)
 		if _, err := BeginCompletion(ctx, "anthropic_api", []byte("request"), nil); err == nil {
 			t.Fatal("managed agent turn was authorized without an execution frame")
 		} else if failure, ok := runtimefailures.EnvelopeFromError(err); !ok || failure.Detail.Code != "agent_execution_frame_missing_or_mismatched" {

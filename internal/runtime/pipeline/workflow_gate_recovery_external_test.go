@@ -1042,7 +1042,7 @@ func TestDecisionRouteObligationQuarantinesPoisonAndContinuesOnBothStores(t *tes
 				t.Fatalf("poison route sweep recovered = %d, %v; want 2 handled obligations, nil", result.Settled, err)
 			}
 			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
-			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
+			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "decision_route_fixture_invalid")
 			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
 			if result, err := bus.SweepPipelineObligations(testAuthorActivityContext(t, context.Background()), 10); err != nil || result.Settled != 0 {
 				t.Fatalf("second poison route sweep recovered = %d, %v; want 0, nil", result.Settled, err)
@@ -1073,7 +1073,7 @@ func TestDecisionRouteStartupRecoveryQuarantinesPoisonAndContinuesOnBothStores(t
 				t.Fatalf("startup poison route recovery: %v", err)
 			}
 			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
-			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
+			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "decision_route_fixture_invalid")
 			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
 			if err := recovery.Recover(testAuthorActivityContext(t, context.Background())); err != nil {
 				t.Fatalf("second startup poison route recovery: %v", err)
@@ -1119,7 +1119,7 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 				}
 
 				assertGateRecoveryObligationStatus(t, selected, fixture.event.ID(), "quarantined")
-				assertGateRecoveryErrorReceipt(t, selected, fixture.event.ID(), "event_interceptor_failed")
+				assertGateRecoveryErrorReceipt(t, selected, fixture.event.ID(), "decision_route_fixture_invalid")
 				assertGateRecoveryActivation(t, fixture.coordinator, runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), fixture.entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
 				card, err := selected.cards.GetDecisionCard(testAuthorActivityContext(t, context.Background()), fixture.cardID)
 				if err != nil {

@@ -1,0 +1,11 @@
+name: hub
+instance: hub_id
+stages:
+  idle: {initial: true}
+  working:
+    timers:
+      - {id: deadline, after: 5s, advances_to: review}
+  review: {}
+  closed: {terminal: true}
+pins:
+  inputs: [hub.start, hub.begin, hub.close]

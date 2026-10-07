@@ -398,7 +398,10 @@ writer:
 					t.Fatalf("debug history omitted records: got %d want %d", len(report.Mutations), len(mutations))
 				}
 				for i, mutation := range report.Mutations {
-					if !reflect.DeepEqual(mutation, mutations[i].RunDebugMutation) {
+					expected := mutations[i].RunDebugMutation
+					mutation.CreatedAt = mutation.CreatedAt.Round(0).UTC()
+					expected.CreatedAt = expected.CreatedAt.Round(0).UTC()
+					if !reflect.DeepEqual(mutation, expected) {
 						t.Fatalf("debug history changed mutation %d: got=%+v want=%+v", i, mutation, mutations[i].RunDebugMutation)
 					}
 				}

@@ -5312,6 +5312,9 @@ engine:
       cleanup and publication responsibility. The receipt describes this handler's
       instance only; a receiver receipt is not the emitting actor's own stage, and
       queued publication acceptance is not an unexecuted handler's completion.
+      Selected-contract execution construction requires the typed publication
+      feedback owner before admitting execution; a missing owner is a construction
+      error, not a dependency to discover after a provider's emit call.
   committed_publication_handoff:
     owner: existing workflow engine mutation result
     rule: >-

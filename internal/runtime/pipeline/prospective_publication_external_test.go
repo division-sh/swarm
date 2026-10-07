@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -33,16 +34,20 @@ type observedProspectiveBus struct {
 
 type observedProspectivePersistence struct {
 	runtimepipeline.WorkflowPersistenceOwner
-	mode    string
-	calls   int
-	err     error
-	db      *sql.DB
-	raced   bool
-	armRace bool
+	mode       string
+	calls      int
+	err        error
+	db         *sql.DB
+	raced      bool
+	armRace    bool
+	conflict   error
+	revisions  []int64
+	onConflict func(context.Context, runtimepipeline.WorkflowEngineMutationCommand)
 }
 
 func (p *observedProspectivePersistence) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
 	p.calls++
+	p.revisions = append(p.revisions, command.State.ExpectedRevision)
 	switch p.mode {
 	case "changed_state":
 		command.State.Fields = json.RawMessage(`{"case_id":"foreign"}`)
@@ -78,6 +83,12 @@ func (p *observedProspectivePersistence) CommitWorkflowEngineMutation(ctx contex
 		}
 	}
 	result, err := p.WorkflowPersistenceOwner.CommitWorkflowEngineMutation(ctx, command)
+	if runtimefailures.IsStateContention(err) {
+		p.conflict = err
+		if p.onConflict != nil {
+			p.onConflict(ctx, command)
+		}
+	}
 	p.err = err
 	return result, err
 }
@@ -174,7 +185,20 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 						t.Fatalf("initial creation failed before race: commits=%d err=%v planner=%v", persistence.calls, persistence.err, observed.err)
 					}
 					observed.calls, persistence.calls = 0, 0
+					persistence.revisions = nil
 					persistence.armRace = true
+					persistence.onConflict = func(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) {
+						current, err := persistence.LoadWorkflowTargetPersistence(ctx, command.State.Identity, identity.NormalizeEntityID(command.State.EntityID))
+						var fields map[string]any
+						if err != nil || json.Unmarshal(current.State.Fields, &fields) != nil || fields["case_id"] != "first" || int64(current.State.Revision) != command.State.ExpectedRevision+1 {
+							t.Fatalf("stale attempt changed rival state: %+v err=%v", current, err)
+						}
+						for _, publication := range command.Publications {
+							if _, found, err := selected.events.LoadPreparedPublishEvent(ctx, publication.DurablePublicationEventID()); err != nil || found {
+								t.Fatalf("stale attempt leaked publication: found=%t err=%v", found, err)
+							}
+						}
+					}
 				}
 				seed := eventtest.ExistingRunRootIngress(uuid.NewString(), "start", "operator", "", []byte(`{"case_id":"exact"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 				if err := canonical.Publish(ctx, seed); err != nil {
@@ -189,7 +213,11 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					t.Fatal(err)
 				}
 				_, _, execution, dispatchErr := coordinator.InterceptDeliveryRoute(ctx, delivery, prepared.DeliveryRoutes[0])
-				if observed.calls != 1 {
+				wantPlans := 1
+				if name == "competing_revision" {
+					wantPlans = 2
+				}
+				if observed.calls != wantPlans {
 					t.Fatalf("actual prepared mutation reached planner %d times", observed.calls)
 				}
 				var states, published int
@@ -211,8 +239,8 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					return
 				}
 				if name == "competing_revision" {
-					failure, typed := runtimefailures.EnvelopeFromError(persistence.err)
-					if !persistence.raced || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || observed.err != nil || len(observed.plans) != 1 {
+					failure, typed := runtimefailures.EnvelopeFromError(persistence.conflict)
+					if !persistence.raced || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || persistence.err != nil || observed.err != nil || len(observed.plans) != 1 || persistence.calls != 2 || len(persistence.revisions) != 2 || persistence.revisions[1] != persistence.revisions[0]+1 {
 						t.Fatalf("wrong revision fence: raced=%t commits=%d commit=%v planning=%v execution=%+v dispatch=%v", persistence.raced, persistence.calls, persistence.err, observed.err, execution, dispatchErr)
 					}
 					var fields string
@@ -220,8 +248,8 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 						t.Fatal(err)
 					}
 					var value map[string]any
-					if err := json.Unmarshal([]byte(fields), &value); err != nil || value["case_id"] != "first" || states != 1 || published != 1 {
-						t.Fatalf("stale plan changed state/publication: fields=%s states=%d published=%d err=%v", fields, states, published, err)
+					if err := json.Unmarshal([]byte(fields), &value); err != nil || value["case_id"] != "exact" || states != 1 || published != 2 {
+						t.Fatalf("fresh retry did not publish exactly once: fields=%s states=%d published=%d err=%v", fields, states, published, err)
 					}
 					return
 				}

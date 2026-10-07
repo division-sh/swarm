@@ -34,6 +34,7 @@ type asyncSiteLedgerEntry struct {
 // a launch within a function can preserve the count: behavioral tests and review
 // must still establish cancellation, joining, and exactly-once settlement.
 var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
+	"go|internal/runtime/effects/turn_execution.go|observeTurnLaunch":                                                    {1, asyncSiteSynchronousJoin, "the admitted logical turn owns its deadline observer; TurnExecution.Finish stops and joins it after provider cleanup and before origin settlement"},
 	"after_func|internal/runtime/startupownership/fan_out_capacity.go|FanOutServingRegistration.BeginTurn":               {1, asyncSiteCanonicalOwner, "exact generation cancellation reaches the admitted finite turn; permit Done stops or joins the bridge before settling its lease"},
 	"go|internal/runtime/startupownership/fan_out_capacity.go|RegisterFanOutServing":                                     {1, asyncSiteCanonicalOwner, "registration owns a runtime standing lease; close or exact generation/process loss cancels and joins the registration monitor"},
 	"go|internal/runtime/startupownership/fan_out_serving.go|StartFanOutServing":                                         {1, asyncSiteCanonicalOwner, "retained process owns one standing shared service; process release cancels and joins it and all admitted turns before releasing store possession"},
