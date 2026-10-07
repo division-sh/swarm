@@ -1278,6 +1278,10 @@ func (p *mutatingProbeEventPublisher) CheckPublishRecipientPlan(context.Context,
 	return runtimebus.PublishRecipientPlan{PersistedRecipients: []string{"probe-recipient"}}, nil
 }
 
+func (p *mutatingProbeEventPublisher) CheckAPIEventPublishRecipientPlan(ctx context.Context, event events.Event, _ *runtimebus.APIEventPublicationEndpoint) (runtimebus.PublishRecipientPlan, error) {
+	return p.CheckPublishRecipientPlan(ctx, event)
+}
+
 func (p *mutatingProbeEventPublisher) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	if p.missingSourceArtifactFact {
 		return ctx, nil
