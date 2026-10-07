@@ -2104,13 +2104,6 @@ func (*countingActivityCredentialStore) Set(context.Context, string, string) err
 func (*countingActivityCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
 func (*countingActivityCredentialStore) Delete(context.Context, string) error      { return nil }
 
-func activityTestPlaceholder(sqlite bool, position int) string {
-	if sqlite {
-		return "?"
-	}
-	return fmt.Sprintf("$%d::uuid", position)
-}
-
 func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore) {
 	t.Helper()
 	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
