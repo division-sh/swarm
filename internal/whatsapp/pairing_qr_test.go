@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -292,6 +293,10 @@ func TestWhatsAppDirectQRTerminalAndReadbackScopeFences(t *testing.T) {
 			if err := q.handle(&events.QR{Codes: []string{"original"}}); err != nil {
 				t.Fatal(err)
 			}
+			foreignPlan, err := plangeneration.FromCanonicalValue(map[string]string{"test": "other_pairing_plan"})
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, mutate := range []func(*pairingQRScope){
 				func(s *pairingQRScope) { s.PrincipalID = uuid.NewString() },
 				func(s *pairingQRScope) { s.OperationID = uuid.NewString() },
@@ -300,6 +305,10 @@ func TestWhatsAppDirectQRTerminalAndReadbackScopeFences(t *testing.T) {
 				func(s *pairingQRScope) { s.Coordinate.ContextPublicationGeneration++ },
 				func(s *pairingQRScope) { s.Coordinate.RuntimeInstanceID = uuid.NewString() },
 				func(s *pairingQRScope) { s.Coordinate.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64) },
+				func(s *pairingQRScope) { s.Coordinate.BundleIdentity = "source:other" },
+				func(s *pairingQRScope) { s.Coordinate.PackInventoryGeneration = "inventory:other" },
+				func(s *pairingQRScope) { s.Coordinate.PlanGeneration = foreignPlan },
+				func(s *pairingQRScope) { s.Coordinate.TargetGeneration++ },
 			} {
 				foreign := scope
 				mutate(&foreign)
