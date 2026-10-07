@@ -31,7 +31,7 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 		eventsYAML = "root.ready:\n  key: account_id\n  account_id: text\n  document: json?\n"
 	}
 	writeClosedVariantFile(t, root, "events.yaml", eventsYAML+DeploymentFixtureCloseDeclaration)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-singleton-connect\nstages: {active: {}, done: {final: true}}\npins:\n  inputs: [fixture.close.requested]\n  outputs: [root.ready, fixture.close.requested]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n  - event: fixture.close.requested\n    from: .\n    to: consumer\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-singleton-connect\nstages: {active: {}, done: {final: true}}\npins:\n  inputs: [fixture.close.requested]\n  outputs:\n    - root.ready\n    - fixture.close.requested\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n  - event: fixture.close.requested\n    from: .\n    to: consumer\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "fixture_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "close-fixture:\n  execution_type: system_node\n  event_handlers:\n    fixture.close.requested: {advances_to: done}\n")
 	writeClosedVariantFile(t, root, "consumer/schema.yaml", "name: consumer\nstages: {active: {}, done: {final: true}}\npins:\n  inputs: [root.ready, fixture.close.requested]\n")

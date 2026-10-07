@@ -158,14 +158,35 @@ func TestFieldlessImportShape2456HTTPBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			compiled, err := contracts.BuildDurableDataImportShapeCatalog(bundle)
-			if err != nil || len(compiled.Shapes) != 1 || compiled.Shapes[0].Fields == nil || len(compiled.Shapes[0].Fields) != 0 {
-				t.Fatalf("fieldless compiled shape = %#v, %v", compiled, err)
+			if err != nil || len(compiled.Shapes) != 2 {
+				t.Fatalf("fieldless and close compiled shapes = %#v, %v", compiled, err)
 			}
-			f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
 			ref, err := durabledata.ParseDeclarationRef(".", "root.ready")
 			if err != nil {
 				t.Fatal(err)
 			}
+			closeRef, err := durabledata.ParseDeclarationRef(".", "fixture.close.requested")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fieldless *durabledata.ImportShape
+			for i := range compiled.Shapes {
+				shape := &compiled.Shapes[i]
+				switch shape.Declaration {
+				case ref:
+					fieldless = shape
+				case closeRef:
+					if len(shape.Fields) != 1 || shape.Fields[0] != (durabledata.ImportShapeField{Name: "account_id", Required: true, Text: true}) {
+						t.Fatalf("close compiled shape = %#v", shape)
+					}
+				default:
+					t.Fatalf("unexpected compiled shape = %#v", shape)
+				}
+			}
+			if fieldless == nil || fieldless.Fields == nil || len(fieldless.Fields) != 0 {
+				t.Fatalf("fieldless compiled shape = %#v", fieldless)
+			}
+			f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
 			reader, ok := f.selected.(interface {
 				GetDeclarationImportShape(context.Context, string, durabledata.DeclarationRef) (durabledata.ImportShape, error)
 			})
