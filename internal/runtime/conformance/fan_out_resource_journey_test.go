@@ -182,13 +182,19 @@ func (f *deploymentResourceFixture) operatorServer(t *testing.T) *httptest.Serve
 	if !ok {
 		t.Fatalf("selected store %T lacks public event readback", f.selected)
 	}
+	runs, ok := f.selected.(apiv1.RunReadStore)
+	if !ok {
+		t.Fatalf("selected store %T lacks canonical run readback", f.selected)
+	}
 	publication := apiv1.EventPublicationOptions{
-		Idempotency: idempotency, Events: f.runtime.bus, Acknowledged: deploymentRunStartDiagnostic{EventBus: f.runtime.bus, t: t},
-		SourceArtifact: f.runtime.bus, RunBundleContext: contextOwner,
+		ExecutionPosture: f.runtime.posture,
+		Idempotency:      idempotency, Events: f.runtime.bus, Acknowledged: deploymentRunStartDiagnostic{EventBus: f.runtime.bus, t: t},
+		SourceArtifact: f.runtime.bus, RunBundleContext: contextOwner, RecipientPlans: f.runtime.bus, Runs: runs, Observability: observability,
 		Source: f.source, Bundle: identity,
 	}
 	methods := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
+		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
 		apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: dataOwner}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: observability}),
 		map[string]apiv1.MethodHandler{"health.check": func(context.Context, apiv1.Request) (any, error) {

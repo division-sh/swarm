@@ -1,5 +1,80 @@
 # #2566 Early Review Repairs
 
+## Finite Caller Census And Fixture Repair
+
+Lifecycle at `c6a90a08be52e613fe273a85875c9ff57bcd28b3` ran on server2
+2026-10-07 08:27:01--08:31:40 UTC, plan
+`bf3b6d7620ee46f8ba2bdb0c1538ccafd3018a8b4f2f8d0e1990ab678d4b93d5`.
+Six units passed, four failed or were interrupted, and 45 did not start. The
+actual release failures were `RUN_NEVER_COMPLETES` for no-final routing roots;
+`runtime-full` and `serveapp-i-reporter` were canceled siblings, not separately
+diagnosed defects. No supplement or soak ran. This receipt does not qualify
+the repaired head.
+
+The read-only census inspected 278 tracked disk schema files (190 independent
+roots), 529 Go literal sites, and 441 finite-method/CLI references. Forty disk
+roots had no final stage before this repair. Literal sites include nested flows,
+fragments, negative oracles and component sources; they are not 529 independent
+run-start sources. Actual source aliases and constructor callers were traced,
+not classified from full-path grep alone.
+
+The permanent tests cover 16 actual finite source variants and explicitly
+classify all 38 remaining no-final disk roots. Service examples, standing
+ingress, startup/provider fixtures, scenario imports, low-level construction,
+fork components and the unreachable boot oracle are not made finite merely to
+pass a test. `TestRewrite2566DeliberateServicesStillRefuseFiniteInitiation`
+retains the refusal for default service constructors. The existing both-store
+API refusal-before-effects and ordinary service-publication proofs remain due
+in lifecycle qualification, with their original assertions intact.
+
+| Actual finite consumer family | Existing fixture owner / repair | Named proof |
+| --- | --- | --- |
+| Managed Claude release, foreground observer overflow, optional live-Claude release | `claude_cli_managed_lifecycle`: routing-only root immediately ends at `done`; worker still enters `pending` and ends at its existing `done`. | `TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults`, `TestRunStartForegroundObserverOverflowFromReleaseBinary`, `TestRewrite2566FiniteReleaseRootsDoNotCompleteTheirWorkers`. Paid live-Claude proof is not claimed. |
+| Numeric scatter pause/crash/restart, row-100 rejection, durable operation replay | `test-numeric-data-scatter-park`: routing-only root immediately ends at `done`; registry retains its original active stages, parked timers and `archived` final. | `TestGoldenNumericDataScatterParkRestartBothStores`, `TestGoldenNumericDataScatterParkRefusalBothStores`, `TestDurableDataOperationAggregatePublicRestartBothStores`, and the independent root/worker test. All five failing release roots pass locally, including their original PostgreSQL/SQLite children. |
+| Deployment document corpus and two independent pinned feeds | `CopyNotifyAllChildren` gets an explicit finite-only option; `CopyTwoDeploymentFeeds` and the deployment conformance source select it. Default service variants remain unchanged. A producer-owned, connected close event ends the reusable portfolio; rows do not close it prematurely. | `TestDeploymentSourceTwoPinnedFeedsSettleIndependentlyBothStores`; corpus/empty-version and heavy fan-out proofs remain required supplements. |
+| Text/file data, keyless multiplicity, selected root/singleton/dynamic feed forks | `CopySelectedDeploymentResource`: existing collectors stay active across rows, with declared primary entities and an explicit close transition. Dynamic close selects an existing receiver, not create-on-close. Data-declaration overrides retain the close declaration instead of deleting it. | Six route/key variants in `TestRewrite2566FiniteInitiationSourcesHaveCompleteClosure`; original text/restart/replay and selected-fork assertions are preserved. Keyless multiplicity additionally proves public close after settlement through existing API and run-read owners. |
+| Connected novel scenario root-input run | `WriteNovelDerivedScenarioBundleWithRootInput`: routing root ends immediately; its existing complete-request handler advances fulfillment `pending` to `done`. The scenario-import-only variant remains a service. | Finite source/ordinary verification test; existing connected private/live-source tests retain their assertions. |
+| Already finite reporter, root ingress, resource-read release, numeric ingress, deployment-run-start | Existing closed constructors and stages are unchanged. | Same 16-case loaded-source census, plus their existing supported-surface journeys in lifecycle/supplements. |
+
+`finite-fixtures.json` uses the already committed hash/offset applier for eight
+explicit disk/generated/caller files. It replays exactly from `c6a90a08b` and
+is byte-idempotent; no end stage is inferred. The original 417-file/553-decision
+retirement/equivalence ledger is unchanged and still replays exactly. The
+permanent finite-source test also runs ordinary structural verification, so
+unreachable decorative finals, absent primary entities and missing producer
+authority cannot receive positive proof credit.
+
+This is a test/source reconciliation within the approved class, not a runtime
+relaxation. No production interpreter, compatibility path, alternate owner,
+timeout/count/ceiling increase or blanket stateless-container exemption is
+introduced. The added completion assertion consumes `operatorread.RunReader`,
+not additional lifecycle SQL. The read-only scratch census is retained as text
+evidence rather than an importable unclassified Go package.
+
+The component deployment harness has no completion executor by default. Its
+additional close proof therefore checks the actual persisted `done` stage
+through `WorkflowInstancePersistenceReader`, not a fabricated whole-run
+completion result. A trial enabling completion across the shared restart
+harness exposed its intentionally separate executor-join requirement and was
+discarded; neither the shared harness lifetime nor A/E's production ownership
+was changed. The real release/served journeys retain whole-run completion
+proof obligations. Failed trial receipts remain evidence, not qualification.
+
+The four focused data journeys pass on both databases at `-race -count=3`
+(159.402 seconds): independent pinned feeds, keyless equal-row multiplicity
+with public close/persisted final, text-file restart/replay, and 37 dynamic
+receivers. Source/ordinary-verification/service census controls pass
+`-race -count=3`; the complete script tests also pass `-race -count=3`.
+All 78 core structural guards pass; the actual persistence ratchet passes
+without new raw authority or baseline changes. Build and vet pass. Full
+repository census and complexity receipts are recorded at the next review head.
+Lifecycle plus the 13 named supplements and hosted full CI are
+still required before review-ready closure. The preceding 22/22 core receipt
+remains bound to `2b9273490`; any carry-forward disposition must not relabel it
+as an execution at this replacement head. Parent/watchlist and A/E ownership
+boundaries are unchanged. This section is a repair checkpoint, not the final
+Post-Implementation Proof Audit.
+
 ## Generated Readiness Order Repair
 
 Core at `2b92734907b298c1e47bcfa5eeff2327a59431b6` passed all 22 units on
