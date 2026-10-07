@@ -868,6 +868,7 @@ units:
       TestAgentLifecycleProcessBindingReadbackParity: [sqlite, postgres]
       TestAgentLifecycleReadinessSourceSetRebindBothStores: [sqlite, postgres]
       TestAgentLifecyclePreparedReadinessRebindBothStores: [sqlite, postgres]
+      TestA9KeyedStandingGenerationDoesNotConstructBothStores: [sqlite/., sqlite/parent, postgres/., postgres/parent]
       TestActivityAdmissionConsumesConstructedHeaderBothStores: [postgres/fieldless/current, postgres/fieldless/malformed_bucket, postgres/fieldless/missing_header, postgres/fieldless/stale, postgres/fieldless/wrong_entity, postgres/fieldless/wrong_header_flow, postgres/fieldless/wrong_path, postgres/fields/current, postgres/fields/malformed_bucket, postgres/fields/missing_header, postgres/fields/stale, postgres/fields/wrong_entity, postgres/fields/wrong_header_flow, postgres/fields/wrong_path, sqlite/fieldless/current, sqlite/fieldless/malformed_bucket, sqlite/fieldless/missing_header, sqlite/fieldless/stale, sqlite/fieldless/wrong_entity, sqlite/fieldless/wrong_header_flow, sqlite/fieldless/wrong_path, sqlite/fields/current, sqlite/fields/malformed_bucket, sqlite/fields/missing_header, sqlite/fields/stale, sqlite/fields/wrong_entity, sqlite/fields/wrong_header_flow, sqlite/fields/wrong_path]
       TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores: [sqlite, postgres]
     count_mode: count-1
@@ -1010,7 +1011,6 @@ units:
       TestScenarioConstructionFieldlessStateBothStores: [sqlite, postgres]
       TestStandingPreparationVerifiesCompleteRootTreeBothStores: [sqlite/intact, sqlite/missing_sibling, sqlite/missing_fields, sqlite/foreign_parent, postgres/intact, postgres/missing_sibling, postgres/missing_fields, postgres/foreign_parent]
       TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores: [sqlite, postgres]
-      TestA9KeyedStandingGenerationDoesNotConstructBothStores: [sqlite/., sqlite/parent, postgres/., postgres/parent]
       TestSelectedContractOrdinarySourceStatePresenceBothStores:
         - sqlite/absent
         - sqlite/zero
