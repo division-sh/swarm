@@ -45,10 +45,23 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 	if err != nil {
 		return ordinaryPublicationSource{}, err
 	}
+	if expected.InstancePath == "" {
+		if p.context != nil {
+			if preview, _ := p.context.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil {
+				expected = preview.selected[route.FlowID]
+			}
+		}
+		if expected.InstancePath == "" {
+			return ordinaryPublicationSource{route: route, root: root, declarationOnly: true}, nil
+		}
+		if err := expected.ValidateConstruction(p.source, evt.RunID()); err != nil {
+			return ordinaryPublicationSource{}, err
+		}
+	}
 	owners := make(map[events.RouteIdentity]struct{})
 	for _, descriptor := range p.descriptors {
 		descriptor = descriptor.Normalized()
-		if !p.providerDescriptorInFlow(evt, route.FlowID, root, descriptor) {
+		if descriptor.FlowInstance != expected.InstancePath {
 			continue
 		}
 		if err := p.validateProviderExecutionDescriptor(route.FlowID, expected, descriptor); err != nil {
@@ -77,16 +90,6 @@ func (p selectedRunTargetOwnerProjection) providerExecutionIdentity(event events
 		return runtimeflowidentity.Instance{}, err
 	}
 	return runtimeflowidentity.StandingForGeneration(p.source, flowID, event.RunID())
-}
-
-func (p selectedRunTargetOwnerProjection) providerDescriptorInFlow(event events.Event, flowID string, root bool, descriptor ActiveTargetDescriptor) bool {
-	if descriptor.FlowInstance == "" {
-		return false
-	}
-	if root {
-		return descriptor.FlowInstance == event.RunID()
-	}
-	return runtimeflowidentity.OwnedByFlow(p.source, flowID, descriptor.FlowInstance)
 }
 
 func (p selectedRunTargetOwnerProjection) validateProviderExecutionDescriptor(flowID string, expected runtimeflowidentity.Instance, descriptor ActiveTargetDescriptor) error {

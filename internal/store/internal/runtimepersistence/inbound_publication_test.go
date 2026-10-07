@@ -2,10 +2,16 @@ package runtimepersistence
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,16 +20,20 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -32,15 +42,7 @@ type inboundPublicationProofStore interface {
 	runtimeinbound.Runner
 	storeTestDurableEventBusStore
 	workflowTestSelectedStore
-}
-
-type inboundPublicationProofAuthorizationVerifier struct{}
-
-func (inboundPublicationProofAuthorizationVerifier) VerifyProviderOutputAuthorization(actual runtimeprovideroutput.Authorization) error {
-	if !actual.Valid() {
-		return errors.New("inbound publication proof authorization is incomplete")
-	}
-	return nil
+	sourceartifact.Reader
 }
 
 type inboundPublicationProofMutation interface {
@@ -83,17 +85,11 @@ func runInboundPublicationProofMutation(t *testing.T, store inboundPublicationPr
 	if !builder.finalized {
 		return runtimeinbound.Record{}, errors.New("inbound publication proof did not finalize")
 	}
-	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	if !ok {
-		return runtimeinbound.Record{}, errors.New("inbound publication proof bundle source fact is required")
-	}
-	eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
-		SourceArtifactFact: sourceFact, ProviderOutputVerifier: inboundPublicationProofAuthorizationVerifier{},
-	})
+	eventBus, admission, err := inboundPublicationProofBus(t, store, ctx, request, len(builder.finalization.Events))
 	if err != nil {
 		return runtimeinbound.Record{}, err
 	}
-	batch := runtimebus.InboundDeliveryBatch{Provider: request.Provider, Events: make([]runtimebus.InboundDeliveryEvent, len(builder.finalization.Events))}
+	batch := runtimebus.InboundDeliveryBatch{Provider: request.Provider, Admission: admission, Events: make([]runtimebus.InboundDeliveryEvent, len(builder.finalization.Events))}
 	for index, item := range builder.finalization.Events {
 		batch.Events[index] = runtimebus.InboundDeliveryEvent{Event: item.Event, Kind: item.Kind, Authorization: item.Authorization}
 	}
@@ -110,6 +106,10 @@ func runInboundPublicationProofMutation(t *testing.T, store inboundPublicationPr
 		}
 		builder.finalization.Events[index].Event = prepared[index].Event
 		builder.finalization.Events[index].RecipientManifest = manifest
+	}
+	builder.finalization.EvidenceEvent, err = eventBus.PrepareInboundEvidence(ctx, builder.finalization.EvidenceEvent)
+	if err != nil {
+		return runtimeinbound.Record{}, err
 	}
 	projection, _ := runtimeauthoractivity.InboundProjectionFromContext(ctx)
 	result, err := store.CommitInboundPublication(ctx, runtimeinbound.CommitCommand{
@@ -130,6 +130,39 @@ func runInboundPublicationProofMutation(t *testing.T, store inboundPublicationPr
 		}
 	}
 	return result.Record, err
+}
+
+func inboundPublicationProofBus(t *testing.T, store inboundPublicationProofStore, ctx context.Context, request runtimeinbound.Request, outputCount int) (*runtimebus.EventBus, providertriggers.PublicationAdmission, error) {
+	t.Helper()
+	var empty providertriggers.PublicationAdmission
+	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !ok {
+		return nil, empty, errors.New("inbound publication proof bundle source fact is required")
+	}
+	persisted, err := store.GetSourceArtifact(ctx, fact.BundleHash())
+	if err != nil {
+		return nil, empty, err
+	}
+	artifact, err := persisted.Decode()
+	if err != nil {
+		return nil, empty, err
+	}
+	repo := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		return nil, empty, err
+	}
+	catalog, plan, authenticated := inboundPublicationProofProvider(t, request, outputCount)
+	source, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), catalog)
+	if err != nil {
+		return nil, empty, err
+	}
+	_, admission, err := plan.ProjectPublication(authenticated, fact.BundleHash(), request.FlowPath)
+	if err != nil {
+		return nil, empty, err
+	}
+	bus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{SourceArtifactFact: fact, ProviderOutputVerifier: catalog, ContractBundle: source})
+	return bus, admission, err
 }
 
 func commitInboundPublicationTestEvent(t *testing.T, _ storeTestDurableEventBusStore, _ inboundPublicationProofMutation, publication *runtimeinbound.EventFinalization) error {
@@ -177,6 +210,9 @@ func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommi
 					t.Fatalf("selected store %T has no inbound publication owner", f.selected)
 				}
 				candidate := f.candidate("credential-ineligible-inbound")
+				bundle := inboundPublicationProofBundle(t, candidate.FlowPath)
+				candidate.Source = mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+				seedStoreTestPersistedArtifact(t, f.db, bundle.SourceArtifact)
 				ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
 				registrar := store.(testAuthorActivityCatalogRegistrar)
 				registerTestAuthorActivityCatalogForContext(t, registrar, ctx)
@@ -228,8 +264,8 @@ func TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommi
 
 func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
-	artifact := storeTestSourceArtifact("inbound-publication-proof")
 	flowPath := "publication-proof/ingress"
+	artifact := inboundPublicationProofBundle(t, flowPath).SourceArtifact
 	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: serviceID, FlowPath: flowPath,
@@ -962,6 +998,102 @@ func inboundPublicationProofEvents(t *testing.T, request runtimeinbound.Request)
 	return inboundPublicationProofEventsCount(t, request, 2)
 }
 
+func inboundPublicationProofBundle(t *testing.T, flowPath string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	rootSchema := `name: inbound-publication-proof
+imports:
+  provider_trigger_events:
+    - provider: github
+      event: inbound.github.push.normalized
+pins:
+  outputs: [inbound.github.push.normalized]
+`
+	leafSchema := `name: ingress
+ingress:
+  alias: github
+  providers:
+    - provider: github
+      signing_secret: proof-secret
+pins:
+  outputs: [inbound.github.push.normalized]
+`
+	files := map[string]string{"schema.yaml": rootSchema + fmt.Sprintf("connect:\n  - event: inbound.github.push.normalized\n    from: %s\n    to: .\n", flowPath), flowPath + "/schema.yaml": leafSchema}
+	parts := strings.Split(flowPath, "/")
+	for index := 1; index < len(parts); index++ {
+		files[strings.Join(parts[:index], "/")+"/schema.yaml"] = "name: " + parts[index-1] + "\n"
+	}
+	for label, body := range files {
+		path := filepath.Join(root, label)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bundle
+}
+
+func inboundPublicationProofProvider(t *testing.T, request runtimeinbound.Request, outputCount int) (*providertriggers.CatalogSnapshot, providertriggers.InboundAdmissionPlan, providertriggers.AdmittedRequest) {
+	t.Helper()
+	const body = `provider: github
+secret: {required: true}
+signature: {type: hmac_sha256, header: X-Signature, prefix: "sha256=", signed_payload: raw_body}
+delivery_id: {json_path: "$.delivery_id", required: true}
+event_type: {literal: push}
+event_name: {literal: inbound.github.push}
+ack: {mode: durable_before_dispatch}
+normalized_events:
+  - event: inbound.github.push.normalized
+    when: {exists: [normalize]}
+    fields:
+      value:
+        from: value
+        schema: {type: object, properties: {z: {type: integer}, a: {type: integer}}, required: [z, a], additionalProperties: false}
+      provider: {from: provider, schema: {type: string}}
+`
+	manifest, err := providertriggers.ParseManifest([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256([]byte(body))
+	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
+		Manifest: manifest, Source: "inbound-publication-proof",
+		Identity: providertriggers.PackIdentity{ID: "provider.github", Version: "1.0.0", ManifestHash: "sha256:" + hex.EncodeToString(hash[:]), Provenance: "test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: request.TargetAlias, Provider: request.Provider, SigningSecret: "proof-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{"delivery_id": request.ProviderEventID, "provider": request.Provider, "value": map[string]any{"z": 2, "a": 1}}
+	if outputCount == 2 {
+		payload["normalize"] = true
+	}
+	wire, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha256.New, []byte("proof-secret"))
+	_, _ = mac.Write(wire)
+	admitted, err := plan.AdmitRequest(providertriggers.Request{
+		Provider: request.Provider, Target: providertriggers.Target{WebhookSecret: "proof-secret"},
+		Headers: http.Header{"X-Signature": {"sha256=" + hex.EncodeToString(mac.Sum(nil))}}, Body: wire, Payload: payload, Received: request.OriginalReceivedAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog, plan, admitted
+}
+
 func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Request, outputCount int) ([]runtimeinbound.EventFinalization, events.Event) {
 	t.Helper()
 	if outputCount < 1 || outputCount > 2 {
@@ -971,26 +1103,24 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 	if err != nil {
 		t.Fatal(err)
 	}
-	rawID, err := runtimeinbound.DeterministicEventID(request.PublicationID, 0)
-	if err != nil {
-		t.Fatal(err)
+	_, providerPlan, authenticated := inboundPublicationProofProvider(t, request, outputCount)
+	delivery, err := providerPlan.ProjectDelivery(authenticated)
+	if err != nil || len(delivery.Events) != outputCount {
+		t.Fatalf("admitted provider output count=%d want=%d err=%v", len(delivery.Events), outputCount, err)
 	}
-	normalizedID, err := runtimeinbound.DeterministicEventID(request.PublicationID, 1)
-	if err != nil {
-		t.Fatal(err)
+	publications := make([]runtimeinbound.EventFinalization, outputCount)
+	for ordinal, output := range delivery.Events {
+		eventID, err := runtimeinbound.DeterministicEventID(request.PublicationID, ordinal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := json.Marshal(output.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := eventtest.ExistingRunRootIngressWithRoutingSource(eventID, output.Name, "inbound-gateway", "", payload, 0, request.ResolvedRunID, events.EventEnvelope{}, source, request.OriginalReceivedAt)
+		publications[ordinal] = runtimeinbound.EventFinalization{Ordinal: ordinal, Event: event, Kind: runtimeprovideroutput.Kind(output.Kind), Authorization: output.Authorization, RecipientManifest: []byte(`[]`)}
 	}
-	payload := []byte(`{"value":{"z":2,"a":1},"provider":"github"}`)
-	raw := eventtest.ExistingRunRootIngressWithRoutingSource(rawID, "inbound.github.push", "inbound-gateway", "", payload, 0, request.ResolvedRunID, events.EventEnvelope{}, source, request.OriginalReceivedAt)
-	normalized := eventtest.ExistingRunRootIngressWithRoutingSource(normalizedID, "github.push.normalized", "inbound-gateway", "", payload, 0, request.ResolvedRunID, events.EventEnvelope{}, source, request.OriginalReceivedAt)
-	authorization := runtimeprovideroutput.MustAuthorization(
-		request.Provider, string(normalized.Type()), "provider.github", "1.0.0",
-		"sha256:"+strings.Repeat("a", 64),
-		triggergeneration.FromCanonicalBytes([]byte("proof-generation")),
-	)
-	publications := []runtimeinbound.EventFinalization{
-		{Ordinal: 0, Event: raw, Kind: runtimeprovideroutput.KindRaw, RecipientManifest: []byte(`[]`)},
-		{Ordinal: 1, Event: normalized, Kind: runtimeprovideroutput.KindNormalized, Authorization: authorization, RecipientManifest: []byte(`[]`)},
-	}[:outputCount]
 	eventIDs := make([]string, len(publications))
 	eventNames := make([]string, len(publications))
 	for index := range publications {

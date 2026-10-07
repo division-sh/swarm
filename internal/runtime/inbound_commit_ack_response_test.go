@@ -25,7 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -132,8 +131,7 @@ func serveAcknowledgedTelegram(t *testing.T, gateway *runtimepkg.InboundGateway,
 func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			const runID = "75100000-0000-0000-0000-000000000001"
-			const entityID = "75100000-0000-0000-0000-000000000002"
+			runID, entityID := boundedInboundTestCoordinates()
 			const agentID = "committed-inbound-observer"
 			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "committed-inbound", agentID)
 			probe := &inboundCommittedFinalizerProbe{}
@@ -208,11 +206,10 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			const runID = "75000000-0000-0000-0000-000000000001"
-			const entityID = "75000000-0000-0000-0000-000000000002"
+			runID, entityID := boundedInboundTestCoordinates()
 			const agentID = "acknowledged-telegram-observer"
 			const providerEventID = "8201"
-			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-telegram", agentID)
+			ctx, selected, _, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-telegram", agentID)
 			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
@@ -250,17 +247,10 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			}
 			waitForInboundBusQuiescence(t, bus)
 			requireNoInboundBusEvent(t, ch, "acknowledged duplicate must not redeliver")
-			var deliveries int
-			if backend == "postgres" {
-				deliveries = countPostgresAgentDeliveriesForEvent(t, ctx, db, rawEventID, agentID)
-				if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, "telegram"); got != 1 {
-					t.Fatalf("marker count=%d, want 1", got)
-				}
-			} else {
-				deliveries = countSQLiteAgentDeliveriesForEvent(t, ctx, selected.(*store.SQLiteRuntimeStore), rawEventID, agentID)
-				if got := countSQLiteInboundMarkers(t, ctx, selected.(*store.SQLiteRuntimeStore), providerEventID, entityID, "telegram"); got != 1 {
-					t.Fatalf("marker count=%d, want 1", got)
-				}
+			readback := selected.(inboundGatewayReadback)
+			deliveries := countInboundAgentDeliveries(t, ctx, readback, rawEventID, agentID)
+			if got := countInboundMarkers(t, ctx, readback, target, "telegram", providerEventID); got != 1 {
+				t.Fatalf("marker count=%d, want 1", got)
 			}
 			if deliveries != 1 {
 				t.Fatalf("agent deliveries=%d, want 1", deliveries)
@@ -295,8 +285,7 @@ func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, fact := range []string{"acknowledgement_mode", "publication_sequence"} {
 			t.Run(backend+"/"+fact, func(t *testing.T) {
-				const runID = "77000000-0000-0000-0000-000000000001"
-				const entityID = "77000000-0000-0000-0000-000000000002"
+				runID, entityID := boundedInboundTestCoordinates()
 				const agentID = "hostile-result-telegram-observer"
 				ctx, selected, _, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "hostile-result", agentID)
 				bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
@@ -326,8 +315,7 @@ func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(
 func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			const runID = "76000000-0000-0000-0000-000000000001"
-			const entityID = "76000000-0000-0000-0000-000000000002"
+			runID, entityID := boundedInboundTestCoordinates()
 			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-operator", "")
 			plan := compileEmbeddedTelegramOperatorChannelPlan(t)
 			identity, err := plan.InterfaceIdentity()

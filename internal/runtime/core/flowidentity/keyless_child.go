@@ -42,16 +42,29 @@ func KeylessChildFlowIDs(source semanticview.Source, parentFlowID string) ([]str
 // KeylessChild binds an authored immediate child to its constructed parent.
 // A keyed ancestor's discriminator stays in the concrete path, not the scope.
 func KeylessChild(source semanticview.Source, parent Instance, childFlowID string) (Instance, error) {
+	return constructedChild(source, parent, childFlowID, "")
+}
+
+// KeyedChild preserves structural ancestry; the creating event is causal
+// evidence, not a substitute parent or a run-wide instance namespace.
+func KeyedChild(source semanticview.Source, parent Instance, childFlowID, instanceID string) (Instance, error) {
+	if instanceID == "" || strings.TrimSpace(instanceID) != instanceID || strings.Contains(instanceID, "/") {
+		return Instance{}, fmt.Errorf("keyed child requires its exact local instance discriminator")
+	}
+	return constructedChild(source, parent, childFlowID, instanceID)
+}
+
+func constructedChild(source semanticview.Source, parent Instance, childFlowID, instanceID string) (Instance, error) {
 	if source == nil || !parent.Route().Valid() || parent.EntityID == "" {
-		return Instance{}, fmt.Errorf("keyless child requires its exact constructed parent")
+		return Instance{}, fmt.Errorf("child requires its exact constructed parent")
 	}
 	schema, found := source.FlowSchemaByID(childFlowID)
-	if !found || !schema.Instance.Empty() {
-		return Instance{}, fmt.Errorf("eager child %s must have a keyless constructor", childFlowID)
+	if !found || schema.Instance.Empty() != (instanceID == "") {
+		return Instance{}, fmt.Errorf("child %s discriminator disagrees with its constructor", childFlowID)
 	}
 	bundle, found := semanticview.Bundle(source)
 	if !found {
-		return Instance{}, fmt.Errorf("keyless child requires the admitted flow tree")
+		return Instance{}, fmt.Errorf("child requires the admitted flow tree")
 	}
 	view, found := bundle.FlowViewByID(childFlowID)
 	if !found || view.Parent == nil || view.Parent.Paths.FlowPath != parent.TemplateID {
@@ -63,14 +76,19 @@ func KeylessChild(source semanticview.Source, parent Instance, childFlowID strin
 		local = scope
 	}
 	if local == "" || strings.Contains(local, "/") {
-		return Instance{}, fmt.Errorf("keyless child %s has no exact local coordinate", childFlowID)
+		return Instance{}, fmt.Errorf("child %s has no exact local coordinate", childFlowID)
 	}
 	instancePath := parent.InstancePath + "/" + local
 	if parent.TemplateID == semanticview.RootExecutionFlowID(source) {
 		instancePath = local
 	}
+	if instanceID == "" {
+		instanceID = local
+	} else {
+		instancePath += "/" + instanceID
+	}
 	return Instance{
-		TemplateID: childFlowID, ScopeKey: scope, InstanceID: local,
+		TemplateID: childFlowID, ScopeKey: scope, InstanceID: instanceID,
 		InstancePath: instancePath, EntityID: EntityID(instancePath), HasStoredPath: true,
 		ParentEntityID: parent.EntityID,
 		ParentRoute:    ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID},

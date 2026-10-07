@@ -31,6 +31,7 @@ type closedPublicationPlanningKey struct{}
 type connectRoutePlanPreviewRoutes struct {
 	table          *RouteTable
 	inputProducers *runtimepinrouting.FlowInputProducerResolver
+	selected       map[string]runtimeflowidentity.Instance
 }
 
 func withConnectRoutePlanPreview(ctx context.Context) context.Context {
@@ -327,6 +328,11 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		}
 		if err := r.installTemplateInstanceLifecyclePreview(ctx, evt.RunID(), decision); err != nil {
 			return connectRoutePlanDispatch{}, err
+		}
+		if !decision.Empty() {
+			if err := selectConnectionConstruction(ctx, decision.identity); err != nil {
+				return connectRoutePlanDispatch{}, err
+			}
 		}
 		action := decision.Action
 		if action == templateInstanceLifecycleActionPreviewCreate || action == templateInstanceLifecycleActionCreated {
@@ -680,6 +686,11 @@ func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.E
 			out = append(out, plan)
 		}
 	}
+	// Ancestor connections prepare/select their exact owner before descendant
+	// connections consume it. Equal-depth plans retain compiled order.
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.Count(out[i].ReceiverEndpoint().Readback().FlowPath, "/") < strings.Count(out[j].ReceiverEndpoint().Readback().FlowPath, "/")
+	})
 	return out
 }
 
@@ -699,8 +710,14 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		flowID := evt.RoutingSource().Route().FlowID
 		if flowID == semanticview.RootExecutionFlowID(r.source) {
 			paths[evt.RunID()] = struct{}{}
-		} else if instance, err := runtimeflowidentity.StandingForGeneration(r.source, flowID, evt.RunID()); err == nil {
-			paths[instance.InstancePath] = struct{}{}
+		} else if owners, err := r.lifecycle.constructionOwners(ctx, evt.RunID()); err == nil {
+			// This bounds read candidates only. The compiled path separately
+			// selects exact keyed ancestry before any recipient is admitted.
+			for _, instance := range owners {
+				if instance.TemplateID == flowID {
+					paths[instance.InstancePath] = struct{}{}
+				}
+			}
 		}
 	}
 	add(evt.SourceRoute())
@@ -752,12 +769,12 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		scope.keys = append(scope.keys, selectedDescriptorKeyQuery{
 			flowTemplate: contract.FlowID, field: "entity." + keys[0].Field.Path(), value: keys[0].Value,
 		})
-		instanceID := templateInstanceLifecycleInstanceID(plan, keys)
-		if instanceID == "" {
+		parent, err := r.lifecycle.constructionParent(ctx, evt, plan)
+		if err != nil {
 			continue
 		}
-		instance := plan.DeriveReceiverIdentity(r.source, instanceID)
-		if instance.InstancePath != "" {
+		instance, err := runtimeflowidentity.KeyedChild(r.source, parent, contract.FlowID, templateInstanceLifecycleInstanceID(plan, keys))
+		if err == nil {
 			paths[instance.InstancePath] = struct{}{}
 		}
 	}
