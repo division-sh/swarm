@@ -136,8 +136,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Methods) != 71 {
 		t.Fatalf("generated OpenRPC methods = %d, want 71", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 245 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 245", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 246 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 246", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 68 {
 		t.Fatalf("generated OpenRPC errors = %d, want 68", len(doc.Components.Errors))
