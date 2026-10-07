@@ -1326,3 +1326,42 @@ Correct optional evidence first, then assess exact hosted acceptance. Any
 budget relaxation still requires lead ruling. Local core/quiet both-store
 numeric and final hosted full/audit remain open; do not advance closure from
 focused repair receipts or relabel historical failed aggregates.
+
+## Cycle-3 compiled-code lifetime correction (PC59)
+
+The user's implementation instruction absorbs the measured per-model cold
+CPython/WASM compilation into this PR. This supplements all original48 and
+PC49-PC58 rows; it is not a second interpreter or worker owner. Existing
+`pythonmodule` artifact validation/publication and `newInterpreterModule`
+own immutable compiled code. `workspace.RunWorker` only carries the parent's
+boot-pinned private cache location to a host worker; Docker clears that
+location and consumes its own target-local cache. Neither location is authored
+or included in Python's input or read-only guest mount.
+
+The key binds interpreter archive, harness/snapshot, Wasmtime version, exact
+executing binary, OS/architecture, CPU features and every fuel/epoch/Wasm
+proposal flag. The exact binary additionally prevents an unknown Go-test
+dependency version from conflating engines. The reader accepts only private
+real directories/regular files with strict bounded identity/size/digest framing;
+the existing interprocess lock serializes double-checked compilation and
+atomic publication. Missing/corrupt derived entries recompile only the pinned
+verified interpreter. Unsafe permissions/symlinks fail closed. No cached
+model, Python globals, Store, linear memory, subprocess, MCP connection,
+authority, delivery or session is retained. No shared host cache is mounted
+into a Docker workspace. Fuel/memory/output bounds, fresh worker digest/ABI
+checks, target-local gateway checks and joined cancellation remain mandatory.
+
+| Supplemental row | Required execution proof |
+| --- | --- |
+| PC59 repeated cold compilation | `TestCompiledInterpreterConcurrentPublishersAndWarmProcesses`: three concurrent cold processes and two later fresh processes compile exactly once, deserialize the real pinned module and each execute twice with fresh globals. `TestCompiledInterpreterIdentityInventoryIsComplete`: every identity field/policy bit changes the key. |
+| PC59 unsafe/corrupt publication | `TestCompiledInterpreterRejectsCorruptForeignAndUnsafeEntries`, `TestCompiledInterpreterFailedCompilePublishesNothing`, `TestCompiledInterpreterRefusesRelativeCacheAuthority`: malformed/truncated/foreign framing and content; symlink/shared directory/file refusal; original compiler cause/no partial entry. Existing artifact repair/concurrent publication/guest-root tests remain. |
+| PC59 host/Docker isolation | `TestWorkerNativeHostModelUsesCapturedSourceAndPinnedBounds`: changed HOME/XDG and caller cache root cannot override the host owner's boot location; captured source/digest/bounds remain. `TestWorkerRealDockerIdentityReuseAndCancellationJoin`: three distinct real-container model workers return counter1, retain exactly one identical target-local compiled file, join each process, ignore the caller's host root, and preserve the original cancellation/identity assertions. |
+| PC59 user-visible slowdown | Unchanged `TestMailboxMutationAdmissionRollbackBothStores` and `TestManagedEmitPublicationExactScopeBothStores`, serial same-host master/candidate measurements; original mailbox/emit/card/HTTP/store assertions and deadlines remain. Hosted exact-head Q01/full acceptance is still required; a local timing comparison is not hosted10s/40s credit. |
+
+Temporary phase instrumentation is removed before final proof. Its diagnostic
+showed one compile across fresh model workers and roughly40ms warm cache
+read/verification; it is not a qualification receipt. All census/inventory/
+registry roots and the actual78-root core structural-owner-guards unit must
+run locally before a new server2 request. Existing local39f component proofs
+and d2 RED remain separately retained. Fresh Local core/quiet both-store
+numeric and exact-head hosted full/Q01 still block merge readiness.

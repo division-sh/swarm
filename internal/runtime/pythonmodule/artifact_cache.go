@@ -64,6 +64,12 @@ func defaultArtifactCacheBaseDir() (string, error) {
 	return defaultArtifactCacheRoot, defaultArtifactCacheRootErr
 }
 
+// Host workers consume the parent's boot-pinned code cache, not mutable HOME.
+// This location is never mounted into a guest or included in model input.
+func ProcessArtifactCacheRoot() (string, error) {
+	return artifactCacheBaseDir()
+}
+
 func resolveDefaultArtifactCacheBaseDir() (string, error) {
 	root, err := os.UserCacheDir()
 	if err != nil {

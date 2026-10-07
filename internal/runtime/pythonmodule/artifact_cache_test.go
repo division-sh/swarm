@@ -27,6 +27,9 @@ var testArtifactCacheRoot string
 
 func TestMain(m *testing.M) {
 	if os.Getenv(artifactCacheHelperEnv) != "" {
+		if root := os.Getenv(artifactCacheRootEnv); root != "" {
+			artifactCacheBaseDir = func() (string, error) { return root, nil }
+		}
 		os.Exit(m.Run())
 	}
 	root, err := os.MkdirTemp("", "swarm-pythonmodule-tests-")

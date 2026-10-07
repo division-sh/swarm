@@ -89,6 +89,34 @@ func TestWorkerRealDockerIdentityReuseAndCancellationJoin(t *testing.T) {
 		}
 		t.Fatalf("real target bytes/ABI/interpreter/version: %+v %v %v", result.Identity, err, identityErr)
 	}
+	isolatedSource := []byte("counter = 0\ndef handle(input):\n    global counter\n    counter += 1\n    return {'counter': counter}\n")
+	isolatedSum := sha256.Sum256(isolatedSource)
+	isolated := &pythonmodule.Request{
+		ModuleID: "isolated-compiled-code", RowID: "fresh-worker",
+		Digest: "sha256:" + hex.EncodeToString(isolatedSum[:]), Entry: mockperformance.EntryHandle,
+		Source: isolatedSource, Input: []byte("{}"), Fuel: mockperformance.ExecutionFuel,
+		MemoryPages: mockperformance.ExecutionMemoryPages, OutputBytes: mockperformance.ExecutionOutputBytes,
+		CompiledCacheRoot: "/host-only/cache-must-not-cross-the-target",
+	}
+	var published string
+	for range 3 {
+		value, err := RunWorker(ctx, target, manager.DockerBin(), worker.Request{Mode: "model", Module: isolated})
+		if err != nil || value.Module == nil || string(value.Module.Output) != `{"counter":1}` {
+			t.Fatalf("compiled code leaked model state across Docker workers: %+v %v", value.Module, err)
+		}
+		cache, err := manager.RunDocker(ctx, "exec", name, "sh", "-c", `find "$HOME/.cache/swarm/runtime-artifacts/python/compiled" -type f -name '*.module' -exec sha256sum {} \;`)
+		if err != nil || len(strings.Split(strings.TrimSpace(cache), "\n")) != 1 || strings.TrimSpace(cache) == "" {
+			t.Fatalf("Docker worker did not publish exactly one target-local module: %q %v", cache, err)
+		}
+		if published != "" && cache != published {
+			t.Fatalf("fresh Docker workers did not reuse immutable compiled bytes: %q versus %q", published, cache)
+		}
+		published = cache
+		top, err := manager.RunDocker(ctx, "top", name, "-eo", "pid,args")
+		if err != nil || strings.Contains(top, worker.Argument) {
+			t.Fatalf("compiled-code reuse retained a worker process: %q %v", top, err)
+		}
+	}
 	source := []byte("def handle(input):\n    while True:\n        pass\n")
 	sum := sha256.Sum256(source)
 	model := &pythonmodule.Request{
@@ -135,6 +163,9 @@ func TestWorkerNativeHostRefusalRetainsLaunchFacts(t *testing.T) {
 
 func TestWorkerNativeHostModelUsesCapturedSourceAndPinnedBounds(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	workerHome := t.TempDir()
+	t.Setenv("HOME", workerHome)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(workerHome, "cache"))
 	root := t.TempDir()
 	target := &Target{Backend: BackendHost, Workdir: root}
 	captured := []byte("def handle(input):\n    return {'captured': input['marker']}\n")
@@ -144,7 +175,8 @@ func TestWorkerNativeHostModelUsesCapturedSourceAndPinnedBounds(t *testing.T) {
 		Digest: "sha256:" + hex.EncodeToString(sum[:]), Entry: mockperformance.EntryHandle,
 		Source: captured, Input: []byte(`{"marker":"captured-only"}`),
 		Fuel: mockperformance.ExecutionFuel, MemoryPages: mockperformance.ExecutionMemoryPages,
-		OutputBytes: mockperformance.ExecutionOutputBytes,
+		OutputBytes:       mockperformance.ExecutionOutputBytes,
+		CompiledCacheRoot: filepath.Join(root, "caller-cache-must-not-be-used"),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -164,6 +196,11 @@ func TestWorkerNativeHostModelUsesCapturedSourceAndPinnedBounds(t *testing.T) {
 		}
 		if string(result.Module.Output) != `{"captured":"captured-only"}` || result.Module.SourceHash != module.Digest || result.Module.InterpreterSHA != identity.InterpreterDigest || result.Module.Interpreter != identity.Interpreter || result.Module.SnapshotHash != identity.SnapshotDigest || result.Module.HarnessABI != identity.HarnessABI || result.Module.Engine != identity.Engine {
 			t.Fatalf("native model escaped captured/pinned input: %+v", result.Module)
+		}
+		for _, invalid := range []string{module.CompiledCacheRoot, filepath.Join(workerHome, "cache", "swarm", "runtime-artifacts", "python", "compiled")} {
+			if _, err := os.Stat(invalid); !os.IsNotExist(err) {
+				t.Fatalf("worker re-inferred or trusted a caller cache root %s: %v", invalid, err)
+			}
 		}
 	}
 	for _, tc := range []struct {
