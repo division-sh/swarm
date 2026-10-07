@@ -11200,6 +11200,13 @@ tool_model:
         and old proof formats are unsupported, with no migration, fallback or compatibility decoder. Uninstalled
         session begin, proof adoption, executable publication, dispatch and readiness remain explicitly unavailable,
         even if a caller supplies structurally valid session evidence or a fabricated connected observation.
+      session_callback_failure: >
+        A first-party WhatsApp callback uses the exact pinned provider client's failure-returning handler boundary.
+        Swarm catches its own callback panics inside that boundary, returns failure, fences the exact connection
+        occurrence and records failure evidence without including the panic payload. Failed capture or failed
+        failure-evidence persistence never reports successful capture. This does not claim that upstream panic
+        recovery makes every encrypted-message receipt safe, or that every upstream goroutine is protected.
+        Session execution remains unavailable until its complete admitted connection implementation is installed.
       text_reply_controls: >
         Without buttons, semantic text controls use the finite text_reply_controls schema (16 controls per page,
         64 runes per label, 128 runes per private control token). These are neutral render limits, not invented provider
