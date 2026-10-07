@@ -10,6 +10,17 @@ import (
 
 type EntityMutationEvidence = private.EntityMutationEvidence
 
+type PipelineReceiptEvidence = private.PipelineReceiptEvidence
+
+func ObservePipelineReceipt(t testing.TB, ctx context.Context, selected any, eventID string) PipelineReceiptEvidence {
+	t.Helper()
+	value, err := private.ObservePipelineReceiptForTest(ctx, selected, eventID)
+	if err != nil {
+		t.Fatalf("observe exact pipeline receipt: %v", err)
+	}
+	return value
+}
+
 func ObserveEntityMutationHistory(t testing.TB, ctx context.Context, selected any, runID string) []EntityMutationEvidence {
 	t.Helper()
 	value, err := private.ObserveEntityMutationHistoryForTest(ctx, selected, runID)

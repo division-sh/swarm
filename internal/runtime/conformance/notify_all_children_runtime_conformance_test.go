@@ -1621,13 +1621,36 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 						waitNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath, "completed")
 						waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, nameCase.agentID, instancePath, "delivered")
 						assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t, ctx, db, tc.name, runID, nameCase.agentID, instancePath)
-						waitNotifyAllChildrenAgentAbsent(t, runtime.manager, runID, nameCase.agentID, instancePath)
+						waitNotifyAllChildrenAgentRetainedIdle(t, ctx, backend, runtime.manager, runID, nameCase.agentID, instancePath)
 					}
 					assertNotifyAllChildrenCompletedTurns(t, ctx, backend, runID, nameCase.agentID, cardinality)
-					if active, err := backend.LoadAgents(ctx); err != nil {
-						t.Fatalf("LoadAgents after independent terminalization: %v", err)
-					} else if len(active) != 0 {
-						t.Fatalf("active agents after independent terminalization = %#v, want none", active)
+					assertNotifyAllChildrenConcreteAgentSet(t, ctx, backend, descriptors, nameCase.agentID)
+					if retained, err := backend.LoadAgents(ctx); err != nil {
+						t.Fatalf("LoadAgents after ordinary final-stage entry: %v", err)
+					} else if len(retained) != cardinality {
+						t.Fatalf("retained agents after ordinary final-stage entry = %#v, want exactly %d", retained, cardinality)
+					}
+					if cardinality == 3 {
+						// Ordinary final entry produces no retirement diagnostic. Exercise
+						// the existing two-consumer outbox proof through explicit cleanup.
+						removed := descriptors[accountIDs[0]]
+						if err := runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
+							ContractBundle: source,
+							Instance:       runtimeflowidentity.Stored(source, notifyallchildren.ChildFlowID, removed.FlowInstance, removed.InstanceID, removed.EntityID, ""),
+							FinalState:     "completed",
+						}); err != nil {
+							t.Fatalf("explicit completed-child deactivation: %v", err)
+						}
+						waitNotifyAllChildrenRuntime(t, runtime, runID)
+						if _, err := runtime.manager.ResolveAgentConfig(runID, nameCase.agentID, removed.FlowInstance); !errors.Is(err, runtimemanager.ErrAgentNotFound) {
+							t.Fatalf("explicitly deactivated child remains process-visible: %v", err)
+						}
+						remaining := make(map[string]runtimebus.ActiveFlowInstanceDescriptor, cardinality-1)
+						for _, accountID := range accountIDs[1:] {
+							remaining[accountID] = descriptors[accountID]
+							waitNotifyAllChildrenAgentRetainedIdle(t, ctx, backend, runtime.manager, runID, nameCase.agentID, descriptors[accountID].FlowInstance)
+						}
+						assertNotifyAllChildrenConcreteAgentSet(t, ctx, backend, remaining, nameCase.agentID)
 					}
 				})
 			}
@@ -2539,24 +2562,39 @@ func assertNotifyAllChildrenCompletedTurns(
 	}
 }
 
-func waitNotifyAllChildrenAgentAbsent(
+func waitNotifyAllChildrenAgentRetainedIdle(
 	t testing.TB,
+	ctx context.Context,
+	selected notifyAllChildrenStore,
 	manager *runtimemanager.AgentManager,
 	runID string,
 	agentID string,
 	flowInstance string,
 ) {
 	t.Helper()
+	reader, ok := selected.(operatorread.AgentReader)
+	if !ok {
+		t.Fatalf("selected store %T has no canonical agent readback owner", selected)
+	}
 	deadline := time.Now().Add(15 * time.Second)
+	var last operatorread.OperatorAgentDetail
 	var lastErr error
 	for time.Now().Before(deadline) {
-		_, lastErr = manager.ResolveAgentConfig(runID, agentID, flowInstance)
-		if lastErr != nil {
-			return
+		cfg, err := manager.ResolveAgentConfig(runID, agentID, flowInstance)
+		lastErr = err
+		if err == nil {
+			identity, err := cfg.ConcreteIdentity()
+			if err != nil || identity.RunID != runID || identity.AgentID() != agentID || identity.FlowInstance() != flowInstance {
+				t.Fatalf("retained agent identity = %#v err=%v, want %s/%s/%s", identity, err, runID, agentID, flowInstance)
+			}
+			last, lastErr = reader.LoadOperatorAgent(ctx, identity)
+			if lastErr == nil && last.Agent.Identity == identity && last.Agent.Status == "idle" {
+				return
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("terminated concrete agent %s remains process-visible: %v", flowInstance, lastErr)
+	t.Fatalf("ordinary final-stage agent %s was not retained idle: detail=%#v err=%v", flowInstance, last, lastErr)
 }
 
 func loadNotifyAllChildrenFlowInstanceStatus(

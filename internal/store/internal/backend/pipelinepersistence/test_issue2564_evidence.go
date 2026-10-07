@@ -18,6 +18,42 @@ type EntityMutationEvidence struct {
 	RegisteredAgent bool
 }
 
+type PipelineReceiptEvidence struct {
+	Count           int
+	Outcome, Reason string
+}
+
+func (s *PipelinePostgresOwner) ObserveReceiptForTest(ctx context.Context, eventID string) (PipelineReceiptEvidence, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return PipelineReceiptEvidence{}, err
+	}
+	var out PipelineReceiptEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error { return observePipelineReceipt(ctx, tx, eventID, &out) })
+	if err != nil {
+		return PipelineReceiptEvidence{}, err
+	}
+	return out, nil
+}
+
+func (s *PipelineSQLiteOwner) ObserveReceiptForTest(ctx context.Context, eventID string) (PipelineReceiptEvidence, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return PipelineReceiptEvidence{}, err
+	}
+	var out PipelineReceiptEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error { return observePipelineReceipt(ctx, tx, eventID, &out) })
+	if err != nil {
+		return PipelineReceiptEvidence{}, err
+	}
+	return out, nil
+}
+
+func observePipelineReceipt(ctx context.Context, tx *sql.Tx, eventID string, out *PipelineReceiptEvidence) error {
+	if _, err := uuid.Parse(eventID); err != nil {
+		return err
+	}
+	return tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MAX(outcome),''),COALESCE(MAX(reason_code),'') FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, eventID).Scan(&out.Count, &out.Outcome, &out.Reason)
+}
+
 func (s *PipelinePostgresOwner) ObserveMutationHistoryForTest(ctx context.Context, runID string) ([]EntityMutationEvidence, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err

@@ -31,6 +31,7 @@ import (
 
 type terminalProviderProbe struct {
 	launched    bool
+	finalEntry  bool
 	replacement bool
 	fenced      chan struct{}
 	ready       chan runtimeeffects.Attempt
@@ -86,12 +87,18 @@ func (p *terminalManagedProvider) ContinueManagedSession(ctx context.Context, se
 	<-p.probe.release
 	if !p.probe.launched {
 		err := handle.MarkLaunched(context.WithoutCancel(ctx))
-		if err == nil {
-			p.probe.settled <- errors.New("retired attempt reached launch")
-		} else {
-			p.probe.settled <- nil
+		if !p.probe.finalEntry {
+			if err == nil {
+				p.probe.settled <- errors.New("retired attempt reached launch")
+			} else {
+				p.probe.settled <- nil
+			}
+			return nil, err
 		}
-		return nil, err
+		if err != nil {
+			p.probe.settled <- err
+			return nil, err
+		}
 	}
 	if err := handle.MarkResponseObserved(context.WithoutCancel(ctx), map[string]any{"terminal_proof": true}); err != nil {
 		p.probe.settled <- err
@@ -116,14 +123,24 @@ func (p *terminalManagedProvider) ContinueManagedSession(ctx context.Context, se
 			BackendProfile: "test", Provider: "anthropic", Transport: "process", ResolvedModel: "terminal-test", InvocationType: "agent_turn"},
 		Now: time.Now().UTC(),
 	})
-	if err == nil && (!settlement.Committed || settlement.Disposition != runtimeeffects.CompletionSettlementDrained || !settlement.OriginSettled || (settlement.Finalization == nil) != p.probe.replacement) {
-		err = fmt.Errorf("terminal provider did not settle exact drain/origin: %+v", settlement)
+	if err == nil {
+		if p.probe.finalEntry {
+			if !settlement.Committed || settlement.Disposition != runtimeeffects.CompletionSettlementCurrent || settlement.OriginSettled || settlement.Finalization != nil {
+				err = fmt.Errorf("ordinary final entry drained or lost the accepted provider result: %+v", settlement)
+			}
+		} else if !settlement.Committed || settlement.Disposition != runtimeeffects.CompletionSettlementDrained || !settlement.OriginSettled || (settlement.Finalization == nil) != p.probe.replacement {
+			err = fmt.Errorf("terminal provider did not settle exact drain/origin: %+v", settlement)
+		}
 	}
 	p.probe.settled <- err
 	if err != nil {
 		return nil, err
 	}
-	return &llm.Response{Message: llm.Message{Role: "assistant"}, CapabilitySurface: &observed}, nil
+	messageResult := llm.Message{Role: "assistant"}
+	if p.probe.finalEntry {
+		messageResult.Content = "accepted provider result"
+	}
+	return &llm.Response{Message: messageResult, CapabilitySurface: &observed}, nil
 }
 
 func TestTerminalProviderOriginSettlementBothStores(t *testing.T) {
@@ -149,7 +166,7 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		for _, launched := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/launched=%t", backend, launched), func(t *testing.T) {
-				probe := &terminalProviderProbe{launched: launched, ready: make(chan runtimeeffects.Attempt, 1), release: make(chan struct{}), settled: make(chan error, 1)}
+				probe := &terminalProviderProbe{launched: launched, finalEntry: activity, ready: make(chan runtimeeffects.Attempt, 1), release: make(chan struct{}), settled: make(chan error, 1)}
 				if replacement {
 					probe.replacement, probe.fenced = true, make(chan struct{})
 				}
@@ -270,8 +287,10 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 				}
 				state, found, err := reader.LoadAgentLifecycleState(ctx, attempt.Authority.Target.AgentIdentity)
 				want := runtimemanager.AgentLifecycleTerminated
-				if replacement {
+				if replacement || activity {
 					want = runtimemanager.AgentLifecycleRunning
+				}
+				if replacement {
 					select {
 					case result := <-restarted:
 						t.Fatalf("successor published before predecessor provider settlement: %+v", result)
@@ -305,7 +324,7 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 				}
 				state, found, err = reader.LoadAgentLifecycleState(ctx, attempt.Authority.Target.AgentIdentity)
 				want = runtimemanager.AgentLifecycleTerminated
-				if replacement {
+				if replacement || activity {
 					want = runtimemanager.AgentLifecycleRunning
 				}
 				if err != nil || !found || state.Phase != want {
@@ -320,7 +339,7 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 				outcome, found, err := outcomes.GetExternalEffectOutcome(ctx, attempt.OperationID)
 				wantAttempt := runtimeeffects.StateTerminalFailure
 				wantDelivery := "dead_letter"
-				if launched {
+				if launched || activity {
 					wantAttempt, wantDelivery = runtimeeffects.StateSettled, "delivered"
 				}
 				if err != nil || !found || outcome.AttemptState != wantAttempt {

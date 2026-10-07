@@ -186,3 +186,44 @@ No server2 window or tier run has started. Fresh core, lifecycle plus13,
 hosted full and independent repair approval remain required. The existing
 watchlist node was refined by reviewer-e at swarm-docs595a156 for both P1s;
 no additional class, issue, collector exception or compatibility path is added.
+
+### A's D1 Proof Handoff Integration
+
+Source attribution: agent-a/#2564 catalog reconciliation
+ca6b722e8d27b5566289954b7b10bbf2c12ce77a (original68cd1aa013), public/golden
+reconciliation9d3e3a0f8d09862cdd498d9b9d30591bd832c000, and the existing
+receipt fixture in e5f96094c. Binding handoff:
+https://github.com/division-sh/swarm/issues/2269#issuecomment-6024213871;
+composition approval:
+https://github.com/division-sh/swarm/issues/2564#issuecomment-6021549457.
+
+The8da7ad993 core remains RED207.288s. Its four scatter duplicate/held cells
+required operational termination after ordinary final entry. E's test blob
+matched A's exact pre-fix source. Isolated classification with A's test and
+receipt port passed all four cells three race repetitions112.691s, not a tier
+pass or a production repair. Exact classification receipt:
+https://github.com/division-sh/swarm/issues/2269#issuecomment-6032081214.
+
+This integration migrates the whole identified catalog/public proof family:
+exact completed-stage snapshots and transition-cause settlement, held handler
+completion, selected mixed accepted agents, ordinary deadline/structural-route
+retention, real self-release diagnostics, and exact retained-idle public actor
+multiplicity and selectors across runs/restart. Existing source isolation,
+duplicate no-op, fields, claims, accepted provider results, explicit termination,
+cleanup failure/replacement joins and staged replay refusals remain required.
+The provider assertion merge preserves E's removed draining phase; it does not
+restore A's historical draining branch. Public proof names/spec registry now
+describe final-stage retention, not automatic teardown. Frozen future #642
+oracle bodies remain unchanged.
+
+The receipt fixture consumes the existing private PipelinePostgresOwner and
+PipelineSQLiteOwner read transaction, schema validation and exact pipeline
+subscriber predicate. runtimepersistence/storetest forward only typed receipt
+count/outcome/reason. No SQL handle or callback escapes to a test consumer,
+no raw-SQL test site or new generic query adapter, and no debt-baseline/collector
+change. Runtime cancellation, clock, mutation and dispatch semantics are untouched.
+
+Fresh integrated focused proof and the complete local census/structural/ratchet
+preflight must pass on the committed candidate before another allocated core.
+Lifecycle plus13 follows only green core; CI full / Local lifecycle unchanged.
+Neither the diagnostic pin nor this handoff conveys tier or merge approval.

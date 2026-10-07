@@ -11,6 +11,22 @@ import (
 
 type EntityMutationEvidence = storepipeline.EntityMutationEvidence
 
+type PipelineReceiptEvidence = storepipeline.PipelineReceiptEvidence
+
+func ObservePipelineReceiptForTest(ctx context.Context, selected any, eventID string) (PipelineReceiptEvidence, error) {
+	if err := requireIssue2564EvidenceOwner(selected); err != nil {
+		return PipelineReceiptEvidence{}, err
+	}
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.ObserveReceiptForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.ObserveReceiptForTest(ctx, eventID)
+	default:
+		return PipelineReceiptEvidence{}, fmt.Errorf("pipeline receipt requires original selected owner, got %T", selected)
+	}
+}
+
 func requireIssue2564EvidenceOwner(selected any) error {
 	switch owner := selected.(type) {
 	case *PostgresStore:

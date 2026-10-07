@@ -39,8 +39,8 @@ func TestReadProofFactoringCompiledSurfaces(t *testing.T) {
 			if len(conversations) == 0 {
 				t.Fatal("no real conversation")
 			}
-			// Materialized candidate agents are retired after run completion. The
-			// declared scout remains readable by the operational agent owner.
+			// Ordinary final-stage entry retains the scout and candidate agents.
+			// Use the scout's exact conversation to exercise the read surfaces.
 			var conversation goldenConversation
 			for _, item := range conversations {
 				if item.AgentID == "scout-worker" {

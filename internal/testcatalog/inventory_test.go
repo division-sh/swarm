@@ -60,7 +60,7 @@ func TestCatalogRequiredInventory(t *testing.T) {
 				"catalog.runtime.agent_instance_materialization",
 				"catalog.runtime.agent_turn_completion",
 				"catalog.runtime.agent_emission_delivery",
-				"catalog.runtime.agent_terminal_teardown",
+				"catalog.runtime.agent_final_stage_retention",
 			},
 		},
 	}

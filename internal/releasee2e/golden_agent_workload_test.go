@@ -729,18 +729,19 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		process = start()
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, runDeadline)
-	firstEvidence := assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, 1)
+	firstEvidence := assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID})
 	if options.repeatSequential {
 		secondRunID := goldenPublishIngressWithKey(t, process.rpc, bundleHash, options.candidateIDs, "golden-search-ingress-second")
 		if secondRunID == runID {
 			t.Fatal("second ingress reused the first run")
 		}
 		waitForGoldenTerminalRun(t, process, store, secondRunID, options.runDeadline)
-		secondEvidence := assertGoldenPublicProof(t, process.rpc, secondRunID, false, options.candidateIDs, nil, 2)
+		retainedRunIDs := []string{runID, secondRunID}
+		secondEvidence := assertGoldenPublicProof(t, process.rpc, secondRunID, false, options.candidateIDs, nil, retainedRunIDs)
 		if firstEvidence.Scout.RunID == secondEvidence.Scout.RunID {
 			t.Fatalf("singleton scouts share run identity: first=%#v second=%#v", firstEvidence.Scout, secondEvidence.Scout)
 		}
-		firstAfterSecond := assertGoldenPublicProof(t, process.rpc, runID, false, options.candidateIDs, nil, 2)
+		firstAfterSecond := assertGoldenPublicProof(t, process.rpc, runID, false, options.candidateIDs, nil, retainedRunIDs)
 		if !reflect.DeepEqual(firstEvidence, firstAfterSecond) {
 			t.Fatalf("second run changed first run's terminal evidence: before=%#v after=%#v", firstEvidence, firstAfterSecond)
 		}
@@ -1233,7 +1234,7 @@ type goldenConversation struct {
 	Status        string `json:"status"`
 }
 
-func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool, candidateIDs []string, preRestartRuntimeLog *goldenRuntimeLog, expectedIdleScouts int) goldenTerminalRunEvidence {
+func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool, candidateIDs []string, preRestartRuntimeLog *goldenRuntimeLog, retainedRunIDs []string) goldenTerminalRunEvidence {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -1250,8 +1251,8 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 
 	entities := listGoldenEntities(t, ctx, rpc, runID)
 	entitySet := assertGoldenEntities(t, ctx, rpc, runID, entities, candidateIDs)
-	agents := waitForGoldenAgentTeardown(t, ctx, rpc, expectedIdleScouts)
-	assertGoldenAgentTeardown(t, agents, expectedIdleScouts)
+	expectedAgents := goldenRetainedAgentExpectations(t, ctx, rpc, runID, entitySet, candidateIDs, retainedRunIDs)
+	waitForGoldenRetainedIdleAgents(t, ctx, rpc, expectedAgents)
 
 	events, err := listGoldenEvents(ctx, rpc, runID)
 	if err != nil {
@@ -1498,7 +1499,57 @@ func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClie
 	return result
 }
 
-func waitForGoldenAgentTeardown(t *testing.T, ctx context.Context, rpc *releaseRPCClient, expectedIdleScouts int) []goldenAgentSummary {
+type goldenRetainedAgentExpectation struct {
+	runID   string
+	summary goldenAgentSummary
+}
+
+func goldenRetainedAgentExpectations(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, current goldenEntitySet, candidateIDs, retainedRunIDs []string) []goldenRetainedAgentExpectation {
+	t.Helper()
+	seen := map[string]bool{}
+	var expected []goldenRetainedAgentExpectation
+	for _, retainedRunID := range retainedRunIDs {
+		if retainedRunID == "" || seen[retainedRunID] {
+			t.Fatalf("retained agent proof has empty/duplicate run identity: %v", retainedRunIDs)
+		}
+		seen[retainedRunID] = true
+		entities := current
+		if retainedRunID != runID {
+			entities = assertGoldenEntities(t, ctx, rpc, retainedRunID, listGoldenEntities(t, ctx, rpc, retainedRunID), candidateIDs)
+		}
+		expected = append(expected, goldenRetainedAgentExpectation{runID: retainedRunID, summary: goldenAgentSummary{
+			AgentID: "scout-worker", Role: "golden_scout", FlowInstance: entities.scout.FlowInstance, ExecutionMode: "mock", Status: "idle",
+		}})
+		for _, candidateID := range candidateIDs {
+			expected = append(expected, goldenRetainedAgentExpectation{runID: retainedRunID, summary: goldenAgentSummary{
+				AgentID: "candidate-worker", Role: "golden_candidate", FlowInstance: entities.candidates[candidateID].FlowInstance, ExecutionMode: "mock", Status: "idle",
+			}})
+		}
+	}
+	if !seen[runID] {
+		t.Fatalf("retained agent proof omits current run %s: %v", runID, retainedRunIDs)
+	}
+	return expected
+}
+
+func goldenRetainedIdleAgentSetMatches(agents []goldenAgentSummary, expected []goldenRetainedAgentExpectation) bool {
+	if len(expected) == 0 || len(agents) != len(expected) {
+		return false
+	}
+	remaining := make(map[goldenAgentSummary]int, len(expected))
+	for _, agent := range expected {
+		remaining[agent.summary]++
+	}
+	for _, agent := range agents {
+		if remaining[agent] == 0 {
+			return false
+		}
+		remaining[agent]--
+	}
+	return true
+}
+
+func waitForGoldenRetainedIdleAgents(t *testing.T, ctx context.Context, rpc *releaseRPCClient, expected []goldenRetainedAgentExpectation) {
 	t.Helper()
 	var agents []goldenAgentSummary
 	err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
@@ -1509,32 +1560,28 @@ func waitForGoldenAgentTeardown(t *testing.T, ctx context.Context, rpc *releaseR
 			return false, err
 		}
 		agents = result.Agents
-		if len(agents) != expectedIdleScouts {
+		if !goldenRetainedIdleAgentSetMatches(agents, expected) {
 			return false, nil
 		}
-		for _, agent := range agents {
-			if agent.AgentID != "scout-worker" || agent.Role != "golden_scout" ||
-				agent.FlowInstance != "scout" || agent.ExecutionMode != "mock" || agent.Status != "idle" {
+		// agent.list omits run identity. Resolve every retained actor through the
+		// supported exact selector; equal paths in two runs are not one agent.
+		for _, agent := range expected {
+			var detail struct {
+				Agent goldenAgentSummary `json:"agent"`
+			}
+			if err := rpc.call(ctx, "agent.get", map[string]any{
+				"run_id": agent.runID, "agent_id": agent.summary.AgentID, "flow_instance": agent.summary.FlowInstance,
+			}, &detail); err != nil {
+				return false, err
+			}
+			if detail.Agent != agent.summary {
 				return false, nil
 			}
 		}
 		return true, nil
 	})
 	if err != nil {
-		t.Fatalf("wait for terminal child-agent teardown: %v; last agent.list=%#v", err, agents)
-	}
-	return agents
-}
-
-func assertGoldenAgentTeardown(t *testing.T, agents []goldenAgentSummary, expectedIdleScouts int) {
-	t.Helper()
-	if len(agents) != expectedIdleScouts {
-		t.Fatalf("agent.list = %#v, want %d idle singleton scouts after child teardown", agents, expectedIdleScouts)
-	}
-	agent := agents[0]
-	if agent.AgentID != "scout-worker" || agent.Role != "golden_scout" || agent.FlowInstance != "scout" ||
-		agent.ExecutionMode != "mock" || agent.Status != "idle" {
-		t.Errorf("post-terminal agent.list row = %#v, want idle mock scout and no stale child agents", agent)
+		t.Fatalf("wait for exact retained idle agents: %v; expected=%#v last agent.list=%#v", err, expected, agents)
 	}
 }
 

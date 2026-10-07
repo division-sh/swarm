@@ -23525,7 +23525,7 @@ test_specification:
       - catalog.runtime.agent_instance_materialization
       - catalog.runtime.agent_turn_completion
       - catalog.runtime.agent_emission_delivery
-      - catalog.runtime.agent_terminal_teardown
+      - catalog.runtime.agent_final_stage_retention
     - source: tests/tier11-flow-composition/test-numeric-data-scatter-park
       executor: github.com/division-sh/swarm/internal/releasee2e
       proves:
@@ -23993,10 +23993,10 @@ test_specification:
         status: active
         required_disposition: runtime
         scope: Exact same-instance and cross-flow delivery of agent-emitted events with complete payload and structured target identity.
-      catalog.runtime.agent_terminal_teardown:
+      catalog.runtime.agent_final_stage_retention:
         status: active
         required_disposition: runtime
-        scope: Terminal child lifecycle convergence with no stale concrete agent, active work, failed delivery, or dead letter.
+        scope: Ordinary final-stage entry retains each exact run-scoped scout and template agent idle, with complete public-list multiplicity and no unsettled work, failed delivery, or dead letter. Explicit termination and process shutdown retain separate cleanup proof.
   deterministic_scenario_runner:
     id: testing.deterministic_scenario_runner_source_authority
     promoted_by: '#1646'
