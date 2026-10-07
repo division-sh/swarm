@@ -4636,7 +4636,7 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 	}
 	source.input = pin
 	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
-	externalSource, err := events.NewExternalIngressRoutingSource(".", eventtest.UUID("provider-ingress"), events.RoutingSourceAuthorityProviderAdmissionPlan)
+	externalSource, err := events.NewExternalIngressRoutingSource(".", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatalf("external routing source: %v", err)
 	}
@@ -4657,7 +4657,7 @@ func TestExternalIngressSelectedTargetScopeIncludesExactSourceEntity(t *testing.
 	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyProviderRollback(t, true))
 	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
 	entityID := eventtest.UUID("provider-selected-source")
-	routingSource, err := events.NewExternalIngressRoutingSource("consumer", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	routingSource, err := events.NewExternalIngressRoutingSource("consumer", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

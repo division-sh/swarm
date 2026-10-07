@@ -40,6 +40,25 @@ func (c FlowConstructor) SuppliedFields() []string {
 	return c.analysis.ConstructorSuppliedFields()
 }
 
+// StandingConstructionIsKeyless classifies declaration ancestry, not executable
+// readiness. A keyed edge requires an admitted creating input at request time.
+func StandingConstructionIsKeyless(source semanticview.Source, flowID string) (bool, error) {
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		return false, fmt.Errorf("standing construction requires the admitted flow tree")
+	}
+	view, found := bundle.FlowViewByID(flowID)
+	if !found {
+		return false, fmt.Errorf("standing constructor flow %s is absent", flowID)
+	}
+	for current := view; current != nil; current = current.Parent {
+		if !current.Schema.Instance.Empty() {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // RequireStandingConstructionPath admits the whole no-argument ancestry before
 // a service generation can be reconciled or its root tree constructed.
 func RequireStandingConstructionPath(source semanticview.Source, flowID string) error {

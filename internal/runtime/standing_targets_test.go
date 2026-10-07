@@ -328,8 +328,8 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner},
 		WorkOwner:          workOwner,
 		StandingTargets: []StandingTarget{{
-			BundleHash: hash, ServiceID: "service-chat", FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
-			RunID: "run", Generation: 1, FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram",
+			BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
+			RunID: "run", Generation: 1, SigningSecret: "webhook_signing.telegram",
 			AdmissionPlan: plan,
 		}},
 	}
@@ -360,8 +360,8 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	}
 	target := StandingTarget{
 		BundleHash: hash, ServiceID: "service-1", FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
-		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
-		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+		RunID: "run-1", Generation: 1, PublicationSequence: 1,
+		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
 	contextDef := BundleContext{
 		SourceArtifactFact: testSourceArtifactFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
@@ -416,8 +416,8 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 	}
 	target := StandingTarget{
 		BundleHash: hash, ServiceID: "service-suspended", FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
-		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
-		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+		RunID: "run-1", Generation: 1, PublicationSequence: 1,
+		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
 	manager, err := newTestRuntimeContextManager(t, nil)
 	if err != nil {
@@ -444,7 +444,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandingPins(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "lead.observed")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/a", EntityID: "41000000-0000-0000-0000-000000000002"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "41000000-0000-0000-0000-000000000001"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -459,8 +459,8 @@ func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandin
 	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), FlowPath: "coordinator",
-		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/a",
-		EntityID: "41000000-0000-0000-0000-000000000002", Alias: "chat", Provider: "telegram",
+		RunID: "41000000-0000-0000-0000-000000000001",
+		Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
 		AdmissionPlan: plan,
 	}, source)
@@ -475,7 +475,7 @@ func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandin
 func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPins(t *testing.T) {
 	source, catalog := standingProviderDeclarationSource(t, "github", "inbound.github.raw.issues")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "42000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/b", EntityID: "42000000-0000-0000-0000-000000000002"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "42000000-0000-0000-0000-000000000001"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -496,8 +496,8 @@ func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPi
 	}
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64), FlowPath: "coordinator",
-		RunID: "42000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/b",
-		EntityID: "42000000-0000-0000-0000-000000000002", Alias: "issues", Provider: "github",
+		RunID: "42000000-0000-0000-0000-000000000001",
+		Alias: "issues", Provider: "github",
 		SigningSecret: "github-secret",
 		AdmissionPlan: plan,
 	}, source)
@@ -517,21 +517,12 @@ func standingTelegramDeclarationSource(t testing.TB, inputEvent string) (semanti
 // separately through the native and served selected-store owners.
 func bindStandingContextFixtureTargets(t testing.TB, source semanticview.Source, declarations []StandingTarget, runID string) []StandingTarget {
 	t.Helper()
-	root := flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
 	bound := append([]StandingTarget(nil), declarations...)
 	for i, target := range bound {
 		if target.RunID != "" || target.Generation != 0 || target.PublicationSequence != 0 || target.ServiceID != bound[0].ServiceID {
 			t.Fatal("context fixture requires unbound declarations of one service")
 		}
-		instance, err := flowidentity.KeylessChild(source, root, target.FlowPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := instance.ValidateConstruction(source, runID); err != nil {
-			t.Fatal(err)
-		}
 		bound[i].RunID, bound[i].Generation, bound[i].PublicationSequence = runID, 1, 1
-		bound[i].InstanceID, bound[i].FlowInstance, bound[i].EntityID = instance.InstanceID, instance.InstancePath, instance.EntityID
 	}
 	return bound
 }

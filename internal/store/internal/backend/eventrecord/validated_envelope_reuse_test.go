@@ -248,7 +248,7 @@ func envelopeReuseFixture(tb testing.TB, plans int, shape string) Record {
 	}
 	if shape != "absent" {
 		const entityID = "33333333-3333-4333-8333-333333333333"
-		source, err := events.NewExternalIngressRoutingSource("ingress", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+		source, err := events.NewExternalIngressRoutingSource("ingress", events.RoutingSourceAuthorityProviderAdmissionPlan)
 		if err != nil {
 			tb.Fatal(err)
 		}

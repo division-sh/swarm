@@ -156,7 +156,7 @@ func TestGenericPublishRejectsEveryClosedSubtypeAndSelectedFork(t *testing.T) {
 
 func TestPersistentContractValidatesNestedDurableUUIDFacts(t *testing.T) {
 	runID := uuid.NewString()
-	source, err := NewExternalIngressRoutingSource("flow-a", "not-a-uuid", RoutingSourceAuthorityProviderAdmissionPlan)
+	source, err := NewStaticFlowRoutingSource(RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/one", EntityID: "not-a-uuid"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestPersistentContractValidatesNestedDurableUUIDFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AdmitForPersistence(event, AdmissionOptions{RequirePersistentUUIDIdentity: true}); err == nil || !strings.Contains(err.Error(), "routing_source.entity_id") {
+	if _, err := AdmitForPersistence(event, AdmissionOptions{RequirePersistentUUIDIdentity: true}); err == nil || !strings.Contains(err.Error(), "source.entity_id") {
 		t.Fatalf("declared source identity error = %v", err)
 	}
 
@@ -202,7 +202,6 @@ func TestDiagnosticDirectSubtypePolicyIsCompleteAtEveryRuntimeBoundary(t *testin
 		{"runtime_log_global_without_run", EventTypePlatformRuntimeLog, "", globalEnvelope},
 		{"runtime_log_global_with_run", EventTypePlatformRuntimeLog, runID, globalEnvelope},
 		{"inbound_recorded_global", EventTypePlatformInboundRecord, runID, globalEnvelope},
-		{"inbound_recorded_entity", EventTypePlatformInboundRecord, runID, entityEnvelope},
 		{"agent_directive_global", EventTypePlatformAgentDirective, runID, globalEnvelope},
 	}
 	for _, test := range valid {
@@ -243,6 +242,7 @@ func TestDiagnosticDirectSubtypePolicyIsCompleteAtEveryRuntimeBoundary(t *testin
 		hostileTuple{"runtime_log_entity_scope", EventTypePlatformRuntimeLog, EventProducerPlatform, "runtime", runID, entityEnvelope},
 		hostileTuple{"runtime_log_flow_scope", EventTypePlatformRuntimeLog, EventProducerPlatform, "runtime", runID, flowEnvelope},
 		hostileTuple{"inbound_recorded_missing_run", EventTypePlatformInboundRecord, EventProducerPlatform, "runtime", "", globalEnvelope},
+		hostileTuple{"inbound_recorded_entity_scope", EventTypePlatformInboundRecord, EventProducerPlatform, "runtime", runID, entityEnvelope},
 		hostileTuple{"inbound_recorded_flow_scope", EventTypePlatformInboundRecord, EventProducerPlatform, "runtime", runID, flowEnvelope},
 		hostileTuple{"agent_directive_missing_run", EventTypePlatformAgentDirective, EventProducerPlatform, "runtime", "", globalEnvelope},
 		hostileTuple{"agent_directive_entity_scope", EventTypePlatformAgentDirective, EventProducerPlatform, "runtime", runID, entityEnvelope},

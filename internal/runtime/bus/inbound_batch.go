@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -15,6 +16,7 @@ import (
 
 type InboundDeliveryBatch struct {
 	Provider          string
+	Admission         providertriggers.PublicationAdmission
 	AuthorSubjectType string
 	AuthorSubjectID   string
 	Events            []InboundDeliveryEvent
@@ -24,6 +26,19 @@ type InboundDeliveryEvent struct {
 	Event         events.Event
 	Kind          runtimeprovideroutput.Kind
 	Authorization runtimeprovideroutput.Authorization
+}
+
+type authenticatedProviderPublicationKey struct{}
+
+type authenticatedProviderPublication struct {
+	eventID string
+	source  events.RouteIdentity
+	kind    runtimeprovideroutput.Kind
+}
+
+func authenticatedProviderPublicationForEvent(ctx context.Context, event events.Event) (authenticatedProviderPublication, bool) {
+	admission, ok := ctx.Value(authenticatedProviderPublicationKey{}).(authenticatedProviderPublication)
+	return admission, ok && admission.eventID == event.ID() && admission.source == event.RoutingSource().Route()
 }
 
 // providerRawSettlementAdmission is minted only by the typed inbound batch
@@ -43,10 +58,10 @@ func (a providerRawSettlementAdmission) authorizes(projected, inbound events.Eve
 	if projected.HasTargetRoute() || len(projected.TargetRoutes()) != 0 {
 		return false
 	}
-	// Ordinary planning proves one live source owner, independently of whether
-	// that source has consumers. A recipient address cannot supply this proof.
+	// The exact compiled declaration admits raw transport evidence independently
+	// of whether any concrete business receiver exists. Addresses cannot prove it.
 	owner := plan.ordinarySource.route
-	return owner.FlowInstance != "" && owner.FlowID == a.source.FlowID && owner.EntityID == a.source.EntityID &&
+	return owner.FlowID == a.source.FlowID && a.source.EntityID == "" && a.source.FlowInstance == "" &&
 		len(plan.DeliveryRoutes()) == 0 && plan.TargetFailure.Empty() && !plan.CanonicalRouteOwnerMatched()
 }
 
@@ -89,6 +104,11 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 	if err != nil {
 		return InboundDeliveryPlan{}, err
 	}
+	for index, item := range validated.Events {
+		if err := validated.Admission.ValidateOutput(eb.sourceArtifactFact.BundleHash(), validated.Provider, index, len(validated.Events), item.Event, item.Kind, item.Authorization); err != nil {
+			return InboundDeliveryPlan{}, err
+		}
+	}
 	plan := InboundDeliveryPlan{events: append([]InboundDeliveryEvent(nil), validated.Events...)}
 	activationOwners := make(map[runtimeflowidentity.Route]int)
 	release := func(cause error) (InboundDeliveryPlan, error) {
@@ -98,7 +118,9 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		return InboundDeliveryPlan{}, cause
 	}
 	for _, item := range validated.Events {
-		itemCtx := ctx
+		itemCtx := context.WithValue(ctx, authenticatedProviderPublicationKey{}, authenticatedProviderPublication{
+			eventID: item.Event.ID(), source: item.Event.RoutingSource().Route(), kind: item.Kind,
+		})
 		if item.Kind == runtimeprovideroutput.KindRaw {
 			itemCtx = withoutProviderOutputAuthorization(itemCtx)
 		} else {
@@ -149,11 +171,14 @@ func (eb *EventBus) admitProviderRawSettlement(kind runtimeprovideroutput.Kind, 
 		return providerRawSettlementAdmission{}
 	}
 	sourceRoute := source.Route().Normalized()
-	if sourceRoute.FlowID == "" || sourceRoute.EntityID == "" || evt.HasTargetRoute() || len(evt.TargetRoutes()) != 0 {
+	if sourceRoute.FlowID == "" || sourceRoute.EntityID != "" || sourceRoute.FlowInstance != "" || evt.HasTargetRoute() || len(evt.TargetRoutes()) != 0 {
 		return providerRawSettlementAdmission{}
 	}
 	producer := runtimepinrouting.ResolveFlowInputProducer(eb.semanticSource, sourceRoute.FlowID, string(evt.Type()))
 	if !producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {
+		return providerRawSettlementAdmission{}
+	}
+	if runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(evt.Type()), source).HasRuntimeConsumer() {
 		return providerRawSettlementAdmission{}
 	}
 	return providerRawSettlementAdmission{eventID: evt.ID(), source: sourceRoute}

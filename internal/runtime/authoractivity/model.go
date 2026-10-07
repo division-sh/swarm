@@ -212,7 +212,7 @@ var kindContracts = map[Kind]kindContract{
 		Transitions: set("received"), SourceOwner: "events", SourceIdentityRequired: true,
 		AllowedProjectionFields:  set("subject_type", "subject_id", "provider", "author_subject_type", "author_subject_id"),
 		RequiredProjectionFields: set("subject_type", "subject_id"),
-		SubjectStrategy:          subjectTypedIdentity, SubjectTypes: set("entity"),
+		SubjectStrategy:          subjectTypedIdentity, SubjectTypes: set("inbound_publication"),
 		ScopeByTransition: scopeAll(ScopeBundle, "received"), HumanVisibleTransitions: set("received"),
 		Actions: map[string]string{"received": "message received"}, SubjectRenderer: renderInboundSubject, ActionRenderer: renderInboundAction,
 	},

@@ -586,7 +586,7 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 		}
 		current, found, err := rt.Pipeline.LoadReconciledStandingService(ctx, runtimepipeline.StandingServiceCandidate{
 			BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason, ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
-			InstanceID: plan.instance.InstanceID, EntityID: plan.instance.EntityID, Source: rt.Options.SourceArtifactFact,
+			Source: rt.Options.SourceArtifactFact,
 		})
 		if err != nil {
 			return nil, nil, err
@@ -609,20 +609,27 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 }
 
 func (rt *Runtime) projectCommittedStandingTargets(planned []StandingTarget, current runtimepipeline.StandingServiceReconciliation) ([]StandingTarget, []StandingActivation, error) {
-	instance, err := runtimeflowidentity.StandingForGeneration(rt.Options.WorkflowModule.SemanticSource(), current.FlowPath, current.RunID)
-	if err != nil || instance.InstanceID != current.InstanceID || instance.EntityID != current.EntityID {
-		return nil, nil, errors.Join(err, fmt.Errorf("channel target has inconsistent constructed coordinates"))
+	source := rt.Options.WorkflowModule.SemanticSource()
+	keyless, err := runtimepipeline.StandingConstructionIsKeyless(source, current.FlowPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	var instance runtimeflowidentity.Instance
+	if keyless {
+		instance, err = runtimeflowidentity.StandingForGeneration(source, current.FlowPath, current.RunID)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	activation := StandingActivation{
 		BundleHash: current.BundleHash, ServiceID: current.ServiceID, FlowPath: current.FlowPath,
 		RunID: current.RunID, Generation: current.Generation, PublicationSequence: current.PublicationSequence,
-		InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
+		Construction: instance,
 		EffectiveState: current.EffectiveState, RestartDisposition: current.RestartDisposition,
 	}
 	targets := append([]StandingTarget(nil), planned...)
 	for i := range targets {
 		targets[i].RunID, targets[i].Generation, targets[i].PublicationSequence = current.RunID, current.Generation, current.PublicationSequence
-		targets[i].InstanceID, targets[i].FlowInstance, targets[i].EntityID = instance.InstanceID, instance.InstancePath, instance.EntityID
 	}
 	return targets, []StandingActivation{activation}, nil
 }

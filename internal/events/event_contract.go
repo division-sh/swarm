@@ -114,8 +114,8 @@ func ValidateEventStructuralContract(class EventAdmissionClass, eventType EventT
 		if runID == "" {
 			return fmt.Errorf("%s requires run_id", eventType)
 		}
-		if scope != EventScopeEntity && scope != EventScopeGlobal {
-			return fmt.Errorf("%s requires entity or global scope; got %q", eventType, scope)
+		if scope != EventScopeGlobal {
+			return fmt.Errorf("%s requires global scope; got %q", eventType, scope)
 		}
 	case EventTypePlatformAgentDirective:
 		if runID == "" {

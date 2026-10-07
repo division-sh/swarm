@@ -317,7 +317,7 @@ func a9AliasReceipt(t *testing.T, body json.RawMessage) map[string]any {
 		t.Fatal(err)
 	}
 	out := map[string]any{}
-	for _, key := range []string{"publication_id", "entity_id", "event_ids"} {
+	for _, key := range []string{"publication_id", "service_id", "run_id", "generation", "flow_path", "event_ids"} {
 		value, present := decoded[key]
 		if !present {
 			t.Fatalf("receipt omitted %q: %s", key, body)

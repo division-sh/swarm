@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 // StandingServiceCoordinate is the execution fact shared by clock and ingress
@@ -16,9 +17,6 @@ type StandingServiceCoordinate struct {
 	Generation          int64
 	PublicationSequence int64
 	FlowPath            string
-	InstanceID          string
-	FlowInstance        string
-	EntityID            string
 }
 
 func standingActivationsForPublication(existing, incoming []StandingActivation, serviceID, bundleHash string) ([]StandingActivation, int, error) {
@@ -54,7 +52,7 @@ func (c BundleContext) standingServiceCoordinates() ([]StandingServiceCoordinate
 		coordinate := StandingServiceCoordinate{
 			BundleHash: target.BundleHash, ServiceID: target.ServiceID, RunID: target.RunID,
 			Generation: target.Generation, PublicationSequence: target.PublicationSequence,
-			FlowPath: target.FlowPath, InstanceID: target.InstanceID, FlowInstance: target.FlowInstance, EntityID: target.EntityID,
+			FlowPath: target.FlowPath,
 		}
 		if err := add(coordinate); err != nil {
 			return nil, err
@@ -64,7 +62,7 @@ func (c BundleContext) standingServiceCoordinates() ([]StandingServiceCoordinate
 		coordinate := StandingServiceCoordinate{
 			BundleHash: activation.BundleHash, ServiceID: activation.ServiceID, RunID: activation.RunID,
 			Generation: activation.Generation, PublicationSequence: activation.PublicationSequence,
-			FlowPath: activation.FlowPath, InstanceID: activation.InstanceID, FlowInstance: activation.FlowInstance, EntityID: activation.EntityID,
+			FlowPath: activation.FlowPath,
 		}
 		if err := add(coordinate); err != nil {
 			return nil, err
@@ -103,12 +101,24 @@ func validateRuntimeContextStandingActivations(contextDef BundleContext) error {
 		if !disposition.Executable() {
 			continue
 		}
-		instance, err := flowidentity.StandingForGeneration(contextDef.Source, activation.FlowPath, activation.RunID)
+		keyless, err := pipeline.StandingConstructionIsKeyless(contextDef.Source, activation.FlowPath)
 		if err != nil {
 			return err
 		}
-		if activation.ServiceID != flowidentity.StandingServiceID(activation.FlowPath) ||
-			instance.InstanceID != activation.InstanceID || instance.InstancePath != activation.FlowInstance || instance.EntityID != activation.EntityID {
+		if activation.ServiceID != flowidentity.StandingServiceID(activation.FlowPath) {
+			return fmt.Errorf("standing activation does not match its declaring flow")
+		}
+		if !keyless {
+			if activation.Construction != (flowidentity.Instance{}) {
+				return fmt.Errorf("keyed standing declaration cannot publish an eager receiver")
+			}
+			continue
+		}
+		instance, err := flowidentity.StandingForGeneration(contextDef.Source, activation.FlowPath, activation.RunID)
+		if err != nil {
+			return fmt.Errorf("standing activation does not match its constructed instance: %w", err)
+		}
+		if instance != activation.Construction {
 			return fmt.Errorf("standing activation does not match its constructed instance")
 		}
 	}

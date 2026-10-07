@@ -184,7 +184,7 @@ func TestExecutionFrameContentHashBindsCanonicalSemanticFacts(t *testing.T) {
 func TestExecutionFrameConsumesAdmittedProviderTriggerEventFactsWithoutNormalization(t *testing.T) {
 	seed, _, surface := testExecutionFrameInputs(t)
 	route := events.RouteIdentity{FlowID: "telegram-ingress", EntityID: "00000000-0000-4000-8000-000000000003"}
-	routingSource, err := events.NewExternalIngressRoutingSource(route.FlowID, route.EntityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	routingSource, err := events.NewExternalIngressRoutingSource(route.FlowID, events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

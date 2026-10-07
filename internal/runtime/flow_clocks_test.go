@@ -102,7 +102,7 @@ func TestClockDeploymentDeclarationsAndExactPublication(t *testing.T) {
 			}
 			activation := StandingActivation{
 				ServiceID: serviceID, RunID: runID, Generation: 1, FlowPath: schedule.FlowID,
-				InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
+				Construction: instance,
 				RestartDisposition: disposition,
 			}
 			command, err := flowClockCommand(source, activation, schedule, executionmode.Live)
@@ -125,9 +125,9 @@ func TestClockDeploymentDeclarationsAndExactPublication(t *testing.T) {
 			for _, mutation := range []func(*StandingActivation){
 				func(a *StandingActivation) { a.RunID = uuid.NewString() },
 				func(a *StandingActivation) { a.Generation++ },
-				func(a *StandingActivation) { a.InstanceID = "foreign" },
-				func(a *StandingActivation) { a.FlowInstance = "foreign" },
-				func(a *StandingActivation) { a.EntityID = uuid.NewString() },
+				func(a *StandingActivation) { a.Construction.InstanceID = "foreign" },
+				func(a *StandingActivation) { a.Construction.InstancePath = "foreign" },
+				func(a *StandingActivation) { a.Construction.EntityID = uuid.NewString() },
 				func(a *StandingActivation) { a.ServiceID = uuid.NewString() },
 			} {
 				invalid := activation

@@ -31,7 +31,6 @@ func TestDiagnosticDirectNamedCommitSubtypeIsolationParity(t *testing.T) {
 				{"runtime_log_without_run", events.EventTypePlatformRuntimeLog, "", events.EventEnvelope{}},
 				{"runtime_log_with_run", events.EventTypePlatformRuntimeLog, runID, events.EventEnvelope{}},
 				{"inbound_recorded_global", events.EventTypePlatformInboundRecord, runID, events.EventEnvelope{}},
-				{"inbound_recorded_entity", events.EventTypePlatformInboundRecord, runID, events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString())},
 				{"agent_directive_global", events.EventTypePlatformAgentDirective, runID, events.EventEnvelope{}},
 			} {
 				t.Run("positive/"+positive.name, func(t *testing.T) {
@@ -65,9 +64,6 @@ func namedDiagnosticContractEvent(eventType events.EventType, runID string) even
 	envelope := events.EventEnvelope{}
 	if eventType == events.EventTypePlatformRuntimeLog {
 		eventRunID = ""
-	}
-	if eventType == events.EventTypePlatformInboundRecord {
-		envelope = events.EnvelopeForEntityID(envelope, uuid.NewString())
 	}
 	return namedDiagnosticContractEventForTuple(eventType, eventRunID, envelope)
 }

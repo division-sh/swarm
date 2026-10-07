@@ -166,7 +166,9 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			return connectRoutePlanDispatch{}, err
 		}
 		evaluationCtx = withTemplateInstanceLifecyclePreview(evaluationCtx)
-		evaluationCtx = context.WithValue(evaluationCtx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
+		if preview, _ := evaluationCtx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview == nil {
+			evaluationCtx = context.WithValue(evaluationCtx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
+		}
 		evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt), replyRecord)
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
@@ -620,6 +622,10 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx co
 	if decision.Activation == nil {
 		return errors.New("connect route preview requires its canonical construction plan")
 	}
+	return r.installFlowConstructionPreview(ctx, runID, *decision.Activation)
+}
+
+func (r connectRoutePlanResolver) installFlowConstructionPreview(ctx context.Context, runID string, plan runtimepipeline.FlowInstanceActivationPlan) error {
 	var preview *connectRoutePlanPreviewRoutes
 	if ctx != nil {
 		preview, _ = ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
@@ -639,23 +645,23 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx co
 		preview.table = table
 		preview.inputProducers = &inputProducers
 	}
-	identity := decision.Route()
-	if !identity.Valid() {
-		return nil
-	}
-	liveIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, identity)
-	if err != nil {
-		return fmt.Errorf("compose connect route planning preview identity: %w", err)
-	}
-	if len(preview.table.MaterializedRoutes(liveIdentity)) > 0 {
-		return nil
-	}
-	if err := preview.table.addFlowInstanceRouteForContextWithInputProducers(ctx, FlowInstanceRouteMaterializationRequest{
-		Identity:            liveIdentity,
-		Instance:            decision.Activation.Identity,
-		ActivationVariables: decision.ActivationVariables(),
-	}, preview.inputProducers); err != nil {
-		return err
+	for _, construction := range plan.ConstructionPlans() {
+		if err := construction.Validate(); err != nil {
+			return err
+		}
+		liveIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, construction.Identity.Route())
+		if err != nil {
+			return fmt.Errorf("compose construction route planning preview identity: %w", err)
+		}
+		if len(preview.table.MaterializedRoutes(liveIdentity)) > 0 {
+			continue
+		}
+		if err := preview.table.addFlowInstanceRouteForContextWithInputProducers(ctx, FlowInstanceRouteMaterializationRequest{
+			Identity: liveIdentity, Instance: construction.Identity,
+			ActivationVariables: cloneRouteActivationVariables(construction.ActivationVariables),
+		}, preview.inputProducers); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -685,7 +691,12 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	}
 	add(evt.RoutingSource().Route())
 	if evt.RoutingSource().Kind() == events.RoutingSourceExternalIngress {
-		scope.sourceEntityID = evt.RoutingSource().Route().EntityID
+		flowID := evt.RoutingSource().Route().FlowID
+		if flowID == semanticview.RootExecutionFlowID(r.source) {
+			paths[evt.RunID()] = struct{}{}
+		} else if instance, err := runtimeflowidentity.StandingForGeneration(r.source, flowID, evt.RunID()); err == nil {
+			paths[instance.InstancePath] = struct{}{}
+		}
 	}
 	add(evt.SourceRoute())
 	add(evt.TargetRoute())

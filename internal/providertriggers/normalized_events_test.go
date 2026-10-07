@@ -17,7 +17,7 @@ func TestNormalizedEventManifestPublishesRawAndTypedFlatEvent(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 	delivery, err := manifest.Accept(Request{
-		Target: Target{EntityID: "entity-1"},
+		Target: Target{},
 		Payload: map[string]any{
 			"update_id": json.Number("123"),
 			"message": map[string]any{
@@ -69,7 +69,7 @@ func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 	delivery, err := plan.Accept(Request{
-		Target: Target{EntityID: "entity-1"},
+		Target: Target{},
 		Payload: map[string]any{
 			"update_id": json.Number("123"),
 			"message": map[string]any{
@@ -129,7 +129,7 @@ func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
 func TestNormalizedEventManifestUnmatchedPayloadPublishesRawOnly(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	delivery, err := manifest.Accept(Request{
-		Target:  Target{EntityID: "entity-1"},
+		Target:  Target{},
 		Payload: map[string]any{"update_id": json.Number("123"), "callback_query": map[string]any{"id": "callback-1"}},
 	})
 	if err != nil {
@@ -170,7 +170,7 @@ func TestNormalizedEventPlanRejectsForcedRuntimeMultiMatch(t *testing.T) {
 	// Exercise the runtime guard with an intentionally corrupted private plan.
 	plan.manifest.value.definition.outputs = manifestDefinition(manifest).OutputManifest()
 	_, err := plan.Accept(Request{
-		Target: Target{EntityID: "entity-1"},
+		Target: Target{},
 		Payload: map[string]any{
 			"update_id": json.Number("123"),
 			"message": map[string]any{
@@ -205,7 +205,7 @@ func TestAdmittedSemanticDigestRetainsRedactedConsumedValues(t *testing.T) {
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 	request := Request{
-		Target: Target{EntityID: "entity-1"},
+		Target: Target{},
 		Payload: map[string]any{
 			"update_id": json.Number("123"),
 			"message": map[string]any{
@@ -332,7 +332,7 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 				t.Fatalf("CompileAdmission: %v", err)
 			}
 			_, err = plan.Accept(Request{
-				Target: Target{EntityID: "entity-1"},
+				Target: Target{},
 				Payload: map[string]any{
 					"update_id": json.Number("123"),
 					"message": map[string]any{
@@ -374,7 +374,7 @@ func TestNormalizedEventManifestRejectsImplicitAndUnknownConversions(t *testing.
 	field.Convert = ""
 	manifest.NormalizedEvents[0].Fields["chat_id"] = field
 	_, err := manifest.Accept(Request{
-		Target: Target{EntityID: "entity-1"},
+		Target: Target{},
 		Payload: map[string]any{"message": map[string]any{
 			"message_id": json.Number("7"), "chat": map[string]any{"id": json.Number("42")}, "text": "hello",
 		}},
@@ -416,7 +416,7 @@ func TestNormalizedEventFinitePredicateAndTextEnumMap(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			delivery, err := manifest.Accept(Request{
-				Target: Target{EntityID: "entity-1"},
+				Target: Target{},
 				Payload: map[string]any{
 					"update_id": json.Number("123"),
 					"message": map[string]any{
@@ -659,7 +659,7 @@ additionalProperties:
 		}
 	}
 
-	request := Request{Target: Target{EntityID: "entity-1"}, Payload: map[string]any{
+	request := Request{Target: Target{}, Payload: map[string]any{
 		"update_id": json.Number("123"),
 		"message": map[string]any{
 			"message_id": json.Number("7"), "chat": map[string]any{"id": json.Number("42")}, "text": "hello", "raw": valid,

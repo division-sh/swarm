@@ -51,11 +51,11 @@ func TestProjectEntityOwnershipRejectsContradictoryCoordinates(t *testing.T) {
 }
 
 func TestProjectSelectedContractSourceEventPreservesProducerAndIsIdempotent(t *testing.T) {
-	external, err := events.NewExternalIngressRoutingSource("ingress", "source-run", events.RoutingSourceAuthorityProviderAdmissionPlan)
+	external, err := events.NewExternalIngressRoutingSource("ingress", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	childExternal, err := events.NewExternalIngressRoutingSource("ingress", "child-run", events.RoutingSourceAuthorityProviderAdmissionPlan)
+	childExternal, err := events.NewExternalIngressRoutingSource("ingress", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -227,7 +228,7 @@ func selectedSQLiteReadProofs(
 	return append(reads,
 		selectedReadProof{name: "load source set", run: func(ctx context.Context) error { _, _, err := loadSourceSet(ctx); return err }},
 		selectedReadProof{name: "load inbound publication", run: func(ctx context.Context) error {
-			_, _, err := store.LoadInboundPublicationByIdentity(ctx, "test", uuid.NewString(), "missing")
+			_, _, err := store.LoadInboundPublicationByIdentity(ctx, runtimeinbound.Identity{ServiceID: uuid.NewString(), RunID: runID, Generation: 1, Provider: "test", ProviderEventID: "missing"})
 			return err
 		}},
 		selectedReadProof{name: "load run bundle", run: func(ctx context.Context) error { _, err := store.LoadRunBundleAvailability(ctx, runID); return err }},

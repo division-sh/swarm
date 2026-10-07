@@ -541,7 +541,7 @@ func (f standingDispositionParityFixture) candidate(name string) runtimepipeline
 	flowPath := "restart-disposition/" + f.backend + "-" + name
 	return runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
-		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+
 		Source: mustStoreTestSourceArtifactFact(f.hash),
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -239,8 +240,8 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	contextDef.Runtime = rt
 	contextDef.WorkOwner = rt.WorkOccurrence()
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: runtimeTestBundleHash, ServiceID: "service-primary", FlowPath: "telegram-flow", Alias: "primary", Provider: "telegram",
-		RunID: "run-primary", Generation: 1, FlowInstance: "telegram-flow/primary", EntityID: "entity-primary",
+		BundleHash: runtimeTestBundleHash, ServiceID: runtimeflowidentity.StandingServiceID("telegram-flow"), FlowPath: "telegram-flow", Alias: "primary", Provider: "telegram",
+		RunID: "run-primary", Generation: 1,
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: planAdmission,
 	}}
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
@@ -565,8 +566,8 @@ func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *prov
 		t.Fatal(err)
 	}
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: hash, ServiceID: "service-" + alias, FlowPath: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
-		Generation: 1, FlowInstance: "acme-flow/" + alias, EntityID: "entity-" + alias,
+		BundleHash: hash, ServiceID: runtimeflowidentity.StandingServiceID("acme-flow"), FlowPath: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
+		Generation: 1,
 		SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
 	}}
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)

@@ -50,8 +50,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 	selectedRuntime.InboundGateway.HandleResolvedWebhook(w, r.WithContext(use.WorkContext()), runtime.InboundTarget{
 		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
 		RunID: target.RunID, Generation: target.Generation,
-		PublicationSequence: target.PublicationSequence, InstanceID: target.InstanceID,
-		FlowInstance: target.FlowInstance, EntityID: target.EntityID, EntitySlug: target.Alias,
+		PublicationSequence: target.PublicationSequence,
 		Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
 	}, use.Context.Source)
 }

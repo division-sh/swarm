@@ -2013,7 +2013,7 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 	req := providertriggers.Request{
 		Provider: "telegram",
 		Target: providertriggers.Target{
-			EntityID:      entityID,
+
 			WebhookSecret: "telegram-secret",
 		},
 		Body:      body,
@@ -2041,7 +2041,7 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 	if err != nil {
 		t.Fatalf("marshal inbound delivery payload: %v", err)
 	}
-	source, err := events.NewExternalIngressRoutingSource("telegram", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	source, err := events.NewExternalIngressRoutingSource("telegram", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

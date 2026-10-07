@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 )
 
 type EventDescriptorResolver interface {
@@ -109,15 +110,21 @@ func PersistedEventDraft(ctx context.Context, resolver EventDescriptorResolver, 
 	}, true, nil
 }
 
-func RecordInbound(ctx context.Context, story runtimeauthoractivity.Mutation, evt events.Event, provider string, projection runtimeauthoractivity.InboundProjection) error {
+func RecordInbound(ctx context.Context, story runtimeauthoractivity.Mutation, evt events.Event, request inboundpublication.Request, projection runtimeauthoractivity.InboundProjection) error {
 	if story == nil {
 		return fmt.Errorf("inbound author activity mutation is required")
+	}
+	if err := request.Validate(); err != nil {
+		return err
+	}
+	if evt.ID() != request.MarkerEventID || evt.RunID() != request.ResolvedRunID || evt.EntityID() != "" || evt.FlowInstance() != "" {
+		return fmt.Errorf("inbound author activity requires its exact declaration-owned receipt evidence")
 	}
 	draft := runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindInboundReceived, Transition: "received",
 		SourceOwner: "events", SourceIdentity: evt.ID(), DedupKey: "inbound:" + evt.ID(),
-		OccurredAt: evt.CreatedAt(), RunID: evt.RunID(), EntityID: evt.EntityID(), FlowID: evt.FlowInstance(),
-		Projection: runtimeauthoractivity.Projection{SubjectType: "entity", SubjectID: evt.EntityID(), Provider: strings.TrimSpace(provider), AuthorSubjectType: projection.SubjectType, AuthorSubjectID: projection.SubjectID},
+		OccurredAt: evt.CreatedAt(), RunID: evt.RunID(), FlowID: request.FlowPath,
+		Projection: runtimeauthoractivity.Projection{SubjectType: "inbound_publication", SubjectID: request.PublicationID, Provider: request.Provider, AuthorSubjectType: projection.SubjectType, AuthorSubjectID: projection.SubjectID},
 	}
 	return story.Record(ctx, draft)
 }

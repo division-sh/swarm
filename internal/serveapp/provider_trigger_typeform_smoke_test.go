@@ -60,7 +60,7 @@ func TestTypeformManualLiveHTTPSWebhookSmoke(t *testing.T) {
 
 	responseCapture := newProviderTriggerSmokeResponseCapture()
 	baseURL := startProviderTriggerSmokeServer(t, ctx, listenAddr, bus, sqliteStore, responseCapture, runtimepkg.InboundTarget{
-		RunID: runID, FlowInstance: flowInstance, EntityID: entityID, EntitySlug: entitySlug,
+		RunID: runID,
 		Alias: entitySlug, Provider: provider, SigningSecret: "bounded_smoke.typeform",
 	}, webhookSecret)
 	localAddress := baseURL + webhookPath

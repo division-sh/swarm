@@ -17,14 +17,6 @@ func checkTemplateInstanceValidation(c *checkerContext) []Finding {
 		return nil
 	}
 	findings := []Finding{}
-	if bundle.RootSchema != nil && !bundle.RootSchema.Instance.Empty() {
-		findings = append(findings, Finding{
-			CheckID:  "template_instance_validation",
-			Severity: "error",
-			Message:  "flow <root> template instance invalid: root schema must not declare instance; template instance keys belong to child flow contracts",
-			Location: "<root>",
-		})
-	}
 	for flowID, schema := range c.source.FlowSchemaEntries() {
 		flowID = strings.TrimSpace(flowID)
 		if flowID == "" {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -101,8 +102,8 @@ func TestEvidencePayloadOwnsExactOrderedCommittedBatch(t *testing.T) {
 		name    string
 		payload json.RawMessage
 	}{
-		{name: "reordered ids", payload: []byte(`{"publication_id":"` + request.PublicationID + `","provider":"github","provider_event_id":"delivery-1","entity_id":"` + request.EntityID + `","event_ids":["` + normalizedID + `","` + rawID + `"],"event_names":["inbound.github.push","github.push.normalized"],"output_count":2}`)},
-		{name: "wrong count", payload: []byte(`{"publication_id":"` + request.PublicationID + `","provider":"github","provider_event_id":"delivery-1","entity_id":"` + request.EntityID + `","event_ids":["` + rawID + `","` + normalizedID + `"],"event_names":["inbound.github.push","github.push.normalized"],"output_count":1}`)},
+		{name: "reordered ids", payload: changedEvidencePayload(t, payload, "event_ids", []string{normalizedID, rawID})},
+		{name: "wrong count", payload: changedEvidencePayload(t, payload, "output_count", 1)},
 		{name: "unknown field", payload: append(append([]byte{}, payload[:len(payload)-1]...), []byte(`,"legacy_event_id":"`+rawID+`"}`)...)},
 	}
 	for _, tc := range testCases {
@@ -164,21 +165,88 @@ func TestA9ReceiptRequestUsesExactAlias(t *testing.T) {
 
 func evidenceProofRequest(t *testing.T) Request {
 	t.Helper()
-	entityID := uuid.NewString()
-	publicationID, markerEventID := DeterministicIDs("github", entityID, "delivery-1")
+	identity := Identity{ServiceID: flowidentity.StandingServiceID("ingress"), RunID: uuid.NewString(), Generation: 1, Provider: "github", ProviderEventID: "delivery-1"}
+	publicationID, markerEventID, err := DeterministicIDs(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return Request{
-		PublicationID: publicationID, Provider: "github", EntityID: entityID, ProviderEventID: "delivery-1",
+		PublicationID: publicationID, Provider: "github", ProviderEventID: "delivery-1",
 		RequestFingerprint: strings.Repeat("a", 64), RequestProjectionVersion: RequestSemanticProjectionVersion,
-		StableServiceID: uuid.NewString(), FlowPath: "ingress", InstanceID: uuid.NewString(),
-		TargetAlias: "github", TargetFlowInstance: "ingress/proof", ResolvedRunID: uuid.NewString(),
+		StableServiceID: identity.ServiceID, FlowPath: "ingress", ExpectedGeneration: identity.Generation,
+		TargetAlias: "github", ResolvedRunID: identity.RunID,
 		MarkerEventID: markerEventID, AcknowledgementMode: AcknowledgementAfterPublish,
 		OriginalReceivedAt: time.Unix(1, 0).UTC(), OriginalTransportMetadata: []byte(`{}`),
+	}
+}
+
+func changedEvidencePayload(t *testing.T, payload json.RawMessage, field string, value any) json.RawMessage {
+	t.Helper()
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields[field] = value
+	result, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestA9InboundReceiptIdentity(t *testing.T) {
+	request := evidenceProofRequest(t)
+	if err := request.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	original := request.Identity()
+	publication, marker, err := DeterministicIDs(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{publication: true}
+	for _, mutate := range []func(*Identity){
+		func(i *Identity) { i.ServiceID = flowidentity.StandingServiceID("other") },
+		func(i *Identity) { i.RunID = uuid.NewString() },
+		func(i *Identity) { i.Generation++ },
+		func(i *Identity) { i.Provider = "telegram" },
+		func(i *Identity) { i.ProviderEventID = "delivery-2" },
+	} {
+		changed := original
+		mutate(&changed)
+		id, evidence, err := DeterministicIDs(changed)
+		if err != nil || seen[id] || evidence == marker {
+			t.Fatalf("binding generation/delivery was collapsed: identity=%+v id=%s err=%v", changed, id, err)
+		}
+		seen[id] = true
+	}
+	for _, alias := range []string{"github", "other-alias"} {
+		changed := request
+		changed.TargetAlias = alias
+		id, _, err := DeterministicIDs(changed.Identity())
+		if err != nil || id != publication || changed.Validate() != nil {
+			t.Fatalf("presentation became receipt identity: id=%s err=%v", id, err)
+		}
+	}
+	for _, mutate := range []func(*Identity){
+		func(i *Identity) { i.ServiceID = "" },
+		func(i *Identity) { i.ServiceID = " " + i.ServiceID },
+		func(i *Identity) { i.RunID = "" },
+		func(i *Identity) { i.Generation = 0 },
+		func(i *Identity) { i.Provider = "Telegram" },
+		func(i *Identity) { i.ProviderEventID += " " },
+	} {
+		changed := original
+		mutate(&changed)
+		if id, evidence, err := DeterministicIDs(changed); err == nil || id != "" || evidence != "" {
+			t.Fatalf("invalid identity acquired a reservation: %+v %s/%s %v", changed, id, evidence, err)
+		}
 	}
 }
 
 func evidenceProofEvent(request Request, payload json.RawMessage) events.Event {
 	return eventtest.DiagnosticDirect(
 		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", payload, 0,
-		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
+		request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt,
 	)
 }

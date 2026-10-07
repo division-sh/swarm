@@ -62,7 +62,7 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				routing, err := events.NewExternalIngressRoutingSource(origin, eventtest.UUID(origin), events.RoutingSourceAuthorityProviderAdmissionPlan)
+				routing, err := events.NewExternalIngressRoutingSource(origin, events.RoutingSourceAuthorityProviderAdmissionPlan)
 				if err != nil {
 					t.Fatal(err)
 				}

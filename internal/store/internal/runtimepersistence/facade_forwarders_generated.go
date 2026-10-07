@@ -711,8 +711,8 @@ func (s *PostgresStore) LoadHumanTaskContinuation(ctx context.Context, cardID st
 	return s.decisionPostgresOwner.LoadHumanTaskContinuation(ctx, cardID)
 }
 
-func (s *PostgresStore) LoadInboundPublicationByIdentity(ctx context.Context, provider string, entityID string, providerEventID string) (inboundpublication.Record, bool, error) {
-	return s.eventPostgresOwner.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
+func (s *PostgresStore) LoadInboundPublicationByIdentity(ctx context.Context, identity inboundpublication.Identity) (inboundpublication.Record, bool, error) {
+	return s.eventPostgresOwner.LoadInboundPublicationByIdentity(ctx, identity)
 }
 
 func (s *PostgresStore) LoadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
@@ -1943,8 +1943,8 @@ func (s *SQLiteRuntimeStore) LoadHumanTaskContinuation(ctx context.Context, card
 	return s.decisionSQLiteOwner.LoadHumanTaskContinuation(ctx, cardID)
 }
 
-func (s *SQLiteRuntimeStore) LoadInboundPublicationByIdentity(ctx context.Context, provider string, entityID string, providerEventID string) (inboundpublication.Record, bool, error) {
-	return s.eventSQLiteOwner.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
+func (s *SQLiteRuntimeStore) LoadInboundPublicationByIdentity(ctx context.Context, identity inboundpublication.Identity) (inboundpublication.Record, bool, error) {
+	return s.eventSQLiteOwner.LoadInboundPublicationByIdentity(ctx, identity)
 }
 
 func (s *SQLiteRuntimeStore) LoadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {

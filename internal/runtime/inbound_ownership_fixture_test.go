@@ -8,12 +8,19 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
-type inboundFixtureOwners []InboundTarget
+type inboundFixtureOwner struct {
+	RunID        string
+	FlowInstance string
+	EntityID     string
+}
+
+type inboundFixtureOwners []inboundFixtureOwner
 
 func (owners inboundFixtureOwners) ListSelectedRunTargetOwners(_ context.Context, runID string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	var out []runtimebus.ActiveTargetDescriptor
@@ -78,8 +85,9 @@ func newInboundTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		targets = []InboundTarget{testInboundTarget("", "")}
 	}
 	rawEvents := []string{"inbound.telegram", "inbound.github.push", "inbound.github.issue_comment", "inbound.slack.message_channels", "inbound.slack.message", "inbound.stripe", "inbound.twilio", "inbound.shopify", "inbound.typeform", "inbound.intercom", "inbound.partner", "inbound.json"}
-	root := &runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
+	root := &runtimecontracts.FlowContractView{Path: ".", Schema: runtimecontracts.FlowSchemaDocument{Name: "inbound-fixture"}, Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
 	byID := map[string]*runtimecontracts.FlowContractView{".": root}
+	schemas := make(map[string]runtimecontracts.FlowSchemaDocument)
 	ingress := make(map[string][]string)
 	for _, target := range targets {
 		flow := runtimecontracts.FlowContractView{Path: target.FlowPath, Paths: runtimecontracts.FlowContractPaths{FlowPath: target.FlowPath}}
@@ -100,13 +108,29 @@ func newInboundTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	}
 	for index := range root.Children {
 		flow := &root.Children[index]
+		flow.Parent = root
 		byID[flow.Path] = flow
+		schemas[flow.Path] = flow.Schema
 	}
-	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: byID}}
+	bundle := &runtimecontracts.WorkflowContractBundle{RootSchema: &root.Schema, FlowSchemas: schemas, FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: byID}}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatal(err)
 	}
 	opts.ContractBundle = semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), ingress)
-	opts.Durable.TargetOwners = inboundFixtureOwners(targets)
+	if opts.SourceArtifactFact.Validate() != nil {
+		opts.SourceArtifactFact = testSourceArtifactFact(t, targets[0].BundleHash)
+	}
+	if opts.WorkOwner == nil {
+		opts.WorkOwner = runtimeTestOccurrence(t, opts.SourceArtifactFact.BundleHash())
+	}
+	var owners inboundFixtureOwners
+	for _, target := range targets {
+		instance, err := flowidentity.StandingForGeneration(opts.ContractBundle, target.FlowPath, target.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owners = append(owners, inboundFixtureOwner{RunID: target.RunID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
+	}
+	opts.Durable.TargetOwners = owners
 	return newRuntimeTestEventBusWithOptions(t, store, opts)
 }

@@ -36,13 +36,7 @@ const (
 )
 
 type Target struct {
-	EntityID      string
-	EntitySlug    string
 	WebhookSecret string
-}
-
-func (t Target) EffectiveEntityID() string {
-	return firstNonEmpty(t.EntityID, t.EntitySlug)
 }
 
 type Request struct {
@@ -868,8 +862,7 @@ func (m manifestDefinition) projectAdmission(admitted manifestAdmission) (Delive
 	provider := admitted.provider
 	deliveryID := admitted.deliveryID
 	eventType := admitted.eventType
-	entityID := req.Target.EffectiveEntityID()
-	payload := m.buildPublishPayload(provider, entityID, deliveryID, eventType, req)
+	payload := m.buildPublishPayload(provider, deliveryID, eventType, req)
 	normalized, err := m.normalizedDeliveryEvents(req.Payload)
 	if err != nil {
 		return Delivery{}, err
@@ -1103,7 +1096,7 @@ func (m manifestDefinition) resolveEventName(eventType string) string {
 	return name
 }
 
-func (m manifestDefinition) buildPublishPayload(provider, entityID, deliveryID, eventType string, req Request) map[string]any {
+func (m manifestDefinition) buildPublishPayload(provider, deliveryID, eventType string, req Request) map[string]any {
 	rawPayload := redactPayload(req.Payload, m.RedactKeys)
 	if strings.TrimSpace(m.PayloadSource) == "form" {
 		rawPayload = redactPayload(formValuesPayload(req.Form), m.RedactKeys)
@@ -1120,7 +1113,6 @@ func (m manifestDefinition) buildPublishPayload(provider, entityID, deliveryID, 
 		}
 	}
 	return map[string]any{
-		"entity_id":            strings.TrimSpace(entityID),
 		"provider":             strings.TrimSpace(provider),
 		"event_type":           strings.TrimSpace(eventType),
 		"provider_event_type":  strings.TrimSpace(eventType),

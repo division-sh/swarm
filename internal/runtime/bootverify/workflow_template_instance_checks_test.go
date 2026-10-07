@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -25,19 +26,32 @@ account:
 	}
 }
 
-func TestRun_RejectsRootTemplateInstanceDeclaration(t *testing.T) {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Name:     "root",
-			Instance: mustBootverifyTemplateInstanceField(t, "account_id"),
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{},
-	}
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "template_instance_validation", "root schema must not declare instance") {
-		t.Fatalf("expected root template_instance_validation error, got %#v", report.Errors())
+func TestA9RootConstructorAdmissionUsesSharedOwners(t *testing.T) {
+	for _, test := range []struct {
+		name, key, eventSchema, wantCheck string
+	}{
+		{"constructible root", "account_id", "account_id: text\n  region: text", ""},
+		{"unknown root key", "missing_id", "account_id: text\n  region: text", "template_instance_validation"},
+		{"ineligible root input", "account_id", "note: text", "flow_constructor_validation"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, repo := t.TempDir(), repoRootForBootverifyTest(t)
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root\ninstance: "+test.key+"\npins:\n  inputs: [account.opened]\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "account.opened:\n  "+test.eventSchema+"\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "account:\n  account_id: text\n  region: text\n  count: {type: integer, initial: 0}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes:\n          - {target_field: count, value: size(entity.region)}\n")
+			bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if test.wantCheck != "" {
+				if !reportContains(report.Errors(), test.wantCheck, "") {
+					t.Fatalf("missing %s refusal: %+v", test.wantCheck, report.Errors())
+				}
+				return
+			}
+			if report.HasErrors() {
+				t.Fatalf("valid standalone keyed root was refused: %+v", report.Errors())
+			}
+		})
 	}
 }
 

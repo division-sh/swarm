@@ -6,15 +6,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // ordinaryPublicationSource resolves an admitted source, not a receiver grant.
-// Provider events intentionally omit FlowInstance; selected-run ownership supplies
-// it without changing the persisted event or its authenticated source carrier.
+// Provider events carry a declaration, never a concrete sender. Construction
+// and selected-run ownership supply the local receiver without changing it.
 type ordinaryPublicationSource struct {
-	route events.RouteIdentity
-	root  bool
+	route           events.RouteIdentity
+	root            bool
+	declarationOnly bool
 }
 
 func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordinaryPublicationSource, error) {
@@ -32,17 +34,28 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 		return ordinaryPublicationSource{}, nil
 	}
 	route := source.Route()
-	if source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan || p.source == nil || route.FlowID == "" || route.EntityID == "" {
-		return ordinaryPublicationSource{}, fmt.Errorf("provider local publication requires an admitted declaring flow and entity")
+	if source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan || p.source == nil || route.FlowID == "" || route.EntityID != "" || route.FlowInstance != "" {
+		return ordinaryPublicationSource{}, fmt.Errorf("provider publication requires an exact admitted declaration without a concrete sender")
 	}
 	if _, ok := p.source.FlowScopeByID(route.FlowID); !ok {
 		return ordinaryPublicationSource{}, fmt.Errorf("provider declaring flow %q is not in the selected source", route.FlowID)
 	}
 	root := route.FlowID == semanticview.RootExecutionFlowID(p.source)
+	var expected runtimeflowidentity.Instance
+	if root {
+		expected = runtimeflowidentity.Stored(p.source, route.FlowID, evt.RunID(), evt.RunID(), runtimeflowidentity.EntityID(evt.RunID()), "")
+	} else if keyless, err := pipeline.StandingConstructionIsKeyless(p.source, route.FlowID); err != nil {
+		return ordinaryPublicationSource{}, err
+	} else if keyless {
+		expected, err = runtimeflowidentity.StandingForGeneration(p.source, route.FlowID, evt.RunID())
+		if err != nil {
+			return ordinaryPublicationSource{}, err
+		}
+	}
 	owners := make(map[events.RouteIdentity]struct{})
 	for _, descriptor := range p.descriptors {
 		descriptor = descriptor.Normalized()
-		if descriptor.Materializing || descriptor.EntityID != route.EntityID || descriptor.FlowInstance == "" {
+		if descriptor.FlowInstance == "" {
 			continue
 		}
 		if root {
@@ -56,7 +69,22 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 		} else if !runtimeflowidentity.OwnedByFlow(p.source, route.FlowID, descriptor.FlowInstance) {
 			continue
 		}
-		owners[events.RouteIdentity{FlowID: route.FlowID, FlowInstance: descriptor.FlowInstance, EntityID: route.EntityID}] = struct{}{}
+		if expected.InstancePath != "" && (descriptor.FlowInstance != expected.InstancePath || descriptor.EntityID != expected.EntityID) {
+			return ordinaryPublicationSource{}, fmt.Errorf("provider receiver disagrees with its canonical constructed identity")
+		}
+		if descriptor.Materializing {
+			owner := events.RouteIdentity{FlowID: route.FlowID, FlowInstance: descriptor.FlowInstance, EntityID: descriptor.EntityID}
+			if _, admitted := p.activationOwners[owner]; !admitted {
+				return ordinaryPublicationSource{}, fmt.Errorf("provider receiver has no admitted same-publication constructor")
+			}
+		}
+		if err := descriptor.Availability.Validate(p.source, route.FlowID); err != nil {
+			return ordinaryPublicationSource{}, err
+		}
+		owners[events.RouteIdentity{FlowID: route.FlowID, FlowInstance: descriptor.FlowInstance, EntityID: descriptor.EntityID}] = struct{}{}
+	}
+	if len(owners) == 0 {
+		return ordinaryPublicationSource{route: route, root: root, declarationOnly: true}, nil
 	}
 	if len(owners) != 1 {
 		return ordinaryPublicationSource{}, fmt.Errorf("provider declaring flow %q entity %q requires one selected-run execution owner; got %d", route.FlowID, route.EntityID, len(owners))
@@ -68,6 +96,9 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 }
 
 func (s ordinaryPublicationSource) eventKeys(evt events.Event) []string {
+	if s.declarationOnly {
+		return nil
+	}
 	if s.route.Empty() {
 		return routedEventKeysForPlan(evt)
 	}
@@ -84,6 +115,9 @@ func (s ordinaryPublicationSource) eventKeys(evt events.Event) []string {
 }
 
 func (s ordinaryPublicationSource) ownsAgent(instance string) bool {
+	if s.declarationOnly {
+		return false
+	}
 	if s.root {
 		return instance == "" || instance == s.route.FlowInstance
 	}
@@ -91,6 +125,9 @@ func (s ordinaryPublicationSource) ownsAgent(instance string) bool {
 }
 
 func (s ordinaryPublicationSource) includesSubscriber(subscriber Subscriber) bool {
+	if s.declarationOnly {
+		return false
+	}
 	if s.route.Empty() {
 		return true
 	}
@@ -112,6 +149,9 @@ func (s ordinaryPublicationSource) includesSubscriber(subscriber Subscriber) boo
 }
 
 func (s ordinaryPublicationSource) includesCandidate(candidate deliveryRecipientCandidate) bool {
+	if s.declarationOnly {
+		return !candidate.PersistAsDelivery
+	}
 	if s.route.Empty() || !candidate.PersistAsDelivery {
 		return true
 	}
@@ -120,6 +160,9 @@ func (s ordinaryPublicationSource) includesCandidate(candidate deliveryRecipient
 }
 
 func (s ordinaryPublicationSource) localNodeIntents(source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+	if s.declarationOnly {
+		return nil
+	}
 	if s.route.Empty() {
 		out := routedRootNodeDeliveryIntentsForNoTargetEvent(source, evt, routed)
 		return append(out, routedExactSameInstanceNoTargetNodeDeliveryIntents(source, evt, routed)...)

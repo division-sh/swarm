@@ -114,7 +114,7 @@ func flowClockCommand(source semanticview.Source, activation StandingActivation,
 	if err != nil {
 		return genericschedule.AdmissionCommand{}, err
 	}
-	if instance.InstanceID != activation.InstanceID || instance.InstancePath != activation.FlowInstance || instance.EntityID != activation.EntityID {
+	if instance != activation.Construction {
 		return genericschedule.AdmissionCommand{}, fmt.Errorf("clock requires the acknowledged constructed instance")
 	}
 	declaration, err := eventidentity.AdmitPublicationDeclaration(schedule.FlowID, schedule.Declaration.Emit)

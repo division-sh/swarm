@@ -261,7 +261,7 @@ func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *t
 	}
 	_, err = acceptInstalled(registry, Request{
 		Provider: "stripe",
-		Target:   Target{EntitySlug: "customer-a"},
+		Target:   Target{},
 	})
 	requireProviderTriggerError(t, err, http.StatusUnauthorized)
 }
@@ -417,7 +417,7 @@ func TestStripeManifestRejectsMalformedSignatureParams(t *testing.T) {
 	req := Request{
 		Provider: "stripe",
 		Target: Target{
-			EntityID:      "entity-1",
+
 			WebhookSecret: "stripe-secret",
 		},
 		Body:     body,
@@ -445,7 +445,7 @@ func TestStripeManifestAcceptsLiteralEventType(t *testing.T) {
 	req := Request{
 		Provider: "stripe",
 		Target: Target{
-			EntityID:      "entity-1",
+
 			WebhookSecret: "stripe-secret",
 		},
 		Body:     body,
@@ -480,7 +480,7 @@ func TestTwilioManifestAcceptsSignedFormWebhook(t *testing.T) {
 	req := Request{
 		Provider: "twilio",
 		Target: Target{
-			EntityID:      "entity-1",
+
 			WebhookSecret: "twilio-secret",
 		},
 		Method:      http.MethodPost,
@@ -544,7 +544,7 @@ func TestTwilioManifestRejectsAmbiguousOrUnsupportedCallbacks(t *testing.T) {
 		req := Request{
 			Provider: "twilio",
 			Target: Target{
-				EntityID:      "entity-1",
+
 				WebhookSecret: "twilio-secret",
 			},
 			Method:      http.MethodPost,
@@ -642,7 +642,7 @@ func TestShopifyManifestAcceptsRawBodyBase64Signature(t *testing.T) {
 	req := Request{
 		Provider: "shopify",
 		Target: Target{
-			EntityID:      "entity-1",
+
 			WebhookSecret: "shopify-secret",
 		},
 		Body:      body,
@@ -691,7 +691,7 @@ func TestShopifyManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 		req := Request{
 			Provider: "shopify",
 			Target: Target{
-				EntityID:      "entity-1",
+
 				WebhookSecret: "shopify-secret",
 			},
 			Body:     validBody,
@@ -774,7 +774,7 @@ func TestTypeformManifestAcceptsRawBodyBase64Signature(t *testing.T) {
 	req := Request{
 		Provider: "typeform",
 		Target: Target{
-			EntityID:      "entity-1",
+
 			WebhookSecret: "typeform-secret",
 		},
 		Body:      body,
@@ -822,7 +822,7 @@ func TestTypeformManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 		req := Request{
 			Provider: "typeform",
 			Target: Target{
-				EntityID:      "entity-1",
+
 				WebhookSecret: "typeform-secret",
 			},
 			Body:     validBody,
@@ -907,7 +907,7 @@ func TestIntercomManifestAcceptsRawBodySHA1Signature(t *testing.T) {
 	req := Request{
 		Provider: "intercom",
 		Target: Target{
-			EntityID:      "entity-1",
+
 			WebhookSecret: "intercom-secret",
 		},
 		Body:      body,
@@ -955,7 +955,7 @@ func TestIntercomManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 		req := Request{
 			Provider: "intercom",
 			Target: Target{
-				EntityID:      "entity-1",
+
 				WebhookSecret: "intercom-secret",
 			},
 			Body:     validBody,
@@ -1279,7 +1279,7 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 
 func TestRegistryRejectsEmptyProvider(t *testing.T) {
 	_, err := acceptInstalled(testPlatformRegistry(t), Request{
-		Target:  Target{EntityID: "entity-1"},
+		Target:  Target{},
 		Body:    []byte(`{}`),
 		Headers: make(http.Header),
 		Payload: map[string]any{},
@@ -1308,7 +1308,7 @@ func telegramRequest(secret string, body []byte, payload any) Request {
 	req := Request{
 		Provider: "telegram",
 		Target: Target{
-			EntityID:      "entity-1",
+
 			WebhookSecret: secret,
 		},
 		Body:      body,
@@ -1426,7 +1426,7 @@ func hostileRequest(now time.Time, body []byte) Request {
 	return Request{
 		Provider: "hostile",
 		Target: Target{
-			EntityID:      "entity-1",
+
 			WebhookSecret: "hostile-secret",
 		},
 		Body:     body,

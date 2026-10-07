@@ -46,16 +46,12 @@ type StandingServiceCandidate struct {
 	BindingBlockReason runtimestanding.StandingBindingBlockReason
 	ServiceID          string
 	FlowPath           string
-	InstanceID         string
-	EntityID           string
 	Source             runtimecorrelation.SourceArtifactFact
 }
 
 func (c StandingServiceCandidate) Normalized() StandingServiceCandidate {
 	c.ServiceID = strings.TrimSpace(c.ServiceID)
 	c.FlowPath = strings.TrimSpace(c.FlowPath)
-	c.InstanceID = strings.TrimSpace(c.InstanceID)
-	c.EntityID = strings.TrimSpace(c.EntityID)
 	return c
 }
 
@@ -66,13 +62,12 @@ func (c StandingServiceCandidate) Validate() error {
 	}
 	for field, value := range map[string]string{
 		"service_id": c.ServiceID, "flow_path": c.FlowPath,
-		"instance_id": c.InstanceID, "entity_id": c.EntityID,
 	} {
 		if value == "" {
 			return fmt.Errorf("standing service %s is required", field)
 		}
 	}
-	for field, value := range map[string]string{"service_id": c.ServiceID, "entity_id": c.EntityID} {
+	for field, value := range map[string]string{"service_id": c.ServiceID} {
 		if _, err := uuid.Parse(value); err != nil {
 			return fmt.Errorf("standing service %s must be a UUID: %w", field, err)
 		}
@@ -91,8 +86,6 @@ type StandingServiceReconciliation struct {
 	BindingEnabled               bool
 	ServiceID                    string
 	FlowPath                     string
-	InstanceID                   string
-	EntityID                     string
 	RunID                        string
 	Generation                   int64
 	PublicationSequence          int64
@@ -116,7 +109,7 @@ type StandingServiceOperation struct {
 
 func (r StandingServiceReconciliation) SameAuthority(other StandingServiceReconciliation) bool {
 	return r.ServiceID != "" && r.ServiceID == other.ServiceID && r.RunID == other.RunID && r.Generation == other.Generation &&
-		r.FlowPath == other.FlowPath && r.InstanceID == other.InstanceID && r.EntityID == other.EntityID &&
+		r.FlowPath == other.FlowPath &&
 		r.BundleHash == other.BundleHash && r.PublicationSequence == other.PublicationSequence && r.RestartDisposition == other.RestartDisposition
 }
 

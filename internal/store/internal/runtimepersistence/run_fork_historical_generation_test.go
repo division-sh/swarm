@@ -95,7 +95,7 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 					routingSource := eventtest.RootRoutingSource(runID)
 					isExternal := cell == "external_current" || cell == "external_historical"
 					if isExternal {
-						routingSource, err = events.NewExternalIngressRoutingSource(".", runID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+						routingSource, err = events.NewExternalIngressRoutingSource(".", events.RoutingSourceAuthorityProviderAdmissionPlan)
 						if err != nil {
 							t.Fatal(err)
 						}

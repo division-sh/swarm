@@ -105,7 +105,7 @@ func standingOperatorProcessFixture(t *testing.T) (*RuntimeContextManager, runti
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
 	target := &contextDef.StandingTargets[0]
-	target.ServiceID, target.RunID, target.EntityID, target.InstanceID = uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	target.RunID = uuid.NewString()
 	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
@@ -120,7 +120,7 @@ func standingOperatorProcessFixture(t *testing.T) (*RuntimeContextManager, runti
 	}
 	return manager, runtimepipeline.StandingServiceReconciliation{
 		ServiceID: target.ServiceID, RunID: target.RunID, Generation: target.Generation, BundleHash: contextDef.BundleHash(),
-		FlowPath: target.FlowPath, InstanceID: target.InstanceID, EntityID: target.EntityID, RestartDisposition: disposition,
+		FlowPath: target.FlowPath, RestartDisposition: disposition,
 	}
 }
 

@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -177,18 +178,15 @@ func testInboundCredentialAdmission(t *testing.T, store runtimecredentials.Store
 
 func testInboundTarget(alias, signingSecret string) InboundTarget {
 	return InboundTarget{
-		BundleHash:          "bundle-v2:sha256:" + strings.Repeat("a", 64),
-		ServiceID:           "10000000-0000-4000-8000-000000000001",
+		BundleHash:          runtimeTestBundleHash,
+		ServiceID:           runtimeflowidentity.StandingServiceID("test-inbound-flow"),
 		FlowPath:            "test-inbound-flow",
 		RunID:               "10000000-0000-4000-8000-000000000002",
 		Generation:          1,
 		PublicationSequence: 1,
-		InstanceID:          "test-inbound-flow/standing-1",
-		FlowInstance:        "test-inbound-flow/standing-1",
-		EntityID:            "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-		EntitySlug:          alias,
-		Alias:               alias,
-		SigningSecret:       signingSecret,
+
+		Alias:         alias,
+		SigningSecret: signingSecret,
 	}
 }
 
@@ -223,7 +221,7 @@ type capturingInboundEventStore struct {
 	duplicate       bool
 	recorded        bool
 	providerEventID string
-	entityID        string
+	serviceID       string
 	provider        string
 	active          []string
 }
@@ -257,7 +255,7 @@ func (*capturingInboundEventStore) ListEventDeliveryRecipients(context.Context, 
 
 func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "chat-flow", RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "chat-flow/a", EntityID: "41000000-0000-0000-0000-000000000002"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "chat-flow", RunID: "41000000-0000-0000-0000-000000000001"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -269,8 +267,8 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	rec := httptest.NewRecorder()
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), FlowPath: "chat-flow",
-		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "chat-flow/a",
-		EntityID: "41000000-0000-0000-0000-000000000002", Alias: "chat", Provider: "telegram",
+		RunID: "41000000-0000-0000-0000-000000000001",
+		Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
 	}, nil)
 	if rec.Code != http.StatusAccepted {
@@ -289,7 +287,7 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 			t.Fatalf("provider event borrowed execution target: run=%s flow_instance=%s entity=%s", evt.RunID(), evt.FlowInstance(), evt.EntityID())
 		}
 		source := evt.RoutingSource()
-		if source.Kind() != events.RoutingSourceExternalIngress || source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan || source.Route().FlowID != "chat-flow" || source.Route().EntityID != "41000000-0000-0000-0000-000000000002" || source.Route().FlowInstance != "" {
+		if source.Kind() != events.RoutingSourceExternalIngress || source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan || source.Route().FlowID != "chat-flow" || source.Route().EntityID != "" || source.Route().FlowInstance != "" {
 			t.Fatalf("provider source authority = %+v", source)
 		}
 	}
@@ -315,7 +313,7 @@ type recordingInboundStore struct {
 	inserted        bool
 	recorded        bool
 	providerEventID string
-	entityID        string
+	serviceID       string
 	provider        string
 	store           runtimebus.EventStore
 	record          runtimeinbound.Record
@@ -403,7 +401,7 @@ func (s *concurrentInboundStore) CommitInboundPublication(ctx context.Context, c
 	return result, nil
 }
 
-func (s *concurrentInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+func (s *concurrentInboundStore) LoadInboundPublicationByIdentity(context.Context, runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record := s.record
@@ -426,15 +424,15 @@ func (s *recordingInboundStore) bindTestInboundEventStore(store runtimebus.Event
 
 func (s *recordingInboundStore) ResolveInboundTarget(context.Context, string, string) (InboundTarget, error) {
 	target := s.target
-	defaults := testInboundTarget(target.EntitySlug, target.SigningSecret)
+	defaults := testInboundTarget(target.Alias, target.SigningSecret)
 	if target.BundleHash == "" {
 		target.BundleHash = defaults.BundleHash
 	}
-	if target.ServiceID == "" {
-		target.ServiceID = defaults.ServiceID
-	}
 	if target.FlowPath == "" {
 		target.FlowPath = defaults.FlowPath
+	}
+	if target.ServiceID == "" {
+		target.ServiceID = runtimeflowidentity.StandingServiceID(target.FlowPath)
 	}
 	if target.RunID == "" {
 		target.RunID = defaults.RunID
@@ -444,18 +442,6 @@ func (s *recordingInboundStore) ResolveInboundTarget(context.Context, string, st
 	}
 	if target.PublicationSequence == 0 {
 		target.PublicationSequence = defaults.PublicationSequence
-	}
-	if target.InstanceID == "" {
-		target.InstanceID = defaults.InstanceID
-	}
-	if target.FlowInstance == "" {
-		target.FlowInstance = defaults.FlowInstance
-	}
-	if target.EntityID == "" {
-		target.EntityID = defaults.EntityID
-	}
-	if target.EntitySlug == "" {
-		target.EntitySlug = defaults.EntitySlug
 	}
 	return target, s.resolveErr
 }
@@ -504,7 +490,7 @@ func runTestInboundPublication(command runtimeinbound.CommitCommand, inserted bo
 func (s *recordingInboundStore) CommitInboundPublication(_ context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
 	request := command.Request
 	s.providerEventID = request.ProviderEventID
-	s.entityID = request.EntityID
+	s.serviceID = request.StableServiceID
 	s.provider = request.Provider
 	result, err := runTestInboundPublication(command, s.inserted)
 	if err == nil {
@@ -519,14 +505,14 @@ func (s *recordingInboundStore) CommitInboundPublication(_ context.Context, comm
 				}
 			}
 			sink.providerEventID = request.ProviderEventID
-			sink.entityID = request.EntityID
+			sink.serviceID = request.StableServiceID
 			sink.provider = request.Provider
 		}
 	}
 	return result, err
 }
 
-func (s *recordingInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+func (s *recordingInboundStore) LoadInboundPublicationByIdentity(context.Context, runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	return s.record, s.record.State == "committed", nil
 }
 
@@ -535,8 +521,8 @@ type credentialMutatingInboundStore struct {
 	onLoad func()
 }
 
-func (s *credentialMutatingInboundStore) LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, eventID string) (runtimeinbound.Record, bool, error) {
-	record, found, err := s.recordingInboundStore.LoadInboundPublicationByIdentity(ctx, provider, entityID, eventID)
+func (s *credentialMutatingInboundStore) LoadInboundPublicationByIdentity(ctx context.Context, identity runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
+	record, found, err := s.recordingInboundStore.LoadInboundPublicationByIdentity(ctx, identity)
 	if found && s.onLoad != nil {
 		s.onLoad()
 	}
@@ -554,7 +540,7 @@ func (s *rollbackTrackingInboundStore) CommitInboundPublication(_ context.Contex
 	return runtimeinbound.CommitResult{}, errors.New("append failed")
 }
 
-func (*rollbackTrackingInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+func (*rollbackTrackingInboundStore) LoadInboundPublicationByIdentity(context.Context, runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	return runtimeinbound.Record{}, false, nil
 }
 
@@ -741,20 +727,24 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 		t.Fatal(err)
 	}
 	admitted, err := target.AdmissionPlan.AdmitRequest(providertriggers.Request{
-		Provider: "github", Target: providertriggers.Target{EntityID: target.EntityID, EntitySlug: target.EntitySlug, WebhookSecret: "github-secret"},
+		Provider: "github", Target: providertriggers.Target{WebhookSecret: "github-secret"},
 		Method: http.MethodPost, Body: body, Headers: req.Header, Payload: map[string]any{"zen": "Keep it logically awesome."}, Received: time.Now(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	projected, _, _, _, err := projectInboundPublication(target, admitted, store.record.Request, time.Now(), executionposture.Live, nil, nil)
+	delivery, _, err := target.AdmissionPlan.ProjectPublication(admitted, target.BundleHash, target.FlowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected, _, _, _, err := projectInboundPublication(target, delivery, admitted, store.record.Request, time.Now(), executionposture.Live, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(projected) != 1 || !projected[0].Event.TargetRoute().Empty() {
 		t.Fatalf("raw provider projection preselected a receiver: %#v", projected)
 	}
-	if evt.RoutingSource().Kind() != events.RoutingSourceExternalIngress || evt.RoutingSource().Route().FlowID != store.target.FlowPath || evt.RoutingSource().Route().EntityID != store.target.EntityID || evt.RoutingSource().Route().FlowInstance != "" {
+	if evt.RoutingSource().Kind() != events.RoutingSourceExternalIngress || evt.RoutingSource().Route().FlowID != store.target.FlowPath || evt.RoutingSource().Route().EntityID != "" || evt.RoutingSource().Route().FlowInstance != "" {
 		t.Fatalf("provider source was relabeled: %#v", evt.RoutingSource())
 	}
 	var payload map[string]any
@@ -777,8 +767,7 @@ func TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPubli
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "github-secret",
 		},
 		inserted: true,
@@ -812,8 +801,7 @@ func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *tes
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "github-secret",
 		},
 		inserted: false,
@@ -841,7 +829,7 @@ func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *tes
 
 func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedRedactedSemantics(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", FlowInstance: "ingress/instance-1", EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -852,8 +840,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 	target := InboundTarget{
 		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", FlowPath: "ingress",
 		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", Generation: 1, PublicationSequence: 1,
-		InstanceID: "instance-1", FlowInstance: "ingress/instance-1",
-		EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a",
+
 		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,
 	}
 
@@ -894,7 +881,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 
 func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProjectionFailure(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", FlowInstance: "ingress/instance-1", EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -906,8 +893,7 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 	target := InboundTarget{
 		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", FlowPath: "ingress",
 		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", Generation: 1, PublicationSequence: 1,
-		InstanceID: "instance-1", FlowInstance: "ingress/instance-1",
-		EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a",
+
 		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,
 	}
 
@@ -1111,10 +1097,7 @@ func TestInboundGateway_SlackRejectsMissingSecretBeforeMarkerAndPublish(t *testi
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{
-		target: InboundTarget{
-			EntityID:   "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug: "customer-a",
-		},
+		target:   InboundTarget{},
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
@@ -1205,8 +1188,7 @@ func TestInboundGateway_SlackRejectsMissingOrInvalidSignatureBeforeMarkerAndPubl
 			}
 			store := &recordingInboundStore{
 				target: InboundTarget{
-					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-					EntitySlug:    "customer-a",
+
 					SigningSecret: "slack-secret",
 				},
 				inserted: true,
@@ -1240,8 +1222,7 @@ func TestInboundGateway_SlackRejectsStaleTimestampBeforeMarkerAndPublish(t *test
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "slack-secret",
 		},
 		inserted: true,
@@ -1623,8 +1604,7 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 			}
 			store := &recordingInboundStore{
 				target: InboundTarget{
-					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-					EntitySlug:    "customer-a",
+
 					SigningSecret: "stripe-secret",
 				},
 				inserted: true,
@@ -1657,8 +1637,7 @@ func TestInboundGateway_StripeDuplicateEventDoesNotPublishAgain(t *testing.T) {
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "stripe-secret",
 		},
 		inserted: false,
@@ -1814,8 +1793,7 @@ func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 			}
 			store := &recordingInboundStore{
 				target: InboundTarget{
-					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-					EntitySlug:    "customer-a",
+
 					SigningSecret: "twilio-secret",
 				},
 				inserted: true,
@@ -1847,8 +1825,7 @@ func TestInboundGateway_TwilioDuplicateDeliveryDoesNotPublishAgain(t *testing.T)
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "twilio-secret",
 		},
 		inserted: false,
@@ -1989,8 +1966,7 @@ func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *tes
 			}
 			store := &recordingInboundStore{
 				target: InboundTarget{
-					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-					EntitySlug:    "customer-a",
+
 					SigningSecret: "shopify-secret",
 				},
 				inserted: true,
@@ -2024,8 +2000,7 @@ func TestInboundGateway_ShopifyDuplicateDeliveryDoesNotPublishAgain(t *testing.T
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "shopify-secret",
 		},
 		inserted: false,
@@ -2276,8 +2251,7 @@ func TestInboundGateway_TypeformAndIntercomRejectInvalidInputsBeforeMarkerAndPub
 				}
 				store := &recordingInboundStore{
 					target: InboundTarget{
-						EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-						EntitySlug:    "customer-a",
+
 						SigningSecret: providerCase.secret,
 					},
 					inserted: true,
@@ -2334,8 +2308,7 @@ func TestInboundGateway_TypeformAndIntercomDuplicateDeliveryDoesNotPublishAgain(
 			}
 			store := &recordingInboundStore{
 				target: InboundTarget{
-					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-					EntitySlug:    "customer-a",
+
 					SigningSecret: tc.secret,
 				},
 				inserted: false,
@@ -2469,7 +2442,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 		{
 			name:       "missing configured secret",
 			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`),
-			target:     InboundTarget{EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a"},
+			target:     InboundTarget{},
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusServiceUnavailable,
 		},
@@ -2560,10 +2533,9 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 				t.Fatalf("NewEventBus: %v", err)
 			}
 			target := tc.target
-			if target.EntityID == "" {
+			if target.SigningSecret == "" {
 				target = InboundTarget{
-					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-					EntitySlug:    "customer-a",
+
 					SigningSecret: "telegram-secret",
 				}
 			}
@@ -2604,8 +2576,7 @@ func TestInboundGateway_TelegramDuplicateDeliveryDoesNotPublishAgain(t *testing.
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "telegram-secret",
 		},
 		inserted: false,
@@ -2657,8 +2628,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretTypeformOrIntercomSignatures(t *te
 			}
 			store := &recordingInboundStore{
 				target: InboundTarget{
-					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-					EntitySlug:    "customer-a",
+
 					SigningSecret: "raw-secret",
 				},
 				inserted: true,
@@ -2691,8 +2661,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretTelegramSecretToken(t *testing.T) 
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "raw-secret",
 		},
 		inserted: true,
@@ -2724,8 +2693,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretShopifySignature(t *testing.T) {
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "raw-secret",
 		},
 		inserted: true,
@@ -2757,8 +2725,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretStripeSignature(t *testing.T) {
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "raw-secret",
 		},
 		inserted: true,
@@ -2814,7 +2781,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "partner-flow", FlowInstance: "partner-flow/standing", RunID: eventtest.UUID("compiled-raw-admission-run-" + tc.name), EntityID: eventtest.UUID("compiled-raw-admission-entity-" + tc.name)})
+			bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "partner-flow", RunID: eventtest.UUID("compiled-raw-admission-run-" + tc.name)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2829,10 +2796,9 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 			req.Header.Set("X-GitHub-Event", "push")
 			rec := httptest.NewRecorder()
 			runID := eventtest.UUID("compiled-raw-admission-run-" + tc.name)
-			entityID := eventtest.UUID("compiled-raw-admission-entity-" + tc.name)
 			gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 				BundleHash: "bundle-v2:sha256:" + strings.Repeat("d", 64), FlowPath: "partner-flow", RunID: runID,
-				FlowInstance: "partner-flow/standing", EntityID: entityID, Alias: "partner", Provider: "partner-events",
+				Alias: "partner", Provider: "partner-events",
 				SigningSecret: "partner-secret", AdmissionPlan: plan,
 			}, nil)
 			if rec.Code != tc.wantStatus {
@@ -2871,7 +2837,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	mac := hmac.New(sha256.New, []byte("partner-secret"))
 	signature := hex.EncodeToString(mac.Sum(nil))
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "partner-flow", FlowInstance: "partner-flow/standing", RunID: eventtest.UUID("compiled-empty-body-run"), EntityID: eventtest.UUID("compiled-empty-body-entity")})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "partner-flow", RunID: eventtest.UUID("compiled-empty-body-run")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2882,10 +2848,9 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	req.Header.Set("X-Partner-Signature", signature)
 	rec := httptest.NewRecorder()
 	runID := eventtest.UUID("compiled-empty-body-run")
-	entityID := eventtest.UUID("compiled-empty-body-entity")
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v2:sha256:" + strings.Repeat("e", 64), FlowPath: "partner-flow", RunID: runID,
-		FlowInstance: "partner-flow/standing", EntityID: entityID, Alias: "partner", Provider: "partner-events",
+		Alias: "partner", Provider: "partner-events",
 		SigningSecret: "partner-secret", AdmissionPlan: plan,
 	}, nil)
 	if rec.Code != http.StatusAccepted {
@@ -2918,7 +2883,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	jsonRec := httptest.NewRecorder()
 	jsonGateway.HandleResolvedWebhook(jsonRec, jsonReq, InboundTarget{
 		BundleHash: "bundle-v2:sha256:" + strings.Repeat("f", 64), FlowPath: "json-flow", RunID: eventtest.UUID("compiled-empty-json-run"),
-		FlowInstance: "json-flow/standing", EntityID: eventtest.UUID("compiled-empty-json-entity"), Alias: "json", Provider: "json-events",
+		Alias: "json", Provider: "json-events",
 		AdmissionPlan: jsonPlan,
 	}, nil)
 	if jsonRec.Code != http.StatusBadRequest || !strings.Contains(jsonRec.Body.String(), "must be valid JSON") {
@@ -2937,8 +2902,7 @@ func TestInboundGateway_RejectsOversizedBodyBeforeMarkerAndPublish(t *testing.T)
 	}
 	store := &recordingInboundStore{
 		target: InboundTarget{
-			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
-			EntitySlug:    "customer-a",
+
 			SigningSecret: "github-secret",
 		},
 		inserted: true,

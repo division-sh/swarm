@@ -54,7 +54,6 @@ type StandingTargetMutationResult struct {
 	Reconciliation      StandingServiceReconciliation
 	Instance            runtimeflowidentity.Instance
 	Created             bool
-	PublicationSequence int64
 }
 
 func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstanceOwner) ([]StandingTargetMutationResult, error) {
@@ -78,8 +77,14 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 		return nil, nil, fmt.Errorf("standing target mutation requires observed_at")
 	}
 	for _, target := range req.Targets {
-		if err := RequireStandingConstructionPath(target.Activation.ContractBundle, target.Candidate.FlowPath); err != nil {
+		keyless, err := StandingConstructionIsKeyless(target.Activation.ContractBundle, semanticview.RootExecutionFlowID(target.Activation.ContractBundle))
+		if err != nil {
 			return nil, nil, err
+		}
+		if keyless {
+			if err := RequireStandingConstructionPath(target.Activation.ContractBundle, semanticview.RootExecutionFlowID(target.Activation.ContractBundle)); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	var completions []func() error
@@ -100,11 +105,18 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 			results = append(results, StandingTargetMutationResult{Reconciliation: reconciliation})
 			continue
 		}
-		instance, err := runtimeflowidentity.StandingForGeneration(target.Activation.ContractBundle, reconciliation.FlowPath, reconciliation.RunID)
+		keyless, err := StandingConstructionIsKeyless(target.Activation.ContractBundle, reconciliation.FlowPath)
 		if err != nil {
 			return nil, nil, err
 		}
-		result := StandingTargetMutationResult{Reconciliation: reconciliation, Instance: instance, PublicationSequence: reconciliation.PublicationSequence}
+		var instance runtimeflowidentity.Instance
+		if keyless {
+			instance, err = runtimeflowidentity.StandingForGeneration(target.Activation.ContractBundle, reconciliation.FlowPath, reconciliation.RunID)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		result := StandingTargetMutationResult{Reconciliation: reconciliation, Instance: instance}
 		if reconciliation.RestartDisposition.Executable() {
 			if err := pc.workflowStore.AdmitStandingServiceRun(ctx, reconciliation.RunID, pc.executionPosture); err != nil {
 				return nil, nil, err
@@ -118,7 +130,16 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 				}
 			}
 			activation := target.Activation
-			activation.Instance, err = runtimeflowidentity.StandingForGeneration(activation.ContractBundle, semanticview.RootExecutionFlowID(activation.ContractBundle), reconciliation.RunID)
+			rootID := semanticview.RootExecutionFlowID(activation.ContractBundle)
+			rootKeyless, err := StandingConstructionIsKeyless(activation.ContractBundle, rootID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !rootKeyless {
+				results = append(results, result)
+				continue
+			}
+			activation.Instance, err = runtimeflowidentity.StandingForGeneration(activation.ContractBundle, rootID, reconciliation.RunID)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -128,7 +149,6 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 			}
 			activation.StandingGenerationReplacement = reconciliation.Generation > 1
 			var created bool
-			var err error
 			if preparation != nil {
 				var complete func() error
 				created, complete, err = preparation.PrepareStandingFlowInstance(operationCtx, activation)
@@ -145,7 +165,7 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 		}
 		results = append(results, result)
 	}
-	// Do not publish any member until every generation's complete tree exists.
+	// Publish the complete binding set only after every eager tree is prepared.
 	for i := range results {
 		reconciliation := results[i].Reconciliation
 		if !reconciliation.RestartDisposition.Executable() {
@@ -157,7 +177,7 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 		if err != nil {
 			return nil, nil, err
 		}
-		results[i].PublicationSequence = sequence
+		results[i].Reconciliation.PublicationSequence = sequence
 	}
 	return results, func() error {
 		for _, complete := range completions {

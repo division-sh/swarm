@@ -623,7 +623,6 @@ func normalizedFloat(accessor func() (float64, bool)) *float64 {
 
 func RawEventCatalogEntry() runtimecontracts.EventCatalogEntry {
 	properties := map[string]runtimecontracts.EventFieldSpec{
-		"entity_id":            {Type: "text"},
 		"provider":             {Type: "text"},
 		"event_type":           {Type: "text"},
 		"provider_event_type":  {Type: "text"},

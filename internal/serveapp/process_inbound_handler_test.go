@@ -101,7 +101,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			StandingTargets: []runtimepkg.StandingTarget{{
 				BundleHash: hash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-ingress", Alias: alias, Provider: "telegram",
-				RunID: runID, FlowInstance: "telegram-ingress", InstanceID: alias, EntityID: entityID,
+				RunID:      runID,
 				Generation: 1, PublicationSequence: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
 		}
@@ -172,7 +172,13 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	}
 }
 
-type processIngressTargetOwners []runtimepkg.StandingTarget
+type processIngressOwner struct {
+	RunID        string
+	FlowInstance string
+	EntityID     string
+}
+
+type processIngressTargetOwners []processIngressOwner
 
 type processIngressNoFlowDescriptors struct{}
 

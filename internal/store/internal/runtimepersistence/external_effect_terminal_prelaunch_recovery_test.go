@@ -123,7 +123,7 @@ func TestExternalEffectTerminalPrelaunchSelectorParksStillCurrentStandingOwner(t
 		flowPath := "effect-recovery/still-current/" + uuid.NewString()
 		candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 			ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
-			InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+
 			Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
 		}
 		standing, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate)

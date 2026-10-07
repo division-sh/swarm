@@ -170,7 +170,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			firstHash := firstArtifact.BundleHash()
 			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: serviceID, FlowPath: flowPath,
-				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+
 				Source: mustStoreTestSourceArtifactFact(firstHash),
 			}
 			seedStoreTestPersistedArtifact(t, db, firstArtifact)
@@ -252,7 +252,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			secondHash := secondArtifact.BundleHash()
 			candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: serviceID, FlowPath: flowPath,
-				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+
 				Source: mustStoreTestSourceArtifactFact(firstHash),
 			}
 			seedStoreTestPersistedArtifact(t, db, firstArtifact)
@@ -263,9 +263,10 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			if _, err := workflow.PublishStandingService(ctx, serviceID, fresh.RunID, fresh.Generation); err != nil {
 				t.Fatalf("publish standing generation: %v", err)
 			}
-			seedStandingRepairEntityState(t, ctx, db, backend, fresh.RunID, candidate.EntityID)
+			receiverEntityID := uuid.NewString()
+			seedStandingRepairEntityState(t, ctx, db, backend, fresh.RunID, receiverEntityID)
 			query := `UPDATE entity_state SET current_state = 'completed' WHERE run_id = ? AND entity_id = ?`
-			args := []any{fresh.RunID, candidate.EntityID}
+			args := []any{fresh.RunID, receiverEntityID}
 			if backend == "postgres" {
 				query = `UPDATE entity_state SET current_state = 'completed' WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 			}
@@ -323,7 +324,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			suspendedServiceID := runtimeflowidentity.StandingServiceID(suspendedFlowPath)
 			suspendedCandidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 				ServiceID: suspendedServiceID, FlowPath: suspendedFlowPath,
-				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+
 				Source: mustStoreTestSourceArtifactFact(firstHash),
 			}
 			suspendedFresh, err := workflow.ReconcileStandingService(ctx, suspendedCandidate)
@@ -333,9 +334,10 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			if _, err := workflow.PublishStandingService(ctx, suspendedServiceID, suspendedFresh.RunID, suspendedFresh.Generation); err != nil {
 				t.Fatalf("publish suspended standing generation: %v", err)
 			}
-			seedStandingRepairEntityState(t, ctx, db, backend, suspendedFresh.RunID, suspendedCandidate.EntityID)
+			suspendedReceiverEntityID := uuid.NewString()
+			seedStandingRepairEntityState(t, ctx, db, backend, suspendedFresh.RunID, suspendedReceiverEntityID)
 			query = `UPDATE entity_state SET current_state = 'completed' WHERE run_id = ? AND entity_id = ?`
-			args = []any{suspendedFresh.RunID, suspendedCandidate.EntityID}
+			args = []any{suspendedFresh.RunID, suspendedReceiverEntityID}
 			if backend == "postgres" {
 				query = `UPDATE entity_state SET current_state = 'completed' WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 			}

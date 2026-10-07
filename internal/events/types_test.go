@@ -75,7 +75,7 @@ func TestResolvedEnvelopeCannotRewriteRoutingSource(t *testing.T) {
 }
 
 func TestDeclaredIngressRoutingSourceRemainsOpaqueToEnvelopeRouting(t *testing.T) {
-	source, err := NewExternalIngressRoutingSource("telegram-ingress", "entity-one", RoutingSourceAuthorityProviderAdmissionPlan)
+	source, err := NewExternalIngressRoutingSource("telegram-ingress", RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -63,7 +63,7 @@ func TestExplicitIngressAndControlFixturesPreserveSource(t *testing.T) {
 	entityID, runID := uuid.NewString(), uuid.NewString()
 	// Opaque provider authority does not project an execution source envelope.
 	envelope := events.EventEnvelope{}
-	source, err := events.NewExternalIngressRoutingSource("review", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	source, err := events.NewExternalIngressRoutingSource("review", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestExplicitIngressFixtureRejectsExecutionSourceEnvelope(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(strconv.FormatBool(existing), func(t *testing.T) {
 			entityID, runID := uuid.NewString(), uuid.NewString()
-			source, err := events.NewExternalIngressRoutingSource("review", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+			source, err := events.NewExternalIngressRoutingSource("review", events.RoutingSourceAuthorityProviderAdmissionPlan)
 			if err != nil {
 				t.Fatal(err)
 			}

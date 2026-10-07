@@ -96,7 +96,6 @@ func TestRecordValidateRejectsNoncanonicalTimestamp(t *testing.T) {
 
 func TestDiagnosticDirectSubtypeRecordValidationAndReadbackMatrix(t *testing.T) {
 	runID := uuid.NewString()
-	entityEnvelope := events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString())
 	valid := []struct {
 		name      string
 		eventType events.EventType
@@ -106,7 +105,6 @@ func TestDiagnosticDirectSubtypeRecordValidationAndReadbackMatrix(t *testing.T) 
 		{"runtime_log_without_run", events.EventTypePlatformRuntimeLog, "", events.EventEnvelope{}},
 		{"runtime_log_with_run", events.EventTypePlatformRuntimeLog, runID, events.EventEnvelope{}},
 		{"inbound_recorded_global", events.EventTypePlatformInboundRecord, runID, events.EventEnvelope{}},
-		{"inbound_recorded_entity", events.EventTypePlatformInboundRecord, runID, entityEnvelope},
 		{"agent_directive_global", events.EventTypePlatformAgentDirective, runID, events.EventEnvelope{}},
 	}
 	for _, test := range valid {
@@ -145,6 +143,7 @@ func TestDiagnosticDirectSubtypeRecordValidationAndReadbackMatrix(t *testing.T) 
 		hostileRecord{"runtime_log_entity_scope", events.EventTypePlatformRuntimeLog, func(record *Record) { record.Scope = events.EventScopeEntity }},
 		hostileRecord{"runtime_log_flow_scope", events.EventTypePlatformRuntimeLog, func(record *Record) { record.Scope = events.EventScopeFlow }},
 		hostileRecord{"inbound_recorded_missing_run", events.EventTypePlatformInboundRecord, func(record *Record) { record.RunID = "" }},
+		hostileRecord{"inbound_recorded_entity_scope", events.EventTypePlatformInboundRecord, func(record *Record) { record.Scope = events.EventScopeEntity; record.EntityID = uuid.NewString() }},
 		hostileRecord{"inbound_recorded_flow_scope", events.EventTypePlatformInboundRecord, func(record *Record) { record.Scope = events.EventScopeFlow }},
 		hostileRecord{"agent_directive_missing_run", events.EventTypePlatformAgentDirective, func(record *Record) { record.RunID = "" }},
 		hostileRecord{"agent_directive_entity_scope", events.EventTypePlatformAgentDirective, func(record *Record) { record.Scope = events.EventScopeEntity }},
