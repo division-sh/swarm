@@ -53,13 +53,17 @@ func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			documents := map[string]string{"schema.yaml": "name: standing-root\nactivation: standing\nstages: []\n" + tc.schema}
+			documents := map[string]string{
+				"schema.yaml": "name: standing-root\nstages: []\n" + constructorIngressSchema + tc.schema,
+				"events.yaml": "inbound.constructor:\n",
+				"nodes.yaml":  constructorIngressNodes,
+			}
 			if tc.fields != "" {
 				documents["entities.yaml"] = "root_state:\n" + tc.fields
 			}
 			if tc.handler != "" {
-				documents["events.yaml"] = "work:\n"
-				documents["nodes.yaml"] = "reader:\n  execution_type: system_node\n  subscribes_to: [work]\n  event_handlers:\n    work:\n" + tc.handler
+				documents["events.yaml"] += "work:\n"
+				documents["nodes.yaml"] += "reader:\n  execution_type: system_node\n  subscribes_to: [work]\n  event_handlers:\n    work:\n" + tc.handler
 			}
 			for name, contents := range documents {
 				if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
@@ -73,8 +77,12 @@ func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
+			catalog, err := providertriggers.NewCatalogSnapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, admitted := range []semanticview.Source{source, semanticview.Wrap(rebuilt)} {
-				declarations, err := ResolveStandingTargetDeclarations(admitted, nil)
+				declarations, err := ResolveStandingTargetDeclarations(admitted, catalog)
 				if tc.refusal != "" {
 					if err == nil || !strings.Contains(err.Error(), tc.refusal) || len(declarations) != 0 {
 						t.Fatalf("standing refusal=%q declarations=%#v err=%v", tc.refusal, declarations, err)
@@ -94,7 +102,9 @@ func TestStandingRequiresConstructibleAncestry(t *testing.T) {
 			documents := map[string]string{
 				"schema.yaml":                "name: root\n",
 				"parent/schema.yaml":         "name: parent\n",
-				"parent/service/schema.yaml": "name: service\nactivation: standing\nstages: []\n",
+				"parent/service/schema.yaml": "name: service\nstages: []\n" + constructorIngressSchema,
+				"parent/service/events.yaml": "inbound.constructor:\n",
+				"parent/service/nodes.yaml":  constructorIngressNodes,
 			}
 			documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
 			documents[filepath.Join(keyed, "entities.yaml")] = "owner:\n  tenant: text\n"
@@ -123,6 +133,29 @@ func TestStandingRequiresConstructibleAncestry(t *testing.T) {
 		})
 	}
 }
+
+const constructorIngressSchema = `pins:
+  inputs: [inbound.constructor]
+ingress:
+  alias: constructor
+  providers:
+    - provider: partner
+      admission:
+        kind: raw
+        acknowledge: unsigned_webhook
+        payload: json
+        event: inbound.constructor
+        authentication: {kind: none}
+        delivery_id: {source: body_sha256}
+`
+
+const constructorIngressNodes = `receiver:
+  execution_type: system_node
+  subscribes_to: [inbound.constructor]
+  event_handlers:
+    inbound.constructor:
+      guard: {check: true}
+`
 
 func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T) {
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
@@ -166,12 +199,29 @@ func TestResolveStandingTargetDeclarationsRejectsDuplicateExactInputIdentity(t *
 	}
 }
 
-func TestResolveStandingTargetDeclarationsRejectsImplicitActivation(t *testing.T) {
+func TestResolveStandingTargetDeclarationsDerivesIngressPresence(t *testing.T) {
+	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
+	declarations, err := ResolveStandingTargetDeclarations(source, registry)
+	if err != nil || len(declarations) != 1 || len(declarations[0].Ingress) != 1 {
+		t.Fatalf("genuine ingress did not supply a declaration: %+v err=%v", declarations, err)
+	}
+}
+
+func TestA9NoProducerCannotRetain(t *testing.T) {
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, _ := semanticview.Bundle(source)
-	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) { schema.Activation = "" })
-	if _, err := ResolveStandingTargetDeclarations(source, registry); err == nil || !strings.Contains(err.Error(), "ingress requires activation: standing") {
-		t.Fatalf("implicit activation error = %v", err)
+	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) { schema.Ingress = nil })
+	rt := &Runtime{Options: RuntimeOptions{
+		WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: registry,
+		SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA), EnableDeclaredClockBinding: true,
+	}}
+	declarations, err := ResolveStandingTargetDeclarations(source, registry)
+	if err != nil || len(declarations) != 0 {
+		t.Fatalf("source without a producer declared a standing service: %+v err=%v", declarations, err)
+	}
+	candidates, err := rt.PlanStandingServiceCandidates()
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("source without a producer manufactured retention: %+v err=%v", candidates, err)
 	}
 }
 
@@ -497,7 +547,7 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: standing-provider-declaration\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	standingYAML := fmt.Sprintf("name: coordinator\nactivation: standing\ningress:\n  alias: %s\n  providers:\n    - provider: %s\n      signing_secret: webhook_signing.%s", alias, provider, provider)
+	standingYAML := fmt.Sprintf("name: coordinator\ningress:\n  alias: %s\n  providers:\n    - provider: %s\n      signing_secret: webhook_signing.%s", alias, provider, provider)
 	schemaPath := filepath.Join(root, "coordinator", "schema.yaml")
 	schemaBytes, err := os.ReadFile(schemaPath)
 	if err != nil {

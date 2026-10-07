@@ -821,7 +821,6 @@ func staticAgentDeclarationPreflightBlueprints(source semanticview.Source) ([]st
 	if source == nil {
 		return nil, nil
 	}
-	standingFlows := standingActivatedFlowIDs(source)
 	groups := map[string]staticAgentFlowGroup{}
 	for _, declaration := range semanticview.AgentDeclarations(source) {
 		flowID := strings.TrimSpace(declaration.OwnerFlowID)
@@ -832,9 +831,6 @@ func staticAgentDeclarationPreflightBlueprints(source semanticview.Source) ([]st
 				return nil, fmt.Errorf("agent declaration %q references missing owning flow %q", declaration.LocalID, flowID)
 			}
 			if strings.EqualFold(strings.TrimSpace(scope.Mode), runtimecontracts.FlowModeTemplate) {
-				continue
-			}
-			if _, standing := standingFlows[flowID]; standing {
 				continue
 			}
 			flowPath = strings.Trim(strings.TrimSpace(scope.Path), "/")
@@ -887,7 +883,6 @@ func staticRequiredDeclarationPreflightBlueprints(source semanticview.Source) ([
 	if source == nil {
 		return nil, nil
 	}
-	standingFlows := standingActivatedFlowIDs(source)
 	blueprints := []staticAgentBlueprint{}
 	if required := source.RequiredAgents(); len(required) > 0 {
 		scopeBlueprints, err := staticRequiredAgentBlueprintsForDeclarations(source, ".", "", required)
@@ -899,9 +894,6 @@ func staticRequiredDeclarationPreflightBlueprints(source semanticview.Source) ([
 	for _, scope := range source.FlowScopes() {
 		flowID := strings.TrimSpace(scope.ID)
 		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-			continue
-		}
-		if _, standing := standingFlows[flowID]; standing {
 			continue
 		}
 		scopeBlueprints, err := staticRequiredAgentBlueprintsForDeclarations(source, flowID, strings.Trim(scope.Path, "/"), source.FlowRequiredAgents(flowID))
@@ -923,27 +915,6 @@ func materializeStaticAgentBlueprints(runID string, blueprints []staticAgentBlue
 		records = append(records, record)
 	}
 	return records, nil
-}
-
-func standingActivatedFlowIDs(source semanticview.Source) map[string]struct{} {
-	out := map[string]struct{}{}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil {
-		return out
-	}
-	for _, scope := range source.FlowScopes() {
-		if strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-			continue
-		}
-		schema, exists := bundle.FlowSchemaByID(scope.ID)
-		if !exists && strings.TrimSpace(scope.ID) == "." && bundle.RootSchema != nil {
-			schema, exists = *bundle.RootSchema, true
-		}
-		if exists && strings.EqualFold(strings.TrimSpace(schema.Activation), runtimecontracts.FlowActivationStanding) {
-			out[strings.TrimSpace(scope.ID)] = struct{}{}
-		}
-	}
-	return out
 }
 
 type staticAgentFlowGroup struct {

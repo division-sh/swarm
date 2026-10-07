@@ -157,7 +157,6 @@ func CopyInboundAdmissionPolicyMatrix(t testing.TB) string {
 
 		"schema.yaml": "name: inbound-admission-policy-matrix\n",
 		"matrix/schema.yaml": `name: matrix
-activation: standing
 stages: []
 ingress:
   alias: matrix

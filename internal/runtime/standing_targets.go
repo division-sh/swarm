@@ -29,12 +29,11 @@ type StandingIngressBinding struct {
 }
 
 type StandingTargetDeclaration struct {
-	SourcePath       string
-	FlowPath         string
-	Alias            string
-	AuthoredStanding bool
-	Ingress          []StandingIngressBinding
-	Clocks           []semanticview.ClockSchedule
+	SourcePath string
+	FlowPath   string
+	Alias      string
+	Ingress    []StandingIngressBinding
+	Clocks     []semanticview.ClockSchedule
 }
 
 type StandingTarget struct {
@@ -129,18 +128,11 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 	}
 	for _, view := range bundle.FlowViews() {
 		flowID := strings.TrimSpace(view.Paths.FlowPath)
-		activation := strings.ToLower(strings.TrimSpace(view.Schema.Activation))
 		location := strings.TrimSpace(view.Paths.SchemaFile)
 		if location == "" {
 			location = "schema.yaml"
 		}
-		if activation != "" && activation != runtimecontracts.FlowActivationStanding {
-			return nil, fmt.Errorf("%s activation %q is unsupported; supported value: standing", location, view.Schema.Activation)
-		}
-		if view.Schema.Ingress != nil && activation != runtimecontracts.FlowActivationStanding {
-			return nil, fmt.Errorf("%s ingress requires activation: standing", location)
-		}
-		if activation != runtimecontracts.FlowActivationStanding && len(clocks[flowID]) == 0 {
+		if view.Schema.Ingress == nil && len(clocks[flowID]) == 0 {
 			continue
 		}
 		if flowID == "" {
@@ -150,10 +142,9 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 			return nil, fmt.Errorf("%s standing constructor is invalid: %w", location, err)
 		}
 		decl := StandingTargetDeclaration{
-			SourcePath:       location,
-			AuthoredStanding: activation == runtimecontracts.FlowActivationStanding,
-			FlowPath:         strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
-			Clocks:           clocks[flowID],
+			SourcePath: location,
+			FlowPath:   strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
+			Clocks:     clocks[flowID],
 		}
 		if flowID == "." {
 			decl.FlowPath = "."
@@ -536,7 +527,6 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 				Instance:       instance,
 				InitialState:   initialState,
 				Bookkeeping: map[string]any{
-					"activation":  runtimecontracts.FlowActivationStanding,
 					"bundle_hash": fact.BundleHash(),
 					"flow_path":   declaration.FlowPath,
 				},
@@ -682,7 +672,7 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	for _, declaration := range declarations {
 		serviceID := runtimeflowidentity.StandingServiceID(declaration.FlowPath)
 		instance := runtimeflowidentity.StandingForService(source, declaration.FlowPath, serviceID)
-		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, instance: instance, bindingEnabled: len(declaration.Ingress) == 0 || len(declaration.Clocks) > 0}
+		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, instance: instance, bindingEnabled: len(declaration.Clocks) > 0}
 		for _, binding := range declaration.Ingress {
 			credentials := admission.bindings[standingIngressSelector(declaration.FlowPath, binding.Provider)]
 			if !credentials.enabled {

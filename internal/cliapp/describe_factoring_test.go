@@ -27,7 +27,6 @@ flows:
   - review (template)
     events:
       - ready (fields: id)
-    activation: standing
     ingress: alias=chat
       - provider=telegram admission=pack-required pack_id=pack authentication=signed event=raw signing_secret=secret.ref
       - provider=webhook admission=intrinsic
@@ -147,7 +146,7 @@ func describeFactoringView() authoringview.View {
 		SourceHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), SourceLabel: "Reception@1.0.0", SourceAuthority: "projection_only_existing_contract_owners",
 		Root: authoringview.RootView{Events: []authoringview.EventView{{Name: "root.empty"}, {Name: "root.ready", Fields: []string{"id", "text"}}}, PrimaryEntity: &authoringview.PrimaryEntityView{Type: "Root"}},
 		Flows: []authoringview.FlowView{
-			{ID: " review ", Mode: "template", Events: []authoringview.EventView{{Name: "ready", Fields: []string{"id"}}}, Activation: "standing",
+			{ID: " review ", Mode: "template", Events: []authoringview.EventView{{Name: "ready", Fields: []string{"id"}}},
 				Ingress:       &authoringview.StandingIngressView{Alias: "chat", Providers: []authoringview.StandingIngressProviderView{{Provider: "telegram", AdmissionKind: "pack-required", PackID: "pack", RequestAuthentication: "signed", Event: "raw", SigningSecret: "secret.ref"}, {Provider: "webhook", AdmissionKind: "intrinsic"}}},
 				PrimaryEntity: &authoringview.PrimaryEntityView{Type: "Review"}, TemplateInstance: &authoringview.TemplateInstanceView{Field: "id", Identity: "run + flow + instance_key"},
 				SingletonCoordinator: &authoringview.SingletonCoordinatorView{PrimaryEntity: "Coordinator", ContainedState: []authoringview.SingletonContainedFieldView{{Name: "items"}}}, ContainedOperations: []authoringview.ContainedOperationView{{Operation: "insert"}}},

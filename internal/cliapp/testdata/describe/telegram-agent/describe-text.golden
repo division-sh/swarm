@@ -10,7 +10,6 @@ flows:
     instance: field=conversation_reference identity=run + flow + instance_key
     constructor: inbound.telegram.text_message key=conversation_reference supplied=[]
   - telegram-ingress (static)
-    activation: standing
     ingress: alias=chat
       - provider=telegram admission=pack-required signing_secret=webhook_signing.telegram
     primary entity: telegram_service

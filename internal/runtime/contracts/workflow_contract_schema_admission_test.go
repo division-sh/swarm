@@ -51,7 +51,7 @@ func TestSchemaAdmissionOwnsCompleteRoot(t *testing.T) {
 }
 
 func TestSchemaAdmissionRetiredPresence(t *testing.T) {
-	for _, key := range []string{"initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule", "instance_variables"} {
+	for _, key := range []string{"activation", "initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule", "instance_variables"} {
 		for _, value := range []string{"null", "''", "false", "x", "{}", "{a: b}", "[]", "[x]"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
 				_, err := loadSchemaFragment(t, "name: retired\n"+key+": "+value+"\n")
@@ -143,35 +143,115 @@ func TestSchemaAdmissionInvalidSourceParity(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte(source), 0600); err != nil {
 				t.Fatal(err)
 			}
-			repo := repoRootForContractsTest(t)
-			_, diskErr := LoadWorkflowContractBundleWithOverrides(repo, dir, DefaultPlatformSpecFile(repo))
-			if diskErr == nil {
-				t.Fatal("invalid source admitted from disk")
-			}
-			artifact, err := sourceartifact.AdmitDirectory(dir)
+			assertSchemaAdmissionInvalidSourceParity(t, dir)
+		})
+	}
+}
+
+func TestA9RetiredActivationPresenceAdmission(t *testing.T) {
+	for _, scope := range []string{".", "child"} {
+		for _, fragment := range []string{
+			"activation: standing\n", "activation: null\n", "activation: ''\n", "activation: false\n",
+			"activation: {}\n", "activation: []\n", "activation: {kind: standing}\n",
+			"name: &value standing\nactivation: *value\n", "<<: {activation: standing}\n",
+			"&key activation: standing\n", "name: &key activation\n*key: standing\n",
+			"activation: standing\nactivation: standing\n",
+		} {
+			t.Run(scope+"/"+fragment, func(t *testing.T) {
+				dir := t.TempDir()
+				if scope != "." {
+					if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte("name: root\n"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(filepath.Join(dir, scope), 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.WriteFile(filepath.Join(dir, scope, "schema.yaml"), []byte(fragment), 0600); err != nil {
+					t.Fatal(err)
+				}
+				err := assertSchemaAdmissionInvalidSourceParity(t, dir)
+				if !strings.Contains(err.Error(), "activation") || !strings.Contains(err.Error(), "schema.yaml:") {
+					t.Fatalf("retired key lost standard source-located admission error: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestA9StandingCorpusMigrationCoverage(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	for _, tc := range []struct {
+		name     string
+		root     string
+		bindings int
+	}{
+		{"telegram example", filepath.Join(repo, "examples/integrations/telegram-agent"), 1},
+		{"lifecycle telegram", filepath.Join(repo, "internal/releasee2e/testdata/full_lifecycle/standing_telegram"), 1},
+		{"channel onboarding", filepath.Join(repo, "internal/releasee2e/testdata/channel_onboarding_release"), 1},
+		{"standing root and beta", filepath.Join(repo, "internal/releasee2e/testdata/standing_root_tree"), 2},
+		{"generated root and beta", canonicalrouting.CopyStandingRootTreePublic(t), 2},
+		{"generated admission matrix", canonicalrouting.CopyInboundAdmissionPolicyMatrix(t), 1},
+		{"generated channel journey", canonicalrouting.CopyChannelLearnedObjectJourney(t), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, tc.root, DefaultPlatformSpecFile(repo))
 			if err != nil {
 				t.Fatal(err)
 			}
-			fact, err := sourceartifact.PersistedFromArtifact(artifact, time.Unix(1, 0))
+			retained, err := sourceartifact.DecodeLogical(bundle.SourceArtifact.LogicalBlob())
 			if err != nil {
 				t.Fatal(err)
 			}
-			catalog, err := fact.Decode()
+			rebuilt, err := LoadWorkflowContractBundleFromArtifact(repo, retained, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			retained, err := sourceartifact.DecodeLogical(catalog.LogicalBlob())
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, candidate := range []*sourceartifact.AdmittedSourceArtifact{catalog, retained} {
-				_, err := LoadWorkflowContractBundleFromArtifact(repo, candidate, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
-				if err == nil || err.Error() != diskErr.Error() || !bytes.Equal(candidate.LogicalBlob(), artifact.LogicalBlob()) || candidate.BundleHash() != artifact.BundleHash() {
-					t.Fatalf("source or refusal changed: disk=%v retained=%v", diskErr, err)
+			for _, candidate := range []*WorkflowContractBundle{bundle, rebuilt} {
+				bindings := 0
+				for _, flow := range candidate.FlowViews() {
+					if flow.Schema.Ingress != nil {
+						bindings++
+					}
+				}
+				if bindings != tc.bindings {
+					t.Fatalf("marker migration changed genuine bindings: got %d, want %d", bindings, tc.bindings)
 				}
 			}
 		})
 	}
+}
+
+func assertSchemaAdmissionInvalidSourceParity(t *testing.T, dir string) error {
+	t.Helper()
+	repo := repoRootForContractsTest(t)
+	_, diskErr := LoadWorkflowContractBundleWithOverrides(repo, dir, DefaultPlatformSpecFile(repo))
+	if diskErr == nil {
+		t.Fatal("invalid source admitted from disk")
+	}
+	artifact, err := sourceartifact.AdmitDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := sourceartifact.PersistedFromArtifact(artifact, time.Unix(1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := fact.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained, err := sourceartifact.DecodeLogical(catalog.LogicalBlob())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range []*sourceartifact.AdmittedSourceArtifact{catalog, retained} {
+		_, err := LoadWorkflowContractBundleFromArtifact(repo, candidate, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+		if err == nil || err.Error() != diskErr.Error() || !bytes.Equal(candidate.LogicalBlob(), artifact.LogicalBlob()) || candidate.BundleHash() != artifact.BundleHash() {
+			t.Fatalf("source or refusal changed: disk=%v retained=%v", diskErr, err)
+		}
+	}
+	return diskErr
 }
 
 func TestSchemaAdmissionProvenanceCompositionAndIsolation(t *testing.T) {

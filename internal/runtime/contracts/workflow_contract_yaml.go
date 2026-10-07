@@ -10,7 +10,6 @@ import (
 
 var flowSchemaDocumentFields = map[string]struct{}{
 	"name":                {},
-	"activation":          {},
 	"ingress":             {},
 	"connect":             {},
 	"imports":             {},

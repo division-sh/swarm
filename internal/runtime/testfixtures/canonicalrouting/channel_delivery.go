@@ -150,7 +150,6 @@ pins:
       advances_to: review
 `)
 	writeClosedVariantFile(t, root, "ingress/schema.yaml", `name: ingress
-activation: standing
 stages:
   active: {gate: {decision: retire_service, outcomes: {retire: {advances_to: done}}}}
   done: {final: true}

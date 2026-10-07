@@ -226,7 +226,18 @@ func promoteDevScratchFixtureToStanding(t *testing.T, sourceRoot string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updatedSchema := strings.Replace(string(schema), "name: fulfillment", "name: fulfillment\nactivation: standing", 1)
+	updatedSchema := strings.Replace(string(schema), "name: fulfillment", `name: fulfillment
+ingress:
+  alias: fulfillment
+  providers:
+    - provider: partner
+      admission:
+        kind: raw
+        acknowledge: unsigned_webhook
+        payload: json
+        event: fulfillment.requested
+        authentication: {kind: none}
+        delivery_id: {source: body_sha256}`, 1)
 	if updatedSchema == string(schema) {
 		t.Fatalf("dev scratch fixture flow declaration was not replaceable:\n%s", schema)
 	}

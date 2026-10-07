@@ -1,5 +1,4 @@
 name: beta
-activation: standing
 stages: []
 imports:
   provider_trigger_events:

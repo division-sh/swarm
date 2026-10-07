@@ -25,7 +25,7 @@ func TestStandingKeyedAncestryRefusesBeforeMutationBothStores(t *testing.T) {
 				documents := map[string]string{
 					"schema.yaml":                "name: root\n",
 					"parent/schema.yaml":         "name: parent\n",
-					"parent/service/schema.yaml": "name: service\nactivation: standing\n",
+					"parent/service/schema.yaml": "name: service\n",
 				}
 				documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
 				documents[filepath.Join(keyed, "entities.yaml")] = "owner:\n  tenant: text\n"
@@ -72,8 +72,8 @@ func TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores(t *te
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 				"schema.yaml":       "name: standing-atomic-set\n",
-				"alpha/schema.yaml": "name: alpha\nactivation: standing\n",
-				"beta/schema.yaml":  "name: beta\nactivation: standing\n",
+				"alpha/schema.yaml": "name: alpha\n",
+				"beta/schema.yaml":  "name: beta\n",
 			}, nil)
 			source := semanticview.Wrap(f.bundle)
 			fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
@@ -107,7 +107,7 @@ func TestDormantStandingPreparationDoesNotConstructBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 				"schema.yaml":         "name: dormant-root\n",
-				"service/schema.yaml": "name: service\nactivation: standing\n",
+				"service/schema.yaml": "name: service\n",
 			}, nil)
 			source := semanticview.Wrap(f.bundle)
 			fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
@@ -154,7 +154,7 @@ func TestStandingPreparationVerifiesCompleteRootTreeBothStores(t *testing.T) {
 			t.Run(backend+"/"+damage, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 					"schema.yaml":                "name: standing-root-tree\n",
-					"service/schema.yaml":        "name: service\nactivation: standing\n",
+					"service/schema.yaml":        "name: service\n",
 					"service/detail/schema.yaml": "name: detail\n",
 					"receiver/schema.yaml":       "name: receiver\n",
 					"receiver/entities.yaml":     "receipt:\n  marker: {type: text, initial: unchanged}\n",

@@ -22,9 +22,58 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"gopkg.in/yaml.v3"
 )
+
+func TestA9DeclaredBindingProjectionParity(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyStandingRootTreePublic(t)
+	disk, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained, err := sourceartifact.DecodeLogical(disk.SourceArtifact.LogicalBlob())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, retained, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var views []View
+	for _, bundle := range []*runtimecontracts.WorkflowContractBundle{disk, rebuilt} {
+		view, err := Build(t.Context(), semanticview.Wrap(bundle), BuildOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		views = append(views, view)
+		if len(view.RoutingTopology.RootInputSources) != 2 {
+			t.Fatalf("offline projection lost declaring bindings: %+v", view.RoutingTopology.RootInputSources)
+		}
+		wire, err := json.Marshal(view)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var projected struct {
+			Flows []map[string]any `json:"flows"`
+		}
+		if err := json.Unmarshal(wire, &projected); err != nil {
+			t.Fatal(err)
+		}
+		for _, flow := range projected.Flows {
+			for _, key := range []string{"activation", "enabled", "retains_run"} {
+				if _, present := flow[key]; present {
+					t.Fatalf("offline declaration invented execution authority %q: %+v", key, flow)
+				}
+			}
+		}
+	}
+	if views[0].SourceHash != views[1].SourceHash || !reflect.DeepEqual(views[0].Flows, views[1].Flows) || !reflect.DeepEqual(views[0].RoutingTopology, views[1].RoutingTopology) {
+		t.Fatal("retained source changed declaration or topology projection")
+	}
+}
 
 func TestBuildShowsReplyPairedTopology(t *testing.T) {
 	source := templatereply.LoadSource(t, templatereply.Options{})

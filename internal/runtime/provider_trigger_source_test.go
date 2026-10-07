@@ -822,13 +822,11 @@ func schemaOnlyTelegramDeclarationSource(t testing.TB) (semanticview.Source, *pr
 		t.Fatal("fixture coordinator flow missing")
 	}
 	flow.Schema.Ingress = nil
-	flow.Schema.Activation = ""
 	schema, exists := bundle.FlowSchemas["coordinator"]
 	if !exists {
 		t.Fatal("fixture coordinator schema missing")
 	}
 	schema.Ingress = nil
-	schema.Activation = ""
 	bundle.FlowSchemas["coordinator"] = schema
 	setProviderTriggerImports(t, bundle, "coordinator", []runtimecontracts.ProviderTriggerEventImport{
 		{Provider: "telegram", Event: "inbound.telegram.text_message"},

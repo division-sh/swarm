@@ -64,7 +64,6 @@ type FlowView struct {
 	ID                   string                         `json:"id"`
 	Path                 string                         `json:"path,omitempty"`
 	Mode                 string                         `json:"mode,omitempty"`
-	Activation           string                         `json:"activation,omitempty"`
 	Ingress              *StandingIngressView           `json:"ingress,omitempty"`
 	SourceFiles          FlowSourceFiles                `json:"source_files"`
 	Events               []EventView                    `json:"events,omitempty"`
@@ -523,7 +522,6 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			InputPins:  inputPinViews(source, flowID, source.FlowInputEventPins(flowID)),
 			OutputPins: outputPinViews(source, flowID, source.FlowOutputEventPins(flowID)),
 		}
-		item.Activation = strings.TrimSpace(schema.Activation)
 		if schema.Ingress != nil {
 			ingress := &StandingIngressView{Alias: strings.TrimSpace(schema.Ingress.Alias)}
 			for _, provider := range schema.Ingress.Providers {
