@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -43,6 +44,10 @@ func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*clia
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+	if mock {
+		configureHostWorkspaceProofLifecycle(t)
+		opts.WorkspaceBackend, opts.WorkspaceBackendSet = workspace.BackendHost, true
+	}
 	if backend == "sqlite" {
 		if mock {
 			opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "completion.sqlite"))
