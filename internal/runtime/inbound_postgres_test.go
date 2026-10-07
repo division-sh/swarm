@@ -97,12 +97,11 @@ func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interfac
 }
 
 func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
 	const (
-		runID             = "41000000-0000-0000-0000-000000000001"
-		entityID          = "41000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "github"
@@ -200,12 +199,11 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 }
 
 func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
 	const (
-		runID             = "42000000-0000-0000-0000-000000000001"
-		entityID          = "42000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "slack"
@@ -303,12 +301,11 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 }
 
 func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
 	const (
-		runID             = "43000000-0000-0000-0000-000000000001"
-		entityID          = "43000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "stripe"
@@ -408,9 +405,8 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 }
 
 func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	const (
-		runID             = "44000000-0000-0000-0000-000000000001"
-		entityID          = "44000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "stripe"
@@ -467,12 +463,11 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 }
 
 func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
 	const (
-		runID             = "45000000-0000-0000-0000-000000000001"
-		entityID          = "45000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "twilio"
@@ -533,9 +528,8 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 }
 
 func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	const (
-		runID             = "46000000-0000-0000-0000-000000000001"
-		entityID          = "46000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "twilio"
@@ -596,12 +590,11 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 }
 
 func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
 	const (
-		runID             = "47000000-0000-0000-0000-000000000001"
-		entityID          = "47000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "shopify"
@@ -658,9 +651,8 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 }
 
 func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	const (
-		runID             = "48000000-0000-0000-0000-000000000001"
-		entityID          = "48000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "shopify"
@@ -717,12 +709,11 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 }
 
 func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
 	const (
-		runID             = "4d000000-0000-0000-0000-000000000001"
-		entityID          = "4d000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "telegram"
@@ -790,9 +781,8 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 }
 
 func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
+	runID, entityID := boundedInboundTestCoordinates()
 	const (
-		runID             = "4e000000-0000-0000-0000-000000000001"
-		entityID          = "4e000000-0000-0000-0000-000000000002"
 		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "telegram"
@@ -981,8 +971,6 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 	}{
 		{
 			name:              "typeform",
-			runID:             "49000000-0000-0000-0000-000000000001",
-			entityID:          "49000000-0000-0000-0000-000000000002",
 			flowInstance:      boundedProviderFlowID,
 			provider:          "typeform",
 			webhookSecret:     "typeform-secret",
@@ -995,8 +983,6 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 		},
 		{
 			name:              "intercom",
-			runID:             "4a000000-0000-0000-0000-000000000001",
-			entityID:          "4a000000-0000-0000-0000-000000000002",
 			flowInstance:      boundedProviderFlowID,
 			provider:          "intercom",
 			webhookSecret:     "intercom-secret",
@@ -1012,6 +998,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 
+			tc.runID, tc.entityID = boundedInboundTestCoordinates()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			target := seedPostgresInboundGatewayRuntime(t, ctx, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
@@ -1076,8 +1063,6 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 	}{
 		{
 			name:              "typeform",
-			runID:             "4b000000-0000-0000-0000-000000000001",
-			entityID:          "4b000000-0000-0000-0000-000000000002",
 			flowInstance:      boundedProviderFlowID,
 			provider:          "typeform",
 			webhookSecret:     "typeform-secret",
@@ -1090,8 +1075,6 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 		},
 		{
 			name:              "intercom",
-			runID:             "4c000000-0000-0000-0000-000000000001",
-			entityID:          "4c000000-0000-0000-0000-000000000002",
 			flowInstance:      boundedProviderFlowID,
 			provider:          "intercom",
 			webhookSecret:     "intercom-secret",
@@ -1104,6 +1087,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.runID, tc.entityID = boundedInboundTestCoordinates()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
 			sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
@@ -1164,10 +1148,10 @@ func seedPostgresInboundGatewayRuntime(
 	agentID string,
 ) runtimepkg.InboundTarget {
 	t.Helper()
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
-		Origin: boundedInboundStandingOrigin(t, provider),
-		RunID:  runID,
-	})
+	target := seedBoundedStandingTarget(t, ctx, pg, entityID)
+	if target.RunID != runID {
+		t.Fatalf("bounded receiver run %s differs from admitted standing run %s", runID, target.RunID)
+	}
 	seedBoundedInboundFlow(t, ctx, pg, runID, entityID, flowInstance, entitySlug)
 	if strings.TrimSpace(agentID) != "" {
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
@@ -1192,7 +1176,7 @@ func seedPostgresInboundGatewayRuntime(
 			t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 		}
 	}
-	return seedBoundedStandingTarget(t, ctx, pg, runID, entityID, flowInstance, provider)
+	return target
 }
 
 func inboundGatewayAgentIdentity(t testing.TB, runID, agentID, flowInstance string) runtimeagentidentity.Identity {
@@ -1288,11 +1272,10 @@ func seedSQLiteInboundGatewayRuntime(
 ) runtimepkg.InboundTarget {
 	t.Helper()
 	now := time.Now().UTC()
-	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{
-		Origin:    boundedInboundStandingOrigin(t, provider),
-		RunID:     runID,
-		StartedAt: now,
-	})
+	target := seedBoundedStandingTarget(t, ctx, sqliteStore, entityID)
+	if target.RunID != runID {
+		t.Fatalf("bounded receiver run %s differs from admitted standing run %s", runID, target.RunID)
+	}
 	seedBoundedInboundFlow(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug)
 	if strings.TrimSpace(agentID) != "" {
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
@@ -1317,7 +1300,7 @@ func seedSQLiteInboundGatewayRuntime(
 			t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 		}
 	}
-	return seedBoundedStandingTarget(t, ctx, sqliteStore, runID, entityID, flowInstance, provider)
+	return target
 }
 
 func boundedInboundStandingOrigin(t *testing.T, _ string) runtimerunlifecycle.RunOrigin {

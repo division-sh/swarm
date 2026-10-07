@@ -34,18 +34,14 @@ func (eb *EventBus) PrepareInboundEvidence(ctx context.Context, event events.Eve
 	if eb == nil {
 		return events.Event{}, fmt.Errorf("inbound evidence requires the event bus")
 	}
-	ctx, err := eb.admitSourceArtifactFact(ctx)
-	if err != nil {
-		return events.Event{}, err
-	}
-	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	_, admitted, err := eb.admitPublicationEventFacts(ctx, event)
 	if err != nil {
 		return events.Event{}, err
 	}
 	if err := events.ValidateNamedEvent(admitted, events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord); err != nil {
 		return events.Event{}, err
 	}
-	return eb.admitEventPayload(ctx, event)
+	return admitted.Event(), nil
 }
 
 type authenticatedProviderPublicationKey struct{}

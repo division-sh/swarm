@@ -2,14 +2,12 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"net/http"
 	stdruntime "runtime"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -19,8 +17,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	storepkg "github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/storetest"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type boundedProviderCredentialStore struct{}
@@ -142,7 +140,7 @@ func TestBoundedProviderDeliveryRequiresPreResolvedStandingTarget(t *testing.T) 
 	}
 }
 
-func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, runID, entityID, flowInstance, _ string) runtimepkg.InboundTarget {
+func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, alias string) runtimepkg.InboundTarget {
 	t.Helper()
 	flowPath := boundedProviderFlowID
 	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
@@ -151,22 +149,37 @@ func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence ru
 		t.Fatal("bounded provider target requires an admitted source artifact fact")
 	}
 	bundleHash := source.BundleHash()
+	writer, ok := persistence.(sourceartifactfixture.Writer)
+	if !ok || bundleHash != sourceartifactfixture.BundleHash {
+		t.Fatal("bounded component binding requires its exact admitted fixture artifact writer")
+	}
+	sourceartifactfixture.Require(t, ctx, writer)
 
-	switch selected := persistence.(type) {
-	case *storepkg.PostgresStore:
-		insertPostgresStandingFixture(t, ctx, storetest.DatabaseForTest(selected), serviceID, flowPath, flowInstance, entityID, runID, bundleHash)
-	case *storepkg.SQLiteRuntimeStore:
-		insertSQLiteStandingFixture(t, ctx, selected, serviceID, flowPath, flowInstance, entityID, runID, bundleHash)
-	default:
-		t.Fatalf("unsupported bounded provider persistence %T", persistence)
+	owner, ok := persistence.(runtimepipeline.StandingServicePersistence)
+	if !ok {
+		t.Fatalf("bounded provider persistence %T lacks the standing owner", persistence)
+	}
+	standing, err := owner.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
+		ServiceID: serviceID, FlowPath: flowPath, Source: source, BindingEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("reconcile bounded standing binding: %v", err)
+	}
+	sequence, err := owner.PublishStandingService(ctx, standing.ServiceID, standing.RunID, standing.Generation)
+	if err != nil {
+		t.Fatalf("publish bounded standing binding: %v", err)
 	}
 
 	return runtimepkg.InboundTarget{
 		BundleHash: bundleHash, ServiceID: serviceID, FlowPath: flowPath,
-		RunID: runID, Generation: 1, PublicationSequence: 1,
-
-		Alias: entityID,
+		RunID: standing.RunID, Generation: standing.Generation, PublicationSequence: sequence,
+		Alias: alias,
 	}
+}
+
+func boundedInboundTestCoordinates() (string, string) {
+	return runtimeflowidentity.StandingGenerationRunID(runtimeflowidentity.StandingServiceID(boundedProviderFlowID), 1),
+		runtimeflowidentity.EntityID(boundedProviderFlowID)
 }
 
 const boundedProviderFlowID = "bounded_inbound"
@@ -218,61 +231,4 @@ func boundedStandingConnectorBundle(t *testing.T, bundle *runtimecontracts.Workf
 		t.Fatalf("compile bounded standing connector semantics: %v", err)
 	}
 	return admitted
-}
-
-func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB, serviceID, flowPath, instanceID, entityID, runID, bundleHash string) {
-	t.Helper()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO standing_services (
-			service_id, flow_path, declaration_present, binding_enabled,
-			operator_override, effective_state, current_bundle_hash,
-			revision_sequence, current_generation, current_run_id, publication_state,
-			publication_sequence, created_at, updated_at
-		) VALUES ($1::uuid, $2, TRUE, TRUE, 'none', 'active', $3, 1, 1, $4::uuid, 'published', 1, now(), now())
-		ON CONFLICT (service_id) DO NOTHING
-	`, serviceID, flowPath, bundleHash, runID); err != nil {
-		t.Fatalf("seed postgres standing service: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO standing_service_generations (service_id, generation, run_id, created_at)
-		VALUES ($1::uuid, 1, $2::uuid, now())
-		ON CONFLICT (service_id, generation) DO NOTHING
-	`, serviceID, runID); err != nil {
-		t.Fatalf("seed postgres standing generation: %v", err)
-	}
-}
-
-func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, selected *storepkg.SQLiteRuntimeStore, serviceID, flowPath, instanceID, entityID, runID, bundleHash string) {
-	t.Helper()
-	now := time.Now().UTC()
-	db := storetest.DatabaseForTest(selected)
-	if db == nil {
-		t.Fatal("sqlite standing fixture database is required")
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin sqlite standing fixture: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
-			INSERT INTO standing_services (
-				service_id, flow_path, declaration_present, binding_enabled,
-				operator_override, effective_state, current_bundle_hash,
-				revision_sequence, current_generation, current_run_id, publication_state,
-				publication_sequence, created_at, updated_at
-			) VALUES (?, ?, TRUE, TRUE, 'none', 'active', ?, 1, 1, ?, 'published', 1, ?, ?)
-			ON CONFLICT(service_id) DO NOTHING
-		`, serviceID, flowPath, bundleHash, runID, now, now); err != nil {
-		t.Fatalf("seed sqlite standing service: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-			INSERT INTO standing_service_generations (service_id, generation, run_id, created_at)
-			VALUES (?, 1, ?, ?)
-			ON CONFLICT(service_id, generation) DO NOTHING
-		`, serviceID, runID, now); err != nil {
-		t.Fatalf("seed sqlite standing generation: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit sqlite standing fixture: %v", err)
-	}
 }
