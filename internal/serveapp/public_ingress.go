@@ -258,14 +258,14 @@ func publicIngressPresentation(facts []serveLifecycleIngressFact, snapshot runti
 	result := append([]serveLifecycleIngressFact(nil), facts...)
 	registrationURLs := make(map[string]string, len(snapshot.Registrations))
 	for _, registration := range snapshot.Registrations {
-		registrationURLs[strings.TrimSpace(registration.Alias)+"\x00"+strings.TrimSpace(registration.Provider)] = strings.TrimSpace(registration.CallbackURL)
+		registrationURLs[registration.Alias+"\x00"+strings.TrimSpace(registration.Provider)] = strings.TrimSpace(registration.CallbackURL)
 	}
 	origin := ""
 	if snapshot.Exposure != nil {
 		origin = strings.TrimRight(strings.TrimSpace(snapshot.Exposure.PublicOrigin), "/")
 	}
 	for index := range result {
-		key := strings.TrimSpace(result[index].Alias) + "\x00" + strings.TrimSpace(result[index].Provider)
+		key := result[index].Alias + "\x00" + strings.TrimSpace(result[index].Provider)
 		if callback := registrationURLs[key]; callback != "" {
 			result[index].URL = callback
 		} else if snapshot.PublicIngressEnabled && origin != "" {

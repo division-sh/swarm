@@ -815,7 +815,7 @@ func pairSemanticKey(pair RegistrationPair) string {
 }
 
 func registrationRouteKey(alias, provider string) string {
-	return strings.TrimSpace(alias) + "\x00" + strings.TrimSpace(provider)
+	return alias + "\x00" + strings.TrimSpace(provider)
 }
 
 func resolveSlotCollisions(pairs []admittedPair) ([]admittedPair, error) {

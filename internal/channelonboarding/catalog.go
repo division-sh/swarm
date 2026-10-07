@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
@@ -35,11 +36,14 @@ func (t CandidateTarget) Validate() error {
 }
 
 func (t CandidateTarget) ValidateDeclaration() error {
+	if err := runtimecontracts.ValidateIngressAlias(t.Alias); err != nil {
+		return err
+	}
 	parsed, err := packs.ParseChannelRegistrationTarget(t.Selector)
 	if err != nil {
 		return fmt.Errorf("channel onboarding target selector %q: %w", strings.TrimSpace(t.Selector), err)
 	}
-	if strings.TrimSpace(t.ServiceID) == "" || strings.TrimSpace(t.FlowPath) != parsed.FlowPath || strings.TrimSpace(t.Provider) != parsed.Provider || strings.TrimSpace(t.Alias) == "" || !t.AdmissionGeneration.Valid() || t.PublicationSequence < 0 || (t.Generation == 0) != (t.PublicationSequence == 0) {
+	if strings.TrimSpace(t.ServiceID) == "" || strings.TrimSpace(t.FlowPath) != parsed.FlowPath || strings.TrimSpace(t.Provider) != parsed.Provider || !t.AdmissionGeneration.Valid() || t.PublicationSequence < 0 || (t.Generation == 0) != (t.PublicationSequence == 0) {
 		return fmt.Errorf("channel onboarding target contradicts its exact selector")
 	}
 	return nil

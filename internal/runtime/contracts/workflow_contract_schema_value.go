@@ -251,6 +251,9 @@ func populateEffectiveSchemaProvenance(bundle *WorkflowContractBundle, builder *
 			fact.InputPaths = qualifyEffectiveEventInputPaths(prefix, fact.InputPaths)
 			builder.set(prefix+"."+relative, fact)
 		}
+		if alias, present := bundle.Semantics.flowIngressAliases[source.FlowPath]; present {
+			builder.set(prefix+".ingress.alias", alias.provenance)
+		}
 		for _, fact := range bundle.FlowRequiredAgentFacts(source.FlowPath) {
 			if fact.Source != RequiredAgentSourceInferred {
 				continue

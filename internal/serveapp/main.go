@@ -2465,7 +2465,7 @@ func serveReadyStandingIngress(ctx context.Context, manager *runtime.RuntimeCont
 		}
 		facts = append(facts, serveLifecycleIngressFact{
 			Provider:   strings.TrimSpace(subject.Provider),
-			Alias:      strings.TrimSpace(admission.Alias),
+			Alias:      admission.Alias,
 			URL:        fmt.Sprintf("http://%s/webhooks/%s/%s", apiAddr.String(), admission.Alias, subject.Provider),
 			BundleHash: strings.TrimSpace(admission.BundleHash),
 			Subject:    subject,

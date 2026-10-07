@@ -82,7 +82,6 @@ func (t StandingTarget) normalized() StandingTarget {
 	t.ServiceID = strings.TrimSpace(t.ServiceID)
 	t.SourcePath = strings.TrimSpace(t.SourcePath)
 	t.FlowPath = strings.Trim(strings.TrimSpace(t.FlowPath), "/")
-	t.Alias = strings.Trim(strings.TrimSpace(t.Alias), "/")
 	t.Provider = providertriggers.NormalizeProviderName(t.Provider)
 	t.RunID = strings.TrimSpace(t.RunID)
 	t.InstanceID = strings.TrimSpace(t.InstanceID)
@@ -95,24 +94,8 @@ func (t StandingTarget) normalized() StandingTarget {
 func (t StandingTarget) CapabilitySubject() (packs.Subject, error) {
 	t = t.normalized()
 	return t.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
-		BundleHash: t.BundleHash, Alias: t.Alias, SigningSecret: t.SigningSecret, SourcePath: t.SourcePath,
+		BundleHash: t.BundleHash, FlowPath: t.FlowPath, Alias: t.Alias, SigningSecret: t.SigningSecret, SourcePath: t.SourcePath,
 	})
-}
-
-func NormalizeStandingIngressAlias(alias string) (string, error) {
-	alias = strings.TrimSpace(alias)
-	if alias == "" {
-		return "", fmt.Errorf("ingress alias is required")
-	}
-	for i := 0; i < len(alias); i++ {
-		c := alias[i]
-		alphaNumeric := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
-		if alphaNumeric || i > 0 && (c == '.' || c == '_' || c == '-') {
-			continue
-		}
-		return "", fmt.Errorf("ingress alias %q must be one URL-safe path segment matching [A-Za-z0-9][A-Za-z0-9._-]*; remove slashes, whitespace, escapes, or reserved characters", alias)
-	}
-	return alias, nil
 }
 
 func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) ([]StandingTargetDeclaration, error) {
@@ -121,7 +104,6 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 		return nil, fmt.Errorf("standing target declarations require a bundle-backed semantic source")
 	}
 	declarations := make([]StandingTargetDeclaration, 0)
-	aliases := map[string]string{}
 	clocks := make(map[string][]semanticview.ClockSchedule)
 	for _, declaration := range semanticview.ClockSchedules(source) {
 		clocks[declaration.FlowID] = append(clocks[declaration.FlowID], declaration)
@@ -150,13 +132,9 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 			decl.FlowPath = "."
 		}
 		if view.Schema.Ingress != nil {
-			alias := strings.TrimSpace(view.Schema.Ingress.Alias)
-			if alias == "" {
-				return nil, fmt.Errorf("%s standing ingress alias is required and is never derived from the flow path", location)
-			}
-			alias, err := NormalizeStandingIngressAlias(alias)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", location, err)
+			alias, present := bundle.FlowIngressAlias(flowID)
+			if !present {
+				return nil, fmt.Errorf("%s has no compiled ingress alias", location)
 			}
 			decl.Alias = alias
 			if len(view.Schema.Ingress.Providers) == 0 {
@@ -193,12 +171,6 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 					Provider: provider, SigningSecret: secret, RawEventLiteral: literal, RawEventTemplate: template, AdmissionPlan: plan,
 				})
 			}
-		}
-		if len(decl.Ingress) > 0 {
-			if previous, exists := aliases[decl.Alias]; exists {
-				return nil, fmt.Errorf("duplicate standing ingress alias %q from %s and %s; rename one ingress alias", decl.Alias, previous, location)
-			}
-			aliases[decl.Alias] = location
 		}
 		declarations = append(declarations, decl)
 	}
@@ -253,7 +225,7 @@ func baseStandingIngressCapabilitySubjects(source semanticview.Source, catalog *
 	for _, declaration := range declarations {
 		for _, binding := range declaration.Ingress {
 			subject, err := binding.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
-				BundleHash: bundleHash, Alias: declaration.Alias, SigningSecret: binding.SigningSecret, SourcePath: declaration.SourcePath,
+				BundleHash: bundleHash, FlowPath: declaration.FlowPath, Alias: declaration.Alias, SigningSecret: binding.SigningSecret, SourcePath: declaration.SourcePath,
 			})
 			if err != nil {
 				return nil, err
@@ -658,6 +630,9 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	source := rt.Options.WorkflowModule.SemanticSource()
 	admission, err := rt.standingCredentials(context.Background())
 	if err != nil {
+		return nil, err
+	}
+	if err := validateEnabledStandingAliases(admission); err != nil {
 		return nil, err
 	}
 	declarations := admission.declarations

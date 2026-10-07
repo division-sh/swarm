@@ -299,6 +299,12 @@ func TestDormantIngressCannotMaskStructuralRefusal(t *testing.T) {
 					schema.Ingress.Alias = "unreachable/alias"
 				}
 			})
+			if defect == "invalid_alias" {
+				if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil {
+					t.Fatal("invalid alias escaped the compiled declaration owner")
+				}
+				return
+			}
 			rt := &Runtime{Options: RuntimeOptions{WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
 				SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)}}
 			if targets, err := rt.PlanStandingTargets(); err == nil || len(targets) != 0 || rt.standingCredentialAdmission != nil {

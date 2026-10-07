@@ -60,7 +60,7 @@ func sameRuntimeRegistrationTarget(registration runtimepublicingress.Registratio
 	return strings.TrimSpace(registration.BundleHash) == strings.TrimSpace(target.BundleHash) &&
 		strings.TrimSpace(registration.ServiceID) == strings.TrimSpace(target.ServiceID) &&
 		strings.TrimSpace(registration.FlowPath) == strings.TrimSpace(target.FlowPath) &&
-		strings.TrimSpace(registration.Alias) == strings.TrimSpace(target.Alias) &&
+		registration.Alias == target.Alias &&
 		strings.TrimSpace(registration.Provider) == strings.TrimSpace(target.Provider) &&
 		registration.Generation == target.Generation &&
 		registration.PublicationSequence == target.PublicationSequence &&

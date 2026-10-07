@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -118,9 +119,12 @@ type rawRequestAdmission struct {
 }
 
 func (s *CatalogSnapshot) CompileAdmission(req CompileAdmissionRequest) (InboundAdmissionPlan, error) {
-	alias := strings.Trim(strings.TrimSpace(req.Alias), "/")
+	alias := req.Alias
+	if err := runtimecontracts.ValidateIngressAlias(alias); err != nil {
+		return InboundAdmissionPlan{}, err
+	}
 	provider := NormalizeProviderName(req.Provider)
-	if alias == "" || provider == "" {
+	if provider == "" {
 		return InboundAdmissionPlan{}, fmt.Errorf("ingress admission requires alias and provider")
 	}
 	if s == nil {
@@ -375,6 +379,7 @@ func (p InboundAdmissionPlan) AcknowledgedUnsigned() bool { return p.acknowledge
 
 type EffectiveSubjectRequest struct {
 	BundleHash    string
+	FlowPath      string
 	Alias         string
 	SigningSecret string
 	SourcePath    string
@@ -404,16 +409,20 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 	if !p.Valid() {
 		return packs.Subject{}, fmt.Errorf("compiled inbound admission plan is required")
 	}
-	bundleHash := strings.TrimSpace(req.BundleHash)
-	alias := strings.Trim(strings.TrimSpace(req.Alias), "/")
+	bundleHash := req.BundleHash
+	alias := req.Alias
 	if bundleHash == "" || alias == "" {
 		return packs.Subject{}, fmt.Errorf("effective inbound admission subject requires bundle_hash and alias")
+	}
+	id, err := packs.IngressSubjectID(bundleHash, req.FlowPath, p.provider)
+	if err != nil {
+		return packs.Subject{}, err
 	}
 	eventName := rawOutputName(p.outputs)
 	source := "raw_declaration"
 	provenance := "project"
 	admission := &packs.TriggerAdmission{
-		BundleHash: bundleHash, Alias: alias, CatalogGeneration: p.generation.Diagnostic(),
+		BundleHash: bundleHash, FlowPath: req.FlowPath, Alias: alias, CatalogGeneration: p.generation.Diagnostic(),
 		PolicySource: string(p.policySource), RequestAuthentication: string(p.requestAuthentication), Event: eventName,
 	}
 	if p.manifest != nil {
@@ -433,7 +442,7 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 		admission.DigestEncoding = p.raw.Authentication.Encoding
 	}
 	subject := packs.Subject{
-		ID:   "ingress:" + bundleHash + ":" + alias + ":" + p.provider,
+		ID:   id,
 		Kind: packs.SubjectProviderTrigger, Provider: p.provider, Source: source,
 		Provenance: provenance, SourcePath: strings.TrimSpace(req.SourcePath), Applicability: "effective",
 		TriggerAdmission: admission,

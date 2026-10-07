@@ -32,8 +32,8 @@ func TestRuntimeProcessInboundHandlerTeachesUnknownStandingAlias(t *testing.T) {
 
 func TestStandingIngressAliasGrammarMatchesProcessWebhookRouter(t *testing.T) {
 	for _, alias := range []string{"chat", "chat.v2", "chat_v2", "chat-v2", "9chat"} {
-		if _, err := runtimepkg.NormalizeStandingIngressAlias(alias); err != nil {
-			t.Fatalf("NormalizeStandingIngressAlias(%q): %v", alias, err)
+		if err := runtimecontracts.ValidateIngressAlias(alias); err != nil {
+			t.Fatalf("ValidateIngressAlias(%q): %v", alias, err)
 		}
 		gotAlias, provider, ok := parseProcessWebhookPath("/webhooks/" + alias + "/telegram")
 		if !ok || gotAlias != alias || provider != "telegram" {
@@ -41,8 +41,8 @@ func TestStandingIngressAliasGrammarMatchesProcessWebhookRouter(t *testing.T) {
 		}
 	}
 	for _, alias := range []string{"chat/support", "chat support", "chat%2Fsupport", "-chat", ".chat", "chat?x"} {
-		if _, err := runtimepkg.NormalizeStandingIngressAlias(alias); err == nil {
-			t.Fatalf("NormalizeStandingIngressAlias(%q) error = nil", alias)
+		if err := runtimecontracts.ValidateIngressAlias(alias); err == nil {
+			t.Fatalf("ValidateIngressAlias(%q) error = nil", alias)
 		}
 	}
 	if _, _, ok := parseProcessWebhookPath("/webhooks/chat/support/telegram"); ok {

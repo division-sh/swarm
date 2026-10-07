@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/google/uuid"
 )
@@ -69,7 +70,6 @@ func (r Request) Normalized() Request {
 	r.StableServiceID = strings.TrimSpace(r.StableServiceID)
 	r.FlowPath = strings.TrimSpace(r.FlowPath)
 	r.InstanceID = strings.TrimSpace(r.InstanceID)
-	r.TargetAlias = strings.Trim(strings.TrimSpace(r.TargetAlias), "/")
 	r.TargetFlowInstance = strings.Trim(strings.TrimSpace(r.TargetFlowInstance), "/")
 	r.ResolvedRunID = strings.TrimSpace(r.ResolvedRunID)
 	r.MarkerEventID = strings.TrimSpace(r.MarkerEventID)
@@ -84,6 +84,9 @@ func (r Request) Normalized() Request {
 
 func (r Request) Validate() error {
 	r = r.Normalized()
+	if err := runtimecontracts.ValidateIngressAlias(r.TargetAlias); err != nil {
+		return fmt.Errorf("target_alias: %w", err)
+	}
 	required := map[string]string{
 		"publication_id":             r.PublicationID,
 		"provider":                   r.Provider,

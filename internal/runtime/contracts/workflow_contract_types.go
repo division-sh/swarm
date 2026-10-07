@@ -92,6 +92,7 @@ type WorkflowSemanticView struct {
 	FlowRules              map[string]string
 	flowInputEventPins     map[string][]CompiledFlowInputPin
 	flowOutputEventPins    map[string][]CompiledFlowOutputPin
+	flowIngressAliases     map[string]compiledFlowIngressAlias
 	CompositionConnects    []FlowConnect
 	FlowAgents             map[string][]FlowRequiredAgent
 	RootAgentFacts         []RequiredAgentFact
@@ -1067,7 +1068,7 @@ type EntityFieldDecl struct {
 	UnusedReaderReason string            `yaml:"_unused_reader_reason"`
 }
 type ProjectFlowIngress struct {
-	Alias     string                       `yaml:"alias"`
+	Alias     string                       `yaml:"alias,omitempty"`
 	Providers []ProjectFlowIngressProvider `yaml:"providers"`
 }
 
