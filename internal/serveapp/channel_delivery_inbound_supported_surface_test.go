@@ -1531,10 +1531,12 @@ func requestChannelRecoveryAction(t *testing.T, provider *telegramapi.Double, ca
 func proveChannelEditLossResendQuotedInput(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
+	lostPromptText := ""
 	countPromptEdits := func() int {
 		count := 0
 		for _, edit := range provider.Edits() {
 			if strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text) required") {
+				lostPromptText = fmt.Sprint(edit["text"])
 				count++
 			}
 		}
@@ -1563,12 +1565,13 @@ func proveChannelEditLossResendQuotedInput(t *testing.T, provider *telegramapi.D
 	}
 	resendMessageID := 0
 	for resendMessageID == 0 {
-		for index := 2; ; index++ {
+		// Earlier standalone prompts are not the card copy requested above.
+		for index := responseMessageID; ; index++ {
 			delivery := provider.Delivery(index)
 			if delivery == nil {
 				break
 			}
-			if strings.Contains(fmt.Sprint(delivery["text"]), "Input: reason (text) required") {
+			if fmt.Sprint(delivery["text"]) == lostPromptText {
 				resendMessageID = index + 1
 				break
 			}
