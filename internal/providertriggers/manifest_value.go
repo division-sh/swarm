@@ -3,6 +3,7 @@ package providertriggers
 import (
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -71,6 +72,28 @@ func (m Manifest) Accept(req Request) (Delivery, error) {
 		return Delivery{}, err
 	}
 	return m.projectAdmission(admitted)
+}
+
+// ProjectNormalizedPayload consumes the admitted pack's existing projection
+// rules, but grants no request or provider-output authorization. Session callers
+// must separately prove their original account admission before publication.
+func (m Manifest) ProjectNormalizedPayload(body []byte) ([]DeliveryEvent, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	if _, err := canonicaljson.Decode(body); err != nil {
+		return nil, err
+	}
+	var payload any
+	if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
+		return nil, err
+	}
+	if m.value.definition.PayloadObjectRequired {
+		if _, ok := payload.(map[string]any); !ok {
+			return nil, badRequest(firstNonEmpty(m.value.definition.PayloadObjectError, "provider payload must be an object"))
+		}
+	}
+	return m.value.definition.normalizedDeliveryEvents(payload)
 }
 
 func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
