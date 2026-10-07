@@ -1,19 +1,23 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.T) {
@@ -133,8 +137,75 @@ func readLifecycleTransitionHistory(t *testing.T, rt servedControlProofRuntime, 
 func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmits))
+			finishStarted, finishRelease := make(chan struct{}, 1), make(chan struct{})
+			var finishOnce sync.Once
+			unblockFinish := func() { finishOnce.Do(func() { close(finishRelease) }) }
+			defer unblockFinish()
+			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmitsUntilObserverFinish), func(ctx context.Context, _ string, evt events.Event) error {
+				if evt.Type() != "ordinary.finish" {
+					return nil
+				}
+				finishStarted <- struct{}{}
+				select {
+				case <-finishRelease:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			})
+			var selected any = rt.SQLite
+			if rt.Postgres != nil {
+				selected = rt.Postgres
+			}
+			var finish servedEventPublishRPCResult
+			var staleAdmitEventID string
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create"})
+			waitOtherDeliveries := func() {
+				if finish.EventID == "" {
+					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+					return
+				}
+				// The known stale admit is rejected; all other work settles
+				// successfully except the one exact accepted finish delivery.
+				var last []storetest.H2NodeDeliveriesEvidence
+				stable := 0
+				for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+					var err error
+					last, err = storetest.ObserveH2NodeDeliveries(context.Background(), selected, started.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					held, rejected, unsettled := 0, 0, 0
+					for _, row := range last {
+						switch {
+						case row.Event == finish.EventID && row.Name == "ordinary.finish" && row.Status == "in_progress":
+							held++
+						case row.Event == staleAdmitEventID && row.Status == "dead_letter":
+							rejected++
+						case row.Status == "pending" || row.Status == "in_progress":
+							unsettled++
+						case row.Status != "delivered":
+							t.Fatalf("unexpected observer-held delivery outcome: %#v", row)
+						}
+					}
+					all := storetest.ObserveWriterRunDelivery(t, context.Background(), selected, started.RunID)
+					if held == 1 && rejected == 1 && unsettled == 0 && len(last) == all.Total && all.SettledDelivered+2 == all.Total {
+						stable++
+						if stable == 4 {
+							var event operatorread.OperatorEventFull
+							requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": finish.EventID}, &event)
+							if event.RunID != started.RunID || event.EventName != "ordinary.finish" || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "in_progress" || event.Deliveries[0].SubscriberType != "node" || event.Deliveries[0].Target.FlowID != "ordinary" {
+								t.Fatalf("held observer delivery=%#v", event)
+							}
+							return
+						}
+					} else {
+						stable = 0
+					}
+					time.Sleep(25 * time.Millisecond)
+				}
+				t.Fatalf("other deliveries did not settle with only observer held: %#v", last)
+			}
 			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, started.RunID, "waiting")
 			publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 				return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": event, "run_id": started.RunID, "source_event_id": started.EventID, "payload": payload, "idempotency_key": key})
@@ -152,7 +223,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 				payload := map[string]any{"revision_id": current.RevisionID}
 				if attempt == 2 {
 					before := lifecycleStoredSnapshot(t, rt, started.RunID)
-					publish("loop.admit", "stale-open-admit", map[string]any{"revision_id": first.RevisionID})
+					staleAdmitEventID = publish("loop.admit", "stale-open-admit", map[string]any{"revision_id": first.RevisionID}).EventID
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
 					if lifecycleStoredSnapshot(t, rt, started.RunID) != before {
 						t.Fatal("stale prior revision mutated open loop")
@@ -160,6 +231,16 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 				}
 				publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, "review")
+				if attempt == 2 {
+					// Admit before the root becomes final. Hold actual work, not
+					// completion timing, while probing receiver-final admission.
+					finish = publish("ordinary.finish", "finish-observer", map[string]any{"seed": true})
+					select {
+					case <-finishStarted:
+					case <-time.After(servedProofPollDeadline):
+						t.Fatal("observer finish did not start")
+					}
+				}
 				capRepeat = publish("loop.repeat", fmt.Sprintf("repeat-%d", attempt), payload)
 				capPayload = payload
 				state := "drafting"
@@ -176,7 +257,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 				if ordinary.Fields["revision_id"] != readLifecycleLoop(t, rt, started.RunID, entityID).RevisionID {
 					t.Fatalf("ordinary consumer lost next-attempt revision: %#v", ordinary)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+				waitOtherDeliveries()
 				requireLifecycleEventCount(t, rt, started.RunID, "ordinary.repeated", 1)
 				requireLifecycleEventCount(t, rt, started.RunID, "loop.escaped", attempt-1)
 			}
@@ -198,6 +279,7 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			if !ok || compiled.FlowID() != "." || compiled.Edge().Source != "loop.escape" || compiled.Edge().LoopID != "revision" {
 				t.Fatalf("cap selected cause=%#v", compiled)
 			}
+			requireServedRunStatus(t, rt.Endpoint, started.RunID, "running")
 			before := lifecycleStoredSnapshot(t, rt, started.RunID)
 			duplicate := publish("loop.repeat", "repeat-2", capPayload)
 			if duplicate.EventID != capRepeat.EventID {
@@ -211,9 +293,27 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			if details["reason"] != "receiver_entity_terminal" || details["stage"] != "escaped" || details["flow_id"] != "." {
 				t.Fatalf("late repeat reason=%#v", details)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+			waitOtherDeliveries()
 			if after := lifecycleStoredSnapshot(t, rt, started.RunID); after != before {
 				t.Fatalf("duplicate/stale repeat mutated lifecycle:\nbefore=%s\nafter=%s", before, after)
+			}
+			requireLifecycleEventCount(t, rt, started.RunID, "ordinary.repeated", 1)
+			requireLifecycleEventCount(t, rt, started.RunID, "loop.escaped", 1)
+			unblockFinish()
+			requireLifecycleFlowEntity(t, rt, started.RunID, "ordinary/", "done")
+			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+			requireServedRunStatus(t, rt.Endpoint, started.RunID, "completed")
+			completed := lifecycleStoredSnapshot(t, rt, started.RunID)
+			terminal := requestServedJSONRPC(t, rt.Endpoint, "event.publish", map[string]any{"event_name": "loop.repeat", "run_id": started.RunID, "source_event_id": started.EventID, "payload": map[string]any{"revision_id": first.RevisionID}, "idempotency_key": "completed-stale-repeat"})
+			if terminal.Error == nil || terminal.Error.Data["code"] != "RUN_ALREADY_TERMINAL" || terminal.Error.Data["retryable"] != false {
+				t.Fatalf("completed repeat admission=%#v", terminal.Error)
+			}
+			terminalDetails, _ := terminal.Error.Data["details"].(map[string]any)
+			if terminalDetails["current_status"] != "completed" || terminalDetails["run_id"] != started.RunID {
+				t.Fatalf("completed repeat reason=%#v", terminalDetails)
+			}
+			if after := lifecycleStoredSnapshot(t, rt, started.RunID); after != completed {
+				t.Fatalf("completed stale repeat mutated lifecycle:\nbefore=%s\nafter=%s", completed, after)
 			}
 			requireLifecycleEventCount(t, rt, started.RunID, "ordinary.repeated", 1)
 			requireLifecycleEventCount(t, rt, started.RunID, "loop.escaped", 1)
