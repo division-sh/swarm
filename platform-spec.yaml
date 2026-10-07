@@ -3835,6 +3835,12 @@ handler_specification:
       reconstruction of whether cleanup succeeded. Engine-owned process-local internal-recipient staging is only
       used by the engine's deferred handoff; ordinary and inbound publication dispatch from their prepared route
       and do not populate that engine-only cache.
+      A route rejection settled in the publication transaction remains terminal through ordinary, deferred,
+      committed-continuation and fan-out dispatch. Each handoff carries that exact prepared rejection; dispatch
+      MUST NOT execute recipients or write a second pipeline acknowledgment for the already settled publication.
+      A declared create collision discovered while preparing an engine mutation rejects that mutation with
+      platform.conflicting_duplicate / flow_instance_already_exists before any business effects commit, matching
+      the constructor's commit-time conflict refusal. It MUST NOT become a successful handler with a failed output.
       An activity-request event admitted in the selected-store mutation is carried unchanged through immediate or
       deferred post-commit dispatch. Consumers use the committed publication's exact event, including its timestamp
       and route projection; they MUST NOT reconstruct a second event with the same ID after COMMIT or retry a failed
