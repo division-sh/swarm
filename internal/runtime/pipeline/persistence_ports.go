@@ -77,14 +77,8 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 		return nil, nil, fmt.Errorf("standing target mutation requires observed_at")
 	}
 	for _, target := range req.Targets {
-		keyless, err := StandingConstructionIsKeyless(target.Activation.ContractBundle, semanticview.RootExecutionFlowID(target.Activation.ContractBundle))
-		if err != nil {
+		if err := requireEagerStandingRoot(target.Activation.ContractBundle); err != nil {
 			return nil, nil, err
-		}
-		if keyless {
-			if err := RequireStandingConstructionPath(target.Activation.ContractBundle, semanticview.RootExecutionFlowID(target.Activation.ContractBundle)); err != nil {
-				return nil, nil, err
-			}
 		}
 	}
 	var completions []func() error
@@ -105,16 +99,9 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 			results = append(results, StandingTargetMutationResult{Reconciliation: reconciliation})
 			continue
 		}
-		keyless, err := StandingConstructionIsKeyless(target.Activation.ContractBundle, reconciliation.FlowPath)
+		instance, err := standingGenerationConstruction(target.Activation.ContractBundle, reconciliation.FlowPath, reconciliation.RunID)
 		if err != nil {
 			return nil, nil, err
-		}
-		var instance runtimeflowidentity.Instance
-		if keyless {
-			instance, err = runtimeflowidentity.StandingForGeneration(target.Activation.ContractBundle, reconciliation.FlowPath, reconciliation.RunID)
-			if err != nil {
-				return nil, nil, err
-			}
 		}
 		result := StandingTargetMutationResult{Reconciliation: reconciliation, Instance: instance}
 		if reconciliation.RestartDisposition.Executable() {
@@ -129,25 +116,14 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 					return nil, nil, err
 				}
 			}
-			activation := target.Activation
-			rootID := semanticview.RootExecutionFlowID(activation.ContractBundle)
-			rootKeyless, err := StandingConstructionIsKeyless(activation.ContractBundle, rootID)
+			activation, eager, err := standingRootActivation(target.Activation, reconciliation, instance)
 			if err != nil {
 				return nil, nil, err
 			}
-			if !rootKeyless {
+			if !eager {
 				results = append(results, result)
 				continue
 			}
-			activation.Instance, err = runtimeflowidentity.StandingForGeneration(activation.ContractBundle, rootID, reconciliation.RunID)
-			if err != nil {
-				return nil, nil, err
-			}
-			if instance.TemplateID != activation.Instance.TemplateID {
-				activation.InitialState = ""
-				activation.Bookkeeping = nil
-			}
-			activation.StandingGenerationReplacement = reconciliation.Generation > 1
 			var created bool
 			if preparation != nil {
 				var complete func() error
@@ -187,6 +163,36 @@ func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req St
 		}
 		return nil
 	}, nil
+}
+
+func requireEagerStandingRoot(source semanticview.Source) error {
+	rootID := semanticview.RootExecutionFlowID(source)
+	keyless, err := StandingConstructionIsKeyless(source, rootID)
+	if err != nil || !keyless {
+		return err
+	}
+	return RequireStandingConstructionPath(source, rootID)
+}
+
+func standingGenerationConstruction(source semanticview.Source, flowID, runID string) (runtimeflowidentity.Instance, error) {
+	keyless, err := StandingConstructionIsKeyless(source, flowID)
+	if err != nil || !keyless {
+		return runtimeflowidentity.Instance{}, err
+	}
+	return runtimeflowidentity.StandingForGeneration(source, flowID, runID)
+}
+
+func standingRootActivation(activation FlowInstanceActivationRequest, reconciliation StandingServiceReconciliation, declaring runtimeflowidentity.Instance) (FlowInstanceActivationRequest, bool, error) {
+	instance, err := standingGenerationConstruction(activation.ContractBundle, semanticview.RootExecutionFlowID(activation.ContractBundle), reconciliation.RunID)
+	if err != nil || instance == (runtimeflowidentity.Instance{}) {
+		return activation, false, err
+	}
+	activation.Instance = instance
+	if declaring.TemplateID != instance.TemplateID {
+		activation.InitialState, activation.Bookkeeping = "", nil
+	}
+	activation.StandingGenerationReplacement = reconciliation.Generation > 1
+	return activation, true, nil
 }
 
 func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context, req FlowInstanceTerminationRequest) (FlowInstanceTermination, error) {

@@ -259,13 +259,9 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if len(rootPlans) != 0 {
-		ctx = context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
-		for _, construction := range rootPlans {
-			if err := p.connectPlanner.installFlowConstructionPreview(ctx, evt.RunID(), construction); err != nil {
-				return RoutePlan{}, err
-			}
-		}
+	ctx, err = p.previewPreparedConstructions(ctx, evt.RunID(), rootPlans)
+	if err != nil {
+		return RoutePlan{}, err
 	}
 	projection, err = projection.withActivationPlans(rootPlans)
 	if err != nil {
@@ -311,6 +307,19 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 	routePlan.ConnectEvaluation = connectPlan.Evaluation
 	routePlan.ActivationPlans = rootPlans
 	return projection.resolveRoutePlan(routePlan)
+}
+
+func (p deliveryPlanner) previewPreparedConstructions(ctx context.Context, runID string, plans []runtimepipeline.FlowInstanceActivationPlan) (context.Context, error) {
+	if len(plans) == 0 {
+		return ctx, nil
+	}
+	ctx = withConnectRoutePlanPreview(ctx)
+	for _, plan := range plans {
+		if err := p.connectPlanner.installFlowConstructionPreview(ctx, runID, plan); err != nil {
+			return ctx, err
+		}
+	}
+	return ctx, nil
 }
 
 type mixedPubsubConnectCompositionFailure struct {

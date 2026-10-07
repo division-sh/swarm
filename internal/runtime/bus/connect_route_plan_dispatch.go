@@ -33,6 +33,13 @@ type connectRoutePlanPreviewRoutes struct {
 	inputProducers *runtimepinrouting.FlowInputProducerResolver
 }
 
+func withConnectRoutePlanPreview(ctx context.Context) context.Context {
+	if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil {
+		return ctx
+	}
+	return context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
+}
+
 type connectRoutePlanEvaluationMemoKey struct{}
 
 type connectRoutePlanEvaluationMemo struct {
@@ -166,9 +173,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			return connectRoutePlanDispatch{}, err
 		}
 		evaluationCtx = withTemplateInstanceLifecyclePreview(evaluationCtx)
-		if preview, _ := evaluationCtx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview == nil {
-			evaluationCtx = context.WithValue(evaluationCtx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
-		}
+		evaluationCtx = withConnectRoutePlanPreview(evaluationCtx)
 		evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt), replyRecord)
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
