@@ -328,13 +328,6 @@ func (s *PipelineSQLiteOwner) ObserveReceiptForTest(ctx context.Context, eventID
 	return out, nil
 }
 
-func observePipelineReceipt(ctx context.Context, tx *sql.Tx, eventID string, out *PipelineReceiptEvidence) error {
-	if _, err := uuid.Parse(eventID); err != nil {
-		return err
-	}
-	return tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MAX(outcome),''),COALESCE(MAX(reason_code),'') FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, eventID).Scan(&out.Count, &out.Outcome, &out.Reason)
-}
-
 func (s *PipelinePostgresOwner) RetirePlannedReadinessForTest(ctx context.Context, plan pipeline.DynamicFlowRuntimeReadinessPlan, ordinal uint64, at time.Time) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
