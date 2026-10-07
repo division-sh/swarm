@@ -49,7 +49,7 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				callback, signing, _ := h.provider.Registration()
 				resendToken, inboxMessage := requestChannelRecoveryAction(t, h.provider, callback, signing, "Resend card")
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901020)
-				fresh := waitUncertainCopyDelivery(t, h, oldMessage, "Input: reason (text) required")
+				fresh := waitUncertainCopyDelivery(t, h, inboxMessage, "Input: reason (text) required")
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901020, http.StatusOK)
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901021)
 				waitChannelRejectedCallback(t, db, resendToken)
