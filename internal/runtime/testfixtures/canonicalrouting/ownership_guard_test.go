@@ -365,7 +365,7 @@ func TestCanonicalRoutingSourceProofRegistryEqualsDirectDeclarations(t *testing.
 	}
 	for id, owner := range registered {
 		if _, exists := declared[id]; !exists {
-			t.Fatalf("routing source %q owner %q has no direct executable proof declaration", id, owner)
+			t.Fatalf("routing source %q owner %+v has no direct executable proof declaration", id, owner)
 		}
 	}
 	for id := range declared {

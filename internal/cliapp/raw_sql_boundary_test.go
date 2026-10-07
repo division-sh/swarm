@@ -23,6 +23,7 @@ const (
 	rawSQLOptionalProductBoundary   rawSQLBoundaryClassification = "optional_product_boundary"
 	rawSQLWorkspaceProcessBoundary  rawSQLBoundaryClassification = "workspace_process_boundary"
 	rawSQLTestSupportBoundary       rawSQLBoundaryClassification = "test_support_boundary"
+	rawSQLProviderStateBoundary     rawSQLBoundaryClassification = "provider_private_state_boundary"
 )
 
 type rawSQLBoundaryEntry struct {
@@ -102,6 +103,12 @@ func unclassifiedConcreteStoreProducer(pg *store.PostgresStore) *pipeline.Pipeli
 
 func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 	return map[string]rawSQLBoundaryEntry{
+		"internal/whatsapp/capture.go": {
+			Classification: rawSQLProviderStateBoundary,
+			Issue:          2577,
+			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_incoming_capture",
+			Reason:         "connection-private bounded provider handoff owns only incoming capture and callback failure evidence; it is not a selected-store execution or effect journal",
+		},
 		"internal/testutil/runtimepipelinefixture/context.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2148,
