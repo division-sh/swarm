@@ -876,6 +876,7 @@ func countAllRunRows(t *testing.T, db *sql.DB) int {
 }
 
 func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBundle {
+	const closeEvent = "fixture.close.requested"
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
 		Path:  "discovery",
@@ -899,16 +900,17 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		Schema: runtimecontracts.FlowSchemaDocument{
 			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready"}, {ID: "done", Final: true}}},
 			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
+				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}, {Event: closeEvent}}},
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: eventName}}},
 			},
 			Connect: []runtimecontracts.FlowConnect{{Event: eventName, From: ".", To: "discovery", SourceFile: "schema.yaml", SourceLine: 1}},
 		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{eventName: {Payload: runtimecontracts.EventPayloadSpec{
-			Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}},
-		}}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventName:  {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}}}},
+			closeEvent: {},
+		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"run-owner": {ExecutionType: "system_node", SubscribesTo: []string{eventName}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {AdvancesTo: "done"}}},
+			"run-owner": {ExecutionType: "system_node", SubscribesTo: []string{closeEvent}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{closeEvent: {AdvancesTo: "done"}}},
 		},
 		Children: []runtimecontracts.FlowContractView{flow},
 	}
