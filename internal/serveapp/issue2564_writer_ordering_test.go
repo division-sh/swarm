@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -91,7 +92,7 @@ func TestIssue2564ServedH3CollectionOperationsBothStores(t *testing.T) {
 							newIssue2564Step(),
 						}
 					}
-					_, rt := startIssue2564Served(t, backend, writeIssue2564Fixture(t, false), p, nil)
+					_, rt := startIssue2564Served(t, backend, writeIssue2564Fixture(t, false), p, nil, nil)
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-start"})
 					entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
 					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "h3"}, "idempotency_key": "h3-begin"})
@@ -172,6 +173,10 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 				var resultOnce sync.Once
 				unblockResult := func() { resultOnce.Do(func() { close(releaseResult) }) }
 				defer unblockResult()
+				releaseTimer := make(chan struct{})
+				var timerOnce sync.Once
+				unblockTimer := func() { timerOnce.Do(func() { close(releaseTimer) }) }
+				defer unblockTimer()
 				_, rt := startIssue2564Served(t, backend, writeIssue2564Fixture(t, true), p, func(ctx context.Context, _ string, evt events.Event) error {
 					if string(evt.Type()) != evt.FlowInstance()+"/hub.result" {
 						return nil
@@ -183,7 +188,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 					case <-ctx.Done():
 						return ctx.Err()
 					}
-				})
+				}, issue2564StageTimerDispatchGate{release: releaseTimer})
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-start"})
 				entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-begin"})
@@ -197,6 +202,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 						t.Fatalf("reverse ordering did not commit before timer: %#v", entity)
 					}
 				}
+				unblockTimer()
 				rt.waitEntityStage(t, seed.RunID, entityID, "review")
 				requireIssue2564TimerReceipt(t, rt, seed.RunID, entityID)
 				requireIssue2564Pending(t, rt, seed.RunID, "agent", "hub.work")
@@ -241,6 +247,22 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 type issue2564Call struct {
 	name  string
 	input map[string]any
+}
+
+type issue2564StageTimerDispatchGate struct {
+	release <-chan struct{}
+}
+
+func (g issue2564StageTimerDispatchGate) NotifyLifecycle(ctx context.Context, signal runtimelifecycleprobe.Signal) {
+	if signal.Kind != runtimelifecycleprobe.PostCommitDispatchStarted || signal.EventType != "platform.stage_timer" {
+		return
+	}
+	// Keep the real deadline and accepted occurrence; only stage advancement
+	// waits until the test has established its explicit save/timer ordering.
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+	}
 }
 
 type issue2564ProviderStep struct {
@@ -433,10 +455,11 @@ func issue2564ToolResults(value any) []any {
 	return nil
 }
 
-func startIssue2564Served(t *testing.T, backend, root string, p *issue2564Provider, hook func(context.Context, string, events.Event) error) (*serveRuntimeTestProcess, issue2564ServedFixture) {
+func startIssue2564Served(t *testing.T, backend, root string, p *issue2564Provider, hook func(context.Context, string, events.Event) error, probe runtimelifecycleprobe.Observer) (*serveRuntimeTestProcess, issue2564ServedFixture) {
 	t.Helper()
 	opts, start := issue2564ServeHarness(t, backend, root, false)
 	opts.TestWorkflowNodeHandlerStartHook = hook
+	opts.TestLifecycleProbe = probe
 	server := httptest.NewServer(p)
 	t.Cleanup(server.Close)
 	redirectExternalHosts(t, map[string]string{"api.anthropic.com": server.URL})
