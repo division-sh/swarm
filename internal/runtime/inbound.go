@@ -892,7 +892,7 @@ func parseWebhookPath(path string) (entityID, provider string, ok bool) {
 	if len(parts) != 3 || parts[0] != "webhooks" {
 		return "", "", false
 	}
-	entityID = strings.TrimSpace(parts[1])
+	entityID = parts[1]
 	provider = strings.TrimSpace(parts[2])
 	if entityID == "" || provider == "" {
 		return "", "", false

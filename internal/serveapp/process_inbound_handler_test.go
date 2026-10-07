@@ -48,6 +48,11 @@ func TestStandingIngressAliasGrammarMatchesProcessWebhookRouter(t *testing.T) {
 	if _, _, ok := parseProcessWebhookPath("/webhooks/chat/support/telegram"); ok {
 		t.Fatal("parseProcessWebhookPath accepted a multi-segment alias")
 	}
+	for _, alias := range []string{" chat", "chat "} {
+		if parsed, _, _ := parseProcessWebhookPath("/webhooks/" + alias + "/telegram"); parsed != alias {
+			t.Fatalf("parser normalized unadmitted alias %q into %q", alias, parsed)
+		}
+	}
 }
 
 func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {

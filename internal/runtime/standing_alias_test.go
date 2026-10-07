@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packadmission"
@@ -125,6 +126,11 @@ func TestA9IngressLookupUsesExactAlias(t *testing.T) {
 		t.Fatal("exact admitted ingress is not discoverable")
 	}
 	for _, alias := range []string{" primary", "primary ", "/primary", "primary/"} {
+		if strings.HasPrefix(alias, " ") || strings.HasSuffix(alias, " ") {
+			if parsed, _, _ := parseWebhookPath("/webhooks/" + alias + "/acme"); parsed != alias {
+				t.Fatalf("lower gateway parser normalized unadmitted alias %q into %q", alias, parsed)
+			}
+		}
 		if lookup := manager.LookupIngress(alias, "acme"); lookup.Found || lookup.AliasFound {
 			t.Fatalf("unadmitted alias %q selected an incumbent: %+v", alias, lookup)
 		}

@@ -73,9 +73,12 @@ func proveA9AliasPublication(t *testing.T, file *credentials.FileStore, base, fl
 	if status != http.StatusOK || !reflect.DeepEqual(a9AliasReceipt(t, receipt), a9AliasReceipt(t, duplicate)) {
 		t.Fatalf("exact retry changed receipt: %s -> %s status=%d", receipt, duplicate, status)
 	}
-	for _, unadmitted := range []string{" " + alias, alias + " ", alias + "%2Fextra"} {
-		if status, response := postProviderAliasUpdate(t, base, unadmitted, secret, body); status != http.StatusNotFound {
-			t.Fatalf("unadmitted endpoint %q selected alias %q: status=%d response=%s", unadmitted, alias, status, response)
+	for _, unadmitted := range []struct {
+		alias  string
+		status int
+	}{{" " + alias, http.StatusNotFound}, {alias + " ", http.StatusNotFound}, {alias + "%2Fextra", http.StatusBadRequest}} {
+		if status, response := postProviderAliasUpdate(t, base, unadmitted.alias, secret, body); status != unadmitted.status {
+			t.Fatalf("unadmitted endpoint %q selected alias %q: status=%d want=%d response=%s", unadmitted.alias, alias, status, unadmitted.status, response)
 		}
 	}
 }
