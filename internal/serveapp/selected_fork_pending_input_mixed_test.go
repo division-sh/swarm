@@ -13,9 +13,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
@@ -62,6 +64,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			waitServedDeliveryOutcomeCount(t, rt.DB, rt.Backend, input.EventID, "node", completedNode.Key(), "delivered", 1)
 			marker := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.marked", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "marker"})
 			waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, marker.EventID, "platform", "pipeline", "success", 1)
+			waitMixedForkSourceCheckpoint(t, selected, rt.BundleHash, seed.RunID, input.EventID, marker.EventID, completedNode.Key())
 			family, ok := selected.RunFork()
 			if !ok {
 				t.Fatal("missing fork owner")
@@ -115,7 +118,17 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			if refusal == nil || refusal.Error() != "selected-contract fork execution materialization blocked: non_agent_delivery_replay_unsupported" {
 				t.Fatalf("historical replay refusal changed: %v", refusal)
 			}
-			for table, rows := range snapshotForkReceiverApplication(t, rt) {
+			after := snapshotForkReceiverApplication(t, rt)
+			if !reflect.DeepEqual(before["runs"], after["runs"]) {
+				t.Logf("changed runs columns=%v", before["runs/columns"])
+				for _, row := range before["runs"] {
+					t.Logf("runs before: %s", row)
+				}
+				for _, row := range after["runs"] {
+					t.Logf("runs after: %s", row)
+				}
+			}
+			for table, rows := range after {
 				if !reflect.DeepEqual(before[table], rows) {
 					t.Fatalf("refused historical replay changed table %s", table)
 				}
@@ -126,4 +139,60 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			requirePendingInputStateCount(t, rt, seed.RunID, "archived", 1)
 		})
 	}
+}
+
+// Publication receipts precede handler handoff and completion-candidate work.
+// Keep the child pending, but finish that independent work before the refusal baseline.
+func waitMixedForkSourceCheckpoint(t *testing.T, selected *selectedStoreOwner, bundleHash, runID, inputID, markerID, completedNodeID string) {
+	t.Helper()
+	deps := selected.RuntimeDeps()
+	child, err := identity.AdmitExecutableNodeDeclaration("child", "controller")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var input, marker storetest.DeliveryEventEvidence
+	var candidates runlifecycle.CandidatePage
+	for time.Now().Before(deadline) {
+		input = storetest.ObserveDeliveryEventEvidence(t, t.Context(), deps.EventStore, inputID)
+		marker = storetest.ObserveDeliveryEventEvidence(t, t.Context(), deps.EventStore, markerID)
+		if input.DeadLetters != 0 || len(input.Deliveries) != 2 || marker.DeadLetters != 0 || len(marker.Deliveries) != 1 {
+			t.Fatalf("mixed source lost its exact deliveries: input=%+v marker=%+v", input, marker)
+		}
+		ready := true
+		for _, row := range input.Deliveries {
+			if row.RunID != runID || row.EventID != inputID || row.SubscriberType != "node" {
+				t.Fatalf("mixed source delivery changed owner: %+v", row)
+			}
+			switch row.SubscriberID {
+			case completedNodeID:
+				ready = ready && row.Status == "delivered" && row.HandoffPresent
+			case child.Key():
+				if row.Status != "in_progress" || len(row.Attempts) != 1 || row.Attempts[0].ClosureKind != "open" {
+					t.Fatalf("mixed source child did not remain held: %+v", row)
+				}
+			default:
+				t.Fatalf("mixed source gained an unexpected recipient: %+v", row)
+			}
+		}
+		row := marker.Deliveries[0]
+		if row.RunID != runID || row.EventID != markerID || row.SubscriberType != "node" {
+			t.Fatalf("mixed source marker changed owner: %+v", row)
+		}
+		if ready && row.Status == "delivered" && row.HandoffPresent {
+			candidates, err = deps.RunLifecycleCandidates.ListCompletionCandidates(t.Context(), runlifecycle.CandidateScope{BundleHash: bundleHash}, runlifecycle.CandidateCursor{}, 128)
+			if err != nil || !candidates.Exhausted {
+				t.Fatalf("mixed source completion census is incomplete: candidates=%+v err=%v", candidates, err)
+			}
+			armed := false
+			for _, candidate := range candidates.Candidates {
+				armed = armed || candidate.RunID == runID
+			}
+			if !armed {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("mixed source did not finish handoff/completion work: input=%+v marker=%+v candidates=%+v", input, marker, candidates)
 }
