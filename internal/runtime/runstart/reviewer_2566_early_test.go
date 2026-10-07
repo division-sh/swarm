@@ -6,18 +6,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestReviewer2566NestedFeedReceiverMustEnterFiniteClosure(t *testing.T) {
-	source := finiteTestSource(t, map[string]string{
-		"schema.yaml":            "stages: {done: {final: true}}\nconnect:\n  - {event: work.requested, from: producer, to: worker, resolution: create}\n",
-		"producer/schema.yaml":   "instance: producer_id\nstages: {done: {final: true}}\npins:\n  outputs: [work.requested]\n",
-		"producer/entities.yaml": "Producer:\n  producer_id: {type: text, _unused_reason: dormant identity}\n",
-		"producer/events.yaml":   "work.requested:\n  worker_id: text\n",
-		"worker/schema.yaml":     "instance: worker_id\nstages: {active: {}}\npins:\n  inputs: [work.requested]\n",
-		"worker/entities.yaml":   "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-		"worker/nodes.yaml":      "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
-	})
+	source := finiteTestSource(t, canonicalrouting.CopyFiniteNestedServiceFeed(t))
 	feed, err := events.NewDeploymentFeedRoutingSource("producer")
 	if err != nil {
 		t.Fatal(err)
@@ -36,30 +29,17 @@ func TestReviewer2566NestedFeedReceiverMustEnterFiniteClosure(t *testing.T) {
 }
 
 func TestFiniteStartSelectedFeedsUseExactRoutesAndRecursiveConstructors(t *testing.T) {
-	for _, offender := range []string{"worker", "worker/support/leaf", "none"} {
-		t.Run(offender, func(t *testing.T) {
-			worker, leaf := "stages: {done: {final: true}}\n", "stages: {done: {final: true}}\n"
-			if offender == "worker" {
-				worker = "stages: {active: {}}\n"
-			}
-			if offender == "worker/support/leaf" {
-				leaf = "stages: {active: {}}\n"
-			}
-			source := finiteTestSource(t, map[string]string{
-				"schema.yaml": "stages: {done: {final: true}}\nconnect:\n  - {event: work.requested, from: producer, to: worker, resolution: create}\n  - {event: work.safe, from: producer, to: safe, resolution: create}\n",
-				// A feed does not instantiate its keyed source, even a service.
-				"producer/schema.yaml":            "instance: producer_id\nstages: {active: {}}\npins:\n  outputs: [work.requested, work.safe]\n",
-				"producer/entities.yaml":          "Producer:\n  producer_id: {type: text, _unused_reason: dormant identity}\n",
-				"producer/events.yaml":            "work.requested:\n  worker_id: text\nwork.safe:\n  worker_id: text\n",
-				"worker/schema.yaml":              "instance: worker_id\n" + worker + "pins:\n  inputs: [work.requested]\n",
-				"worker/entities.yaml":            "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-				"worker/nodes.yaml":               "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
-				"worker/support/schema.yaml":      "stages: {done: {final: true}}\n",
-				"worker/support/leaf/schema.yaml": leaf,
-				"safe/schema.yaml":                "instance: worker_id\nstages: {done: {final: true}}\npins:\n  inputs: [work.safe]\n",
-				"safe/entities.yaml":              "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-				"safe/nodes.yaml":                 "worker:\n  execution_type: system_node\n  event_handlers:\n    work.safe: {}\n",
-			})
+	for _, tc := range []struct {
+		offender string
+		variant  canonicalrouting.FiniteClosureOffender
+	}{
+		{"worker", canonicalrouting.FiniteClosureWorkerService},
+		{"worker/support/leaf", canonicalrouting.FiniteClosureChildService},
+		{"none", canonicalrouting.FiniteClosureEnded},
+	} {
+		t.Run(tc.offender, func(t *testing.T) {
+			// A feed does not instantiate its keyed source, even a service.
+			source := finiteTestSource(t, canonicalrouting.CopyFiniteSelectedFeedClosure(t, tc.variant))
 			routing, err := events.NewDeploymentFeedRoutingSource("producer")
 			if err != nil {
 				t.Fatal(err)
@@ -76,15 +56,15 @@ func TestFiniteStartSelectedFeedsUseExactRoutesAndRecursiveConstructors(t *testi
 				t.Fatalf("unselected source or route entered the closure: %v", err)
 			}
 			err = ValidateFinite(source, feeds)
-			if offender == "none" {
+			if tc.offender == "none" {
 				if err != nil {
 					t.Fatal(err)
 				}
 				return
 			}
 			var refusal *FiniteStartError
-			if !errors.As(err, &refusal) || refusal.FlowID != offender {
-				t.Fatalf("selected feed closure missed %s: %v", offender, err)
+			if !errors.As(err, &refusal) || refusal.FlowID != tc.offender {
+				t.Fatalf("selected feed closure missed %s: %v", tc.offender, err)
 			}
 		})
 	}

@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -313,25 +311,7 @@ func TestRunStartRejectsDeclaredFeedWithoutOutputPinBeforeMutation(t *testing.T)
 
 func deploymentRunStartTestSource(t *testing.T) (semanticview.Source, durabledata.Catalog, durabledata.DeclarationRef, durabledata.DeclarationRef, durabledata.DeclarationRef) {
 	t.Helper()
-	// This deployment delegates work to data-created instances. An empty feed
-	// constructs only the explicit ended root; it must not strand an eager worker.
-	root := t.TempDir()
-	files := map[string]string{
-		"schema.yaml":             "name: deployment\nstages: {done: {final: true}}\npins:\n  inputs: [scan.requested]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n",
-		"events.yaml":             "scan.requested:\n  topic: text\nscore.observed:\n  key: label\n  label: text\nportfolio.opened:\n  topic: text\n",
-		"discovery/schema.yaml":   "instance: topic\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [scan.requested]\n",
-		"discovery/entities.yaml": "Scan:\n  topic: text\n",
-		"discovery/nodes.yaml":    "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: done\n",
-	}
-	for name, body := range files {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	root := canonicalrouting.CopyDeploymentRunStart(t)
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
