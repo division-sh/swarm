@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
@@ -2116,34 +2117,13 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 			store, ctx := tc.open(t)
 			standingCtx := ctx
 			flowPath := "standing-workflow-timer"
-			sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
-			if !ok {
-				t.Fatal("standing timer test context missing bundle source fact")
-			}
-			bundleHash := sourceFact.BundleHash()
-			if store.isSQLite() {
-				if _, err := store.testDB().ExecContext(ctx, `
-						INSERT INTO standing_services (
-							service_id, flow_path, declaration_present, binding_enabled,
-							operator_override, effective_state, current_bundle_hash,
-							revision_sequence, current_generation, current_run_id, publication_state,
-							publication_sequence, created_at, updated_at
-						) VALUES (?, ?, TRUE, TRUE, 'none', 'active', ?, 1, 1, ?, 'pending', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-						`, runtimeflowidentity.StandingServiceID(flowPath), flowPath, bundleHash, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
-					t.Fatalf("seed standing ownership fixture: %v", err)
-				}
-			} else {
-				if _, err := store.testDB().ExecContext(ctx, `
-					INSERT INTO standing_services (
-						service_id, flow_path, declaration_present, binding_enabled,
-						operator_override, effective_state, current_bundle_hash,
-						revision_sequence, current_generation, current_run_id, publication_state,
-						publication_sequence, created_at, updated_at
-					) VALUES ($1::uuid, $2, TRUE, TRUE, 'none', 'active', $3, 1, 1, $4::uuid, 'pending', 0, NOW(), NOW())
-					`, runtimeflowidentity.StandingServiceID(flowPath), flowPath, bundleHash, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
-					t.Fatalf("seed standing ownership fixture: %v", err)
-				}
-			}
+			// This component test owns timer storage and restoration, not standing
+			// construction. Served tests exercise the native standing mutation owner.
+			store.standingServices = workflowTimerStandingReadControl{fact: runtimerunlifecycle.StandingRestartFact{
+				ServiceID: runtimeflowidentity.StandingServiceID(flowPath), RunID: runtimecorrelation.RunIDFromContext(ctx),
+				Generation: 1, ExactCurrent: true, DeclarationPresent: true, BindingEnabled: true,
+				EffectiveState: "active", OperatorOverride: "none", RunState: "running",
+			}}
 			pc, _, _ := seedWorkflowTimerOwnerActivationAt(
 				t, store, standingCtx, &recordingPipelineBus{}, false, "1h", time.Now(), false,
 			)
@@ -2168,6 +2148,18 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 			}
 		})
 	}
+}
+
+type workflowTimerStandingReadControl struct {
+	StandingServicePersistence
+	fact runtimerunlifecycle.StandingRestartFact
+}
+
+func (c workflowTimerStandingReadControl) StandingRunRestartDisposition(_ context.Context, runID string) (runtimerunlifecycle.StandingRestartDisposition, error) {
+	if runID != c.fact.RunID {
+		return runtimerunlifecycle.ClassifyStandingRestart(runtimerunlifecycle.StandingRestartFact{})
+	}
+	return runtimerunlifecycle.ClassifyStandingRestart(c.fact)
 }
 
 func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *testing.T) {
