@@ -49,15 +49,16 @@ type Identity struct {
 }
 
 type Request struct {
-	ModuleID    string
-	RowID       string
-	Digest      string
-	Entry       string
-	Source      []byte
-	Input       []byte
-	Fuel        uint64
-	MemoryPages uint32
-	OutputBytes int
+	ModuleID          string
+	RowID             string
+	Digest            string
+	Entry             string
+	Source            []byte
+	Input             []byte
+	Fuel              uint64
+	MemoryPages       uint32
+	OutputBytes       int
+	CompiledCacheRoot string
 }
 
 type Result struct {
@@ -177,7 +178,7 @@ func runHarness(ctx context.Context, req Request, envelope harnessEnvelope, fuel
 		return harnessWireResult{}, err
 	}
 	ctxDone := ctx.Done()
-	root, engine, module, err := newInterpreterModuleForContext(ctx)
+	root, engine, module, err := newInterpreterModuleForContext(ctx, req.CompiledCacheRoot)
 	if err != nil {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return harnessWireResult{}, contextErr
@@ -300,7 +301,7 @@ type interpreterModuleResult struct {
 	err    error
 }
 
-func newInterpreterModuleForContext(ctx context.Context) (string, *wasmtime.Engine, *wasmtime.Module, error) {
+func newInterpreterModuleForContext(ctx context.Context, cacheRoot string) (string, *wasmtime.Engine, *wasmtime.Module, error) {
 	result := make(chan interpreterModuleResult)
 	go func() {
 		root, err := materializedArtifactDir()
@@ -314,7 +315,7 @@ func newInterpreterModuleForContext(ctx context.Context) (string, *wasmtime.Engi
 		if ctx.Err() != nil {
 			return
 		}
-		engine, module, err := newInterpreterModule(root)
+		engine, module, err := newInterpreterModule(root, cacheRoot)
 		prepared := interpreterModuleResult{root: root, engine: engine, module: module, err: err}
 		select {
 		case result <- prepared:
@@ -344,22 +345,24 @@ func closeInterpreterModule(prepared interpreterModuleResult) {
 	}
 }
 
-func newInterpreterModule(root string) (*wasmtime.Engine, *wasmtime.Module, error) {
+func newInterpreterModule(root, cacheRoot string) (*wasmtime.Engine, *wasmtime.Module, error) {
 	interpreterModuleOnce.Do(func() {
-		wasm, err := os.ReadFile(filepath.Join(root, pythonWasmPath))
-		if err != nil {
-			interpreterModuleErr = fmt.Errorf("read embedded %s: %w", pythonWasmPath, err)
-			return
+		if cacheRoot == "" {
+			var err error
+			cacheRoot, err = artifactCacheBaseDir()
+			if err != nil {
+				interpreterModuleErr = err
+				return
+			}
 		}
-		engine := wasmtime.NewEngineWithConfig(newInterpreterConfig())
-		defer engine.Close()
-		module, err := wasmtime.NewModule(engine, wasm)
+		identity, err := currentCompiledInterpreterIdentity()
 		if err != nil {
 			interpreterModuleErr = err
 			return
 		}
-		defer module.Close()
-		serializedInterpreterModule, interpreterModuleErr = module.Serialize()
+		serializedInterpreterModule, interpreterModuleErr = loadCompiledInterpreter(cacheRoot, identity, func() ([]byte, error) {
+			return compileInterpreter(root)
+		})
 	})
 	if interpreterModuleErr != nil {
 		return nil, nil, interpreterModuleErr
@@ -373,16 +376,32 @@ func newInterpreterModule(root string) (*wasmtime.Engine, *wasmtime.Module, erro
 	return engine, module, nil
 }
 
+func compileInterpreter(root string) ([]byte, error) {
+	wasm, err := os.ReadFile(filepath.Join(root, pythonWasmPath))
+	if err != nil {
+		return nil, fmt.Errorf("read embedded %s: %w", pythonWasmPath, err)
+	}
+	engine := wasmtime.NewEngineWithConfig(newInterpreterConfig())
+	defer engine.Close()
+	module, err := wasmtime.NewModule(engine, wasm)
+	if err != nil {
+		return nil, err
+	}
+	defer module.Close()
+	return module.Serialize()
+}
+
 func newInterpreterConfig() *wasmtime.Config {
+	policy := currentInterpreterPolicy()
 	cfg := wasmtime.NewConfig()
-	cfg.SetConsumeFuel(true)
-	cfg.SetEpochInterruption(true)
-	cfg.SetWasmBulkMemory(true)
-	cfg.SetWasmMemory64(false)
-	cfg.SetWasmMultiMemory(false)
-	cfg.SetWasmSIMD(false)
-	cfg.SetWasmRelaxedSIMD(false)
-	cfg.SetWasmThreads(false)
+	cfg.SetConsumeFuel(policy.ConsumeFuel)
+	cfg.SetEpochInterruption(policy.EpochInterruption)
+	cfg.SetWasmBulkMemory(policy.BulkMemory)
+	cfg.SetWasmMemory64(policy.Memory64)
+	cfg.SetWasmMultiMemory(policy.MultiMemory)
+	cfg.SetWasmSIMD(policy.SIMD)
+	cfg.SetWasmRelaxedSIMD(policy.RelaxedSIMD)
+	cfg.SetWasmThreads(policy.Threads)
 	return cfg
 }
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 )
 
@@ -94,6 +95,17 @@ func RunWorker(ctx context.Context, target *Target, dockerBin string, request wo
 	}
 	request.Expected = expected
 	request.Deadline, _ = ctx.Deadline()
+	if request.Module != nil {
+		module := *request.Module
+		module.CompiledCacheRoot = ""
+		if target.ExecutionTarget().Mode == ExecutionModeHostLocal {
+			module.CompiledCacheRoot, err = pythonmodule.ProcessArtifactCacheRoot()
+			if err != nil {
+				return worker.Result{}, &WorkerExecutionError{Err: err}
+			}
+		}
+		request.Module = &module
+	}
 	input, err := json.Marshal(request)
 	if err != nil || len(input) > worker.MaxBytes {
 		return worker.Result{}, &WorkerExecutionError{Err: failures.New(failures.ClassSchemaInvalid, "workspace_worker_input_invalid", "workspace", "launch_worker", nil)}
