@@ -11225,6 +11225,22 @@ tool_model:
         state before Swarm's incoming capture; pre-capture redelivery and decryption-failure acknowledgments are not
         claimed durably recoverable. This limitation never grants a successful Swarm capture acknowledgment. The
         bounded incoming-only capture owner must prove its separate commit, publication and acknowledgment boundaries.
+      session_pairing_qr: >
+        The concrete WhatsApp pairing owner consumes the public QR and ADV-rotation events through the same guarded
+        occurrence callback as incoming capture; the SDK GetQRChannel convenience helper is not a supported Swarm
+        execution path. One joined expiry worker owns a bounded replacement snapshot, never a queue of emitter
+        goroutines or a code-bearing output channel. A batch admits at most six nonempty UTF-8 codes of 4096 bytes
+        each. A newly received batch replaces the prior batch; its first code expires after 60 seconds and each
+        subsequent code after 20 seconds. Readback also enforces elapsed expiry before returning material.
+        ADV rotation replaces only the exact ADV-secret component in the pinned SDK QR URI representation, preserves
+        remaining identity fields and expiry, and refuses invalid or mismatched secret evidence without fallback.
+        Overflow, unsupported passkey or non-multidevice modes, failure, cancellation and retirement clear QR material.
+        Readback requires the exact authenticated onboarding principal, operation, durable source and live context,
+        stable connection and connection occurrence; successor admission never adopts predecessor QR material.
+        PairSuccess and Connected clear disclosure but remain separately named observations, not provider account
+        admission, executable readiness, standing retention or human identity. Pairing callback installation precedes
+        connect, and occurrence fencing and joining include this owner. Session execution remains unavailable until
+        the complete connection is installed and qualified; isolated QR proofs do not clear upstream SDK lifetime defects.
       session_incoming_capture: >
         WhatsApp incoming capture commits exact payload bytes together with the original session admission,
         connection occurrence, source identity, onboarding responsibility, principal and binding revision before
