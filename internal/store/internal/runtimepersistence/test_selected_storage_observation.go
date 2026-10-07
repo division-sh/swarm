@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-
-	"github.com/google/uuid"
 )
 
 // This private adapter is extracted from the existing served observation owner.
@@ -19,16 +17,6 @@ func readServedDeliveryObservation(ctx context.Context, selected any, read func(
 	default:
 		return fmt.Errorf("storage observation requires the original selected owner, got %T", selected)
 	}
-}
-
-func validateEntityToolStorageIdentity(runID, entityID string) error {
-	if _, err := uuid.Parse(runID); err != nil {
-		return fmt.Errorf("entity tool storage requires an exact run identity: %w", err)
-	}
-	if _, err := uuid.Parse(entityID); err != nil {
-		return fmt.Errorf("entity tool storage requires an exact entity identity: %w", err)
-	}
-	return nil
 }
 
 func validateChannelObservationOwner(selected any) error {

@@ -11355,7 +11355,11 @@ tool_model:
         process-only topology. It defers initial-entry finalization, timers, and creation-event publication. After the
         executable catalog is installed, PreparedStartup.Start is the sole single-use release owner: it admits the
         generation grant and Manager.Run, completes prepared standing topology through the existing finalizer, and
-        then releases recovery and producer phases. Reset uses this same owner after complete-set consumer convergence;
+        then verifies source-scoped startup topology before releasing recovery and producer phases. Standing preparation
+        may construct a newly credential-enabled generation after the startup snapshot; its exact acknowledged
+        finalizer completes that construction before snapshot-based verification. It does not confer recovery authority
+        on unrelated pending instances or bypass current source, attempt, or generation checks.
+        Reset uses this same owner after complete-set consumer convergence;
         no second prepared-start interpreter or early grant admission is permitted.
       registration_handoff_rule: >
         A pre-binding webhook intent carries only exact registration plan, target, validated credential observation, and generation facts.

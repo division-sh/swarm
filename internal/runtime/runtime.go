@@ -1815,14 +1815,16 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 				return fmt.Errorf("start managed execution loops: %w", err)
 			}
-			if err := rt.Manager.CompleteDynamicFlowRuntimeStartupTopology(startCtx, startupTopology); err != nil {
-				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
-				return fmt.Errorf("complete source-scoped dynamic topology: %w", err)
-			}
 			if completePreparedTopology != nil {
 				if err := completePreparedTopology(); err != nil {
 					return fmt.Errorf("complete prepared standing topology after publication: %w", err)
 				}
+			}
+			// Standing preparation can admit a new generation after the startup
+			// snapshot. Its exact finalizer must settle that construction first.
+			if err := rt.Manager.CompleteDynamicFlowRuntimeStartupTopology(startCtx, startupTopology); err != nil {
+				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
+				return fmt.Errorf("complete source-scoped dynamic topology: %w", err)
 			}
 			if replayAllowed {
 				startupRecoveryDecision.ManagerRecoveryAttempted = true

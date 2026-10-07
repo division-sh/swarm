@@ -67,13 +67,28 @@ func TestServedClockRetainsWithoutIngressCredentialsBothStores(t *testing.T) {
 			for _, status := range statuses {
 				if status.FlowPath == "beta" {
 					siblingService = status.ServiceID
+				} else if status.FlowPath == "." && (status.RunID != rootRun || status.ServiceID != rootService) {
+					t.Fatalf("credential enabling replaced the clock's standing owner: %+v", status)
 				}
-				if !status.RestartDisposition.Executable() {
+				if !status.RestartDisposition.Executable() || status.Generation != 1 {
 					t.Fatalf("real credentials failed binding readiness: %+v", status)
 				}
 			}
 			if siblingService == "" {
 				t.Fatal("real sibling ingress binding did not acquire its own generation")
+			}
+			readiness, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(t.Context(), rt.Options.SourceArtifactFact)
+			if err != nil || len(readiness.CurrentPending) != 0 || len(readiness.SourceTransitionRequired) != 0 {
+				t.Fatalf("credential enabling left unfinished startup topology: %+v err=%v", readiness, err)
+			}
+			completedRuns := make(map[string]bool)
+			for _, item := range readiness.CurrentCompleted {
+				completedRuns[item.Plan.RunID] = true
+			}
+			for _, status := range statuses {
+				if !completedRuns[status.RunID] {
+					t.Fatalf("ready service lacks completed topology for its exact run: %+v", status)
+				}
 			}
 			current := readServedClockHeader(t, restarted.Endpoint, rootRun).ClockSchedules[0]
 			if current.ActivationID != initial.ActivationID || !current.RetainsRun || !current.InitialDueAt.Equal(initial.InitialDueAt) {
