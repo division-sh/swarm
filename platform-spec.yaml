@@ -3446,6 +3446,24 @@ compute_module_contracts:
         MUST converge on that one tree.
         Anonymous process-scoped interpreter extraction and marker-only cache trust
         are forbidden; invocation transport scratch remains separate and ephemeral.
+        The same Python-module owner MUST reuse immutable compiled interpreter
+        code across fresh workers, keyed by the pinned interpreter/snapshot,
+        Wasmtime version, exact executing binary, operating system, architecture,
+        CPU feature set and the exact fuel/epoch/proposal compilation policy.
+        This private cache is outside
+        the guest-mounted interpreter tree. Before deserializing compiler-owned
+        bytes, verify the exact identity, size and content digest of a private
+        regular file; symlinks and shared-write/read entries are refused. Missing
+        or corrupt entries are regenerated only from the verified pinned artifact
+        under the existing interprocess publication lock and atomically published.
+        Compiled-code reuse MUST NOT reuse a worker process, Wasmtime Store,
+        linear memory, model/session state, target authority or MCP connection.
+        Every invocation retains its original limits and cancellation/cleanup;
+        target-local executable identity and gateway checks remain mandatory.
+        Host workers consume the Python-module owner's boot-pinned cache location,
+        not a new inference from mutable HOME/XDG settings. This internal location
+        is never authored or included in model input. Docker workers use their own
+        target-local cache; no host cache path is sent into the container.
         No official python.org prebuilt WASI binary exists; this first slice
         records the artifact as an unofficial-but-canonical community/core-dev
         build. Self-building CPython-WASI from source in swarm release CI is a
