@@ -1396,6 +1396,45 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	}
 }
 
+func TestEngineOutboxCommittedTargetRefusalPreservesDisposition(t *testing.T) {
+	store := &outboxClaimStore{}
+	eb, err := newScopedTestEventBus(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := runtimeengine.EmitIntent{Event: eventtest.RunCreatingRootIngress(
+		uuid.NewString(), "child/output.done", "", "", []byte(`{}`), 0,
+		runtimebustest.DefaultRunID, "",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{
+			EntityID: uuid.NewString(), FlowInstance: "missing-flow",
+		}), time.Now().UTC(),
+	)}
+	ctx := context.Background()
+	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.receipts[intent.Event.ID()]; got != runtimepipelineobligation.DispositionDeadLetter {
+		t.Fatalf("committed disposition = %s, want dead letter", got)
+	}
+	for i := 0; i < 2; i++ {
+		if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+			t.Fatal(err)
+		}
+		if got := store.receipts[intent.Event.ID()]; got != runtimepipelineobligation.DispositionDeadLetter {
+			t.Fatalf("dispatch %d replaced committed refusal with %s", i, got)
+		}
+		store.claimMu.Lock()
+		remaining := len(store.claims)
+		store.claimMu.Unlock()
+		if remaining != 0 {
+			t.Fatalf("dispatch %d retained %d claims", i, remaining)
+		}
+	}
+	if routes := store.routes[intent.Event.ID()]; len(routes) != 0 {
+		t.Fatalf("refused publication acquired deliveries: %+v", routes)
+	}
+}
+
 func TestEngineOutbox_TargetFailureDeadLetterErrorFailsClosed(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

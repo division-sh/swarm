@@ -39580,6 +39580,13 @@ durable_pipeline_processing_obligation_authority:
       cursor wrapper and later recovery opens a fresh selected-store cursor.
   disposition_contract:
     vocabulary: [acknowledged, deferred, terminal_error, dead_letter, quarantined]
+    committed_publication_handoff: >
+      A target refusal committed with publication is carried as that exact closed disposition through prepared
+      publication, engine outbox and grouped dispatch. Consumers release the exact publication claim without
+      executing or settling the refused publication again. Commit acknowledgement, prerequisite errors, event
+      identity and delivery-handoff checks remain required; a failed commit is not a committed refusal. Provider
+      raw settlement keeps its separately admitted treatment. Repeated callbacks without local handoff evidence
+      use the existing exact durable recovery owner, never new settlement rights or reconstructed refusal evidence.
     dispatch_decision: >
       One EventBus decision owner classifies execution outcomes and dispatch failures for ordinary and inbound
       committed publication, committed outbox/group publication, and claimed recovery. Foreground classification

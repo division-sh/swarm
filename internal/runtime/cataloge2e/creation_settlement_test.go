@@ -3,6 +3,7 @@ package cataloge2e
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 type catalogCreationSettlementObserver func(context.Context, lifecycleprobe.Signal)
@@ -91,6 +93,14 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 				})
 				for _, group := range transcript.groups {
 					for _, step := range group.steps {
+						var preservedChild *runtimepipeline.WorkflowInstance
+						if transcript.expected.Expected.RefusedPublication != nil && step.ReceiptOutcome == "success" {
+							child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, workerPath, false)
+							if err != nil || !found {
+								t.Fatalf("capture receiver before duplicate: found=%t err=%v", found, err)
+							}
+							preservedChild = &child
+						}
 						if step.Event == "flow.finished" {
 							parent, found, err := h.workflow.Load(h.ctx, catalogRootWorkflowRoute())
 							if err != nil || !found || parent.CurrentState != "spawned" {
@@ -113,6 +123,12 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 								t.Logf("creation event id=%s type=%s deliveries=%+v no_delivery=%+v dead_letters=%+v", id, event.EventName, event.Deliveries, event.NoDelivery, event.DeadLetters)
 							}
 							t.Fatal(err)
+						}
+						if preservedChild != nil {
+							child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, workerPath, false)
+							if err != nil || !found || !reflect.DeepEqual(*preservedChild, child) {
+								t.Fatalf("duplicate changed receiver: found=%t err=%v before=%+v after=%+v", found, err, preservedChild, child)
+							}
 						}
 					}
 					h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)

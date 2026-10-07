@@ -271,7 +271,8 @@ func (eb *EventBus) takeFanOutOutboxOperation(committed CommittedEnginePublicati
 	if operation.publicationClaim == nil || operation.publicationClaim != committed.plan.prepared.publicationClaim ||
 		!reflect.DeepEqual(actual, want) ||
 		!reflect.DeepEqual(operation.intent.Context, committed.plan.intent.Context) ||
-		operation.outcome != committed.committed.AppendOutcome {
+		operation.outcome != committed.committed.AppendOutcome ||
+		!reflect.DeepEqual(operation.committedDisposition, committed.plan.command.Commit.Disposition) {
 		return pendingOutboxOperation{}, false, errors.New("fan-out pending operation differs from exact committed publication")
 	}
 	if len(operations) == 1 {
@@ -298,6 +299,10 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 	}
 	if err := d.bus.AcceptCommittedDeliveryHandoffs(operation.deliveryHandoffs); err != nil {
 		return err
+	}
+	if operation.committedDisposition != nil {
+		d.bus.logPublished(ctx, operation.intent.Event, 0)
+		return nil
 	}
 	if transferGroup && d.bus.canTransferFanOutDelivery(operation, plan) {
 		if err := settlement.collect(claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {

@@ -334,7 +334,7 @@ func TestCommittedDispatchMatchesOnlyStagedSourceOrProjectedEvent(t *testing.T) 
 	foreign := eventtest.RunCreatingRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":1}`), 0, runID, "", events.EventEnvelope{}, stamp.Add(time.Second))
 	intent := runtimeengine.EmitIntent{Event: projected}
 	for _, accepted := range []events.Event{source, projected} {
-		bus.stageCommittedOutboxOperationWithFinalization(intent, source, EventAppendInserted, nil, nil, nil)
+		bus.stageCommittedOutboxOperationWithFinalization(intent, source, EventAppendInserted, nil, nil, nil, nil)
 		if _, ok, err := bus.takeMatchingPendingOutboxOperation(foreign); !errors.Is(err, events.ErrEventIdentityConflict) || ok {
 			t.Fatalf("foreign staged view accepted: ok=%t err=%v", ok, err)
 		}

@@ -273,3 +273,34 @@ journey pass through real selected persistence. Native provider doubles are not
 paid-provider/public-launcher qualification. Earlier diagnostic compile/metadata
 failures remain recorded. The final committed head still requires the complete
 local census/structural/ratchet sweep and managed broad unit before server2 core.
+
+## Bounded Committed-Refusal Handoff Repair
+
+Authorization: https://github.com/division-sh/swarm/issues/2269#issuecomment-6045420580.
+The promoted working class is loss of an exact committed publication disposition
+across post-commit consumer handoff, not duplicate creation alone.
+
+| Owner/consumer | Disposition |
+| --- | --- |
+| PreparedPublish.CommitRequest | Existing canonical refusal producer, including its provider-raw authority exclusion; unchanged. |
+| NewCommittedEnginePublication/finalizeOneEnginePublication | Validate commit evidence first; retain its exact command disposition across all three staging branches. |
+| pendingOutboxOperation | Freeze that typed disposition as data; no inference from recipients, event names, stage or later error/readback. |
+| Scalar pending dispatch | Preserve finalization errors, exact event matching and handoff ordering; release the claim without a second dispatch/settlement for a committed refusal. |
+| Grouped/fan-out dispatch | Same refusal consumption; exact group matching additionally checks disposition equality. Zero-route refusals cannot enter node-only transfer groups. |
+| Direct prepared dispatch | Existing committed-refusal consumption remains authoritative and unchanged. |
+| Missing-operation recovery/replay | Existing exact durable recovery owner refuses a closed obligation; no new replay or settlement right. Unresolved explicit-target republish keeps its prior refusal. |
+
+The duplicate corpus now keeps its second parent trigger successful and asserts
+one exact cause-bound child refusal: platform.target_ambiguous /
+route_plan_instance_conflict, resolution_blocked, one immutable dead letter and
+zero deliveries. Parent/other-child settlement, receiver preservation and all
+three native executions/restarts remain required. Existing store terminal-receipt
+fences, accepted-effect/provider-raw rules, cancellation and graph exclusions are
+unchanged. Invariant: a committed terminal publication disposition never becomes
+a second dispatch or a new platform settlement during consumer handoff.
+
+Focused receipt provenance and earlier diagnostic/setup/timeout failures are
+recorded in the #2269 implementation ledger. This production delta needs a fresh
+credit-impact disposition before the next broad run; the 25 credits approved for
+fixture-only506872d0c are not automatically extended. CI-Tier remains full and
+Local-Tier lifecycle; no full qualification or merge approval is claimed here.
