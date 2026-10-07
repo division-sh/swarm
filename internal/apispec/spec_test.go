@@ -21,8 +21,11 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.MethodCount != 71 {
 		t.Fatalf("method count = %d, want 71", report.MethodCount)
 	}
-	if report.SchemaCount != 245 {
-		t.Fatalf("schema count = %d, want 245", report.SchemaCount)
+	if report.SchemaCount != 246 {
+		t.Fatalf("schema count = %d, want 246", report.SchemaCount)
+	}
+	if _, ok := api.Components.Schemas["ChannelCapabilityVector"]; !ok {
+		t.Fatal("ChannelCapabilityVector missing from schema catalog")
 	}
 	if report.ErrorCodeCount != 68 {
 		t.Fatalf("error code count = %d, want 68", report.ErrorCodeCount)
