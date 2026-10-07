@@ -23,36 +23,8 @@ func TestServedSemanticNumericScenarioModes(t *testing.T) {
 			t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
-				files := map[string]string{
-					"events.yaml": `fulfillment.requested:
-  value: integer
-  fraction: numeric
-`,
-					"fulfillment/events.yaml": `
-fulfillment.completed:
-  value: integer
-  fraction: numeric
-  explicit_double: numeric
-`,
-					"fulfillment/nodes.yaml": `complete-request:
-  execution_type: system_node
-  subscribes_to: [fulfillment.requested]
-  produces: [fulfillment.completed]
-  event_handlers:
-    fulfillment.requested:
-      emit:
-        event: fulfillment.completed
-        fields:
-          value: payload.value + 1
-          fraction: double(payload.fraction) + 0.5
-          explicit_double: double(payload.value) + 1.0
-collector:
-  execution_type: system_node
-  subscribes_to: [fulfillment.completed]
-  event_handlers:
-    fulfillment.completed: {}
-`,
-				}
+				canonicalrouting.InstallNovelNumericScenarioLifecycle(t, root)
+				files := map[string]string{}
 				scenario := "name: numeric " + mode + "\n"
 				switch mode {
 				case "authored":
@@ -158,6 +130,7 @@ collector:
 				if out["fraction"] != fraction+0.5 {
 					t.Fatalf("fraction input=%#v output=%#v", in, out)
 				}
+				requireServedRunStatus(t, rt.Endpoint, run, "completed")
 			})
 		}
 	}
