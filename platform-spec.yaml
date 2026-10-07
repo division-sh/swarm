@@ -11207,6 +11207,20 @@ tool_model:
         failure-evidence persistence never reports successful capture. This does not claim that upstream panic
         recovery makes every encrypted-message receipt safe, or that every upstream goroutine is protected.
         Session execution remains unavailable until its complete admitted connection implementation is installed.
+      session_state_join: >
+        The WhatsApp connection owner fences and joins every pinned SDK private-store method, not only Swarm callbacks.
+        Closing database/sql or the upstream callback queue is not proof that an existing SDK transaction has finished.
+        An already admitted transaction may finish under its retained occurrence while new work is fenced; its state
+        handles and possession remain owned until that full join and close succeed. An ended transaction context
+        grants no new work. Destructive device deletion additionally requires explicit current logout and cannot use
+        an inherited transaction to bypass retirement. Ordinary disconnect, provider-side unlink, pairing failure,
+        reset and source retirement do not authorize automatic local session deletion.
+      session_buffer_choice: >
+        V1 WhatsApp disables the SDK decrypted-event buffer and its persistent outgoing retry store. Their store
+        methods refuse instead of creating hidden plaintext or resend spools. Decryption may advance provider ratchet
+        state before Swarm's incoming capture; pre-capture redelivery and decryption-failure acknowledgments are not
+        claimed durably recoverable. This limitation never grants a successful Swarm capture acknowledgment. The
+        bounded incoming-only capture owner must prove its separate commit, publication and acknowledgment boundaries.
       text_reply_controls: >
         Without buttons, semantic text controls use the finite text_reply_controls schema (16 controls per page,
         64 runes per label, 128 runes per private control token). These are neutral render limits, not invented provider
