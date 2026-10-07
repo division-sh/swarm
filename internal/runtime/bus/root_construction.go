@@ -65,27 +65,37 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 		Context: events.DeliveryContextFromContext(ctx), ContractBundle: source,
 		Instance: identity, TriggerEvent: event, OccurredAt: event.CreatedAt(),
 	}
-	if !schema.Instance.Empty() {
-		request.ConstructorInput = pin.EventType()
-		constructor, err := pipeline.CompileFlowConstructor(source, flowID, request.ConstructorInput)
-		if err != nil {
-			return nil, err
-		}
-		if admission, authenticated := authenticatedProviderPublicationForEvent(ctx, event); authenticated && admission.kind == provideroutput.KindRaw &&
-			!constructor.Eligible() && !pinrouting.ClassifyRoutingSourceOutputConsumer(source, string(event.Type()), event.RoutingSource()).HasRuntimeConsumer() {
-			return nil, nil
-		}
-		var payload map[string]any
-		if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
-			return nil, fmt.Errorf("root constructor payload: %w", err)
-		}
-		request.ResolvedKey = payload[schema.Instance.Path()]
+	request, transportOnly, err := prepareRootConstructorArguments(ctx, request, pin.EventType(), schema.Instance.Path())
+	if err != nil || transportOnly {
+		return nil, err
 	}
 	plan, err := p.connectPlanner.lifecycle.plan.PrepareFlowInstanceActivation(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("prepare root constructor: %w", err)
 	}
 	return []pipeline.FlowInstanceActivationPlan{plan}, nil
+}
+
+func prepareRootConstructorArguments(ctx context.Context, request pipeline.FlowInstanceActivationRequest, input, key string) (pipeline.FlowInstanceActivationRequest, bool, error) {
+	if key == "" {
+		return request, false, nil
+	}
+	request.ConstructorInput = input
+	constructor, err := pipeline.CompileFlowConstructor(request.ContractBundle, request.Instance.TemplateID, input)
+	if err != nil {
+		return request, false, err
+	}
+	event := request.TriggerEvent
+	if admission, authenticated := authenticatedProviderPublicationForEvent(ctx, event); authenticated && admission.kind == provideroutput.KindRaw &&
+		!constructor.Eligible() && !pinrouting.ClassifyRoutingSourceOutputConsumer(request.ContractBundle, string(event.Type()), event.RoutingSource()).HasRuntimeConsumer() {
+		return request, true, nil
+	}
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
+		return request, false, fmt.Errorf("root constructor payload: %w", err)
+	}
+	request.ResolvedKey = payload[key]
+	return request, false, nil
 }
 
 func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, event events.Event, instance flowidentity.Instance, key string) error {
