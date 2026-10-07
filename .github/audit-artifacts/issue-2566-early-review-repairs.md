@@ -424,3 +424,13 @@ Full local API/conformance unit reproduction and the complete guard sweep are
 separate obligations; focused green is not a lifecycle receipt. No replacement
 PR proof audit is posted while qualification is red. The gate, class boundary
 and existing watchlist mappings remain unchanged.
+
+The first complete local `api-llm-bus-full` reproduction at `ececd0e6b` passes
+the original repaired roots, bus and LLM, but finds two diagnostic child failures
+inside `TestOperatorRunStartHandlersFailClosedBeforePersistence`. The fixture's
+new dedicated close input correctly appears in the canonical declared/routable
+vocabulary. Those exact expected lists now include both known inputs, in sorted
+order; the unroutable case still requires an empty routable list. Error codes,
+reasons and every no-persistence assertion remain unchanged. The entire root
+passes `-race -count=3` (34.233s). The failed full-unit receipt is retained and
+does not qualify this replacement; a new exact-head unit run remains required.
