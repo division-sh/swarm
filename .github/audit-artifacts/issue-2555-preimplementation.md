@@ -1417,3 +1417,28 @@ runtime/cache/driver change, retry, assertion or timing-unit ceiling relaxation.
 Rerun both-store golden and the complete census at the resulting signed head,
 then one push/hosted full. Old9d failures remain red; record this bounded
 test-health disposition under2353, not as a repaired product defect.
+
+### Cycle-6 Clock Agent Fixture Integration (PC60)
+
+Reviewer-g6042489659 approves this fixture-only integration repair. The merged
+#2526 clock-agent journey invokes the shared non-executable workspace stub;
+both-store startup correctly refuses workspace_worker_target_missing before
+readiness. The real host-manager fixture must supply the source-projected
+execution target for capability admission and every native mock launch. Reuse
+that existing fixture construction, preserve all exact clock, delivery, output,
+identity and shutdown assertions, and do not weaken the production probe.
+The retained process also consumes ownedMockLifecycleRoot: its existing cleanup
+joins children before restoring removal permission on sealed data projections.
+No cleanup permission is changed while the agent can execute.
+
+| Supplemental row | Required execution proof |
+| --- | --- |
+| PC60 executable clock-agent target | `TestOwnedMockClockLocalAgentConsumerBothStores`: SQLite/PostgreSQL real HostManager, authenticated MCP/native worker admission, exact poll.tick delivery, causally matched agent.observed output, root actor identity and joined zero-exit shutdown. Baseline d064 fails both stores with workspace_worker_target_missing; rerun the unchanged root after repair, including race3. |
+| PC60 clock sibling census | Inspect every merged clock fixture and every clockDeploymentHarness caller. Only clock_agent_consumer_test.go authors an agent/mock and starts the owned mock lifecycle. Root-export, connected keyless child, restart, disarm/reset, removal, mixed ingress, finite frontier and held-handler journeys remain agent-free and do not claim model execution. Run their existing both-store public controls; pure scheduling/storage tests remain a different semantic concept. |
+
+The integration has no runtime/spec policy, SQL port, registry/census baseline,
+transport fallback or legacy change. Existing target-local transport watchlist
+captures the manifestation;2353 retains test-health tracking. The numeric
+phase correction already passes hosted SQLite55.07s/PostgreSQL76.13s; keep those
+receipts bound to d064, not the next head. One new source push/full hosted run
+is required before merge; all original48 and PC49-PC59 obligations remain.
