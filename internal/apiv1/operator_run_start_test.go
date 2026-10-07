@@ -512,7 +512,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}, source)
+		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}}, source)
 		runID := uuid.NewString()
 
 		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-publish-failure"))
@@ -534,7 +534,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}, source)
+		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}}, source)
 		runID := uuid.NewString()
 
 		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-event-after-validation"))
@@ -641,6 +641,19 @@ func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus EventPublish
 
 type failingRunStartPublisher struct {
 	err error
+}
+
+// These cases inject failure after ordinary input admission, at publication.
+type admittedRunStartFailurePublisher struct {
+	failingRunStartPublisher
+}
+
+func (p admittedRunStartFailurePublisher) CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error) {
+	return runtimebus.PublishRecipientPlan{}, nil
+}
+
+func (p admittedRunStartFailurePublisher) CheckAPIEventPublishRecipientPlan(ctx context.Context, event events.Event, _ *runtimebus.APIEventPublicationEndpoint) (runtimebus.PublishRecipientPlan, error) {
+	return p.CheckPublishRecipientPlan(ctx, event)
 }
 
 func (p failingRunStartPublisher) Publish(context.Context, events.Event) error {

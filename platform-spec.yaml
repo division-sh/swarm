@@ -36598,7 +36598,8 @@ api_specification:
         identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext;
         an existing run cannot acquire new run-creation data.
 
-        Before either atomic creation owner, require an explicit final stage for the selected root,
+        After exact source/input/feed admission, including canonical event payload preflight,
+        and before either atomic creation owner, require an explicit final stage for the selected root,
         eagerly constructed keyless descendants, and possible compiled routing receivers/templates and
         their constructor children. Independently selected nested imports and pins seed this closure
         with the exact receivers matched by their already-admitted declaration/routing evidence;
@@ -36606,7 +36607,9 @@ api_specification:
         Unknown or contradictory catalog evidence fails closed. Do not
         infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or
         treat stateless instances as exempt containers. A no-final service is structurally valid but
-        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow. Committed
+        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow.
+        Malformed event payloads fail PAYLOAD_VALIDATION_FAILED before this finite-eligibility
+        check; a valid payload cannot waive the no-final refusal. Committed
         idempotency replay/conflicts retain their existing owners; existing-run event.publish and
         standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,
         resource, feed and permanent-receipt effects.
