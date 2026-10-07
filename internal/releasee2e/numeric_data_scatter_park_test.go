@@ -16,6 +16,7 @@ import (
 
 const numericScatterSource = "tests/tier11-flow-composition/test-numeric-data-scatter-park"
 const goldenShutdownGrace = 30 * time.Second
+const numericPostSettlementReadbackDeadline = 60 * time.Second
 
 // Establish the approved observable interruption boundary before giving the
 // larger corpus any recovery credit. No private runtime hooks stop the pump.
@@ -54,32 +55,42 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			if verified.err != nil {
 				t.Fatalf("numeric verify: %v\n%s", verified.err, verified.output)
 			}
-			start := func() *releaseServeProcess {
+			start := func(parent context.Context) *releaseServeProcess {
+				if err := parent.Err(); err != nil {
+					t.Fatal(err)
+				}
 				p := startReleaseServe(t, releaseProcessSpec{
 					BinaryPath: binary, InternalMockLifecycleBinary: lifecycle,
 					WorkingDir: project, Source: "contracts", ConfigPath: ".swarm/swarm.yaml",
 					Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env,
 					ShutdownGrace: goldenShutdownGrace,
 				})
-				ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+				ctx, cancel := context.WithTimeout(parent, goldenStartupTimeout)
 				defer cancel()
 				if err := p.waitReady(ctx); err != nil {
 					t.Fatal(err)
 				}
 				return p
 			}
-			p := start()
+			p := start(context.Background())
 			creationEndpoint := p.apiBase
 			runID := uuid.NewString()
 			issued := time.Now()
 			goldenServedBundleHash(t, p.rpc, "mock_only")
-			create := func() releaseCommandResult {
-				return runReleaseCommand(t, goldenStartupTimeout, project, cliEnv, "", binary,
+			create := func(parent context.Context) releaseCommandResult {
+				if err := parent.Err(); err != nil {
+					return releaseCommandResult{err: err}
+				}
+				timeout := goldenStartupTimeout
+				if deadline, ok := parent.Deadline(); ok {
+					timeout = min(timeout, time.Until(deadline))
+				}
+				return runReleaseCommand(t, timeout, project, cliEnv, "", binary,
 					"run", "start", "--connect", p.apiBase,
 					"--run-id", runID, "--idempotency-key", "numeric-"+runID,
 					"--data", "item.registered=contracts/data/items.jsonl", "--no-follow")
 			}
-			result := create()
+			result := create(context.Background())
 			if result.err != nil || !strings.Contains(result.output, "run_id="+runID) {
 				t.Fatalf("numeric compiled run start: %v\n%s", result.err, result.output)
 			}
@@ -134,7 +145,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			if err := p.killAndWait(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			p = start()
+			p = start(ctx)
 			retained, err := readNumericFeed(ctx, p.rpc, runID)
 			if err != nil || retained.Cursor != checkpoint.Cursor || retained.Owed != checkpoint.Owed || retained.Status != checkpoint.Status {
 				t.Fatalf("paused restart changed feed: before=%+v after=%+v error=%v\n%s", checkpoint, retained, err, p.output.String())
@@ -217,8 +228,16 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				t.Fatalf("numeric shutdown: %v\n%s", err, p.output.String())
 			}
 			t.Logf("100-item shutdown took %s with documented default grace %s", time.Since(shutdownStarted), goldenShutdownGrace)
+			readback, readbackCancel, err := newNumericPostSettlementReadbackContext(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cancel()
+			ctx = readback
+			defer readbackCancel()
+			readbackStarted := time.Now()
 			timers := inspectNumericFeedTimers(t, ctx, lifecycle, project, env, runID, expected, entities)
-			p = start()
+			p = start(ctx)
 			if got := assertNumericFeedPublic(t, ctx, p.rpc, runID, expected, corpus); !reflect.DeepEqual(got, entities) {
 				t.Fatal("settled restart changed exact receiver identities")
 			}
@@ -228,7 +247,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 					t.Fatalf("settled restart changed event/delivery %s", eventID)
 				}
 			}
-			replayed := create()
+			replayed := create(ctx)
 			wantOutput := strings.ReplaceAll(result.output, creationEndpoint, p.apiBase)
 			if replayed.err != nil || replayed.output != wantOutput {
 				t.Fatalf("permanent creation retry after process loss: err=%v before=%s after=%s", replayed.err, result.output, replayed.output)
@@ -252,8 +271,21 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			if got := inspectNumericFeedTimers(t, ctx, lifecycle, project, env, runID, expected, entities); !reflect.DeepEqual(got, timers) {
 				t.Fatal("settled restart/retry changed exact typed timer activations")
 			}
+			if err := ctx.Err(); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("post-settlement readback completed in %s under %s bound", time.Since(readbackStarted), numericPostSettlementReadbackDeadline)
 		})
 	}
+}
+
+func newNumericPostSettlementReadbackContext(active context.Context) (context.Context, context.CancelFunc, error) {
+	if err := active.Err(); err != nil {
+		return nil, nil, err
+	}
+	// The active deadline must succeed before its separately bounded readback.
+	ctx, cancel := context.WithTimeout(context.Background(), numericPostSettlementReadbackDeadline)
+	return ctx, cancel, nil
 }
 
 // Independent public wire projections deliberately do not reuse the server DTO

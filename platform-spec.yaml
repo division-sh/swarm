@@ -23374,6 +23374,13 @@ test_specification:
         list API: typed selected-store inspection occurs only after child join, closes before restart, and receives
         supplemental persistence credit rather than invented public-surface credit. No gather, terminal-run,
         dormant-agent-turn, nonzero-budget, live-provider or successful history-fork credit is inferred.
+      phase_budgets: >-
+        Preserve the 90-second active-work deadline through interrupted pause/continue, exact 100-row convergence
+        and the first joined shutdown. Only after that phase succeeds may an independent 60-second context own
+        timer inspection, settled restart, identical creation retry and frozen-domain/final-timer readback.
+        Readback startup and command waits consume that phase's remaining deadline. Expired active work cannot
+        receive a fresh readback budget; expired readback must fail, never be counted as success. All original
+        assertions and worker identity checks remain mandatory on both stores.
     compiled_process_golden_profile:
       promoted_by: '#2168, #2321'
       source: internal/releasee2e/testdata/golden_agent_workload
