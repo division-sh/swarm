@@ -2916,12 +2916,6 @@
     "body_sha256": "aa30940d69b4607a5fff6d66ea459a35143580f32642155a5e5a251d77e99e43"
   },
   {
-    "owner": "internal/serveapp/main.go::isLocalListenerHost",
-    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "2e40c3a3b6c99cb20de33a1e10f53a1ba02a05ec16020d08885aae078798d9c7"
-  },
-  {
     "owner": "internal/serveapp/main.go::loadBudgetRecoveryStageSource",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
@@ -3132,24 +3126,6 @@
     "body_sha256": "4ba6e3426375fc4f0721b8709a17958edea63104b64b3e0db42d3cf94673224f"
   },
   {
-    "owner": "internal/serveapp/main.go::serveListenerHTTPURL",
-    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "f93032b9a926d473ef7c73eeff723a81ebf765ce3399c116f49cebab0b1753ec"
-  },
-  {
-    "owner": "internal/serveapp/main.go::serveListenerHTTPURLWithHost",
-    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "73d5804f5924fd8ae30489dee88700eab48d7bd7983c8df73d61680fa1c5458b"
-  },
-  {
-    "owner": "internal/serveapp/main.go::serveMCPContainerGatewayURL",
-    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "99a41fbe7dd76d546f923e1020e733434d6fda8092783b6f6d5c3d2725ea7a71"
-  },
-  {
     "owner": "internal/serveapp/main.go::serveOperatorChannelInterfaces",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
@@ -3220,12 +3196,6 @@
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
     "body_sha256": "3a8f10bb7f0f8022b6e329b393e9ba6259e893f9c109dcbb5082ac3e6051b350"
-  },
-  {
-    "owner": "internal/serveapp/main.go::splitListenerHostPort",
-    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "fa7f0f8953c8f2b977eb7b75e961d7614cf1473cad0d88e390ca2b202baa0cf9"
   },
   {
     "owner": "internal/serveapp/main.go::startServeOwnershipWatch",
