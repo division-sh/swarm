@@ -21,7 +21,7 @@ import (
 
 func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semanticview.Source {
 	t.Helper()
-	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{})
+	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{FiniteLifecycle: true})
 	if !includeAgent {
 		if err := os.Remove(filepath.Join(root, notifyallchildren.ChildFlowID, "agents.yaml")); err != nil {
 			t.Fatal(err)

@@ -1,5 +1,5 @@
 name: numeric-data-scatter-park
-stages: []
+stages: {done: {final: true}}
 pins:
   outputs:
     - item.registered

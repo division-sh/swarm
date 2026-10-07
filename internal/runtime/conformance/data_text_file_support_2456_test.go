@@ -29,7 +29,7 @@ func standaloneTextDataFixture2456(t *testing.T, backend string, keyed bool) *de
 	if keyed {
 		declaration = "root.ready:\n  key: account_id\n  account_id: text\n  body: text\n"
 	}
-	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(declaration), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(declaration+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(conformanceRepoRoot(t), root, contracts.DefaultPlatformSpecFile(conformanceRepoRoot(t)))
@@ -150,7 +150,7 @@ func TestFieldlessImportShape2456HTTPBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopySelectedDeploymentResource(t, "root", false)
-			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("root.ready:\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("root.ready:\n"+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(conformanceRepoRoot(t), root, contracts.DefaultPlatformSpecFile(conformanceRepoRoot(t)))

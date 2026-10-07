@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 // Equal keyless rows are distinct ordinal obligations, not one deduplicated
@@ -129,6 +131,28 @@ func TestDeploymentSourceKeylessEqualRowsPreserveMultiplicityBothStores(t *testi
 			}
 			if len(publicEvents) != 2 || len(publicDeliveries) != 2 {
 				t.Fatalf("equal keyless rows collapsed public identities: events=%+v deliveries=%+v", publicEvents, publicDeliveries)
+			}
+			// Settlement of every row is not itself the authored end of this
+			// reusable collector. Its explicit close must reach the final stage.
+			runs, ok := f.selected.(operatorread.RunReader)
+			if !ok {
+				t.Fatal("selected store lacks the canonical run-read owner")
+			}
+			header, err := runs.LoadRunHeader(f.ctx, runID)
+			if err != nil || header.Status != "running" {
+				t.Fatalf("collector ended before close: status=%s error=%v", header.Status, err)
+			}
+			closed := textFileRPCParams2456(t, server, "event.publish", map[string]any{
+				"run_id": runID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(),
+				"event_name": "fixture.close.requested", "payload": map[string]any{"account_id": "same"}, "idempotency_key": uuid.NewString(),
+			})
+			if len(closed.Error) != 0 {
+				t.Fatalf("public collector close: %s", closed.Error)
+			}
+			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 30*time.Second)
+			instances, err := f.selected.ListWorkflowInstances(f.ctx, runID)
+			if err != nil || len(instances) != 1 || !instances[0].StageDefined || instances[0].CurrentState != "done" {
+				t.Fatalf("public close did not reach the declared final stage: instances=%+v error=%v", instances, err)
 			}
 		})
 	}

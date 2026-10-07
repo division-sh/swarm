@@ -1,0 +1,163 @@
+{
+  "baseline": "c6a90a08be52e613fe273a85875c9ff57bcd28b3",
+  "scope": "reviewed positive entry/end equivalence plus explicitly classified generated/partial source and negative-oracle cut; runtime closure requires the separate execution proof matrix",
+  "changes": [
+    {
+      "file": "internal/releasee2e/testdata/claude_cli_managed_lifecycle/schema.yaml",
+      "before_hash": "900690da3f117d96e3a4b8f72f3c77efe6109e8e4fcb9cd04b3140a571aba05b",
+      "after_hash": "43e8f4e685c61f9f853ecd9f0724f3f688d2135adadf4af87eda440072fd3ada",
+      "edits": [
+        {
+          "offset": 35,
+          "before": "",
+          "after": "stages: {done: {final: true}}\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Routing-only root has no handler/timer work. Its end is immediate; the eager worker still starts pending, accepts task.assigned, and must reach its existing done final stage before the foreground run completes. Preserve actual MCP/mailbox and completion assertions."
+    },
+    {
+      "file": "internal/runtime/conformance/data_text_file_journey_2456_test.go",
+      "before_hash": "ccf88cb3fd2b6b6126b0dcddc9af8e553d7bbb9f11b23abeedd435eb178a119d",
+      "after_hash": "39785b6de6159b06c974cc36790de6067994476159b99fc4ba84f29f3b694b7f",
+      "edits": [
+        {
+          "offset": 1297,
+          "before": "\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(declaration), 0o600); err != nil {\n",
+          "after": "\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(declaration+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {\n"
+        },
+        {
+          "offset": 15344,
+          "before": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(\"root.ready:\\n  key: account_id\\n  account_id: text\\n  body: text\\n\"), 0o600); err != nil {\n",
+          "after": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(\"root.ready:\\n  key: account_id\\n  account_id: text\\n  body: text\\n\"+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {\n"
+        },
+        {
+          "offset": 58084,
+          "before": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(\"root.ready:\\n  body: text\\nroot.ready.body:\\n  note: text\\n\"), 0o600); err != nil {\n",
+          "after": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(\"root.ready:\\n  body: text\\nroot.ready.body:\\n  note: text\\n\"+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Retain the finite source's producer-owned close event when replacing its independent root.ready data declaration. Original payload and receipt/restart/replay assertions remain intact."
+    },
+    {
+      "file": "internal/runtime/conformance/data_text_file_support_2456_test.go",
+      "before_hash": "bb7d6d89660fd4a69669f001fed69697dddde7001f0093091166a581b209ca73",
+      "after_hash": "d45f28ebab1c90c9eacf216e2a848c71014a2f56ee4b545f03b536cc5ef4cb1b",
+      "edits": [
+        {
+          "offset": 881,
+          "before": "\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(declaration), 0o600); err != nil {\n",
+          "after": "\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(declaration+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {\n"
+        },
+        {
+          "offset": 5517,
+          "before": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(\"root.ready:\\n\"), 0o600); err != nil {\n",
+          "after": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(\"root.ready:\\n\"+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Retain the finite source's producer-owned close event in standalone-data declaration variants. The standalone data grammar, limits and no-mutation assertions are unchanged."
+    },
+    {
+      "file": "internal/runtime/conformance/fan_out_resource_source_proof_test.go",
+      "before_hash": "720771b69c7c4045741599fbaf5a1210470cbfb53c22da9e60ccdaf1e7ab444d",
+      "after_hash": "7cfb6a0a913381e41536b3ffe18d2b9a40b7512227369e2e52f0657b59a0f2f4",
+      "edits": [
+        {
+          "offset": 659,
+          "before": "\troot := notifyallchildren.WriteVariant(t, notifyallchildren.Options{})\n",
+          "after": "\troot := notifyallchildren.WriteVariant(t, notifyallchildren.Options{FiniteLifecycle: true})\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Finite deployment run.start consumers explicitly select the existing canonical fixture owner's FiniteLifecycle variant. No runtime construction, issuance, row, replay or fork assertion is relaxed."
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/deployment_resource_feeds.go",
+      "before_hash": "707312003714f36ac05ef6aa603082359c88337217c1d4319a875dce377c6fdf",
+      "after_hash": "26c815df0885ddb1763c98e673f28d063733c8e52f24f22bda164b3277b1e0d3",
+      "edits": [
+        {
+          "offset": 83,
+          "before": "",
+          "after": "const DeploymentFixtureCloseDeclaration = \"fixture.close.requested:\\n  account_id: text\\n\"\n\n"
+        },
+        {
+          "offset": 226,
+          "before": "\troot := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{})\n",
+          "after": "\troot := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{FiniteLifecycle: true})\n"
+        },
+        {
+          "offset": 1042,
+          "before": "\twriteClosedVariantFile(t, root, \"events.yaml\", eventsYAML)\n",
+          "after": "\twriteClosedVariantFile(t, root, \"events.yaml\", eventsYAML+DeploymentFixtureCloseDeclaration)\n\twriteClosedVariantFile(t, root, \"schema.yaml\", \"name: root-output-singleton-connect\\nstages: {active: {}, done: {final: true}}\\npins:\\n  inputs: [fixture.close.requested]\\n  outputs: [root.ready, fixture.close.requested]\\nconnect:\\n  - event: root.ready\\n    from: .\\n    to: consumer\\n  - event: fixture.close.requested\\n    from: .\\n    to: consumer\\n\")\n\twriteClosedVariantFile(t, root, \"entities.yaml\", \"fixture_state: {}\\n\")\n\twriteClosedVariantFile(t, root, \"nodes.yaml\", \"close-fixture:\\n  execution_type: system_node\\n  event_handlers:\\n    fixture.close.requested: {advances_to: done}\\n\")\n\twriteClosedVariantFile(t, root, \"consumer/schema.yaml\", \"name: consumer\\nstages: {active: {}, done: {final: true}}\\npins:\\n  inputs: [root.ready, fixture.close.requested]\\n\")\n\twriteClosedVariantFile(t, root, \"consumer/entities.yaml\", \"consumer_state: {}\\n\")\n\twriteClosedVariantFile(t, root, \"consumer/nodes.yaml\", \"consumer-node:\\n  execution_type: system_node\\n  event_handlers:\\n    root.ready: {}\\n    fixture.close.requested: {advances_to: done}\\n\")\n"
+        },
+        {
+          "offset": 1302,
+          "before": "\t\treplaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, \"schema.yaml\"), \"    to: consumer\\n\", \"    to: consumer\\n    resolution: select-or-create\\n\")\n",
+          "after": "\t\treplaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, \"schema.yaml\"), \"  - event: root.ready\\n    from: .\\n    to: consumer\\n\", \"  - event: root.ready\\n    from: .\\n    to: consumer\\n    resolution: select-or-create\\n\")\n\t\treplaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, \"schema.yaml\"), \"  - event: fixture.close.requested\\n    from: .\\n    to: consumer\\n\", \"  - event: fixture.close.requested\\n    from: .\\n    to: consumer\\n    resolution: select\\n\")\n"
+        },
+        {
+          "offset": 1664,
+          "before": "\t\treplaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, \"schema.yaml\"), \"connect:\\n  - event: root.ready\\n    from: .\\n    to: consumer\\n\", \"\")\n\t\twriteClosedVariantFile(t, root, \"nodes.yaml\", \"root-collector:\\n  execution_type: system_node\\n  subscribes_to: [root.ready]\\n  event_handlers:\\n    root.ready: {}\\n\")\n",
+          "after": "\t\treplaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, \"schema.yaml\"), \"connect:\\n  - event: root.ready\\n    from: .\\n    to: consumer\\n  - event: fixture.close.requested\\n    from: .\\n    to: consumer\\n\", \"\")\n\t\twriteClosedVariantFile(t, root, \"nodes.yaml\", \"root-collector:\\n  execution_type: system_node\\n  subscribes_to: [root.ready, fixture.close.requested]\\n  event_handlers:\\n    root.ready: {}\\n    fixture.close.requested: {advances_to: done}\\n\")\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Finite feed-specific variants only: routing root and reusable collector stay active until fixture.close.requested advances to done. Close connects select existing dynamic receivers; no row closes a receiver or changes its original delivery assertions. Preserve primary entity admission."
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/derived_scenario.go",
+      "before_hash": "8b99d46e8712127400e108a07eeda2416b88c85e87e4b226fd1a9106112d5ede",
+      "after_hash": "128c083f2337bf410606133a03a44e340bcd532698056d6bc56594c90ac1f23e",
+      "edits": [
+        {
+          "offset": 804,
+          "before": "",
+          "after": "stages: {done: {final: true}}\n"
+        },
+        {
+          "offset": 1524,
+          "before": "",
+          "after": "\t\tfiles[\"fulfillment/schema.yaml\"] = \"name: fulfillment\\nstages: {pending: {}, done: {final: true}}\\npins:\\n  inputs: [fulfillment.requested]\\n\"\n\t\tfiles[\"fulfillment/entities.yaml\"] = \"fulfillment_state: {}\\n\"\n\t\tfiles[\"fulfillment/nodes.yaml\"] = \"complete-request:\\n  execution_type: system_node\\n  subscribes_to: [fulfillment.requested]\\n  event_handlers:\\n    fulfillment.requested: {advances_to: done}\\n\"\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Root-input finite variant ends its routing-only root immediately; complete-request advances fulfillment pending to done with a fieldless primary entity. The default scenario-import-only service variant is unchanged."
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/notify_all_children.go",
+      "before_hash": "2fb1e9553437fc0ba0606d7612abb2f3c9db48ba30863e5531eacb4a33cf309c",
+      "after_hash": "5f6736da423c00f34f2504d5a6eb3745a389b0e017b34ce7e397d66b6f3bbaa5",
+      "edits": [
+        {
+          "offset": 1457,
+          "before": "",
+          "after": "\tFiniteLifecycle             bool\n"
+        },
+        {
+          "offset": 14591,
+          "before": "",
+          "after": "\tif opts.FiniteLifecycle {\n\t\t// The root only forwards work. The portfolio stays active across rows\n\t\t// until an explicit close, rather than completing on its first input.\n\t\tapplyClosedReplacement(t, connectFile, \"name: notify-all-children\\n\", \"name: notify-all-children\\nstages: {done: {final: true}}\\n\")\n\t\tapplyClosedReplacement(t, connectFile, \"  inputs:\\n\", \"  inputs:\\n    - fixture.close.requested\\n\")\n\t\tapplyClosedReplacement(t, connectFile, \"  outputs:\\n\", \"  outputs:\\n    - fixture.close.requested\\n\")\n\t\tapplyClosedReplacement(t, connectFile, \"connect:\\n\", \"connect:\\n  - {event: fixture.close.requested, from: ., to: portfolio}\\n\")\n\t\tapplyClosedReplacement(t, filepath.Join(root, \"events.yaml\"), \"portfolio.opened:\\n\", \"fixture.close.requested:\\nportfolio.opened:\\n\")\n\t\tapplyClosedReplacement(t, ownerSchema, \"name: portfolio\\n\", \"name: portfolio\\nstages: {active: {}, done: {final: true}}\\n\")\n\t\tapplyClosedReplacement(t, ownerSchema, \"  inputs:\\n\", \"  inputs:\\n    - fixture.close.requested\\n\")\n\t\tapplyClosedReplacement(t, ownerNodes, \"  event_handlers:\\n\", \"    - fixture.close.requested\\n  event_handlers:\\n    fixture.close.requested: {advances_to: done}\\n\")\n\t}\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Explicit FiniteLifecycle option for finite run.start consumers. End the routing-only root immediately; portfolio has a producer-owned, connected fixture.close.requested transition to done. Default service example/variants remain no-final."
+    },
+    {
+      "file": "tests/tier11-flow-composition/test-numeric-data-scatter-park/schema.yaml",
+      "before_hash": "1b620235f994899511798d4f47048518e04ee57f32b44ab80d1bf57d244dd576",
+      "after_hash": "c813aef240ac75db7ba249faf2675520e037a636c96de33e866f63881dc05963",
+      "edits": [
+        {
+          "offset": 32,
+          "before": "stages: []\n",
+          "after": "stages: {done: {final: true}}\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Routing-only root has no handler/timer work. Its end is immediate; the pinned fan-out and created registry instances remain owed work, with existing registered/investigating/assessed timers leading to archived final. Preserve 100-row pause/crash/restart, per-row settlement, and permanent rejected-operation receipt assertions."
+    }
+  ]
+}
