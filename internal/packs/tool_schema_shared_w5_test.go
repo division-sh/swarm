@@ -13,6 +13,7 @@ import (
 )
 
 func TestW5ToolSchemaSharedConsumerParity(t *testing.T) {
+	channelPrefix := "provider: probe\ntransport: webhook\n" + channelCapabilityFixture
 	for _, text := range []string{
 		"{}",
 		"{type: string, pattern: '^a+$', minLength: 0, maxLength: 3, enum: [a, aa]}",
@@ -51,7 +52,7 @@ func TestW5ToolSchemaSharedConsumerParity(t *testing.T) {
 					return spec.Interfaces["probe"]["v1"].Schemas["probe"], err
 				},
 				"channel_opaque": func() (contracts.ToolInputSchema, error) {
-					manifest, err := packs.ParseChannelManifest([]byte("provider: probe\nopaque_types: {probe: " + text + "}\noperations: {check: {tool: probe.check}}\nevents: {checked: {event: probe.checked, fields: {value: payload.value}}}\n"))
+					manifest, err := packs.ParseChannelManifest([]byte(channelPrefix + "opaque_types: {probe: " + text + "}\noperations: {check: {tool: probe.check}}\nevents: {checked: {event: probe.checked, fields: {value: payload.value}}}\n"))
 					return manifest.OpaqueTypes["probe"], err
 				},
 				"trigger": func() (contracts.ToolInputSchema, error) {
@@ -91,7 +92,7 @@ func TestW5ToolSchemaSharedConsumerParity(t *testing.T) {
 		})
 	}
 	for _, source := range []string{"{<<: {minLength: 1.5}, type: string}", "{type: object, properties: {value: &p {type: string}, other: *p}}"} {
-		_, err := packs.ParseChannelManifest([]byte("provider: probe\nopaque_types: {probe: " + source + "}\noperations: {check: {tool: probe.check}}\nevents: {checked: {event: probe.checked, fields: {value: payload.value}}}\n"))
+		_, err := packs.ParseChannelManifest([]byte(channelPrefix + "opaque_types: {probe: " + source + "}\noperations: {check: {tool: probe.check}}\nevents: {checked: {event: probe.checked, fields: {value: payload.value}}}\n"))
 		if strings.Contains(source, "1.5") && (err == nil || !strings.Contains(err.Error(), "channel.yaml")) {
 			t.Fatalf("merged bound diagnostic: %v", err)
 		}
