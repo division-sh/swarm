@@ -1132,7 +1132,6 @@ func (r ScopedNodeRecord) Identity() (runtimeidentity.ExecutableNode, error) {
 
 type FlowSchemaDocument struct {
 	Name                   string                   `yaml:"name"`
-	Activation             string                   `yaml:"activation"`
 	Ingress                *ProjectFlowIngress      `yaml:"ingress"`
 	Connect                []FlowConnect            `yaml:"connect"`
 	Imports                FlowSchemaImports        `yaml:"imports"`
@@ -1155,8 +1154,6 @@ func (s FlowSchemaDocument) EffectiveMode() string {
 	}
 	return FlowModeStatic
 }
-
-const FlowActivationStanding = "standing"
 
 type FlowSchemaImports struct {
 	ConnectorPacks        []ConnectorPackImport        `yaml:"connector_packs"`

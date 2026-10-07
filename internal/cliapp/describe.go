@@ -270,9 +270,6 @@ func writeDescribeClockSchedules(out io.Writer, schedules []semanticview.ClockSc
 
 func writeDescribeFlowDetails(out io.Writer, flow authoringview.FlowView) {
 	writeDescribeEvents(out, flow.Events, "    ")
-	if flow.Activation != "" {
-		fmt.Fprintf(out, "    activation: %s\n", flow.Activation)
-	}
 	writeDescribeIngress(out, flow.Ingress)
 	if flow.PrimaryEntity != nil {
 		fmt.Fprintf(out, "    primary entity: %s\n", flow.PrimaryEntity.Type)

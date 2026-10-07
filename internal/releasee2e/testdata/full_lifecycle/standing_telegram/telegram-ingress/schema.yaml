@@ -24,7 +24,6 @@ pins:
     - inbound.telegram
   outputs:
     - inbound.telegram.text_message
-activation: standing
 ingress:
   alias: chat
   providers:

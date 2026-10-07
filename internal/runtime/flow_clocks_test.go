@@ -52,26 +52,29 @@ func TestDeclaredClockBindingRequiresDeploymentSelection(t *testing.T) {
 	}
 }
 
-func TestFiniteClockSelectionPreservesIndependentStandingDeclarations(t *testing.T) {
+func TestFiniteClockSelectionPreservesIngressBindings(t *testing.T) {
 	source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyClockDeployment(t, false))
 	declarations, err := ResolveStandingTargetDeclarations(source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	before := append([]StandingTargetDeclaration(nil), declarations...)
-	independent := StandingTargetDeclaration{FlowPath: "legacy-standing"}
+	independent := StandingTargetDeclaration{FlowPath: "ingress", Ingress: []StandingIngressBinding{{Provider: "partner"}}}
 	selected := selectStandingClockBindings(append(declarations, independent), false)
 	if len(selected) != 1 || !reflect.DeepEqual(selected[0], independent) {
 		t.Fatalf("finite host changed an independent standing declaration: %+v", selected)
 	}
-	declarations[0].AuthoredStanding = true
+	declarations[0].Ingress = independent.Ingress
 	selected = selectStandingClockBindings(declarations, false)
-	if len(selected) != 1 || len(selected[0].Clocks) != 0 || !selected[0].AuthoredStanding {
+	if len(selected) != 1 || len(selected[0].Clocks) != 0 || !reflect.DeepEqual(selected[0].Ingress, independent.Ingress) {
 		t.Fatalf("finite host erased independent standing authority or enabled its clocks: %+v", selected)
 	}
-	declarations[0].AuthoredStanding = false
+	declarations[0].Ingress = nil
 	if !reflect.DeepEqual(declarations, before) {
 		t.Fatal("binding selection mutated declaration ownership")
+	}
+	if selected := selectStandingClockBindings([]StandingTargetDeclaration{{FlowPath: "no-producer"}}, false); len(selected) != 0 {
+		t.Fatalf("finite host retained a declaration without an ingress binding: %+v", selected)
 	}
 }
 

@@ -45,18 +45,16 @@ func (rt *Runtime) ArmDeclaredFlowClocks(ctx context.Context, activations []Stan
 }
 
 // A local finite host may use the serve bootstrap, but it is not a deployment.
-// Existing authored standing declarations remain independent of clock binding.
+// Independently admitted ingress remains separate from clock binding.
 func selectStandingClockBindings(declarations []StandingTargetDeclaration, enabled bool) []StandingTargetDeclaration {
 	if enabled {
 		return declarations
 	}
 	selected := make([]StandingTargetDeclaration, 0, len(declarations))
 	for _, declaration := range declarations {
-		if len(declaration.Clocks) != 0 {
-			if !declaration.AuthoredStanding {
-				continue
-			}
-			declaration.Clocks = nil
+		declaration.Clocks = nil
+		if len(declaration.Ingress) == 0 {
+			continue
 		}
 		selected = append(selected, declaration)
 	}

@@ -29,7 +29,6 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 	rows := []row{
 		{"name", root, "name", "Example", "", "", "MES"},
 		{"mode", root, "mode", "static", "", "", "M"},
-		{"activation", root, "activation", "standing", "", "", "MS"},
 		{"instance", root, "instance", "work_id", "", "", "MS"},
 		{"stages", root, "stages", "x", "{waiting: {}, done: {final: true}}", "[x]", "MPZ"},
 		{"stages.waiting", "stages:\n  %s\n", "waiting", "x", "{final: true}", "[x]", "OP"},

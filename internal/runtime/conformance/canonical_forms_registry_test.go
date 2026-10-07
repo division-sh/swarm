@@ -83,6 +83,9 @@ func TestCanonicalFormsEventAuthorityGuardDetectsRestoredPrivateConstructors(t *
 func retiredEventAuthorityDeclarations(t *testing.T, root string) []string {
 	t.Helper()
 	retired := map[string]bool{
+		"FlowActivationStanding":                     true,
+		"standingActivatedFlowIDs":                   true,
+		"routeFlowStanding":                          true,
 		"PublishPublicInputAcknowledged":             true,
 		"FlowInputPinSourceExternal":                 true,
 		"EventEmitterRef":                            true,

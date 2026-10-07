@@ -21,7 +21,7 @@ func TestDerivedFlowShapeRejectsAuthoredMode(t *testing.T) {
 				{"file", func() error { _, err := loadSchemaFragment(t, source); return err }},
 			} {
 				t.Run(admission.name, func(t *testing.T) {
-					if err := admission.run(); err == nil || !strings.Contains(err.Error(), `schema field "mode" is not supported`) || !strings.Contains(err.Error(), "Valid fields: activation") {
+					if err := admission.run(); err == nil || !strings.Contains(err.Error(), `schema field "mode" is not supported`) || !strings.Contains(err.Error(), "Valid fields: auto_emit_on_create") {
 						t.Fatalf("mode admission = %v; want presence rejection with current schema vocabulary", err)
 					}
 				})

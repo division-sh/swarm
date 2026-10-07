@@ -291,7 +291,7 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 			LocalEvents: cloneStringSet(localEvents),
 			Subscribers: subscribers,
 		}
-		if strings.EqualFold(scope.Mode, "template") || routeFlowStanding(source, scope.ID) {
+		if strings.EqualFold(scope.Mode, "template") {
 			continue
 		}
 		if flowPath != "" {
@@ -312,15 +312,6 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 
 	rt.rebuildLocked()
 	return rt, nil
-}
-
-func routeFlowStanding(source semanticview.Source, flowID string) bool {
-	flowID = strings.TrimSpace(flowID)
-	if source == nil || flowID == "" {
-		return false
-	}
-	schema, ok := source.FlowSchemaByID(flowID)
-	return ok && strings.TrimSpace(schema.Activation) == runtimecontracts.FlowActivationStanding
 }
 
 func (rt *RouteTable) Resolve(eventType string) []Subscriber {

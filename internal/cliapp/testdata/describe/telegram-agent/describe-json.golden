@@ -127,7 +127,6 @@
       "id": "telegram-ingress",
       "path": "telegram-ingress",
       "mode": "static",
-      "activation": "standing",
       "ingress": {
         "alias": "chat",
         "providers": [
@@ -34271,16 +34270,6 @@
         "source_line": 1,
         "source_column": 1,
         "source_presence": "empty_sequence"
-      }
-    },
-    {
-      "path": "schemas[\"telegram-ingress\"].activation",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "telegram-ingress/schema.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
       }
     },
     {

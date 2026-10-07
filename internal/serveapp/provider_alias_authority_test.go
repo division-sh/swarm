@@ -503,7 +503,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 				rootSchema += "  - {event: " + name + ", from: " + alias + ", to: " + receiver + "}\n"
 			}
 		}
-		files[alias+"/schema.yaml"] = "name: " + alias + "\nactivation: standing\nstages: []\n" + imports + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\ningress:\n  alias: " + alias + "\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing." + alias + "}\n"
+		files[alias+"/schema.yaml"] = "name: " + alias + "\nstages: []\n" + imports + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\ningress:\n  alias: " + alias + "\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing." + alias + "}\n"
 		files[alias+"/entities.yaml"] = "service: {}\n"
 		files[alias+"/nodes.yaml"] = nodes
 		if scenario.noLocalConsumers {

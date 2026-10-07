@@ -65,7 +65,7 @@ func TestPrimaryEntityConformance(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tc.wantLoadError) {
 					t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want %q", err, tc.wantLoadError)
 				}
-				if strings.Contains(tc.wantLoadError, `schema field "entity"`) && !strings.Contains(err.Error(), "Valid fields: activation") {
+				if strings.Contains(tc.wantLoadError, `schema field "entity"`) && !strings.Contains(err.Error(), "Valid fields: auto_emit_on_create") {
 					t.Fatalf("schema entity rejection omitted current vocabulary: %v", err)
 				}
 				return

@@ -2,7 +2,6 @@ package canonicalrouting
 
 // Closed parser fixtures exercise schema families, not a runnable topology.
 const SchemaAdmissionCompleteRoot = `name: Complete
-activation: standing
 instance: work_id
 ingress:
   alias: hooks

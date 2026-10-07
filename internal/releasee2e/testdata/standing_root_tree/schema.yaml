@@ -1,5 +1,4 @@
 name: standing-root-tree
-activation: standing
 stages: []
 imports:
   provider_trigger_events:

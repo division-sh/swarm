@@ -5561,13 +5561,8 @@ func TestStaticFlowRequiredAgentPreflightRegistersSubscriptions(t *testing.T) {
 	}
 }
 
-func TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *testing.T) {
+func TestDeclaredFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *testing.T) {
 	bundle := testStaticFlowBundle()
-	schema := bundle.FlowSchemas["analyzer-flow"]
-	schema.Activation = runtimecontracts.FlowActivationStanding
-	bundle.FlowSchemas["analyzer-flow"] = schema
-	bundle.FlowTree.ByID["analyzer-flow"].Schema = schema
-	bundle.FlowTree.Root.Children[0].Schema = schema
 	source := semanticview.Wrap(bundle)
 
 	staticRecords, err := StaticAgentMaterializationBlueprints(source)

@@ -9,7 +9,6 @@ func TestFlowSchemaStandingIngressStrictDecode(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
 name: chat
-activation: standing
 ingress:
   alias: support
   providers:
@@ -18,7 +17,7 @@ ingress:
 `), &doc); err != nil {
 		t.Fatalf("Unmarshal standing ingress: %v", err)
 	}
-	if doc.Activation != FlowActivationStanding || doc.Ingress == nil || doc.Ingress.Alias != "support" {
+	if doc.Ingress == nil || doc.Ingress.Alias != "support" {
 		t.Fatalf("standing flow = %#v", doc)
 	}
 	providers := doc.Ingress.Providers
@@ -32,8 +31,8 @@ ingress:
 		field string
 	}{
 		{name: "flow field", field: "lifecycle", yaml: "name: chat\nlifecycle: standing\n"},
-		{name: "ingress field", field: "route", yaml: "name: chat\nactivation: standing\ningress:\n  route: support\n"},
-		{name: "provider field", field: "secret", yaml: "name: chat\nactivation: standing\ningress:\n  alias: support\n  providers:\n    - provider: telegram\n      secret: webhook_signing.telegram\n"},
+		{name: "ingress field", field: "route", yaml: "name: chat\ningress:\n  route: support\n"},
+		{name: "provider field", field: "secret", yaml: "name: chat\ningress:\n  alias: support\n  providers:\n    - provider: telegram\n      secret: webhook_signing.telegram\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var invalid FlowSchemaDocument
@@ -49,7 +48,6 @@ func TestFlowSchemaInboundAdmissionStrictDecode(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(`
 name: events
-activation: standing
 ingress:
   alias: partner-events
   providers:
@@ -85,7 +83,7 @@ ingress:
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			block := strings.ReplaceAll(tc.block, "\n", "\n      ")
-			body := "name: chat\nactivation: standing\ningress:\n  alias: support\n  providers:\n    - provider: telegram\n      " + block + "\n"
+			body := "name: chat\ningress:\n  alias: support\n  providers:\n    - provider: telegram\n      " + block + "\n"
 			var invalid FlowSchemaDocument
 			err := decodeNodeTestYAML([]byte(body), &invalid)
 			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "not supported") {

@@ -83,7 +83,7 @@ func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 			break
 		}
 	}
-	if flow.Activation != "standing" || flow.Ingress == nil || flow.Ingress.Alias != "chat" || len(flow.Ingress.Providers) != 1 {
+	if flow.Ingress == nil || flow.Ingress.Alias != "chat" || len(flow.Ingress.Providers) != 1 {
 		t.Fatalf("standing describe flow = %#v", flow)
 	}
 	provider := flow.Ingress.Providers[0]

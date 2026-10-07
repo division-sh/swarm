@@ -8651,7 +8651,7 @@ engine:
           - The declaring flow and every ancestor to the selected root must be keyless. A keyless child under keyed ancestry is potentially per-instance and is rejected with schedules fire per run; per-instance cadence is not supported. Selecting that same child standalone is valid.
           - The emitted event is an authored bare business event with an actual local consumer, an explicit compiled connection consumer, or a selected-root export. Root export with zero deliveries is valid. Input declaration, same name or a complete address is not a consumer.
           - Compilation and offline describe project declaration facts only. Describe renders declared; arms on deployment. No input pin, active binding, next-due coordinate or retention is inferred from a clock declaration.
-          - Only deployment through serve enables clock bindings. Offline verify, describe, test and finite run start do not arm clocks. The internal serve host used by local finite run start is not deployment authority and does not derive a clock-only standing generation, restore its clocks, infer declaration removal from unavailable deployment bindings, or mutate a declared clock through standing operator commands. An independently authored standing declaration does not confer clock-binding authority on that finite host. An existing clock remains unchanged through finite hosting; full declaration-set reconciliation belongs to deployment only. A timer-only deployment requires neither ingress nor authored activation standing.
+          - Only deployment through serve enables clock bindings. Offline verify, describe, test and finite run start do not arm clocks. The internal serve host used by local finite run start is not deployment authority and does not derive a clock-only standing generation, restore its clocks, infer declaration removal from unavailable deployment bindings, or mutate a declared clock through standing operator commands. An independent ingress declaration does not confer clock-binding authority on that finite host. An existing clock remains unchanged through finite hosting; full declaration-set reconciliation belongs to deployment only. A timer-only deployment requires no ingress or activation marker.
           - Arming consumes the genuine construction and attachment owner and the standing transaction's actual selected generation run. No synthetic instance, root entity, lazy constructor, generation prediction or ready-success substitute is permitted. Startup callback release ordering is unchanged.
           - Process execution scope consumes acknowledged deployment activation coordinates independently of provider transport targets. Clock-only services have no fabricated ingress alias or provider target. Startup recovery, context registration, reset and service controls consume the same exact run/generation coordinate; contradictory ingress and activation evidence is rejected.
           - Ordinary runtime restoration restores control-schedule families only. Serve admits or exactly replays declared instance clocks after construction, attachment and executable context publication, under the binding's exact standing work occurrence. Finite entry points cannot restore a deployment clock implicitly; replay preserves its existing activation and due coordinate.
@@ -13342,10 +13342,10 @@ flow_model:
       - producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, delivery rows, replay rows
     standing_activation_model:
       status: merge_bearing_contract_runtime_behavior
-      implementation_tracker: '#1951'
-      declaration_surface: 'schema.yaml activation: standing plus optional ingress'
+      implementation_tracker: '#2438'
+      declaration_surface: 'schema.yaml ingress or compiled schedules; retention derives from an enabled binding or an active deployment clock'
       canonical_owners:
-        declaration: internal/runtime/contracts.ProjectFlowRef
+        declaration: internal/runtime.ResolveStandingTargetDeclarations over the admitted ingress and compiled clock declarations
         verification: internal/runtime.ResolveStandingTargetDeclarations
         provider_catalog: internal/providertriggers.CatalogSnapshot
         admission_plan: internal/providertriggers.InboundAdmissionPlan
@@ -13360,23 +13360,22 @@ flow_model:
         routing_projection: internal/runtime/routingtopology.Build root_input_sources
       authoring_shape:
         example:
-          flows:
-          - id: telegram-chat
-            flow: telegram-chat
-            activation: standing
-            ingress:
-              alias: chat
-              providers:
-              - provider: telegram
-                signing_secret: webhook_signing.telegram
+          name: telegram-chat
+          pins:
+            inputs: [inbound.telegram]
+          ingress:
+            alias: chat
+            providers:
+            - provider: telegram
+              signing_secret: webhook_signing.telegram
         rules:
-        - activation is explicit and is never inferred from ingress
-        - 'activation: standing is valid only when the declaring flow and every ancestor, including the root, have eligible canonical keyless no-argument constructors; keyed ancestry refuses before any service, generation, run, or header mutation. Runtime declaration, reconstructed-source admission, and boot verification consume that constructor contract, not contained-flow singleton resolution'
+        - 'activation is not an authored schema key; every presence is rejected by ordinary strict unknown-key admission, including retained source artifacts. Ingress and compiled clock declarations supply declaration identity; no producer means no service candidate, execution, or retention'
+        - 'Keyless standing construction consumes the declaring flow and every ancestor, including the root, through the eligible canonical no-argument constructor. Runtime declaration, reconstructed-source admission, and boot verification consume that constructor contract, not contained-flow singleton resolution'
         - 'Each independently selected standing generation constructs the complete eligible root tree through the canonical constructor in one activation commit, recursively including all keyless descendants and skipping keyed branches. The root coordinate belongs to that generation run; the returned standing target is the exact declaring descendant with its constructed parent identity, never a service-only subtree or a shared service generation'
         - 'Restart verifies the complete committed root tree, canonical headers, and iff-declared field companions before attachment or standing-set publication. Missing or mismatched descendants refuse without constructing replacements. Reset constructs a fresh tree under the new selected generation; attachment retry preserves construction and creating receipts'
         - 'Standing preparation remains non-executable: process topology may be staged before the startup grant, but timers and committed initial-entry/creation publication finalize only after Manager startup. A construction failure prevents publication of a partial standing target set'
-        - standing activation without ingress is valid for timer-driven or connect-fed services
-        - ingress requires activation: standing and an explicit alias; it is never derived from the package flow id
+        - 'A deployment clock may retain its declaring service without ingress. Connect edges remain delivery authority, not independent service-retention declarations. An ingress binding retains its service only when the binding is admitted and enabled; dormant declarations grant no retention'
+        - ingress requires an explicit alias; it is never derived from the package flow id
         - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
         - ingress providers are a list so duplicate provider declarations remain visible to strict verification
         - admission omission is always pack-required; raw admission requires explicit kind plus its complete closed policy
@@ -13440,7 +13439,7 @@ flow_model:
         reconciliation durably records that latest declaration source without rewriting N. Before readiness, one
         selected-store transaction validates the complete declaration set, creates enabled services or revises retained declared services, and
         orphans every previously declared service omitted from that complete set. A retained declaration keeps its current
-        nonterminal run and generation while its source revision and journal advance. A removed, renamed, or non-standing
+        nonterminal run and generation while its source revision and journal advance. A removed or renamed producer
         declaration is explicitly orphaned: its current generation is quiesced, its run is paused, publication is withdrawn,
         and its durable identity and lineage remain inspectable. A fresh all-dormant declaration creates no standing run,
         generation, service row or journal. The desired-state owner keeps declaration_present, binding_enabled and
@@ -41010,7 +41009,7 @@ filesystem_source_model:
     derivation: |
       Every non-reserved directory segment above a classified declaration, typed resource, or live descendant is a FlowNode. Child identity is its exact slash-relative path from the selected root. The selected root is spelled exactly `.`; an empty path, backslash spelling, or any other normalized-equivalent spelling is invalid rather than repaired. A non-root node must have local semantic/resource content or a live descendant; dead directories fail. The selected root must contain at least one semantic declaration, typed resource, or live descendant.
     schema_owner: |
-      schema.yaml owns instance shape, activation, ingress, imports, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. Mode is derived from the instance declaration, never authored. There is no connect.yaml or manifest-owned routing surface.
+      schema.yaml owns instance shape, ingress, schedules, imports, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. Mode is derived from the instance declaration, never authored. Deployment retention derives from enabled ingress bindings and active declared clocks, never an activation marker. There is no connect.yaml or manifest-owned routing surface.
     discovery_output: |
       One immutable trie rooted at `.`. Consumers may derive sorted registries from the trie but may not reconstruct topology from package inventories, directory names outside the artifact, or declaration contents.
   authored_identity:

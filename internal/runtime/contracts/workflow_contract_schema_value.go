@@ -21,16 +21,10 @@ func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 	if err := schemaValueTexts(fields, map[string]*string{"name": &out.Name}, false); err != nil {
 		return out, err
 	}
-	if err := schemaValueTexts(fields, map[string]*string{"activation": &out.Activation}, true); err != nil {
-		return out, err
-	}
-	if out.Activation != "" && out.Activation != FlowActivationStanding {
-		return out, nodeValueError(fields["activation"], fmt.Errorf("activation must be standing"))
-	}
 	for _, name := range sortedContractKeys(fields) {
 		value := fields[name]
 		switch name {
-		case "name", "activation":
+		case "name":
 			continue
 		case "instance":
 			var text string
