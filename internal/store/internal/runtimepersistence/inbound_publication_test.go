@@ -67,7 +67,7 @@ func (b *inboundPublicationProofBuilder) FinalizeInboundPublication(_ context.Co
 
 func runInboundPublicationProofMutation(t *testing.T, store inboundPublicationProofStore, ctx context.Context, request runtimeinbound.Request, fn func(inboundPublicationProofMutation) error) (runtimeinbound.Record, error) {
 	t.Helper()
-	if existing, found, err := store.LoadInboundPublicationByIdentity(ctx, request.Provider, request.EntityID, request.ProviderEventID); err != nil {
+	if existing, found, err := store.LoadInboundPublicationByIdentity(ctx, request.Identity()); err != nil {
 		return runtimeinbound.Record{}, err
 	} else if found {
 		if existing.RequestFingerprint != request.RequestFingerprint || existing.RequestProjectionVersion != request.RequestProjectionVersion {
@@ -231,10 +231,8 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	artifact := storeTestSourceArtifact("inbound-publication-proof")
 	flowPath := "publication-proof/ingress"
 	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
-	instanceID := uuid.NewString()
-	entityID := uuid.NewString()
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
-		ServiceID: serviceID, FlowPath: flowPath, InstanceID: instanceID, EntityID: entityID,
+		ServiceID: serviceID, FlowPath: flowPath,
 		Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 	}
 	ctx := runtimecorrelation.WithSourceArtifactFact(
@@ -675,7 +673,7 @@ func inboundPublicationZeroOutputEvidence(t *testing.T, request runtimeinbound.R
 	}
 	return eventtest.DiagnosticDirect(
 		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", payload, 0,
-		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
+		request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt,
 	)
 }
 
@@ -778,7 +776,7 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 	publications, evidence := inboundPublicationProofEvents(t, request)
 	evidence = eventtest.DiagnosticDirect(
 		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", []byte(`{}`), 0,
-		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
+		request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt,
 	)
 	if _, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
 		for index := range publications {
@@ -880,7 +878,7 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 			request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, fmt.Sprintf("delivery-corrupt-%d", index))
 			commitInboundPublicationProof(t, ctx, store, request, 2)
 			corruption.mutate(t, request)
-			if _, _, err := store.LoadInboundPublicationByIdentity(context.Background(), request.Provider, request.EntityID, request.ProviderEventID); err == nil {
+			if _, _, err := store.LoadInboundPublicationByIdentity(context.Background(), request.Identity()); err == nil {
 				t.Fatal("LoadInboundPublicationByIdentity error = nil, want corruption refusal")
 			}
 		})
@@ -910,7 +908,7 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 			request.PublicationID, request.MarkerEventID, strings.Repeat("d", 64), recipientFingerprint); err != nil {
 			t.Fatalf("insert extra child corruption: %v", err)
 		}
-		if _, _, err := store.LoadInboundPublicationByIdentity(context.Background(), request.Provider, request.EntityID, request.ProviderEventID); err == nil {
+		if _, _, err := store.LoadInboundPublicationByIdentity(context.Background(), request.Identity()); err == nil {
 			t.Fatal("LoadInboundPublicationByIdentity error = nil, want extra-child refusal")
 		}
 	})
@@ -939,16 +937,20 @@ func inboundProofArgs(sqlite bool, publicationID, value string) []any {
 
 func inboundPublicationProofRequest(t *testing.T, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64, providerEventID string) runtimeinbound.Request {
 	t.Helper()
-	publicationID, markerEventID := runtimeinbound.DeterministicIDs("github", candidate.EntityID, providerEventID)
+	identity := runtimeinbound.Identity{ServiceID: candidate.ServiceID, RunID: runID, Generation: generation, Provider: "github", ProviderEventID: providerEventID}
+	publicationID, markerEventID, err := runtimeinbound.DeterministicIDs(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fingerprint, err := runtimeinbound.SemanticFingerprint(map[string]any{"provider": "github", "provider_event_id": providerEventID, "payload": map[string]any{"value": 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return runtimeinbound.Request{
-		PublicationID: publicationID, Provider: "github", EntityID: candidate.EntityID, ProviderEventID: providerEventID,
+		PublicationID: publicationID, Provider: "github", ProviderEventID: providerEventID,
 		RequestFingerprint: fingerprint, RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
 		StableServiceID: candidate.ServiceID, FlowPath: candidate.FlowPath,
-		InstanceID: candidate.InstanceID, TargetAlias: "github", TargetFlowInstance: candidate.FlowPath + "/" + candidate.InstanceID,
+		TargetAlias:                 "github",
 		ExpectedPublicationSequence: sequence, ExpectedGeneration: generation,
 		ResolvedRunID: runID, MarkerEventID: markerEventID,
 		AcknowledgementMode: runtimeinbound.AcknowledgementDurableBeforeDispatch,
@@ -965,7 +967,10 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 	if outputCount < 1 || outputCount > 2 {
 		t.Fatalf("unsupported inbound publication proof output count %d", outputCount)
 	}
-	envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: request.EntityID, FlowInstance: request.TargetFlowInstance})
+	source, err := events.NewExternalIngressRoutingSource(request.FlowPath, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rawID, err := runtimeinbound.DeterministicEventID(request.PublicationID, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -975,8 +980,8 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 		t.Fatal(err)
 	}
 	payload := []byte(`{"value":{"z":2,"a":1},"provider":"github"}`)
-	raw := eventtest.ExistingRunRootIngress(rawID, "inbound.github.push", "inbound-gateway", "", payload, 0, request.ResolvedRunID, envelope, request.OriginalReceivedAt)
-	normalized := eventtest.ExistingRunRootIngress(normalizedID, "github.push.normalized", "inbound-gateway", "", payload, 0, request.ResolvedRunID, events.EventEnvelope{}, request.OriginalReceivedAt)
+	raw := eventtest.ExistingRunRootIngressWithRoutingSource(rawID, "inbound.github.push", "inbound-gateway", "", payload, 0, request.ResolvedRunID, events.EventEnvelope{}, source, request.OriginalReceivedAt)
+	normalized := eventtest.ExistingRunRootIngressWithRoutingSource(normalizedID, "github.push.normalized", "inbound-gateway", "", payload, 0, request.ResolvedRunID, events.EventEnvelope{}, source, request.OriginalReceivedAt)
 	authorization := runtimeprovideroutput.MustAuthorization(
 		request.Provider, string(normalized.Type()), "provider.github", "1.0.0",
 		"sha256:"+strings.Repeat("a", 64),
@@ -998,7 +1003,7 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 	}
 	evidence := eventtest.DiagnosticDirect(
 		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", evidencePayload, 0,
-		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
+		request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt,
 	)
 	return publications, evidence
 }

@@ -18,7 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestStandingKeyedAncestryRefusesBeforeMutationBothStores(t *testing.T) {
+func TestA9KeyedStandingGenerationDoesNotConstructBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, keyed := range []string{".", "parent"} {
 			t.Run(backend+"/"+keyed, func(t *testing.T) {
@@ -36,18 +36,40 @@ func TestStandingKeyedAncestryRefusesBeforeMutationBothStores(t *testing.T) {
 					t.Fatal("source authority is missing")
 				}
 				serviceID := flowidentity.StandingServiceID("parent/service")
-				instance := flowidentity.StandingForService(source, "parent/service", serviceID)
 				req := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), Targets: []pipeline.StandingTargetMutation{{
-					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: "parent/service", InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact},
-					Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance},
+					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: "parent/service", Source: fact},
+					Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, OccurredAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)},
 				}}}
-				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 				results, finish, err := f.workflows.PrepareStandingTargets(f.ctx, req, f.manager)
-				if err == nil || !strings.Contains(err.Error(), "keyless no-argument signature") || results != nil || finish != nil {
-					t.Fatalf("keyed ancestry accepted: results=%+v completion=%t err=%v", results, finish != nil, err)
+				if err != nil || len(results) != 1 || finish == nil {
+					t.Fatalf("keyed declaration failed to retain a generation: results=%+v completion=%t err=%v", results, finish != nil, err)
 				}
-				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
-					t.Fatal("keyed ancestry refusal mutated the selected store")
+				result := results[0]
+				if !result.Reconciliation.RestartDisposition.Executable() || result.Reconciliation.Generation != 1 || result.Reconciliation.PublicationSequence <= 0 || result.Instance != (flowidentity.Instance{}) {
+					t.Fatalf("binding and receiver identity were conflated: %+v", result)
+				}
+				instances, err := f.workflows.ListWorkflowInstances(f.ctx, result.Reconciliation.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantHeaders := 0
+				if keyed == "parent" {
+					wantHeaders = 1 // The genuine keyless root, never a keyed placeholder.
+				}
+				if len(instances) != wantHeaders {
+					t.Fatalf("enabled generation manufactured receivers: %+v", instances)
+				}
+				for _, instance := range instances {
+					if instance.WorkflowName != "." || instance.StorageRef != result.Reconciliation.RunID {
+						t.Fatalf("unexpected eager receiver: %+v", instance)
+					}
+				}
+				if err := finish(); err != nil {
+					t.Fatal(err)
+				}
+				statuses, err := f.workflows.ListStandingServiceStatuses(f.ctx)
+				if err != nil || len(statuses) != 1 || !statuses[0].SameAuthority(result.Reconciliation) {
+					t.Fatalf("zero-instance binding readback changed authority: %+v err=%v", statuses, err)
 				}
 			})
 		}
@@ -85,7 +107,7 @@ func TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores(t *te
 				serviceID := flowidentity.StandingServiceID(flowID)
 				instance := flowidentity.StandingForService(source, flowID, serviceID)
 				req.Targets = append(req.Targets, pipeline.StandingTargetMutation{
-					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: flowID, InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact},
+					Candidate:  pipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: serviceID, FlowPath: flowID, Source: fact},
 					Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance, OccurredAt: req.ObservedAt},
 				})
 			}
@@ -118,7 +140,7 @@ func TestDormantStandingPreparationDoesNotConstructBothStores(t *testing.T) {
 			instance := flowidentity.StandingForService(source, "service", serviceID)
 			request := pipeline.StandingTargetMutationRequest{ObservedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), Targets: []pipeline.StandingTargetMutation{{
 				Candidate: pipeline.StandingServiceCandidate{BindingEnabled: false, BindingBlockReason: runlifecycle.StandingBindingCredentialsAbsent,
-					ServiceID: serviceID, FlowPath: "service", InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact},
+					ServiceID: serviceID, FlowPath: "service", Source: fact},
 				Activation: pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance},
 			}}}
 			owner := &failSecondStandingTreeOwner{AgentManager: f.manager}
@@ -128,7 +150,7 @@ func TestDormantStandingPreparationDoesNotConstructBothStores(t *testing.T) {
 				if err != nil || len(results) != 1 || finish == nil {
 					t.Fatalf("dormant preparation: results=%+v finish=%t err=%v", results, finish != nil, err)
 				}
-				if result := results[0]; result.Created || result.Reconciliation.RunID != "" || result.Reconciliation.Generation != 0 || result.Reconciliation.RestartDisposition.Executable() || result.PublicationSequence != 0 || result.Instance.InstancePath != "" {
+				if result := results[0]; result.Created || result.Reconciliation.RunID != "" || result.Reconciliation.Generation != 0 || result.Reconciliation.RestartDisposition.Executable() || result.Reconciliation.PublicationSequence != 0 || result.Instance.InstancePath != "" {
 					t.Fatalf("dormant declaration acquired execution evidence: %+v", result)
 				}
 				if err := finish(); err != nil || owner.preparations != 0 {

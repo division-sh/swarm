@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -18,7 +19,7 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 		"alpha/schema.yaml": "name: alpha\n",
 		"beta/schema.yaml":  "name: beta\n",
 	}))
-	runID, entityID := eventtest.UUID("provider-run"), eventtest.UUID("provider-entity")
+	runID := eventtest.UUID("provider-run")
 	for _, flow := range []string{semanticview.RootExecutionFlowID(source), "alpha"} {
 		t.Run(flow, func(t *testing.T) {
 			root := flow == semanticview.RootExecutionFlowID(source)
@@ -30,7 +31,8 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 				wantKeys = []string{"inbound.telegram.text_message", "./inbound.telegram.text_message", runID + "/inbound.telegram.text_message"}
 				localAgent = agentidentitytest.RootDeclaredForRun(t, runID, "local", ".")
 			}
-			routing, err := events.NewExternalIngressRoutingSource(flow, entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+			entityID := flowidentity.EntityID(instance)
+			routing, err := events.NewExternalIngressRoutingSource(flow, events.RoutingSourceAuthorityProviderAdmissionPlan)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -99,8 +101,9 @@ func TestOrdinaryProviderSourceUsesExactSelectedOwner(t *testing.T) {
 				t.Fatal("agent filtering rewrote the admitted source or invented an event target")
 			}
 			projection.descriptors = []ActiveTargetDescriptor{{FlowInstance: "beta", EntityID: entityID}}
-			if _, err := projection.ordinarySource(evt); err == nil {
-				t.Fatal("foreign same-entity descriptor supplied the source instance")
+			absent, err := projection.ordinarySource(evt)
+			if err != nil || !absent.declarationOnly || len(absent.eventKeys(evt)) != 0 || absent.includesSubscriber(Subscriber{Recipient: events.MustAgentDeliveryRecipient(localAgent.AgentID()), AgentPlan: localPlan}) {
+				t.Fatalf("zero-instance declaration borrowed foreign execution: %+v err=%v", absent, err)
 			}
 			projection.descriptors = []ActiveTargetDescriptor{{FlowInstance: instance, EntityID: eventtest.UUID("other-entity")}}
 			if _, err := projection.ordinarySource(evt); err == nil {

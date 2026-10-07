@@ -16,7 +16,7 @@ func TestHumanRendererBankedAuthorStoryGrammar(t *testing.T) {
 	base := time.Date(2026, 7, 14, 19, 8, 9, 0, time.UTC)
 	ingress := occurrenceFromDraft(testDraft(KindInboundReceived, "received", base), 1)
 	ingress.Projection = Projection{
-		SubjectType: "entity", SubjectID: uuid.NewString(), Provider: "telegram",
+		SubjectType: "inbound_publication", SubjectID: uuid.NewString(), Provider: "telegram",
 		AuthorSubjectType: "chat", AuthorSubjectID: "123456",
 	}
 	entity := occurrenceFromDraft(testDraft(KindEntityLifecycle, "created", base), 2)
@@ -228,7 +228,7 @@ func TestTTYPaletteStylesTypedSemanticTokensOnly(t *testing.T) {
 	base := time.Date(2026, 7, 14, 19, 8, 9, 0, time.UTC)
 	ingress := occurrenceFromDraft(testDraft(KindInboundReceived, "received", base), 1)
 	ingress.Projection = Projection{
-		SubjectType: "entity", SubjectID: uuid.NewString(), Provider: "telegram",
+		SubjectType: "inbound_publication", SubjectID: uuid.NewString(), Provider: "telegram",
 		AuthorSubjectType: "chat", AuthorSubjectID: "123456",
 	}
 	delivered := occurrenceFromDraft(testDraft(KindDeliveryLifecycle, "delivered", base.Add(time.Second)), 2)

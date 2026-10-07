@@ -844,8 +844,8 @@ func validateRuntimeContextStandingTargets(contextDef BundleContext, executable 
 		}
 		bound := target.RunID != "" && target.Generation > 0
 		declarationOnly := target.RunID == "" && target.Generation == 0 && target.PublicationSequence == 0
-		if target.Alias == "" || target.Provider == "" || (executable && !bound) || (!bound && !declarationOnly) || target.FlowPath == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
-			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_path, flow_instance, entity_id, and compiled admission plan", bundleHash)
+		if target.Alias == "" || target.Provider == "" || (executable && !bound) || (!bound && !declarationOnly) || target.FlowPath == "" || !target.AdmissionPlan.Valid() || target.ServiceID != runtimeflowidentity.StandingServiceID(target.FlowPath) {
+			return fmt.Errorf("runtime context %s standing target requires its exact declaration, alias, provider, run generation and compiled admission plan", bundleHash)
 		}
 		if target.AdmissionPlan.RequiresSecret() != (target.SigningSecret != "") {
 			return fmt.Errorf("runtime context %s standing target %q/%q signing_secret presence contradicts compiled %s request authentication", bundleHash, target.Alias, target.Provider, target.AdmissionPlan.RequestAuthentication())
@@ -1855,7 +1855,7 @@ func validateStandingOperationDeclaration(entry *runtimeContextEntry, expected r
 
 func standingTargetMatchesOperation(target StandingServiceCoordinate, expected runtimepipeline.StandingServiceReconciliation) bool {
 	return target.RunID == expected.RunID && target.Generation == expected.Generation && target.PublicationSequence == expected.PublicationSequence &&
-		target.FlowPath == expected.FlowPath && target.InstanceID == expected.InstanceID && target.EntityID == expected.EntityID
+		target.FlowPath == expected.FlowPath
 }
 
 func (t *StandingServiceTransition) Wait(ctx context.Context) error {

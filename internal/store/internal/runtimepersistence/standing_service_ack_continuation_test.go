@@ -12,7 +12,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 type standingServicePostCommitFaultOwner struct {
@@ -68,7 +67,7 @@ func TestStandingServiceAcknowledgedCleanupErrorStillSignalsContinuationBothStor
 			candidate := func(path string) runtimepipeline.StandingServiceCandidate {
 				return runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 					ServiceID: runtimeflowidentity.StandingServiceID(path), FlowPath: path,
-					InstanceID: uuid.NewString(), EntityID: uuid.NewString(), Source: source,
+					Source: source,
 				}
 			}
 			suspendedCandidate := candidate("project/standing-ack-suspend")

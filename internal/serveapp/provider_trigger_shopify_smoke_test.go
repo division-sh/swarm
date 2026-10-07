@@ -74,7 +74,7 @@ func TestShopifyLocalProviderToolSmoke(t *testing.T) {
 
 	responseCapture := newProviderTriggerSmokeResponseCapture()
 	baseURL := startProviderTriggerSmokeServer(t, ctx, "localhost:0", bus, sqliteStore, responseCapture, runtimepkg.InboundTarget{
-		RunID: runID, FlowInstance: flowInstance, EntityID: entityID, EntitySlug: entitySlug,
+		RunID: runID,
 		Alias: entitySlug, Provider: provider, SigningSecret: "bounded_smoke.shopify",
 	}, clientSecret)
 

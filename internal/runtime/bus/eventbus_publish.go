@@ -2179,6 +2179,11 @@ func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt 
 }
 
 func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt events.Event) error {
+	if evt.RoutingSource().Kind() == events.RoutingSourceExternalIngress {
+		if _, authenticated := authenticatedProviderPublicationForEvent(ctx, evt); !authenticated {
+			return errors.New("provider declaration publication requires its authenticated admission owner")
+		}
+	}
 	if eb == nil || eb.recipientPlanAdmissionGuard == nil {
 		return nil
 	}

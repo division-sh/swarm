@@ -18,6 +18,8 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/google/uuid"
 )
@@ -35,18 +37,39 @@ const (
 
 var publicationNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm-inbound-publication"))
 
+// Identity elects one immutable provider receipt for an exact binding generation.
+// Concrete receivers and endpoint presentation are consequences, never identity.
+type Identity struct {
+	ServiceID       string `json:"service_id"`
+	RunID           string `json:"run_id"`
+	Generation      int64  `json:"generation"`
+	Provider        string `json:"provider"`
+	ProviderEventID string `json:"provider_event_id"`
+}
+
+func (i Identity) Validate() error {
+	for field, value := range map[string]string{"service_id": i.ServiceID, "run_id": i.RunID} {
+		parsed, err := uuid.Parse(value)
+		if err != nil || parsed == uuid.Nil || parsed.String() != value {
+			return fmt.Errorf("inbound identity %s requires an exact UUID", field)
+		}
+	}
+	if i.Generation <= 0 || i.Provider == "" || i.Provider != strings.ToLower(strings.TrimSpace(i.Provider)) ||
+		i.ProviderEventID == "" || i.ProviderEventID != strings.TrimSpace(i.ProviderEventID) {
+		return fmt.Errorf("inbound identity requires its exact generation, provider and provider delivery")
+	}
+	return nil
+}
+
 type Request struct {
 	PublicationID               string
 	Provider                    string
-	EntityID                    string
 	ProviderEventID             string
 	RequestFingerprint          string
 	RequestProjectionVersion    string
 	StableServiceID             string
 	FlowPath                    string
-	InstanceID                  string
 	TargetAlias                 string
-	TargetFlowInstance          string
 	ExpectedPublicationSequence int64
 	ExpectedGeneration          int64
 	ResolvedRunID               string
@@ -60,7 +83,6 @@ type Request struct {
 func (r Request) Normalized() Request {
 	r.PublicationID = strings.TrimSpace(r.PublicationID)
 	r.Provider = strings.ToLower(strings.TrimSpace(r.Provider))
-	r.EntityID = strings.TrimSpace(r.EntityID)
 	r.ProviderEventID = strings.TrimSpace(r.ProviderEventID)
 	r.RequestFingerprint = strings.ToLower(strings.TrimSpace(r.RequestFingerprint))
 	r.RequestProjectionVersion = strings.TrimSpace(r.RequestProjectionVersion)
@@ -69,8 +91,6 @@ func (r Request) Normalized() Request {
 	}
 	r.StableServiceID = strings.TrimSpace(r.StableServiceID)
 	r.FlowPath = strings.TrimSpace(r.FlowPath)
-	r.InstanceID = strings.TrimSpace(r.InstanceID)
-	r.TargetFlowInstance = strings.Trim(strings.TrimSpace(r.TargetFlowInstance), "/")
 	r.ResolvedRunID = strings.TrimSpace(r.ResolvedRunID)
 	r.MarkerEventID = strings.TrimSpace(r.MarkerEventID)
 	r.AcknowledgementMode = AcknowledgementMode(strings.TrimSpace(string(r.AcknowledgementMode)))
@@ -83,6 +103,13 @@ func (r Request) Normalized() Request {
 }
 
 func (r Request) Validate() error {
+	if err := r.Identity().Validate(); err != nil {
+		return err
+	}
+	flow, err := identity.AdmitFlowIdentity(r.FlowPath)
+	if err != nil || r.StableServiceID != flowidentity.StandingServiceID(flow.String()) {
+		return fmt.Errorf("inbound request requires its exact declaration-owned service")
+	}
 	r = r.Normalized()
 	if err := runtimecontracts.ValidateIngressAlias(r.TargetAlias); err != nil {
 		return fmt.Errorf("target_alias: %w", err)
@@ -90,14 +117,11 @@ func (r Request) Validate() error {
 	required := map[string]string{
 		"publication_id":             r.PublicationID,
 		"provider":                   r.Provider,
-		"entity_id":                  r.EntityID,
 		"provider_event_id":          r.ProviderEventID,
 		"request_fingerprint":        r.RequestFingerprint,
 		"stable_service_id":          r.StableServiceID,
 		"flow_path":                  r.FlowPath,
-		"instance_id":                r.InstanceID,
 		"target_alias":               r.TargetAlias,
-		"target_flow_instance":       r.TargetFlowInstance,
 		"resolved_run_id":            r.ResolvedRunID,
 		"marker_event_id":            r.MarkerEventID,
 		"request_projection_version": r.RequestProjectionVersion,
@@ -109,7 +133,6 @@ func (r Request) Validate() error {
 	}
 	for field, value := range map[string]string{
 		"publication_id":    r.PublicationID,
-		"entity_id":         r.EntityID,
 		"stable_service_id": r.StableServiceID,
 		"resolved_run_id":   r.ResolvedRunID,
 		"marker_event_id":   r.MarkerEventID,
@@ -130,6 +153,10 @@ func (r Request) Validate() error {
 	if r.ExpectedGeneration < 1 {
 		return fmt.Errorf("expected_generation must be positive")
 	}
+	publicationID, markerEventID, err := DeterministicIDs(r.Identity())
+	if err != nil || r.PublicationID != publicationID || r.MarkerEventID != markerEventID {
+		return fmt.Errorf("inbound request does not use its reserved binding-generation identity")
+	}
 	switch r.AcknowledgementMode {
 	case AcknowledgementAfterPublish, AcknowledgementDurableBeforeDispatch:
 	default:
@@ -146,6 +173,11 @@ func (r Request) Validate() error {
 		return fmt.Errorf("original_transport_metadata must be a JSON object")
 	}
 	return nil
+}
+
+func (r Request) Identity() Identity {
+	return Identity{ServiceID: r.StableServiceID, RunID: r.ResolvedRunID, Generation: r.ExpectedGeneration,
+		Provider: r.Provider, ProviderEventID: r.ProviderEventID}
 }
 
 type EventFinalization struct {
@@ -176,10 +208,10 @@ type CommitCommand struct {
 }
 
 func (c CommitCommand) Validate() error {
-	request := c.Request.Normalized()
-	if err := request.Validate(); err != nil {
+	if err := c.Request.Validate(); err != nil {
 		return err
 	}
+	request := c.Request.Normalized()
 	if len(c.Finalization.Events) > 2 {
 		return fmt.Errorf("inbound publication requires raw plus zero or one normalized event")
 	}
@@ -251,6 +283,11 @@ func (c CommitCommand) Validate() error {
 		}
 		if item.Event.RunID() != request.ResolvedRunID {
 			return fmt.Errorf("inbound publication child ordinal %d must use the admitted resolved_run_id", index)
+		}
+		source := item.Event.RoutingSource()
+		if source.Kind() != events.RoutingSourceExternalIngress || source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan ||
+			source.Route() != (events.RouteIdentity{FlowID: request.FlowPath}) {
+			return fmt.Errorf("inbound publication child ordinal %d requires its exact provider declaration", index)
 		}
 		authorization := item.Authorization
 		switch item.Kind {
@@ -332,7 +369,10 @@ type EvidencePayload struct {
 	PublicationID   string   `json:"publication_id"`
 	Provider        string   `json:"provider"`
 	ProviderEventID string   `json:"provider_event_id"`
-	EntityID        string   `json:"entity_id"`
+	ServiceID       string   `json:"service_id"`
+	RunID           string   `json:"run_id"`
+	Generation      int64    `json:"generation"`
+	FlowPath        string   `json:"flow_path"`
 	EventIDs        []string `json:"event_ids"`
 	EventNames      []string `json:"event_names"`
 	OutputCount     int      `json:"output_count"`
@@ -377,7 +417,8 @@ func BuildEvidencePayload(request Request, eventIDs, eventNames []string) (json.
 	}
 	payload, err := json.Marshal(EvidencePayload{
 		PublicationID: request.PublicationID, Provider: request.Provider,
-		ProviderEventID: request.ProviderEventID, EntityID: request.EntityID,
+		ProviderEventID: request.ProviderEventID, ServiceID: request.StableServiceID,
+		RunID: request.ResolvedRunID, Generation: request.ExpectedGeneration, FlowPath: request.FlowPath,
 		EventIDs: ids, EventNames: names, OutputCount: len(ids),
 	})
 	if err != nil {
@@ -401,8 +442,8 @@ func ValidateEvidenceEvent(request Request, evidence events.Event, eventIDs, eve
 	if evidence.Type() != events.EventTypePlatformInboundRecord {
 		return fmt.Errorf("inbound evidence event must be platform.inbound_recorded")
 	}
-	if strings.TrimSpace(evidence.Envelope().EntityID) != request.EntityID {
-		return fmt.Errorf("inbound evidence event must use the admitted entity_id")
+	if evidence.Envelope().EntityID != "" || evidence.Envelope().FlowInstance != "" {
+		return fmt.Errorf("inbound evidence event cannot impersonate a concrete receiver")
 	}
 
 	var expected, actual EvidencePayload
@@ -418,7 +459,8 @@ func ValidateEvidenceEvent(request Request, evidence events.Event, eventIDs, eve
 		return err
 	}
 	if actual.PublicationID != expected.PublicationID || actual.Provider != expected.Provider ||
-		actual.ProviderEventID != expected.ProviderEventID || actual.EntityID != expected.EntityID ||
+		actual.ProviderEventID != expected.ProviderEventID || actual.ServiceID != expected.ServiceID ||
+		actual.RunID != expected.RunID || actual.Generation != expected.Generation || actual.FlowPath != expected.FlowPath ||
 		actual.OutputCount != expected.OutputCount || !slices.Equal(actual.EventIDs, expected.EventIDs) ||
 		!slices.Equal(actual.EventNames, expected.EventNames) {
 		return fmt.Errorf("inbound evidence payload does not match the committed ordered event batch")
@@ -439,18 +481,20 @@ func ensureEvidencePayloadEOF(decoder *json.Decoder) error {
 
 type Runner interface {
 	CommitInboundPublication(ctx context.Context, command CommitCommand) (CommitResult, error)
-	LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, providerEventID string) (Record, bool, error)
+	LoadInboundPublicationByIdentity(ctx context.Context, identity Identity) (Record, bool, error)
 	ValidateInboundPublicationIntegrity(ctx context.Context) error
 }
 
-func DeterministicIDs(provider, entityID, providerEventID string) (publicationID, markerEventID string) {
-	identity := strings.Join([]string{
-		strings.ToLower(strings.TrimSpace(provider)),
-		strings.TrimSpace(entityID),
-		strings.TrimSpace(providerEventID),
-	}, "\x00")
-	publication := uuid.NewSHA1(publicationNamespace, []byte(identity))
-	return publication.String(), uuid.NewSHA1(publication, []byte("evidence")).String()
+func DeterministicIDs(identity Identity) (publicationID, markerEventID string, err error) {
+	if err := identity.Validate(); err != nil {
+		return "", "", err
+	}
+	encoded, err := json.Marshal(identity)
+	if err != nil {
+		return "", "", err
+	}
+	publication := uuid.NewSHA1(publicationNamespace, encoded)
+	return publication.String(), uuid.NewSHA1(publication, []byte("evidence")).String(), nil
 }
 
 func DeterministicEventID(publicationID string, ordinal int) (string, error) {

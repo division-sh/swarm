@@ -2124,23 +2124,23 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 			if store.isSQLite() {
 				if _, err := store.testDB().ExecContext(ctx, `
 						INSERT INTO standing_services (
-							service_id, flow_path, instance_id, entity_id, declaration_present, binding_enabled,
+							service_id, flow_path, declaration_present, binding_enabled,
 							operator_override, effective_state, current_bundle_hash,
 							revision_sequence, current_generation, current_run_id, publication_state,
 							publication_sequence, created_at, updated_at
-						) VALUES (?, ?, ?, ?, TRUE, TRUE, 'none', 'active', ?, 1, 1, ?, 'pending', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-						`, runtimeflowidentity.StandingServiceID(flowPath), flowPath, flowPath, uuid.NewString(), bundleHash, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+						) VALUES (?, ?, TRUE, TRUE, 'none', 'active', ?, 1, 1, ?, 'pending', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+						`, runtimeflowidentity.StandingServiceID(flowPath), flowPath, bundleHash, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
 					t.Fatalf("seed standing ownership fixture: %v", err)
 				}
 			} else {
 				if _, err := store.testDB().ExecContext(ctx, `
 					INSERT INTO standing_services (
-						service_id, flow_path, instance_id, entity_id, declaration_present, binding_enabled,
+						service_id, flow_path, declaration_present, binding_enabled,
 						operator_override, effective_state, current_bundle_hash,
 						revision_sequence, current_generation, current_run_id, publication_state,
 						publication_sequence, created_at, updated_at
-					) VALUES ($1::uuid, $2, $3, $4::uuid, TRUE, TRUE, 'none', 'active', $5, 1, 1, $6::uuid, 'pending', 0, NOW(), NOW())
-				`, runtimeflowidentity.StandingServiceID(flowPath), flowPath, flowPath, uuid.NewString(), bundleHash, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+					) VALUES ($1::uuid, $2, TRUE, TRUE, 'none', 'active', $3, 1, 1, $4::uuid, 'pending', 0, NOW(), NOW())
+					`, runtimeflowidentity.StandingServiceID(flowPath), flowPath, bundleHash, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
 					t.Fatalf("seed standing ownership fixture: %v", err)
 				}
 			}

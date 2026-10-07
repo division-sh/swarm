@@ -170,7 +170,7 @@ func TestDormantStandingReconciliationBothStores(t *testing.T) {
 			seedStoreTestPersistedArtifact(t, db, artifact)
 			candidate := runtimepipeline.StandingServiceCandidate{
 				ServiceID: runtimeflowidentity.StandingServiceID("telegram-ingress"), FlowPath: "telegram-ingress",
-				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+
 				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), BindingEnabled: false,
 				BindingBlockReason: runtimerunlifecycle.StandingBindingCredentialsAbsent,
 			}

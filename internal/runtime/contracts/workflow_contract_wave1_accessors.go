@@ -20,9 +20,9 @@ func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (Tem
 		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s template instance is unavailable: bundle is nil", label)
 	}
 	if flowID == "" {
-		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow <root> cannot declare a template instance key; template instances are child flow contracts")
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: exact flow identity is required")
 	}
-	schema, ok := b.FlowSchemas[flowID]
+	schema, ok := b.FlowSchemaByID(flowID)
 	if !ok {
 		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s template instance is unavailable: schema not found", flowID)
 	}

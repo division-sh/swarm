@@ -2072,13 +2072,18 @@ func reconcileServeRuntimeStandingTargets(
 		if !ok {
 			return nil, nil, fmt.Errorf("standing service %s has no startup reconciliation", targets[i].ServiceID)
 		}
-		instance, err := runtimeflowidentity.StandingForGeneration(rt.Options.WorkflowModule.SemanticSource(), reconciliation.FlowPath, reconciliation.RunID)
+		source := rt.Options.WorkflowModule.SemanticSource()
+		keyless, err := runtimepipeline.StandingConstructionIsKeyless(source, reconciliation.FlowPath)
 		if err != nil {
 			return nil, nil, err
 		}
-		targets[i].InstanceID = instance.InstanceID
-		targets[i].EntityID = instance.EntityID
-		targets[i].FlowInstance = instance.InstancePath
+		var instance runtimeflowidentity.Instance
+		if keyless {
+			instance, err = runtimeflowidentity.StandingForGeneration(source, reconciliation.FlowPath, reconciliation.RunID)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		targets[i].RunID = reconciliation.RunID
 		targets[i].Generation = reconciliation.Generation
 		targets[i].PublicationSequence = reconciliation.PublicationSequence
@@ -2093,9 +2098,7 @@ func reconcileServeRuntimeStandingTargets(
 			RunID:               reconciliation.RunID,
 			Generation:          reconciliation.Generation,
 			PublicationSequence: reconciliation.PublicationSequence,
-			InstanceID:          instance.InstanceID,
-			FlowInstance:        targets[i].FlowInstance,
-			EntityID:            instance.EntityID,
+			Construction:        instance,
 			EffectiveState:      reconciliation.EffectiveState,
 			RestartDisposition:  reconciliation.RestartDisposition,
 			Created:             reconciliation.Transition == "created",
@@ -2211,8 +2214,8 @@ func (c *serveStandingServiceController) mutateStandingService(ctx context.Conte
 		}
 	}
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
-		ServiceID: target.ServiceID, FlowPath: target.FlowPath, InstanceID: target.InstanceID,
-		EntityID: target.EntityID, Source: use.Context.SourceArtifactFact,
+		ServiceID: target.ServiceID, FlowPath: target.FlowPath,
+		Source: use.Context.SourceArtifactFact,
 	}
 	expected, found, err := owner.Pipeline.LoadReconciledStandingService(ctx, candidate)
 	if err != nil || !found {

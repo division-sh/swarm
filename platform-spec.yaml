@@ -13351,13 +13351,13 @@ flow_model:
         alias: internal/runtime/contracts.WorkflowContractBundle.FlowIngressAlias compiled with the immutable workflow semantics and effective provenance
         verification: internal/runtime.ResolveStandingTargetDeclarations
         provider_catalog: internal/providertriggers.CatalogSnapshot
-        admission_plan: internal/providertriggers.InboundAdmissionPlan
+        admission_plan: internal/providertriggers.InboundAdmissionPlan and its authenticated PublicationAdmission output handoff
         durable_identity_and_desired_state: private runtime/pipeline workflow persistence over standing_services plus standing_service_generations plus standing_service_journal
         restart_disposition: internal/runtime/runlifecycle.ClassifyStandingRestart over the complete selected-store exact-current fact product
         startup_reconciliation: internal/runtime/pipeline.PipelineCoordinator.ReconcileStandingServiceSet
         lifecycle_materialization: internal/runtime.Runtime.EnsureStandingTargets
         process_registry: internal/runtime.RuntimeContextManager
-        ingress_operation: internal/store.RunInboundPublicationMutation and internal/store.SQLiteRuntimeStore.RunInboundPublicationMutation
+        ingress_operation: internal/store/internal/backend/eventpersistence.EventPostgresOwner.CommitInboundPublication and EventSQLiteOwner.CommitInboundPublication
         ingress_admission: internal/runtime.InboundGateway.HandleResolvedWebhook
         committed_publication_authority: inbound_publications
         routing_projection: internal/runtime/routingtopology.Build root_input_sources
@@ -13374,10 +13374,12 @@ flow_model:
         rules:
         - 'activation is not an authored schema key; every presence is rejected by ordinary strict unknown-key admission, including retained source artifacts. Ingress and compiled clock declarations supply declaration identity; no producer means no service candidate, execution, or retention'
         - 'Keyless standing construction consumes the declaring flow and every ancestor, including the root, through the eligible canonical no-argument constructor. Runtime declaration, reconstructed-source admission, and boot verification consume that constructor contract, not contained-flow singleton resolution'
-        - 'Each independently selected standing generation constructs the complete eligible root tree through the canonical constructor in one activation commit, recursively including all keyless descendants and skipping keyed branches. The root coordinate belongs to that generation run; the returned standing target is the exact declaring descendant with its constructed parent identity, never a service-only subtree or a shared service generation'
-        - 'Restart verifies the complete committed root tree, canonical headers, and iff-declared field companions before attachment or standing-set publication. Missing or mismatched descendants refuse without constructing replacements. Reset constructs a fresh tree under the new selected generation; attachment retry preserves construction and creating receipts'
+        - 'Each independently selected standing generation owns a declaration binding, run and generation before any keyed receiver exists. A keyless selected root constructs its complete eligible no-argument tree in one activation commit, recursively including keyless descendants and skipping keyed branches. A keyed root remains unconstructed until an authenticated eligible creating input arrives. The root execution coordinate belongs to that generation run, not its business key or service UUID; a standing target carries binding authority, never a fabricated receiver'
+        - 'Restart verifies every already-constructed tree, canonical header and iff-declared field companion before attachment. A keyed binding with no receiver is valid typed absence, not corruption. Missing or mismatched descendants of an existing constructed parent refuse without replacements. Reset admits the new generation and its eager keyless tree where applicable; attachment retry preserves immutable construction and creating receipts'
         - 'Standing preparation remains non-executable: process topology may be staged before the startup grant, but timers and committed initial-entry/creation publication finalize only after Manager startup. A construction failure prevents publication of a partial standing target set'
         - 'A deployment clock may retain its declaring service without ingress. Connect edges remain delivery authority, not independent service-retention declarations. An ingress binding retains its service only when the binding is admitted and enabled; dormant declarations grant no retention'
+        - 'Provider publications carry the exact pinned declaring flow, not a concrete source instance or entity. InboundAdmissionPlan authenticates the request and transfers its exact ordered output names, kinds, payloads and pack authorization through PublicationAdmission before planning. An ingress source enum, schema import, endpoint alias or capability subject ID cannot grant that admission. Concrete execution still requires the shared constructor, explicit connection where crossing a boundary, selected-run receiver ownership and actual attachment'
+        - 'The inbound receipt identity is exactly service/run/generation/provider/provider-delivery. Alias and concrete receiver coordinates are projections, never deduplication identity. Exact retries return the immutable committed batch before current output projection or construction; changed semantic content at the same identity refuses before mutation. Current binding source, generation, publication sequence and run fences remain mandatory for fresh publication'
         - 'Omitted ingress.alias is derived once from the selected root flow name and declaration path: root shop becomes shop, child shop becomes shop.shop, and nested shop/leaf becomes shop.shop.leaf. The root name must be an exact single-segment addressable name; an absent or invalid name cannot be repaired from a host directory, execution hash or label. An explicit valid override does not require a derivable root name'
         - 'Explicit alias presence is exact non-empty text and a valid URL segment; empty, null, malformed and normalized-equivalent spellings refuse rather than becoming omission. Provider composition, runtime declaration/lookup, describe/topology and registration consume the same compiled alias and its provenance, never raw-override reconstruction'
         - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
@@ -13503,9 +13505,11 @@ flow_model:
         in internal/runtime/runlifecycle; the selected-store standingdisposition reader proves its complete fact product.
         Standing mutations retain parent-before-run lock order. Generic continue uses the non-locking canonical standing
         read under its existing run fence and must not acquire an inverted standing-parent lock.
-        service_id, current_generation, current_run_id, instance_id, and entity_id are the standing semantic authority. The
-        standing instance continues to use the ordinary canonical flow-instance identity owner; a special path namespace,
-        source-equality validator, entity_state scan, or alternate route matcher is forbidden.
+        service_id, flow_path, current_generation and current_run_id are declaration-owned standing authority,
+        independent of concrete receiver cardinality. A binding can retain an enabled generation with no instances.
+        Constructors and immutable receiver receipts own concrete instance/entity identities; service rows neither
+        manufacture nor select a receiver. Concrete instances use the ordinary canonical flow-instance identity owner;
+        a special path namespace, source-equality validator, entity_state scan or alternate route matcher is forbidden.
       process_routing: >
         One process RuntimeContextManager owns primary, additional, SQLite, Postgres, API, ingress, and shutdown visibility.
         It resolves alias/provider to exactly one loaded BundleContext and context-complete target.
@@ -15413,6 +15417,7 @@ platform_tables:
         as one typed descriptor fact resolved from the canonical semantic source. The selected store may consume that fact
         only under the matching live exact-scope lease and must reject missing, stale, mismatched, or conflicting facts.
       subject_rules:
+        inbound_received: The subject is the exact immutable inbound publication UUID, with the binding run and declaring flow as scope; subject_type is inbound_publication. It never requires or fabricates a receiver entity. The provider renders as the human subject and the independently authenticated external author remains separate metadata.
         event_emitted: The subject is the exact canonical producer identity and type paired with the exact event type. The event UUID is source evidence and MUST NOT render as the subject.
         effect_lifecycle: The subject is derived from exact adapter, transport, and authority metadata. The effect-attempt UUID is source evidence and MUST NOT render as the subject.
         card_lifecycle: Every registered decision-card anchor kind MUST have one exact metadata-only adapter. stage_gate uses stage_activation_id, human_task uses operation_id, and proposed_effect uses request_event_id as anchor identity; all lifecycle changes join the decision-card mutation transaction and story.
@@ -15660,8 +15665,6 @@ platform_tables:
         CREATE TABLE standing_services (
             service_id             UUID PRIMARY KEY,
             flow_path              TEXT NOT NULL,
-            instance_id            TEXT NOT NULL UNIQUE,
-            entity_id              UUID NOT NULL UNIQUE,
             declaration_present    BOOLEAN NOT NULL,
             binding_enabled        BOOLEAN NOT NULL,
             operator_override      TEXT NOT NULL DEFAULT 'none' CHECK (operator_override IN ('none', 'suspended')),
@@ -15775,7 +15778,7 @@ platform_tables:
             CHECK ((event_name IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class = 'diagnostic_direct') OR (event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class <> 'diagnostic_direct')),
             CHECK (event_name <> 'platform.runtime_log' OR produced_by = 'runtime'),
             CHECK (event_name NOT IN ('platform.inbound_recorded', 'platform.agent_directive') OR run_id IS NOT NULL),
-            CHECK ((event_name = 'platform.runtime_log' AND scope = 'global') OR (event_name = 'platform.inbound_recorded' AND scope IN ('entity', 'global')) OR (event_name = 'platform.agent_directive' AND scope = 'global') OR event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive')),
+            CHECK ((event_name IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND scope = 'global') OR event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive')),
             CHECK ((routing_source_kind IN ('absent', 'platform_control') AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'external_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind IN ('root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'deployment_feed') AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
             CHECK ((event_class = 'runtime_control' AND routing_source_kind IN ('root', 'flow_owned_control', 'platform_control')) OR (event_class IN ('runtime_diagnostic', 'diagnostic_direct') AND routing_source_kind = 'absent') OR event_class NOT IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             UNIQUE (event_id, run_id),
@@ -16466,7 +16469,7 @@ platform_tables:
     inbound_publications:
       description: >-
         Permanent inbound provider request/idempotency owner. The parent reserves one
-        provider identity and binds a retry-stable request fingerprint to one immutable
+        (service, run, generation, provider, provider delivery) identity and binds a retry-stable request fingerprint to one immutable
         ordered executable-event batch and one platform.inbound_recorded evidence event.
         Output projection and current pack generation are not request identity. A prepared
         row is transaction-local only; any durable prepared row is corruption.
@@ -16474,15 +16477,12 @@ platform_tables:
         CREATE TABLE inbound_publications (
             publication_id              UUID PRIMARY KEY,
             provider                    TEXT NOT NULL,
-            entity_id                   UUID NOT NULL,
             provider_event_id           TEXT NOT NULL,
             request_fingerprint         TEXT NOT NULL,
             request_projection_version  TEXT NOT NULL CHECK (request_projection_version = 'inbound-request-semantic-v1'),
             stable_service_id            UUID NOT NULL REFERENCES standing_services(service_id),
             flow_path                    TEXT NOT NULL,
-            instance_id                  TEXT NOT NULL,
             target_alias                 TEXT NOT NULL,
-            target_flow_instance         TEXT NOT NULL,
             expected_generation          BIGINT NOT NULL CHECK (expected_generation > 0),
             expected_publication_sequence BIGINT NOT NULL CHECK (expected_publication_sequence >= 0),
             resolved_run_id              UUID NOT NULL REFERENCES runs(run_id),
@@ -16496,7 +16496,7 @@ platform_tables:
             created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             committed_at                 TIMESTAMPTZ,
             CHECK ((state = 'prepared' AND marker_event_id IS NULL AND output_count = 0 AND committed_at IS NULL) OR (state = 'committed' AND marker_event_id IS NOT NULL AND output_count >= 0 AND output_count <= 2 AND committed_at IS NOT NULL)),
-            UNIQUE (provider, entity_id, provider_event_id),
+            UNIQUE (stable_service_id, expected_generation, resolved_run_id, provider, provider_event_id),
             INDEX idx_inbound_publications_run (resolved_run_id, created_at),
             INDEX idx_inbound_publications_service (stable_service_id, created_at),
             INDEX idx_inbound_publications_state (state, created_at)
@@ -21498,12 +21498,15 @@ platform_events:
         - internal/store/internal/backend/eventpersistence/inbound_publication.go#RunInboundPublicationMutation
         - internal/store/internal/backend/eventpersistence/sqlite_inbound_publication.go#RunInboundPublicationMutation
       routing_class: diagnostic_direct_persisted
-      scope: entity or global
+      scope: global
       payload:
         publication_id: uuid
         provider: string
         provider_event_id: string
-        entity_id: uuid
+        service_id: uuid
+        run_id: uuid
+        generation: integer
+        flow_path: string
         event_ids: array<string>
         event_names: array<string>
         output_count: integer

@@ -136,7 +136,7 @@ func authorActivityInboundDraft(identity string, at time.Time, scope runtimeauth
 		OccurrenceID: uuid.NewString(), Kind: runtimeauthoractivity.KindInboundReceived,
 		Version: runtimeauthoractivity.Version, Transition: "received", SourceOwner: "events",
 		SourceIdentity: identity, DedupKey: identity, OccurredAt: at, Scope: scope,
-		Projection: runtimeauthoractivity.Projection{SubjectType: "entity", SubjectID: identity},
+		Projection: runtimeauthoractivity.Projection{SubjectType: "inbound_publication", SubjectID: identity},
 	}
 }
 

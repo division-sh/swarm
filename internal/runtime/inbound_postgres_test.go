@@ -768,7 +768,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
 	requireInboundGatewayAuthorProjection(t, ctx, pg, runID, entityID, "chat", "42")
-	record, found, err := pg.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
+	record, found, err := pg.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, provider, providerEventID))
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
@@ -838,7 +838,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
 	requireInboundGatewayAuthorProjection(t, ctx, sqliteStore, runID, entityID, "chat", "42")
-	record, found, err := sqliteStore.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
+	record, found, err := sqliteStore.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, provider, providerEventID))
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
 	}
@@ -1328,6 +1328,10 @@ func boundedInboundStandingOrigin(t *testing.T, _ string) runtimerunlifecycle.Ru
 		t.Fatalf("construct bounded inbound standing origin: %v", err)
 	}
 	return origin
+}
+
+func inboundTestReceiptIdentity(target runtimepkg.InboundTarget, provider, deliveryID string) runtimeinbound.Identity {
+	return runtimeinbound.Identity{ServiceID: target.ServiceID, RunID: target.RunID, Generation: target.Generation, Provider: provider, ProviderEventID: deliveryID}
 }
 
 type inboundStandingRecoveryOwner struct {

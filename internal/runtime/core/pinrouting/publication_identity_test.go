@@ -11,7 +11,7 @@ func TestBusinessPublicationAdmittedSourceKinds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	external, err := events.NewExternalIngressRoutingSource("child", "entity", events.RoutingSourceAuthorityProviderAdmissionPlan)
+	external, err := events.NewExternalIngressRoutingSource("child", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

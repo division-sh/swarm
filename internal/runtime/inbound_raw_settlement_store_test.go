@@ -89,7 +89,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 							if response.Code != http.StatusAccepted {
 								t.Fatalf("status = %d, want 202 body=%s", response.Code, response.Body.String())
 							}
-							record, found, err := selected.LoadInboundPublicationByIdentity(ctx, provider.provider, entityID, providerEventID)
+							record, found, err := selected.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, provider.provider, providerEventID))
 							if err != nil || !found || len(record.Events) != 1 {
 								t.Fatalf("LoadInboundPublicationByIdentity = found:%t events:%d err:%v response:%s", found, len(record.Events), err, response.Body.String())
 							}

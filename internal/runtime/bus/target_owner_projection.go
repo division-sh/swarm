@@ -19,6 +19,7 @@ type selectedRunTargetOwnerProjection struct {
 	context            context.Context
 	agents             map[agentidentity.Identity]ActiveAgentDescriptor
 	constructingAgents map[agentidentity.Identity]struct{}
+	activationOwners   map[events.RouteIdentity]struct{}
 	agentsAvailable    bool
 	descriptors        []ActiveTargetDescriptor
 	targetsAvailable   bool
@@ -358,6 +359,10 @@ func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepip
 	for identity := range p.constructingAgents {
 		constructing[identity] = struct{}{}
 	}
+	activationOwners := make(map[events.RouteIdentity]struct{}, len(p.activationOwners))
+	for identity := range p.activationOwners {
+		activationOwners[identity] = struct{}{}
+	}
 	var constructionPlans []runtimepipeline.FlowInstanceActivationPlan
 	for _, plan := range plans {
 		constructionPlans = append(constructionPlans, plan.ConstructionPlans()...)
@@ -371,6 +376,8 @@ func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepip
 		if err := normalized.Validate(); err != nil {
 			return selectedRunTargetOwnerProjection{}, fmt.Errorf("validate selected-run activation owner: %w", err)
 		}
+		activationOwners[events.RouteIdentity{FlowID: normalized.Identity.TemplateID,
+			FlowInstance: normalized.Identity.InstancePath, EntityID: normalized.Identity.EntityID}] = struct{}{}
 		ordered.add(ActiveTargetDescriptor{
 			ID:            normalized.Identity.InstanceID,
 			FlowInstance:  normalized.Identity.InstancePath,
@@ -389,6 +396,7 @@ func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepip
 	}
 	p.agents = agents
 	p.constructingAgents = constructing
+	p.activationOwners = activationOwners
 	p.descriptors = ordered.descriptors
 	return p, nil
 }

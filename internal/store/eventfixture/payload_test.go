@@ -11,7 +11,7 @@ import (
 func TestBindPayloadRetainsExactSourceSchemaCoordinate(t *testing.T) {
 	runID := eventtest.UUID("payload-root-run")
 	entityID := eventtest.UUID("payload-provider-entity")
-	provider, err := events.NewExternalIngressRoutingSource("provider", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	provider, err := events.NewExternalIngressRoutingSource("provider", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

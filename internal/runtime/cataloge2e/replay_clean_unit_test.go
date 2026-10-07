@@ -62,7 +62,7 @@ func TestCatalogReplayProjectionPreservesExactInputAndSemanticFacts(t *testing.T
 	want := catalogReplayUnitProjection(t, transcript, replayOperatorEvent(t, base))
 
 	targetEnvelope := events.EnvelopeForTargetRoute(baseEnvelope, events.RouteIdentity{FlowInstance: "worker/one", EntityID: entityID})
-	externalSource, err := events.NewExternalIngressRoutingSource("root", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	externalSource, err := events.NewExternalIngressRoutingSource("root", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

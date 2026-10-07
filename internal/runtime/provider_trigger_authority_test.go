@@ -359,7 +359,7 @@ func mutateProviderAuthorityYAML(t testing.TB, path string, mutate func(map[stri
 
 func providerAuthorityReceivers(t testing.TB, graph pinrouting.CompiledConnectGraph, flow, event string) []string {
 	t.Helper()
-	routing, err := events.NewExternalIngressRoutingSource(flow, "admitted-entry-entity", events.RoutingSourceAuthorityProviderAdmissionPlan)
+	routing, err := events.NewExternalIngressRoutingSource(flow, events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

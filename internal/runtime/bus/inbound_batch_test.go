@@ -273,7 +273,7 @@ func inboundRawSettlementSource(t testing.TB, admitted bool) semanticview.Source
 
 func inboundRawSettlementRoutingSource(t testing.TB, entityID string) events.RoutingSource {
 	t.Helper()
-	source, err := events.NewExternalIngressRoutingSource("telegram-ingress", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	source, err := events.NewExternalIngressRoutingSource("telegram-ingress", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatalf("NewExternalIngressRoutingSource: %v", err)
 	}

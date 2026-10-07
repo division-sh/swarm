@@ -110,7 +110,7 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 				flowPath := "effect-recovery/invalid-current"
 				candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 					ServiceID: runtimeflowidentity.StandingServiceID(flowPath), FlowPath: flowPath,
-					InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+
 					Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
 				}
 				standing, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate)

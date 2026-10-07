@@ -454,7 +454,7 @@ func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing
 
 func TestRoutePlanTargetProjectionPreservesExplicitlyAbsentIngressSource(t *testing.T) {
 	source, err := events.NewExternalIngressRoutingSource(
-		"telegram-ingress", uuid.NewString(), events.RoutingSourceAuthorityProviderAdmissionPlan,
+		"telegram-ingress", events.RoutingSourceAuthorityProviderAdmissionPlan,
 	)
 	if err != nil {
 		t.Fatalf("NewExternalIngressRoutingSource: %v", err)

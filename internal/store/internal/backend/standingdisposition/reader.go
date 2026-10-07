@@ -30,7 +30,7 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("standing restart run_id: %w", err)
 	}
 	query := `
-		SELECT ss.service_id, ss.flow_path, ss.instance_id, ss.entity_id,
+		SELECT ss.service_id, ss.flow_path,
 		       ss.current_run_id, ss.current_generation,
 		       ss.declaration_present, ss.binding_enabled, ss.effective_state, ss.operator_override,
 		       COALESCE(r.status, ''), COALESCE(r.origin_kind, ''),
@@ -48,7 +48,7 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 	args := []any{runID, runID}
 	if postgres {
 		query = `
-			SELECT ss.service_id::text, ss.flow_path, ss.instance_id, ss.entity_id::text,
+			SELECT ss.service_id::text, ss.flow_path,
 			       ss.current_run_id::text, ss.current_generation,
 			       ss.declaration_present, ss.binding_enabled, ss.effective_state, ss.operator_override,
 			       COALESCE(r.status, ''), COALESCE(r.origin_kind, ''),
@@ -66,11 +66,11 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 		args = []any{runID}
 	}
 	var fact runtimestanding.StandingRestartFact
-	var flowPath, instanceID, entityID, originKind, originServiceID string
+	var flowPath, originKind, originServiceID string
 	var originGeneration int64
 	var owners, generationRelations int
 	err := q.QueryRowContext(ctx, query, args...).Scan(
-		&fact.ServiceID, &flowPath, &instanceID, &entityID,
+		&fact.ServiceID, &flowPath,
 		&fact.RunID, &fact.Generation, &fact.DeclarationPresent, &fact.BindingEnabled,
 		&fact.EffectiveState, &fact.OperatorOverride, &fact.RunState,
 		&originKind, &originServiceID, &originGeneration, &owners, &generationRelations,
@@ -84,7 +84,7 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 	if owners != 1 {
 		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s has %d exact current owners", runID, owners)
 	}
-	if strings.TrimSpace(flowPath) == "" || strings.TrimSpace(instanceID) == "" {
+	if strings.TrimSpace(flowPath) == "" {
 		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s has incomplete service identity", runID)
 	}
 	wantServiceID := runtimeflowidentity.StandingServiceID(flowPath)
@@ -95,9 +95,6 @@ func ReadByRun(ctx context.Context, q queryRower, postgres bool, runID string) (
 			fact.ServiceID,
 			wantServiceID,
 		)
-	}
-	if _, err := uuid.Parse(strings.TrimSpace(entityID)); err != nil {
-		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf("standing restart run %s entity identity: %w", runID, err)
 	}
 	if generationRelations != 1 {
 		return runtimestanding.StandingRestartDisposition{}, fmt.Errorf(

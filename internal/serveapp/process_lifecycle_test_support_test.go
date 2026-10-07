@@ -191,7 +191,7 @@ func (s *processIngressProofStore) CommitInboundPublication(ctx context.Context,
 	}, nil
 }
 
-func (*processIngressProofStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+func (*processIngressProofStore) LoadInboundPublicationByIdentity(context.Context, runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	return runtimeinbound.Record{}, false, nil
 }
 

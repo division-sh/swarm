@@ -122,7 +122,9 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 						}
 						var receipt struct {
 							PublicationID     string   `json:"publication_id"`
-							EntityID          string   `json:"entity_id"`
+							ServiceID         string   `json:"service_id"`
+							RunID             string   `json:"run_id"`
+							Generation        int64    `json:"generation"`
 							EventIDs          []string `json:"event_ids"`
 							ActionDisposition string   `json:"operator_channel_action_disposition"`
 						}
@@ -145,7 +147,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 							}
 						}
 						if shape == "callback" {
-							requireProviderAliasActionIntent(t, rt, receipt.PublicationID, receipt.EntityID, scenario.source(alias), id)
+							requireProviderAliasActionIntent(t, rt, receipt.PublicationID, runtimeinbound.Identity{ServiceID: receipt.ServiceID, RunID: receipt.RunID, Generation: receipt.Generation, Provider: "telegram", ProviderEventID: fmt.Sprint(id)}, scenario.source(alias))
 						} else {
 							seen := map[string]bool{}
 							for _, eventID := range receipt.EventIDs {
@@ -183,13 +185,13 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 	}
 }
 
-func requireProviderAliasActionIntent(t *testing.T, rt servedWorkspaceProofRuntime, publicationID, entityID, flow string, updateID int) {
+func requireProviderAliasActionIntent(t *testing.T, rt servedWorkspaceProofRuntime, publicationID string, identity runtimeinbound.Identity, flow string) {
 	t.Helper()
-	record, found, err := rt.Inbound.LoadInboundPublicationByIdentity(context.Background(), "telegram", entityID, fmt.Sprint(updateID))
+	record, found, err := rt.Inbound.LoadInboundPublicationByIdentity(context.Background(), identity)
 	if err != nil || !found {
 		t.Fatalf("read callback publication: found=%t err=%v", found, err)
 	}
-	if record.PublicationID != publicationID || record.FlowPath != flow || record.EntityID != entityID || record.OutputCount != 0 || len(record.Events) != 0 {
+	if record.PublicationID != publicationID || record.FlowPath != flow || record.Identity() != identity || record.OutputCount != 0 || len(record.Events) != 0 {
 		t.Fatalf("callback lost exact provider alias or published business events: %+v", record)
 	}
 	snapshot := readWorkspaceProofApplication(t, rt.Events)

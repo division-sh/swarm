@@ -445,7 +445,7 @@ func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity
 	ctx, rt := use.WorkContext(), use.Runtime()
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(rt.Options.RuntimeInstanceID))
 	expected, found, err := rt.Pipeline.LoadReconciledStandingService(ctx, runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
-		ServiceID: serviceID, FlowPath: target.FlowPath, InstanceID: target.InstanceID, EntityID: target.EntityID,
+		ServiceID: serviceID, FlowPath: target.FlowPath,
 		Source: use.Context.SourceArtifactFact,
 	})
 	if err != nil || !found {

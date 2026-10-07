@@ -289,7 +289,7 @@ func routingSourceRoundTripFixtures(t testing.TB) []events.RoutingSource {
 	}
 	return []events.RoutingSource{
 		events.NoRoutingSource(),
-		must(events.NewExternalIngressRoutingSource("gateway", uuid.NewString(), events.RoutingSourceAuthorityProviderAdmissionPlan)),
+		must(events.NewExternalIngressRoutingSource("gateway", events.RoutingSourceAuthorityProviderAdmissionPlan)),
 		must(events.NewRootRoutingSource(uuid.NewString())),
 		must(events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "static", FlowInstance: "static", EntityID: uuid.NewString()})),
 		must(events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{FlowID: "template", FlowInstance: "template/one", EntityID: uuid.NewString()})),

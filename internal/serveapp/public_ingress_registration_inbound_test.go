@@ -131,8 +131,8 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	}
 	target := runtimepkg.StandingTarget{
 		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-ingress",
-		Alias: "chat", Provider: "telegram", RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-ingress",
-		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002", Generation: 1, PublicationSequence: 1,
+		Alias: "chat", Provider: "telegram", RunID: "41000000-0000-0000-0000-000000000001",
+		Generation: 1, PublicationSequence: 1,
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: admission,
 	}
 	installed, err := catalog.InstalledCapabilitySubjects()
@@ -352,8 +352,8 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	target := runtimepkg.StandingTarget{
 		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001",
 		FlowPath: "telegram-ingress", Alias: "chat", Provider: "telegram_raw",
-		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-ingress",
-		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002",
+		RunID: "41000000-0000-0000-0000-000000000001",
+
 		Generation: 1, PublicationSequence: 1, AdmissionPlan: admission,
 	}
 	emptyPublication, err := channelonboarding.NewChannelActivationPublication(nil)

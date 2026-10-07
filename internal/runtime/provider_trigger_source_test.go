@@ -448,7 +448,7 @@ func TestProviderTriggerInputWithoutConnectionDoesNotAcquireCrossFlowPlan(t *tes
 		t.Fatalf("unconnected provider input acquired executable plans: %#v", plans)
 	}
 
-	routingSource, err := events.NewExternalIngressRoutingSource("coordinator", "provider-event", events.RoutingSourceAuthorityProviderAdmissionPlan)
+	routingSource, err := events.NewExternalIngressRoutingSource("coordinator", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

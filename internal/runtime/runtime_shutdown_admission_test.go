@@ -427,7 +427,7 @@ func (s *cancellationBlockingInboundStore) CommitInboundPublication(ctx context.
 	return runtimeinbound.CommitResult{}, ctx.Err()
 }
 
-func (*cancellationBlockingInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+func (*cancellationBlockingInboundStore) LoadInboundPublicationByIdentity(context.Context, runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	return runtimeinbound.Record{}, false, nil
 }
 
@@ -445,10 +445,10 @@ func (s *runtimeShutdownInboundStore) CommitInboundPublication(_ context.Context
 }
 
 func (s *runtimeShutdownInboundStore) ResolveInboundTarget(context.Context, string, string) (InboundTarget, error) {
-	return InboundTarget{EntityID: "entity-1", EntitySlug: "entity-1"}, nil
+	return InboundTarget{}, nil
 }
 
-func (*runtimeShutdownInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+func (*runtimeShutdownInboundStore) LoadInboundPublicationByIdentity(context.Context, runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	return runtimeinbound.Record{}, false, nil
 }
 
@@ -908,7 +908,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 	}
 	hash := "bundle-v2:sha256:" + strings.Repeat("7", 64)
 	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner}, InboundTarget{FlowPath: "chat", RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "chat/a", EntityID: "41000000-0000-0000-0000-000000000002"})
+	bus, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner}, InboundTarget{FlowPath: "chat", RunID: "41000000-0000-0000-0000-000000000001"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -931,7 +931,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 		rec := httptest.NewRecorder()
 		gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 			BundleHash: hash, FlowPath: "chat", RunID: "41000000-0000-0000-0000-000000000001",
-			FlowInstance: "chat/a", EntityID: "41000000-0000-0000-0000-000000000002",
+
 			Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
 		}, nil)
 		response <- rec

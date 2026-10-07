@@ -334,11 +334,10 @@ func newCompleteEventDispatchFixtureWithOrigin(
 		})
 
 		reconciled, err := workflow.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
-			ServiceID:  origin.ServiceID(),
-			FlowPath:   backend,
-			InstanceID: uuid.NewString(),
-			EntityID:   uuid.NewString(),
-			Source:     authorActivityTestSourceArtifactFact,
+			ServiceID: origin.ServiceID(),
+			FlowPath:  backend,
+
+			Source: authorActivityTestSourceArtifactFact,
 		})
 		if err != nil {
 			t.Fatalf("reconcile standing recovery fixture: %v", err)

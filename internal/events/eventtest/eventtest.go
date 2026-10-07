@@ -402,7 +402,7 @@ func fixtureRoutingSource(envelope events.EventEnvelope) events.RoutingSource {
 		}
 		return routingSource
 	}
-	routingSource, err := events.NewExternalIngressRoutingSource(source.FlowID, source.EntityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	routingSource, err := events.NewExternalIngressRoutingSource(source.FlowID, events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		panic(err)
 	}

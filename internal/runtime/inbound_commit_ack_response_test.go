@@ -92,12 +92,12 @@ func (s *inboundPostCommitFaultStore) CommitInboundPublication(ctx context.Conte
 	return result, s.fault
 }
 
-func (s *inboundPostCommitFaultStore) LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, eventID string) (runtimeinbound.Record, bool, error) {
+func (s *inboundPostCommitFaultStore) LoadInboundPublicationByIdentity(ctx context.Context, identity runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	if s.hideLoads > 0 {
 		s.hideLoads--
 		return runtimeinbound.Record{}, false, nil
 	}
-	return s.InboundPersistence.LoadInboundPublicationByIdentity(ctx, provider, entityID, eventID)
+	return s.InboundPersistence.LoadInboundPublicationByIdentity(ctx, identity)
 }
 
 func inboundAcknowledgedSelectedFixture(t *testing.T, backend, runID, entityID, slug, agentID string) (context.Context, operatorChannelInboundSelectedStore, *sql.DB, runtimepkg.InboundTarget) {
@@ -141,13 +141,13 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			_ = subscribeInboundGatewayAgent(t, bus, runID, agentID, target.FlowInstance, events.EventType("inbound.telegram"))
+			_ = subscribeInboundGatewayAgent(t, bus, runID, agentID, boundedProviderFlowID, events.EventType("inbound.telegram"))
 			gateway := newTestInboundGateway(t, bus, nil, nil, selected)
 			first := serveAcknowledgedTelegram(t, gateway, bus, target, ctx, 8291, "hello")
 			if first.Code != http.StatusServiceUnavailable || probe.persisted != 2 {
 				t.Fatalf("commit status=%d notifications=%d body=%s", first.Code, probe.persisted, first.Body.String())
 			}
-			record, found, err := selected.LoadInboundPublicationByIdentity(ctx, "telegram", entityID, "8291")
+			record, found, err := selected.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, "telegram", "8291"))
 			if err != nil || !found || len(record.Events) != 2 {
 				t.Fatalf("committed batch=%+v found=%t err=%v", record, found, err)
 			}
@@ -200,7 +200,7 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 			if duplicate.Code != http.StatusOK {
 				t.Fatalf("duplicate status=%d body=%s", duplicate.Code, duplicate.Body.String())
 			}
-			unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, target.FlowInstance)
+			unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, boundedProviderFlowID)
 		})
 	}
 }
@@ -217,7 +217,7 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			if err != nil {
 				t.Fatal(err)
 			}
-			ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, target.FlowInstance, events.EventType("inbound.telegram"))
+			ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, boundedProviderFlowID, events.EventType("inbound.telegram"))
 			fault := errors.New("private post-commit cleanup fault")
 			wrapped := &inboundPostCommitFaultStore{InboundPersistence: selected, fault: fault}
 			gateway := newTestInboundGateway(t, bus, nil, nil, wrapped)
@@ -225,7 +225,7 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			if first.Code != http.StatusAccepted || !strings.Contains(first.Body.String(), `"status":"accepted"`) || strings.Contains(first.Body.String(), fault.Error()) || wrapped.commits != 1 {
 				t.Fatalf("fresh status/body/commits=%d/%s/%d", first.Code, first.Body.String(), wrapped.commits)
 			}
-			record, found, err := selected.LoadInboundPublicationByIdentity(ctx, "telegram", entityID, providerEventID)
+			record, found, err := selected.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, "telegram", providerEventID))
 			if err != nil || !found || len(record.Events) == 0 {
 				t.Fatalf("durable publication=%+v found=%v err=%v", record, found, err)
 			}
@@ -270,7 +270,7 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			if hostile.Code != http.StatusServiceUnavailable || wrapped.commits != 3 || strings.Contains(hostile.Body.String(), fault.Error()) {
 				t.Fatalf("mismatched result status/body/commits=%d/%s/%d", hostile.Code, hostile.Body.String(), wrapped.commits)
 			}
-			if _, found, err := selected.LoadInboundPublicationByIdentity(ctx, "telegram", entityID, "8203"); err != nil || !found {
+			if _, found, err := selected.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, "telegram", "8203")); err != nil || !found {
 				t.Fatalf("hostile-result commit missing: found=%v err=%v", found, err)
 			}
 			waitForInboundBusQuiescence(t, bus)
@@ -281,12 +281,12 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			if missing.Code != http.StatusServiceUnavailable || wrapped.commits != 4 || strings.Contains(missing.Body.String(), fault.Error()) {
 				t.Fatalf("missing ack status/body/commits=%d/%s/%d", missing.Code, missing.Body.String(), wrapped.commits)
 			}
-			if _, found, err := selected.LoadInboundPublicationByIdentity(ctx, "telegram", entityID, "8202"); err != nil || found {
+			if _, found, err := selected.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, "telegram", "8202")); err != nil || found {
 				t.Fatalf("missing-ack request persisted: found=%v err=%v", found, err)
 			}
 			waitForInboundBusQuiescence(t, bus)
 			requireNoInboundBusEvent(t, ch, "missing ack must not dispatch")
-			unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, target.FlowInstance)
+			unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, boundedProviderFlowID)
 		})
 	}
 }
@@ -303,7 +303,7 @@ func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(
 				if err != nil {
 					t.Fatal(err)
 				}
-				ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, target.FlowInstance, events.EventType("inbound.telegram"))
+				ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, boundedProviderFlowID, events.EventType("inbound.telegram"))
 				fault := errors.New("private post-commit cleanup fault")
 				wrapped := &inboundPostCommitFaultStore{InboundPersistence: selected, fault: fault, corruptCreatedFact: fact}
 				gateway := newTestInboundGateway(t, bus, nil, nil, wrapped)
@@ -311,13 +311,13 @@ func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(
 				if response.Code != http.StatusServiceUnavailable || wrapped.commits != 1 || strings.Contains(response.Body.String(), fault.Error()) {
 					t.Fatalf("mismatched %s status/body/commits=%d/%s/%d", fact, response.Code, response.Body.String(), wrapped.commits)
 				}
-				record, found, err := selected.LoadInboundPublicationByIdentity(ctx, "telegram", entityID, "8401")
+				record, found, err := selected.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, "telegram", "8401"))
 				if err != nil || !found || len(record.Events) == 0 || record.ExpectedPublicationSequence != target.PublicationSequence {
 					t.Fatalf("durable unmodified record=%+v found=%v err=%v", record, found, err)
 				}
 				waitForInboundBusQuiescence(t, bus)
 				requireNoInboundBusEvent(t, ch, "mismatched created result must not dispatch")
-				unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, target.FlowInstance)
+				unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, boundedProviderFlowID)
 			})
 		}
 	}
@@ -392,7 +392,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 				t.Fatalf("claim status/response/commits=%d/%+v/%d body=%s", first.Code, response, wrapped.commits, first.Body.String())
 			}
 			requireOperatorChannelOperationState(t, selected, principal.ID, operation.OperationID, operatorchannel.StateAwaitingConfirmation, 2)
-			record, found, err := selected.LoadInboundPublicationByIdentity(ctx, "telegram", entityID, "8301")
+			record, found, err := selected.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, "telegram", "8301"))
 			if err != nil || !found || len(record.Events) != 0 {
 				t.Fatalf("durable claim publication=%+v found=%v err=%v", record, found, err)
 			}
@@ -412,7 +412,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 			if missing.Code != http.StatusServiceUnavailable || wrapped.commits != 3 {
 				t.Fatalf("claim missing-ack status/body/commits=%d/%s/%d", missing.Code, missing.Body.String(), wrapped.commits)
 			}
-			if _, found, err := selected.LoadInboundPublicationByIdentity(ctx, "telegram", entityID, "8302"); err != nil || found {
+			if _, found, err := selected.LoadInboundPublicationByIdentity(ctx, inboundTestReceiptIdentity(target, "telegram", "8302")); err != nil || found {
 				t.Fatalf("missing-ack claim persisted: found=%v err=%v", found, err)
 			}
 			requireOperatorChannelOperationState(t, selected, principal.ID, operation.OperationID, operatorchannel.StateAwaitingConfirmation, 2)

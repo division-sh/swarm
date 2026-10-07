@@ -185,14 +185,18 @@ type RoutingSource struct {
 
 func NoRoutingSource() RoutingSource { return RoutingSource{kind: RoutingSourceAbsent} }
 
-func NewExternalIngressRoutingSource(flowID, entityID string, authority RoutingSourceAuthority) (RoutingSource, error) {
+func NewExternalIngressRoutingSource(flowID string, authority RoutingSourceAuthority) (RoutingSource, error) {
+	flow, err := runtimeidentity.AdmitFlowIdentity(flowID)
+	if err != nil {
+		return RoutingSource{}, err
+	}
 	source := RoutingSource{
 		kind:      RoutingSourceExternalIngress,
-		route:     RouteIdentity{FlowID: flowID, EntityID: entityID}.Normalized(),
+		route:     RouteIdentity{FlowID: flow.String()},
 		authority: authority,
 	}
-	if source.route.FlowID == "" || source.route.EntityID == "" || !source.authority.valid() {
-		return RoutingSource{}, fmt.Errorf("external ingress routing source requires flow_id, entity_id, and accepted authority")
+	if !source.authority.valid() {
+		return RoutingSource{}, fmt.Errorf("external ingress declaration requires accepted provider authority")
 	}
 	return source, nil
 }
@@ -273,6 +277,9 @@ func RestoreRoutingSource(kindCode string, route RouteIdentity, authorityCode st
 	if !ok {
 		return RoutingSource{}, fmt.Errorf("routing source kind %q is invalid", kindCode)
 	}
+	if kind == RoutingSourceExternalIngress && (route != route.Normalized() || authorityCode != strings.TrimSpace(authorityCode)) {
+		return RoutingSource{}, fmt.Errorf("external ingress requires its exact declaration and authority")
+	}
 	route = route.Normalized()
 	authorityCode = strings.TrimSpace(authorityCode)
 	switch kind {
@@ -282,14 +289,14 @@ func RestoreRoutingSource(kindCode string, route RouteIdentity, authorityCode st
 		}
 		return NoRoutingSource(), nil
 	case RoutingSourceExternalIngress:
-		if route.FlowInstance != "" {
-			return RoutingSource{}, fmt.Errorf("external ingress routing source forbids flow_instance")
+		if route.FlowInstance != "" || route.EntityID != "" {
+			return RoutingSource{}, fmt.Errorf("external ingress declaration forbids concrete instance and entity coordinates")
 		}
 		authority, ok := routingSourceAuthorityFromCode(authorityCode)
 		if !ok {
 			return RoutingSource{}, fmt.Errorf("external ingress routing source authority %q is invalid", authorityCode)
 		}
-		return NewExternalIngressRoutingSource(route.FlowID, route.EntityID, authority)
+		return NewExternalIngressRoutingSource(route.FlowID, authority)
 	case RoutingSourceRoot:
 		if authorityCode != "" {
 			return RoutingSource{}, fmt.Errorf("root routing source cannot carry authority")

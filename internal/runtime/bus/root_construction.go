@@ -7,6 +7,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -14,7 +16,8 @@ import (
 // The creating root input prepares the whole keyless tree before recipient
 // classification. Publication commits that tree and its deliveries atomically.
 func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event events.Event, projection selectedRunTargetOwnerProjection) ([]pipeline.FlowInstanceActivationPlan, error) {
-	if event.RoutingSource().Kind() != events.RoutingSourceRoot {
+	sourceKind := event.RoutingSource().Kind()
+	if sourceKind != events.RoutingSourceRoot && sourceKind != events.RoutingSourceExternalIngress {
 		return nil, nil
 	}
 	switch event.AdmissionClass() {
@@ -23,6 +26,9 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 		return nil, nil
 	}
 	source := p.recipientPolicy.semanticSource
+	if sourceKind == events.RoutingSourceExternalIngress && event.RoutingSource().Route().FlowID != semanticview.RootExecutionFlowID(source) {
+		return nil, nil
+	}
 	pin, admitted := semanticview.SelectedRootInputPin(source, string(event.Type()))
 	if !admitted {
 		return nil, nil
@@ -54,6 +60,14 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 	}
 	if !schema.Instance.Empty() {
 		request.ConstructorInput = pin.EventType()
+		constructor, err := pipeline.CompileFlowConstructor(source, flowID, request.ConstructorInput)
+		if err != nil {
+			return nil, err
+		}
+		if admission, authenticated := authenticatedProviderPublicationForEvent(ctx, event); authenticated && admission.kind == provideroutput.KindRaw &&
+			!constructor.Eligible() && !pinrouting.ClassifyRoutingSourceOutputConsumer(source, string(event.Type()), event.RoutingSource()).HasRuntimeConsumer() {
+			return nil, nil
+		}
 		var payload map[string]any
 		if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
 			return nil, fmt.Errorf("root constructor payload: %w", err)

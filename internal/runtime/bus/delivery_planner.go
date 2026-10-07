@@ -259,6 +259,14 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 	if err != nil {
 		return RoutePlan{}, err
 	}
+	if len(rootPlans) != 0 {
+		ctx = context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
+		for _, construction := range rootPlans {
+			if err := p.connectPlanner.installFlowConstructionPreview(ctx, evt.RunID(), construction); err != nil {
+				return RoutePlan{}, err
+			}
+		}
+	}
 	projection, err = projection.withActivationPlans(rootPlans)
 	if err != nil {
 		return RoutePlan{}, err
@@ -332,7 +340,18 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 			return independentPubsubSubscriber(subscriber) && input.AllowsSubscriber(subscriber)
 		}
 	}
-	routing := p.routeResolver.resolve(localEvent, source, include)
+	resolver := p.routeResolver
+	if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
+		original := resolver.resolveRoutedSubscribers
+		resolver.resolveRoutedSubscribers = func(event events.Event, keys []string) []Subscriber {
+			out := original(event, keys)
+			for _, key := range keys {
+				out = append(out, preview.table.ResolveForRun(event.RunID(), key)...)
+			}
+			return dedupeSubscribers(out)
+		}
+	}
+	routing := resolver.resolve(localEvent, source, include)
 	manifest, err := p.recipientPolicy.evaluate(ctx, localEvent, routing.Recipients, source)
 	if err != nil {
 		return RoutePlan{}, err

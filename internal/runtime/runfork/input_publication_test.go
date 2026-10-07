@@ -11,7 +11,7 @@ import (
 
 func TestInputPublicationDoesNotReplaceOtherPublicationOwners(t *testing.T) {
 	run, id, entity := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	external, err := events.NewExternalIngressRoutingSource("child", entity, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	external, err := events.NewExternalIngressRoutingSource("child", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}
