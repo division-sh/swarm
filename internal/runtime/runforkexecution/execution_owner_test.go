@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestSelectedContractExecutionOwnerRequiresEmitFeedback(t *testing.T) {
@@ -24,8 +23,8 @@ func TestSelectedContractExecutionOwnerRequiresEmitFeedback(t *testing.T) {
 			if backend == "sqlite" {
 				owner = selectedContractSQLiteExecutionOwnerForTest(t, storetest.StartSQLiteRuntimeStore(t))
 			} else {
-				_, db, _ := testutil.StartPostgres(t)
-				owner = selectedContractExecutionOwnerForTest(t, storetest.AdmitPostgresRuntimeStore(t, db))
+				selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				owner = selectedContractExecutionOwnerForTest(t, selected)
 			}
 			ports := owner.ports
 			durable := ports.busDurable
