@@ -1165,22 +1165,13 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	payloadAdmitter := boot.payloadAdmitter(rt.Logger)
 	rt.payloadAdmitter = payloadAdmitter
+	constructionOwner := runtimeFlowConstructionOwner{current: func() *runtimemanager.AgentManager { return managerRef }}
 	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.ExecutionPosture, boot.SourceArtifactFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	}, payloadAdmitter, runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
-		if managerRef == nil {
-			return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow instance activation planner is required")
-		}
-		return managerRef.PrepareFlowInstanceActivation(ctx, req)
-	}), runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
-		if managerRef == nil {
-			return fmt.Errorf("flow instance activation finalizer is required")
-		}
-		return managerRef.FinalizeCommittedFlowInstanceActivation(ctx, committed)
-	}), opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
+	}, payloadAdmitter, constructionOwner, constructionOwner, opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}

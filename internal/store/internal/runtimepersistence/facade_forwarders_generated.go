@@ -707,6 +707,10 @@ func (s *PostgresStore) LoadEntityState(ctx context.Context, identity tools.Enti
 	return s.entityPostgresOwner.LoadEntityState(ctx, identity)
 }
 
+func (s *PostgresStore) LoadFlowConstructionPublication(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionPublicationEvidence, error) {
+	return s.pipelinePostgresOwner.LoadFlowConstructionPublication(ctx, owner, entityID)
+}
+
 func (s *PostgresStore) LoadHumanTaskContinuation(ctx context.Context, cardID string) (decisioncard.HumanTaskContinuation, error) {
 	return s.decisionPostgresOwner.LoadHumanTaskContinuation(ctx, cardID)
 }
@@ -1937,6 +1941,10 @@ func (s *SQLiteRuntimeStore) LoadDynamicFlowRuntimeReadiness(ctx context.Context
 
 func (s *SQLiteRuntimeStore) LoadEntityState(ctx context.Context, identity tools.EntityIdentity) (map[string]any, bool, error) {
 	return s.entitySQLiteOwner.LoadEntityState(ctx, identity)
+}
+
+func (s *SQLiteRuntimeStore) LoadFlowConstructionPublication(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionPublicationEvidence, error) {
+	return s.pipelineSQLiteOwner.LoadFlowConstructionPublication(ctx, owner, entityID)
 }
 
 func (s *SQLiteRuntimeStore) LoadHumanTaskContinuation(ctx context.Context, cardID string) (decisioncard.HumanTaskContinuation, error) {

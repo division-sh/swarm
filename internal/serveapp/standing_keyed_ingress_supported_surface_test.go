@@ -15,7 +15,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
@@ -33,6 +36,16 @@ func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, start := clockDeploymentHarness(t, backend, root)
+			var construction pipeline.FlowConstructionPublicationReader
+			var inbound inboundpublication.Runner
+			previous := projectRuntimePersistenceForServe
+			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
+				projection := previous(owner)
+				construction, _ = projection.deps.EventStore.(pipeline.FlowConstructionPublicationReader)
+				inbound = projection.deps.InboundStore
+				return projection
+			}
+			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			process, served := start()
 			t.Cleanup(func() {
 				if code := process.stop(); code != 0 {
@@ -40,6 +53,9 @@ func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
 				}
 			})
 			rt := servedTestProcessRuntime(t, process)
+			if construction == nil || inbound == nil {
+				t.Fatal("served proof requires the original native construction and inbound receipt readers")
+			}
 			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
 			if err != nil || len(statuses) != 1 || !statuses[0].RestartDisposition.Executable() {
 				t.Fatalf("zero-instance enabled binding=%+v err=%v", statuses, err)
@@ -76,6 +92,14 @@ func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
 				t.Fatalf("receipt lost binding-generation authority: %+v err=%v", receipt, err)
 			}
 			a9RequireRootIngressSettlement(t, served.Endpoint, status.RunID, receipt.EventIDs[0])
+			rootOwner, err := flowidentity.NewRunScopedFlowInstance(status.RunID, flowidentity.StoredRoute(".", status.RunID, status.RunID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			initial, err := construction.LoadFlowConstructionPublication(t.Context(), rootOwner, status.RunID)
+			if err != nil || initial.CreatingInput != (pipeline.FlowConstructionInput{EventID: receipt.EventIDs[0], Input: "account.opened"}) || initial.Fields["provider_event_id"] != "first" {
+				t.Fatalf("creating input or immutable initial fields lost: %+v err=%v", initial, err)
+			}
 			instances, err = rt.Pipeline.ListWorkflowInstances(t.Context(), status.RunID)
 			if err != nil || len(instances) != 2 {
 				t.Fatalf("constructor did not create its exact root/keyless child tree: %+v err=%v", instances, err)
@@ -92,6 +116,27 @@ func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
 			requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
 			if entity.Fields["processed_count"] != float64(1) {
 				t.Fatalf("receipt retry redelivered the constructor event: %+v", entity)
+			}
+			code, contradiction := a9PostSignedRawIngress(t, endpoint, secret, `{"delivery_id":"second","account_id":"account-8"}`)
+			if code != http.StatusServiceUnavailable || !strings.Contains(string(contradiction), "immutable constructor key") {
+				t.Fatalf("different root key was accepted: status=%d body=%s", code, contradiction)
+			}
+			instances, err = rt.Pipeline.ListWorkflowInstances(t.Context(), status.RunID)
+			if err != nil || len(instances) != 2 {
+				t.Fatalf("root-key conflict changed construction: %+v err=%v", instances, err)
+			}
+			requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
+			if entity.Fields["provider_event_id"] != "first" || entity.Fields["processed_count"] != float64(1) {
+				t.Fatalf("root-key conflict mutated initial or business state: %+v", entity)
+			}
+			again, err := construction.LoadFlowConstructionPublication(t.Context(), rootOwner, status.RunID)
+			if err != nil || !reflect.DeepEqual(initial, again) {
+				t.Fatalf("retry or contradiction replaced immutable construction: %+v -> %+v err=%v", initial, again, err)
+			}
+			if _, found, err := inbound.LoadInboundPublicationByIdentity(t.Context(), inboundpublication.Identity{
+				ServiceID: status.ServiceID, RunID: status.RunID, Generation: status.Generation, Provider: "partner", ProviderEventID: "second",
+			}); err != nil || found {
+				t.Fatalf("root-key contradiction left a receipt: found=%t err=%v", found, err)
 			}
 		})
 	}

@@ -28,6 +28,26 @@ type InboundDeliveryEvent struct {
 	Authorization runtimeprovideroutput.Authorization
 }
 
+// PrepareInboundEvidence uses the same pinned payload owner before the closed
+// inbound mutation, so rejection cannot call runtime diagnostics under SQL locks.
+func (eb *EventBus) PrepareInboundEvidence(ctx context.Context, event events.Event) (events.Event, error) {
+	if eb == nil {
+		return events.Event{}, fmt.Errorf("inbound evidence requires the event bus")
+	}
+	ctx, err := eb.admitSourceArtifactFact(ctx)
+	if err != nil {
+		return events.Event{}, err
+	}
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return events.Event{}, err
+	}
+	if err := events.ValidateNamedEvent(admitted, events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord); err != nil {
+		return events.Event{}, err
+	}
+	return eb.admitEventPayload(ctx, event)
+}
+
 type authenticatedProviderPublicationKey struct{}
 
 type authenticatedProviderPublication struct {

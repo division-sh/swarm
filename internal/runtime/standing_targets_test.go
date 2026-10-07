@@ -48,7 +48,7 @@ func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) 
 		name, schema, fields, handler, refusal string
 	}{
 		{name: "keyless root"},
-		{name: "keyed root", schema: "instance: tenant\n", fields: "  tenant: text\n", refusal: "keyless no-argument signature"},
+		{name: "keyed root", schema: "instance: tenant\n", fields: "  tenant: text\n"},
 		{name: "unassigned initial read", fields: "  brief: text\n", handler: "      guard: {check: entity.brief != ''}\n", refusal: "standing constructor is ineligible"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -95,7 +95,7 @@ func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) 
 	}
 }
 
-func TestStandingRequiresConstructibleAncestry(t *testing.T) {
+func TestA9DeclarationAncestryMayBeKeyed(t *testing.T) {
 	for _, keyed := range []string{".", "parent"} {
 		t.Run(keyed, func(t *testing.T) {
 			root := t.TempDir()
@@ -124,10 +124,14 @@ func TestStandingRequiresConstructibleAncestry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			catalog, err := providertriggers.NewCatalogSnapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, admitted := range []semanticview.Source{source, semanticview.Wrap(rebuilt)} {
-				declarations, err := ResolveStandingTargetDeclarations(admitted, nil)
-				if err == nil || len(declarations) != 0 || !strings.Contains(err.Error(), "keyless no-argument signature") {
-					t.Fatalf("standing accepted without input for ancestor %s: declarations=%+v err=%v", keyed, declarations, err)
+				declarations, err := ResolveStandingTargetDeclarations(admitted, catalog)
+				if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "parent/service" || len(declarations[0].Ingress) != 1 || !declarations[0].Ingress[0].AdmissionPlan.Valid() {
+					t.Fatalf("keyed ancestry %s erased the declaring binding: declarations=%+v err=%v", keyed, declarations, err)
 				}
 			}
 		})

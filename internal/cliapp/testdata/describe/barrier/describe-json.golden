@@ -25512,16 +25512,6 @@
       }
     },
     {
-      "path": "platform.events[\"platform.inbound_recorded\"].payload.entity_id",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "platform.events[\"platform.inbound_recorded\"].payload.event_ids",
       "provenance": {
         "origin": "authored",
@@ -25533,6 +25523,26 @@
     },
     {
       "path": "platform.events[\"platform.inbound_recorded\"].payload.event_names",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.inbound_recorded\"].payload.flow_path",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.inbound_recorded\"].payload.generation",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
@@ -25573,6 +25583,26 @@
     },
     {
       "path": "platform.events[\"platform.inbound_recorded\"].payload.publication_id",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.inbound_recorded\"].payload.run_id",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.inbound_recorded\"].payload.service_id",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
@@ -29293,6 +29323,16 @@
     },
     {
       "path": "platform.platform_tables.author_activity_story.registry.subject_rules.event_emitted",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.author_activity_story.registry.subject_rules.inbound_received",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",

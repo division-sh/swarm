@@ -43,7 +43,7 @@ type servedWorkspaceProofRuntime struct {
 	Observability                 apiv1.ObservabilityReadStore
 	WorkflowTargets               pipeline.WorkflowTargetPersistenceReader
 	Inbound                       interface {
-		LoadInboundPublicationByIdentity(context.Context, string, string, string) (inboundpublication.Record, bool, error)
+		LoadInboundPublicationByIdentity(context.Context, inboundpublication.Identity) (inboundpublication.Record, bool, error)
 	}
 	Standing interface {
 		ListStandingServiceStatuses(context.Context) ([]pipeline.StandingServiceStatus, error)

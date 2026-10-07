@@ -475,6 +475,11 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		writeInboundPublicationError(w, projectionErr)
 		return
 	}
+	evidence, projectionErr = g.bus.PrepareInboundEvidence(pubCtx, evidence)
+	if projectionErr != nil {
+		writeInboundPublicationError(w, projectionErr)
+		return
+	}
 	if operatorEvent != nil && operatorEvent.BareCandidate == nil {
 		if !validate() {
 			return
@@ -932,15 +937,6 @@ func inboundFormValues(contentType string, body []byte) (url.Values, bool, strin
 		return nil, true, err.Error()
 	}
 	return values, true, ""
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
