@@ -97,7 +97,9 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-sqlite-possession-e2e\n\ngo 1.23.0\n")
 	store := goldenSQLiteStore(root)
 	configPath := filepath.Join(root, "config", "swarm.yaml")
-	writeReleaseFile(t, configPath, goldenRuntimeConfig(store))
+	// Verification must use the same ephemeral listener policy as serve.
+	writeReleaseFile(t, configPath, goldenRuntimeConfig(store)+
+		"serve:\n  api_listen_addr: '127.0.0.1:0'\n  mcp_listen_addr: '127.0.0.1:0'\n")
 	devConfigPath := filepath.Join(root, ".swarm", "swarm.yaml")
 	writeReleaseFile(t, devConfigPath, goldenRuntimeConfig(goldenStoreSelection{
 		name: "sqlite", configYAML: "store:\n  backend: sqlite\n",
