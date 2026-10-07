@@ -575,11 +575,6 @@ func (m *RuntimeContextManager) BeginStandingRunRecovery(
 	if m.resetExecutionFenced {
 		return nil, worklifetime.ErrAdmissionFenced
 	}
-	if suppressed, err := m.standingRecoverySuppressedLocked(runID, origin); err != nil {
-		return nil, err
-	} else if suppressed {
-		return nil, runtimebus.ErrStandingRestartParked
-	}
 	var selected *worklifetime.StandingOccurrence
 	for _, entry := range m.contexts {
 		if !runtimeContextEntryLoaded(entry) || entry.standing == nil {
@@ -600,6 +595,14 @@ func (m *RuntimeContextManager) BeginStandingRunRecovery(
 			return nil, fmt.Errorf("standing recovery run %s has more than one process-local owner", runID)
 		}
 		selected = occurrence
+	}
+	if suppressed, err := m.standingRecoverySuppressedLocked(runID, origin); err != nil {
+		return nil, err
+	} else if suppressed {
+		if selected != nil {
+			return nil, runtimebus.ErrStandingRecoveryTransitionFenced
+		}
+		return nil, runtimebus.ErrStandingRestartParked
 	}
 	if selected == nil {
 		return nil, fmt.Errorf(

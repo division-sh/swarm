@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -39,8 +40,9 @@ func TestStandingRecoverySuppressionRequiresExactGenerationAndSignalsRestore(t *
 		t.Fatal(err)
 	}
 	lease, err := manager.BeginStandingRunRecovery(context.Background(), expected.RunID, origin)
-	if lease != nil || !errors.Is(err, runtimebus.ErrStandingRestartParked) {
-		t.Fatalf("known transition was not deferred: lease=%v err=%v", lease, err)
+	if lease != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) ||
+		!errors.Is(err, runtimebus.ErrStandingRecoveryTransitionFenced) || errors.Is(err, runtimebus.ErrStandingRestartParked) {
+		t.Fatalf("known transition was misclassified as a parked generation: lease=%v err=%v", lease, err)
 	}
 	foreign, err := runtimerunlifecycle.StandingGenerationRunOrigin(expected.ServiceID, expected.Generation+1)
 	if err != nil {
@@ -51,7 +53,7 @@ func TestStandingRecoverySuppressionRequiresExactGenerationAndSignalsRestore(t *
 		origin runtimerunlifecycle.RunOrigin
 	}{{uuid.NewString(), origin}, {expected.RunID, foreign}} {
 		lease, err := manager.BeginStandingRunRecovery(context.Background(), coordinate.run, coordinate.origin)
-		if lease != nil || err == nil || errors.Is(err, runtimebus.ErrStandingRestartParked) {
+		if lease != nil || err == nil || errors.Is(err, runtimebus.ErrStandingRestartParked) || errors.Is(err, worklifetime.ErrAdmissionFenced) {
 			t.Fatalf("foreign coordinate borrowed deferral: lease=%v err=%v", lease, err)
 		}
 	}
@@ -77,11 +79,24 @@ func TestStandingRecoverySuppressionRequiresExactGenerationAndSignalsRestore(t *
 		t.Fatal(err)
 	}
 	lease, err = manager.BeginStandingRunRecovery(context.Background(), expected.RunID, origin)
-	if lease != nil || err == nil || errors.Is(err, runtimebus.ErrStandingRestartParked) {
+	if lease != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) ||
+		errors.Is(err, runtimebus.ErrStandingRecoveryTransitionFenced) || errors.Is(err, runtimebus.ErrStandingRestartParked) {
 		t.Fatalf("untracked fence masqueraded as an owned transition: lease=%v err=%v", lease, err)
 	}
 	if err := child.Reopen(); err != nil {
 		t.Fatal(err)
+	}
+	transition, err = manager.BeginStandingServiceOperation(context.Background(), expected, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := transition.Retire(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err = manager.BeginStandingRunRecovery(context.Background(), expected.RunID, origin)
+	if lease != nil || !errors.Is(err, runtimebus.ErrStandingRestartParked) ||
+		errors.Is(err, runtimebus.ErrStandingRecoveryTransitionFenced) || errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		t.Fatalf("retired suppressed generation retained transient fence classification: lease=%v err=%v", lease, err)
 	}
 }
 

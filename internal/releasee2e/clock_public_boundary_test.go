@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -26,16 +27,7 @@ func TestDeclaredClockNestedBinaryDeliveryBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			root := filepath.Join(base, backend)
 			config, env := clockReleaseConfig(t, root, backend)
-			source := filepath.Join(root, "contracts")
-			for path, body := range map[string]string{
-				"schema.yaml":          "name: clock-child-public\nstages: []\nconnect:\n  - {event: poll.tick, from: clock, to: consumer}\n",
-				"clock/schema.yaml":    "stages: []\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n",
-				"clock/events.yaml":    "poll.tick:\n",
-				"consumer/schema.yaml": "stages: []\npins:\n  inputs: [poll.tick]\n",
-				"consumer/nodes.yaml":  "observer:\n  execution_type: system_node\n  subscribes_to: [poll.tick]\n  event_handlers:\n    poll.tick:\n      guard: {id: admit, check: true}\n",
-			} {
-				writeReleaseFile(t, filepath.Join(source, path), body)
-			}
+			source := canonicalrouting.CopyClockDeployment(t, true)
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
 			assertFullLifecycleVerifySuccess(t, verify)
@@ -93,8 +85,7 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			root := filepath.Join(base, backend)
 			config, env := clockReleaseConfig(t, root, backend)
-			source := filepath.Join(root, "contracts")
-			writeClockReleaseFixture(t, source)
+			source := canonicalrouting.CopyClockFiniteDeployment(t)
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 			writeReleaseFile(t, filepath.Join(root, "home", ".config", "swarm", "swarm.yaml"),
 				fmt.Sprintf("serve:\n  api_token_file: %q\nconnection:\n  api_token_file: %q\n",
@@ -193,38 +184,6 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			t.Log("proof_surface=real binary verify/describe/private scenario/local finite run/serve/connected finite run; parked HTTP+CLI clock inventory and HTTP+WebSocket+CLI occurrence readback; no external executor, provider or SQL test access")
 		})
 	}
-}
-
-func writeClockReleaseFixture(t *testing.T, source string) {
-	t.Helper()
-	writeReleaseFile(t, filepath.Join(source, "schema.yaml"), `name: clock-public-boundary
-stages:
-  pending: {initial: true}
-  done: {terminal: true}
-schedules:
-  poll: {every: 250ms, emit: poll.tick}
-pins:
-  inputs: [start.requested]
-  outputs: [poll.tick]
-`)
-	writeReleaseFile(t, filepath.Join(source, "events.yaml"), "start.requested:\npoll.tick:\n")
-	writeReleaseFile(t, filepath.Join(source, "entities.yaml"), "test_entity: {}\n")
-	writeReleaseFile(t, filepath.Join(source, "nodes.yaml"), `complete:
-  execution_type: system_node
-  subscribes_to: [start.requested]
-  event_handlers:
-    start.requested:
-      advances_to: done
-`)
-	writeReleaseFile(t, filepath.Join(source, "tests", "finite.yaml"), `name: finite-clock-boundary
-steps:
-  - publish: start.requested
-    payload: {}
-expect:
-  events:
-    exact: [start.requested]
-  no_dead_letters: true
-`)
 }
 
 func readPublicClockRun(t *testing.T, process *releaseServeProcess, runID string) clockPublicHeader {

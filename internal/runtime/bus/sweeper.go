@@ -33,6 +33,26 @@ const (
 
 var ErrStandingRestartParked = errors.New("standing restart disposition is non-executable")
 
+// A tracked transition retains its exact owner and restore signal. It is a
+// fence, not a non-executable durable disposition or an untracked lifetime fence.
+var ErrStandingRecoveryTransitionFenced = standingRecoveryTransitionFencedError{}
+
+type standingRecoveryTransitionFencedError struct{}
+
+func (standingRecoveryTransitionFencedError) Error() string {
+	return "standing recovery transition: " + worklifetime.ErrAdmissionFenced.Error()
+}
+
+func (standingRecoveryTransitionFencedError) Is(target error) bool {
+	return target == worklifetime.ErrAdmissionFenced
+}
+
+func standingRecoveryDeferred(err error) bool {
+	return runtimefailures.OnlyBranches(err, func(cause error) bool {
+		return errors.Is(cause, ErrStandingRestartParked) || errors.Is(cause, ErrStandingRecoveryTransitionFenced)
+	})
+}
+
 type OutboxSweeperConfig struct {
 	Interval time.Duration
 	Limit    int
@@ -280,7 +300,7 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 					closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
 					return result, errors.Join(processErr, closeErr)
 				}
-				if errors.Is(processErr, ErrStandingRestartParked) || errors.Is(processErr, errRunDispatchParked) {
+				if standingRecoveryDeferred(processErr) || errors.Is(processErr, errRunDispatchParked) {
 					continue
 				}
 				if errors.Is(processErr, ErrRunDispatchBlocked) {

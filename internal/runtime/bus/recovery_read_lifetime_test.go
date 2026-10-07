@@ -239,7 +239,9 @@ func TestRecoveryMetadataReadAdmissionAndIsolation(t *testing.T) {
 
 func TestContinuationStandingSuppressionRetainsCarrierAndIndependentErrors(t *testing.T) {
 	independent := errors.New("independent standing admission failure")
-	for _, failure := range []error{ErrStandingRestartParked, independent, errors.Join(ErrStandingRestartParked, independent), worklifetime.ErrAdmissionFenced} {
+	for _, failure := range []error{ErrStandingRestartParked, ErrStandingRecoveryTransitionFenced, independent,
+		errors.Join(ErrStandingRestartParked, independent), errors.Join(ErrStandingRecoveryTransitionFenced, independent),
+		worklifetime.ErrAdmissionFenced, errors.Join(ErrStandingRecoveryTransitionFenced, worklifetime.ErrAdmissionFenced)} {
 		t.Run(failure.Error(), func(t *testing.T) {
 			owner := newRecoveryControlOwner(t)
 			eb, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{WorkOwner: owner})
@@ -283,7 +285,7 @@ func TestContinuationStandingSuppressionRetainsCarrierAndIndependentErrors(t *te
 				t.Fatal(err)
 			}
 			result := eb.DispatchDeliveryContinuation(context.Background(), event, route)
-			if failure == ErrStandingRestartParked {
+			if failure == ErrStandingRestartParked || failure == ErrStandingRecoveryTransitionFenced {
 				if result.Validate() != nil || result.Disposition() != deliverycontinuation.DispatchDeferred || result.WakeAuthority() != deliverycontinuation.DispatchWakeRunContinue {
 					t.Fatalf("known standing transition lost its progress owner: %+v", result)
 				}
