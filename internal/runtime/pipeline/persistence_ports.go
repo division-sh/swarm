@@ -51,9 +51,9 @@ type StandingTargetMutationRequest struct {
 }
 
 type StandingTargetMutationResult struct {
-	Reconciliation      StandingServiceReconciliation
-	Instance            runtimeflowidentity.Instance
-	Created             bool
+	Reconciliation StandingServiceReconciliation
+	Instance       runtimeflowidentity.Instance
+	Created        bool
 }
 
 func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstanceOwner) ([]StandingTargetMutationResult, error) {
@@ -222,6 +222,13 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 
 func (pc *PipelineCoordinator) Load(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error) {
 	return pc.workflowStore.Load(ctx, identity)
+}
+
+func (pc *PipelineCoordinator) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID string) (FlowConstructionPublicationEvidence, error) {
+	if pc == nil {
+		return FlowConstructionPublicationEvidence{}, fmt.Errorf("pipeline construction receipt owner is required")
+	}
+	return pc.workflowStore.LoadFlowConstructionPublication(ctx, owner, entityID)
 }
 
 func (pc *PipelineCoordinator) LoadConstructedFlowInstance(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID) (WorkflowInstance, bool, error) {

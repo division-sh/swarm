@@ -146,6 +146,17 @@ func (am *AgentManager) PrepareFlowInstanceActivation(
 	return plan, err
 }
 
+func (am *AgentManager) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
+	if am == nil {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("agent manager is required")
+	}
+	reader, ok := am.workflowInstances.(runtimepipeline.FlowConstructionPublicationReader)
+	if !ok {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("flow activation requires its immutable construction receipt reader")
+	}
+	return reader.LoadFlowConstructionPublication(ctx, owner, entityID)
+}
+
 func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
 	ctx context.Context,
 	committed runtimepipeline.CommittedFlowInstanceActivation,

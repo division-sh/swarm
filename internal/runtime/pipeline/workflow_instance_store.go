@@ -775,6 +775,24 @@ func (p WorkflowPersistence) LoadWorkflowInstance(ctx context.Context, owner run
 	return p.store.Load(ctx, owner)
 }
 
+func (p WorkflowPersistence) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID string) (FlowConstructionPublicationEvidence, error) {
+	if p.empty() {
+		return FlowConstructionPublicationEvidence{}, errors.New("workflow persistence has no construction receipt owner")
+	}
+	return p.store.LoadFlowConstructionPublication(ctx, owner, entityID)
+}
+
+func (s *workflowInstanceStore) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID string) (FlowConstructionPublicationEvidence, error) {
+	if s == nil {
+		return FlowConstructionPublicationEvidence{}, errors.New("workflow persistence has no construction receipt owner")
+	}
+	reader, ok := s.instanceReader.(FlowConstructionPublicationReader)
+	if !ok {
+		return FlowConstructionPublicationEvidence{}, errors.New("workflow persistence has no immutable construction receipt reader")
+	}
+	return reader.LoadFlowConstructionPublication(ctx, owner, entityID)
+}
+
 func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
 	if s == nil || s.entityStateReader == nil {
 		return WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state reader is required")

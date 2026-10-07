@@ -41,44 +41,17 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 		return ordinaryPublicationSource{}, fmt.Errorf("provider declaring flow %q is not in the selected source", route.FlowID)
 	}
 	root := route.FlowID == semanticview.RootExecutionFlowID(p.source)
-	var expected runtimeflowidentity.Instance
-	if root {
-		expected = runtimeflowidentity.Stored(p.source, route.FlowID, evt.RunID(), evt.RunID(), runtimeflowidentity.EntityID(evt.RunID()), "")
-	} else if keyless, err := pipeline.StandingConstructionIsKeyless(p.source, route.FlowID); err != nil {
+	expected, err := p.providerExecutionIdentity(evt, route.FlowID, root)
+	if err != nil {
 		return ordinaryPublicationSource{}, err
-	} else if keyless {
-		expected, err = runtimeflowidentity.StandingForGeneration(p.source, route.FlowID, evt.RunID())
-		if err != nil {
-			return ordinaryPublicationSource{}, err
-		}
 	}
 	owners := make(map[events.RouteIdentity]struct{})
 	for _, descriptor := range p.descriptors {
 		descriptor = descriptor.Normalized()
-		if descriptor.FlowInstance == "" {
+		if !p.providerDescriptorInFlow(evt, route.FlowID, root, descriptor) {
 			continue
 		}
-		if root {
-			coordinate, err := semanticview.AdmitRootExecutionCoordinate(p.source, evt.RunID())
-			if err != nil {
-				return ordinaryPublicationSource{}, err
-			}
-			if !coordinate.Matches(route.FlowID, descriptor.FlowInstance) {
-				continue
-			}
-		} else if !runtimeflowidentity.OwnedByFlow(p.source, route.FlowID, descriptor.FlowInstance) {
-			continue
-		}
-		if expected.InstancePath != "" && (descriptor.FlowInstance != expected.InstancePath || descriptor.EntityID != expected.EntityID) {
-			return ordinaryPublicationSource{}, fmt.Errorf("provider receiver disagrees with its canonical constructed identity")
-		}
-		if descriptor.Materializing {
-			owner := events.RouteIdentity{FlowID: route.FlowID, FlowInstance: descriptor.FlowInstance, EntityID: descriptor.EntityID}
-			if _, admitted := p.activationOwners[owner]; !admitted {
-				return ordinaryPublicationSource{}, fmt.Errorf("provider receiver has no admitted same-publication constructor")
-			}
-		}
-		if err := descriptor.Availability.Validate(p.source, route.FlowID); err != nil {
+		if err := p.validateProviderExecutionDescriptor(route.FlowID, expected, descriptor); err != nil {
 			return ordinaryPublicationSource{}, err
 		}
 		owners[events.RouteIdentity{FlowID: route.FlowID, FlowInstance: descriptor.FlowInstance, EntityID: descriptor.EntityID}] = struct{}{}
@@ -93,6 +66,40 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 		return ordinaryPublicationSource{route: owner, root: root}, nil
 	}
 	return ordinaryPublicationSource{}, fmt.Errorf("provider source ownership resolution failed")
+}
+
+func (p selectedRunTargetOwnerProjection) providerExecutionIdentity(event events.Event, flowID string, root bool) (runtimeflowidentity.Instance, error) {
+	if root {
+		return runtimeflowidentity.Stored(p.source, flowID, event.RunID(), event.RunID(), runtimeflowidentity.EntityID(event.RunID()), ""), nil
+	}
+	keyless, err := pipeline.StandingConstructionIsKeyless(p.source, flowID)
+	if err != nil || !keyless {
+		return runtimeflowidentity.Instance{}, err
+	}
+	return runtimeflowidentity.StandingForGeneration(p.source, flowID, event.RunID())
+}
+
+func (p selectedRunTargetOwnerProjection) providerDescriptorInFlow(event events.Event, flowID string, root bool, descriptor ActiveTargetDescriptor) bool {
+	if descriptor.FlowInstance == "" {
+		return false
+	}
+	if root {
+		return descriptor.FlowInstance == event.RunID()
+	}
+	return runtimeflowidentity.OwnedByFlow(p.source, flowID, descriptor.FlowInstance)
+}
+
+func (p selectedRunTargetOwnerProjection) validateProviderExecutionDescriptor(flowID string, expected runtimeflowidentity.Instance, descriptor ActiveTargetDescriptor) error {
+	if expected.InstancePath != "" && (descriptor.FlowInstance != expected.InstancePath || descriptor.EntityID != expected.EntityID) {
+		return fmt.Errorf("provider receiver disagrees with its canonical constructed identity")
+	}
+	if descriptor.Materializing {
+		owner := events.RouteIdentity{FlowID: flowID, FlowInstance: descriptor.FlowInstance, EntityID: descriptor.EntityID}
+		if _, admitted := p.activationOwners[owner]; !admitted {
+			return fmt.Errorf("provider receiver has no admitted same-publication constructor")
+		}
+	}
+	return descriptor.Availability.Validate(p.source, flowID)
 }
 
 func (s ordinaryPublicationSource) eventKeys(evt events.Event) []string {

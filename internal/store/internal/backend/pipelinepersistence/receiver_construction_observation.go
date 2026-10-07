@@ -10,6 +10,38 @@ import (
 	"github.com/google/uuid"
 )
 
+func (s *PipelinePostgresOwner) LoadFlowConstructionPublication(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionPublicationEvidence, error) {
+	if s == nil || s.backend == nil {
+		return pipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("postgres construction receipt owner is required")
+	}
+	var evidence pipeline.FlowConstructionPublicationEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		evidence, err = ReadFlowConstructionPublicationTx(ctx, tx, owner, entityID)
+		return err
+	})
+	if err != nil {
+		return pipeline.FlowConstructionPublicationEvidence{}, err
+	}
+	return evidence, nil
+}
+
+func (s *PipelineSQLiteOwner) LoadFlowConstructionPublication(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionPublicationEvidence, error) {
+	if s == nil || s.backend == nil {
+		return pipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("sqlite construction receipt owner is required")
+	}
+	var evidence pipeline.FlowConstructionPublicationEvidence
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		evidence, err = ReadFlowConstructionPublicationTx(ctx, tx, owner, entityID)
+		return err
+	})
+	if err != nil {
+		return pipeline.FlowConstructionPublicationEvidence{}, err
+	}
+	return evidence, nil
+}
+
 // ReadFlowConstructionPublicationTx reads the immutable construction
 // receipt, not either current half of the receiver persistence aggregate.
 func ReadFlowConstructionPublicationTx(ctx context.Context, tx *sql.Tx, owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionPublicationEvidence, error) {

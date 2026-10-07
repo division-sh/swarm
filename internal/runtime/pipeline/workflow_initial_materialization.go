@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,6 +45,10 @@ func ValidateFlowConstructionPublication(raw []byte, owner runtimeflowidentity.R
 type FlowConstructionPublicationEvidence struct {
 	CreatingInput FlowConstructionInput
 	Fields        map[string]any
+}
+
+type FlowConstructionPublicationReader interface {
+	LoadFlowConstructionPublication(context.Context, runtimeflowidentity.RunScopedFlowInstance, string) (FlowConstructionPublicationEvidence, error)
 }
 
 // ProjectFlowConstructionPublication discovers the immutable creating input
