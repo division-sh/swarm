@@ -188,7 +188,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 					case <-ctx.Done():
 						return ctx.Err()
 					}
-				}, issue2564StageTimerDispatchGate{release: releaseTimer})
+				}, issue2564StageTimerPublicationGate{release: releaseTimer})
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-start"})
 				entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "m33"}, "idempotency_key": "m33-begin"})
@@ -249,16 +249,16 @@ type issue2564Call struct {
 	input map[string]any
 }
 
-type issue2564StageTimerDispatchGate struct {
+type issue2564StageTimerPublicationGate struct {
 	release <-chan struct{}
 }
 
-func (g issue2564StageTimerDispatchGate) NotifyLifecycle(ctx context.Context, signal runtimelifecycleprobe.Signal) {
-	if signal.Kind != runtimelifecycleprobe.PostCommitDispatchStarted || signal.EventType != "platform.stage_timer" {
+func (g issue2564StageTimerPublicationGate) NotifyLifecycle(ctx context.Context, signal runtimelifecycleprobe.Signal) {
+	if signal.Kind != runtimelifecycleprobe.EventPersisted || signal.EventType != "platform.stage_timer" {
 		return
 	}
-	// Keep the real deadline and accepted occurrence; only stage advancement
-	// waits until the test has established its explicit save/timer ordering.
+	// Observe the committed occurrence before engine-outbox dispatch. Neither a
+	// SQL transaction nor the timer's entity-transition lock is held here.
 	select {
 	case <-g.release:
 	case <-ctx.Done():
