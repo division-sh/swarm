@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -235,21 +236,11 @@ func TestWhatsAppCaptureBoundsRefuseWithoutTrimming(t *testing.T) {
 			case "event":
 				event.Body = []byte(`"` + strings.Repeat("x", maxCaptureEventBytes-1) + `"`)
 			case "count":
-				for i := 0; i < maxPendingCaptureCount; i++ {
-					event.EventID = fmt.Sprint(i)
-					if err := store.capture(context.Background(), event); err != nil {
-						t.Fatal(err)
-					}
-				}
+				seedCaptureQuotaFixture(t, db, store, event, maxPendingCaptureCount)
 				event.EventID = "overflow"
 			case "bytes":
 				event.Body = []byte(`"` + strings.Repeat("x", maxCaptureEventBytes-2) + `"`)
-				for i := 0; i < maxPendingCaptureBytes/maxCaptureEventBytes; i++ {
-					event.EventID = fmt.Sprint(i)
-					if err := store.capture(context.Background(), event); err != nil {
-						t.Fatal(err)
-					}
-				}
+				seedCaptureQuotaFixture(t, db, store, event, maxPendingCaptureBytes/maxCaptureEventBytes)
 				event.EventID = "overflow"
 			}
 			before := captureRawRowsFixture(t, db)
@@ -261,6 +252,49 @@ func TestWhatsAppCaptureBoundsRefuseWithoutTrimming(t *testing.T) {
 				t.Fatal("overflow trimmed or changed existing evidence")
 			}
 		})
+	}
+}
+
+// Quota setup is not an append-throughput proof. Seed the exact private state
+// once, then independently validate every row through the production reader.
+func seedCaptureQuotaFixture(t *testing.T, db *sql.DB, capture *captureStore, event capturedEvent, count int) {
+	t.Helper()
+	event.EventID = "0"
+	if err := capture.capture(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	for i := 1; i < count; i++ {
+		event.EventID = fmt.Sprint(i)
+		envelope, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(envelope)
+		if _, err := tx.Exec(`INSERT INTO whatsapp_incoming_capture
+			(connection_id,account_ref,conversation_ref,event_id,event_kind,body_bytes,envelope,digest)
+			VALUES(?,?,?,?,?,?,?,?)`, event.Scope.Session.ConnectionID, event.Scope.Session.AccountRef, event.Conversation,
+			event.EventID, event.Kind, len(event.Body), envelope, digest[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := capture.pending(context.Background())
+	if err != nil || len(pending) != count {
+		t.Fatalf("invalid quota fixture: count=%d err=%v", len(pending), err)
+	}
+	for i, got := range pending {
+		want := event
+		want.EventID = fmt.Sprint(i)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("quota row %d differs from exact source fixture", i)
+		}
 	}
 }
 

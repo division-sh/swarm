@@ -11206,6 +11206,10 @@ tool_model:
         occurrence and records failure evidence without including the panic payload. Failed capture or failed
         failure-evidence persistence never reports successful capture. This does not claim that upstream panic
         recovery makes every encrypted-message receipt safe, or that every upstream goroutine is protected.
+        Callback admission is fenced atomically; a join includes in-flight capture and failure-evidence recording.
+        Capture completion after occurrence cancellation or retirement never returns successful SDK status.
+        Callback ownership binds exactly once before connect to the exact client occurrence, and callback failure
+        fences that transport before recording its retained failure evidence.
         Session execution remains unavailable until its complete admitted connection implementation is installed.
       session_state_join: >
         The WhatsApp connection owner fences and joins every pinned SDK private-store method, not only Swarm callbacks.
@@ -11230,6 +11234,9 @@ tool_model:
         private-state reopen and is never reinterpreted using a replacement account, source, principal or binding.
         Limits are one MiB per event, 1024 pending events and 16 MiB total pending payload per connection; overflow
         preserves existing evidence and refuses the new capture. Corruption and I/O failures are non-success.
+        Duplicate admission, new-event quota admission and recovery consume one full-row validation boundary:
+        routing indexes, identity dimensions and byte accounting must agree with the validated exact envelope and
+        digest. An index cannot hide corrupt evidence from admission, and refusal never rewrites that evidence.
         Provider transport acknowledgment, local capture commit and selected-store atomic publication remain
         separate boundaries; a local capture fixture alone does not establish supported end-to-end delivery.
       session_client_occurrence: >

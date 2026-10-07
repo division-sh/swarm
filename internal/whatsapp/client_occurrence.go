@@ -30,6 +30,7 @@ type clientOccurrence struct {
 	cancel       context.CancelFunc
 	client       *whatsmeow.Client
 	stores       *sdkStores
+	callbacks    *callbackGuard
 	started      bool
 	fenced       bool
 	inFlight     int
@@ -77,6 +78,35 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 		return true
 	})
 	return o, nil
+}
+
+func (o *clientOccurrence) bindCallbacks(handle func(context.Context, any) error,
+	record func(context.Context, callbackFailure) error,
+) (*callbackGuard, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.fenced || o.ctx.Err() != nil {
+		return nil, errClientOccurrenceFenced
+	}
+	if o.started || o.callbacks != nil {
+		return nil, fmt.Errorf("WhatsApp callbacks must bind exactly once before connect")
+	}
+	if handle == nil || record == nil {
+		return nil, fmt.Errorf("WhatsApp callbacks require capture and failure owners")
+	}
+	guard, err := newCallbackGuard(o.ctx, o.connectionID, o.occurrenceID, handle,
+		func(ctx context.Context, failure callbackFailure) error {
+			o.fence()
+			return record(ctx, failure)
+		})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := guard.install(o.client); err != nil {
+		return nil, err
+	}
+	o.callbacks = guard
+	return guard, nil
 }
 
 func (o *clientOccurrence) connect() error {
@@ -161,7 +191,11 @@ func (o *clientOccurrence) fence() {
 			close(o.drained)
 		}
 	}
+	callbacks := o.callbacks
 	o.mu.Unlock()
+	if callbacks != nil {
+		callbacks.fence()
+	}
 	o.stores.fence.fence()
 	o.cancel()
 	o.stopOnce.Do(func() {
@@ -176,6 +210,14 @@ func (o *clientOccurrence) fence() {
 // The containing connection must do both and retain evidence if either fails.
 func (o *clientOccurrence) join(ctx context.Context) error {
 	o.fence()
+	o.mu.Lock()
+	callbacks := o.callbacks
+	o.mu.Unlock()
+	if callbacks != nil {
+		if err := callbacks.join(ctx); err != nil {
+			return err
+		}
+	}
 	for _, done := range []<-chan struct{}{o.drained, o.stopDone} {
 		select {
 		case <-done:
