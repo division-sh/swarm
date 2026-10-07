@@ -101,6 +101,10 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*cap
 		body_bytes INTEGER NOT NULL CHECK(body_bytes > 0 AND body_bytes <= 1048576),
 		envelope BLOB NOT NULL,
 		digest BLOB NOT NULL,
+		publication_request BLOB,
+		publication_digest BLOB,
+		CHECK((publication_request IS NULL AND publication_digest IS NULL) OR
+		      (publication_request IS NOT NULL AND publication_digest IS NOT NULL AND length(publication_digest) = 32)),
 		UNIQUE(connection_id, account_ref, conversation_ref, event_id, event_kind)
 	)`)
 	if err != nil {
@@ -193,20 +197,32 @@ type captureRowQuery interface {
 // Every admission and readback consumer validates the same complete rows. A
 // corrupt routing index cannot hide a row from duplicate or quota admission.
 func (s *captureStore) readCapturedRows(ctx context.Context, query captureRowQuery) ([]capturedEvent, error) {
-	rows, err := query.QueryContext(ctx, `SELECT envelope,digest,connection_id,body_bytes,
-		account_ref,conversation_ref,event_id,event_kind
+	stored, err := s.readPendingRows(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]capturedEvent, 0, len(stored))
+	for _, row := range stored {
+		result = append(result, row.event)
+	}
+	return result, nil
+}
+
+func (s *captureStore) readPendingRows(ctx context.Context, query captureRowQuery) ([]pendingCapture, error) {
+	rows, err := query.QueryContext(ctx, `SELECT sequence,envelope,digest,connection_id,body_bytes,
+		account_ref,conversation_ref,event_id,event_kind,publication_request,publication_digest
 		FROM whatsapp_incoming_capture ORDER BY sequence`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var result []capturedEvent
+	var result []pendingCapture
 	var totalBytes int64
 	for rows.Next() {
-		var raw, digest []byte
+		var raw, digest, request, requestDigest []byte
 		var connectionID, account, conversation, eventID, kind string
-		var bodyBytes int64
-		if err := rows.Scan(&raw, &digest, &connectionID, &bodyBytes, &account, &conversation, &eventID, &kind); err != nil {
+		var sequence, bodyBytes int64
+		if err := rows.Scan(&sequence, &raw, &digest, &connectionID, &bodyBytes, &account, &conversation, &eventID, &kind, &request, &requestDigest); err != nil {
 			return nil, err
 		}
 		event, err := decodeCapture(raw, digest)
@@ -221,7 +237,15 @@ func (s *captureStore) readCapturedRows(ctx context.Context, query captureRowQue
 		if len(result) >= maxPendingCaptureCount || totalBytes > maxPendingCaptureBytes {
 			return nil, errCaptureCapacity
 		}
-		result = append(result, event)
+		pending := pendingCapture{sequence: sequence, event: event, requestBytes: request}
+		if request != nil || requestDigest != nil {
+			admitted, err := decodePublicationRequest(event, request, requestDigest)
+			if err != nil {
+				return nil, err
+			}
+			pending.request = &admitted
+		}
+		result = append(result, pending)
 	}
 	return result, rows.Err()
 }

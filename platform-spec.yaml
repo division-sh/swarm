@@ -11270,6 +11270,24 @@ tool_model:
         A mapped payload or fixture scope is not authenticated session admission, normalized-output authorization,
         human identity, or publication success. Accepted trigger normalization and original-authority admission remain
         separate mandatory consumers, and session execution remains unavailable until complete qualification.
+      session_capture_publication: >
+        An admitted trigger BODY projects the exact captured JSON bytes through the same normalized-field and branch
+        owner as webhook delivery. This pure projection grants neither request authentication nor provider-output
+        authorization; session admission and the existing normalized-output authorization owner remain mandatory.
+        Before invoking atomic selected-store publication, the private incoming capture freezes its original runtime
+        publication request, including exact target, run, generation, sequence, receipt time and transport metadata.
+        Its existing publication identity covers connection, account, conversation, provider event and kind; its
+        semantic fingerprint binds the full original capture scope, occurrence and exact body bytes. Staging requires
+        the retained capture, is idempotent only for the identical canonical request, and grants no executable authority.
+        Recovery retains that request instead of selecting a current target or adopting replacement source/account facts.
+        Duplicate, quota, readback, staging and retirement consume the same complete capture/publication evidence
+        validator. Corrupt, partial or conflicting evidence is retained and refused, never repaired or guessed.
+        Private capture retirement requires the selected-store exact publication reader's verified committed record
+        matching the entire frozen request. An in-memory acknowledgment, current health or another publication cannot
+        authorize deletion. Read or retirement-write failure preserves the capture and request for exact retry;
+        process death after commit but before retirement does not authorize provider replay or another effect.
+        Isolated projection, private-state and raw selected-store fixtures do not establish authenticated session
+        capture-to-normalized-publication closure or supported WhatsApp execution.
       session_client_occurrence: >
         A WhatsApp connection occurrence owns one private SDK client and one connect attempt. SDK automatic,
         initial and login reconnect are disabled; a disconnected or retired client never reconnects or crosses into
