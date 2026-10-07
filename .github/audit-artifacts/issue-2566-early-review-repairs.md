@@ -1,5 +1,48 @@
 # #2566 Early Review Repairs
 
+## Generated Readiness Order Repair
+
+Core at `2b92734907b298c1e47bcfa5eeff2327a59431b6` passed all 22 units on
+server2, 2026-10-07 07:34:51--07:45:01 UTC, plan
+`841488275cc1443c9bf3660ee907db0c8e231ed2e21a5d7e522aa369caa1c273`.
+Lifecycle at that same head stopped at 07:46:04: its initial/staged selected-fork
+readiness matrices failed boot admission on both databases. The generated schema
+put `complete` before `idle`, making `complete` the derived entry and `idle`
+unreachable. Two units passed, four failed or were interrupted, 49 did not start.
+Canceled sibling units receive no proof credit. No supplements or soaks ran.
+Server2 was released after the joined failure; its receipts remain in the clean
+exact-head qualification worktree.
+
+The existing `localReadinessFixture` decoded and re-marshaled whole schema
+documents through Go maps at three modification points. The ordered parser was
+not defective. That modifier is now the named
+`canonicalrouting.CopySelectedForkLocalReadiness` recipe: it preserves the
+original lifecycle bytes and makes only the known preparation-route changes,
+with exact unique-match refusals. All three map re-parsers are deleted from the
+consumer. No stage inference, generic public mutator, compatibility adapter,
+production interpreter, or replacement semantic owner is introduced.
+
+`TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens` now covers all 27
+legal declaration/frontier combinations, each through actual loaded, persisted
+and retained-logical sources. Independent expectations require `idle` first,
+the complete ordered stage list, and only `complete` final; all variants pass
+race/count-three. The original 553 reviewed entry decisions and 417 exact,
+byte-idempotent rewrite outputs are preserved. The existing initial/staged,
+node/activity-loop execution witnesses also pass on both databases at
+race/count-three with their original assertions intact.
+The complete initial/staged matrices (all 108 backend/declaration/frontier
+cells), creation-source and fork-recipient controls pass through the managed
+wrapper at count-one. The full repository Census/Inventory/Registry sweep,
+closed routing/partition checks, all 78 structural guards and the actual
+persistence debt ratchet pass. Build and vet pass; no registry, ceiling,
+repetition, assertion, budget or supported workload limit is changed.
+
+The user explicitly directed the next server2 slot to lifecycle plus supplements
+after these test/fixture-only repairs, retaining the preceding core receipt.
+That receipt is still bound to `2b9273490`, not mislabeled as qualification of
+the replacement head. Local sweeps and complete fork matrices are now green;
+final lifecycle/supplement and hosted-full receipts remain due.
+
 ## Core 497985965 Integration Repair
 
 Core at `497985965d25882531d5c2932b79258675fda404` completed on server2:

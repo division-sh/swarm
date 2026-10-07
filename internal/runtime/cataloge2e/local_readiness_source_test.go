@@ -2,8 +2,6 @@ package cataloge2e
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,8 +20,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 type localReadinessEntryProbe struct {
@@ -180,120 +178,7 @@ func TestLocalReadinessForkRecipientBothStores(t *testing.T) {
 
 func localReadinessFixture(t *testing.T, declarations int, frontier string) string {
 	t.Helper()
-	root := selectedForkReadinessCatalogFixture(t, declarations, frontier)
-	path := filepath.Join(root, "schema.yaml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schema map[string]any
-	if err := yaml.Unmarshal(data, &schema); err != nil {
-		t.Fatal(err)
-	}
-	pins := schema["pins"].(map[string]any)
-	pins["inputs"] = append(pins["inputs"].([]any), "source.prepare", "source.recorded")
-	pins["outputs"] = append(pins["outputs"].([]any), "source.prepare")
-	schema["connect"] = append(schema["connect"].([]any), map[string]any{"event": "source.prepare", "from": ".", "to": "worker-flow", "resolution": "select"})
-	data, err = yaml.Marshal(schema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	event := "worker.inspect"
-	if frontier != "node" && !strings.HasPrefix(frontier, "activity") {
-		event = "worker.ready"
-	}
-	for name, addition := range map[string]string{
-		"events.yaml":             "\nsource.prepare:\n  worker_id: text\nsource.recorded:\n  worker_id: text\n",
-		"nodes.yaml":              "\nprepare:\n  execution_type: system_node\n  subscribes_to: [source.recorded]\n  event_handlers:\n    source.recorded:\n      guard: {id: admitted, check: true}\n",
-		"worker-flow/schema.yaml": "\nauto_emit_on_create:\n  event: " + event + ".requested\n",
-	} {
-		path := filepath.Join(root, name)
-		data, err := os.ReadFile(path)
-		if err != nil && !os.IsNotExist(err) {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, append(data, addition...), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if strings.HasPrefix(frontier, "activity_loop") {
-		// Keep the loop start in the fork frontier. An extra forwarding handler
-		// would itself need loop admission and would change that obligation.
-		for _, file := range []string{"schema.yaml", "events.yaml", "worker-flow/schema.yaml", "worker-flow/nodes.yaml"} {
-			path := filepath.Join(root, file)
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var doc map[string]any
-			if err := yaml.Unmarshal(raw, &doc); err != nil {
-				t.Fatal(err)
-			}
-			switch file {
-			case "schema.yaml":
-				var connections []any
-				for _, edge := range doc["connect"].([]any) {
-					if edge.(map[string]any)["event"] != "worker.inspect" {
-						connections = append(connections, edge)
-					}
-				}
-				doc["connect"] = connections
-				for _, direction := range []string{"inputs", "outputs"} {
-					boundary := doc["pins"].(map[string]any)
-					var pins []any
-					for _, pin := range boundary[direction].([]any) {
-						if pin != "worker.inspect" {
-							pins = append(pins, pin)
-						}
-					}
-					boundary[direction] = pins
-				}
-			case "events.yaml":
-				delete(doc, "worker.inspect")
-			case "worker-flow/schema.yaml":
-				doc["auto_emit_on_create"] = map[string]any{"event": "worker.inspect"}
-				boundary := doc["pins"].(map[string]any)
-				var pins []any
-				for _, pin := range boundary["inputs"].([]any) {
-					if pin != "worker.inspect.requested" {
-						pins = append(pins, pin)
-					}
-				}
-				boundary["inputs"] = pins
-			case "worker-flow/nodes.yaml":
-				delete(doc, "worker-inspect-entry")
-			}
-			raw, err = yaml.Marshal(doc)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, raw, 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	childSchemaPath := filepath.Join(root, "worker-flow/schema.yaml")
-	childSchema, err := os.ReadFile(childSchemaPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var child map[string]any
-	if err := yaml.Unmarshal(childSchema, &child); err != nil {
-		t.Fatal(err)
-	}
-	childPins := child["pins"].(map[string]any)
-	childPins["inputs"] = append(childPins["inputs"].([]any), "source.prepare")
-	childSchema, err = yaml.Marshal(child)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(childSchemaPath, childSchema, 0600); err != nil {
-		t.Fatal(err)
-	}
-	return root
+	return canonicalrouting.CopySelectedForkLocalReadiness(t, declarations, frontier)
 }
 
 func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtimeHarness, eventName string) string {

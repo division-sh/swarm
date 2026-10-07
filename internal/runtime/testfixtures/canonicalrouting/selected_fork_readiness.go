@@ -210,3 +210,59 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 	}
 	return root
 }
+
+// CopySelectedForkLocalReadiness adds the local preparation path without
+// round-tripping the lifecycle declarations through an unordered Go map.
+func CopySelectedForkLocalReadiness(t testing.TB, declarations int, frontier string) string {
+	t.Helper()
+	root := CopySelectedForkReadiness(t, declarations, frontier)
+	read := func(file string) string {
+		raw, err := os.ReadFile(filepath.Join(root, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	schema := read("schema.yaml")
+	schema = replaceSelectedReadiness(t, schema, "  inputs:\n", "  inputs:\n    - source.prepare\n    - source.recorded\n")
+	schema = replaceSelectedReadiness(t, schema, "  outputs:\n", "  outputs:\n    - source.prepare\n")
+	schema += "  - {event: source.prepare, from: ., to: worker-flow, resolution: select}\n"
+	events := read("events.yaml") + "\nsource.prepare:\n  worker_id: text\nsource.recorded:\n  worker_id: text\n"
+	child := read("worker-flow/schema.yaml")
+	child = replaceSelectedReadiness(t, child, "  inputs:\n", "  inputs:\n    - source.prepare\n")
+	childNodes := read("worker-flow/nodes.yaml")
+	event := "worker.inspect"
+	if frontier != "node" && !strings.HasPrefix(frontier, "activity") {
+		event = "worker.ready"
+	}
+	if strings.HasPrefix(frontier, "activity_loop") {
+		// The loop start is itself the frontier, not an extra forwarding handler.
+		schema = strings.ReplaceAll(schema, "    - worker.inspect\n", "")
+		schema = replaceSelectedReadiness(t, schema, "  - {event: worker.inspect, from: ., to: worker-flow, rename: worker.inspect.requested, resolution: select}\n", "")
+		events = replaceSelectedReadiness(t, events, "worker.inspect:\n  worker_id: text\n", "")
+		child = replaceSelectedReadiness(t, child, "    - worker.inspect.requested\n", "")
+		forwarder := fmt.Sprintf("\n%s-entry:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit:\n        event: %s\n        fields:\n          worker_id: payload.worker_id\n", strings.ReplaceAll(event, ".", "-"), event+".requested", event+".requested", event)
+		childNodes = replaceSelectedReadiness(t, childNodes, forwarder, "")
+		child += "\nauto_emit_on_create:\n  event: " + event + "\n"
+	} else {
+		child += "\nauto_emit_on_create:\n  event: " + event + ".requested\n"
+	}
+	writeClosedVariantFile(t, root, "schema.yaml", schema)
+	writeClosedVariantFile(t, root, "events.yaml", events)
+	writeClosedVariantFile(t, root, "worker-flow/schema.yaml", child)
+	writeClosedVariantFile(t, root, "worker-flow/nodes.yaml", childNodes)
+	nodes, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	writeClosedVariantFile(t, root, "nodes.yaml", string(nodes)+"\nprepare:\n  execution_type: system_node\n  subscribes_to: [source.recorded]\n  event_handlers:\n    source.recorded:\n      guard: {id: admitted, check: true}\n")
+	return root
+}
+
+func replaceSelectedReadiness(t testing.TB, source, old, replacement string) string {
+	t.Helper()
+	if count := strings.Count(source, old); count != 1 {
+		t.Fatalf("selected readiness fixture expected one %q, found %d", old, count)
+	}
+	return strings.Replace(source, old, replacement, 1)
+}
