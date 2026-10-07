@@ -1365,3 +1365,9 @@ registry roots and the actual78-root core structural-owner-guards unit must
 run locally before a new server2 request. Existing local39f component proofs
 and d2 RED remain separately retained. Fresh Local core/quiet both-store
 numeric and exact-head hosted full/Q01 still block merge readiness.
+
+The expanded local census found five stale admission-census rows for the
+unused serve listener wrappers removed in39f. Regeneration removes exactly
+those five dead roots; existing live `cliapp/workspace_listener.go` owners,
+their hashes, proof mappings and mutation-rejection controls remain unchanged.
+This repairs PC58 bookkeeping, not an admission exception or weakened guard.
