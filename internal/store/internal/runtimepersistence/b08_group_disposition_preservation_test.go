@@ -120,7 +120,7 @@ func TestB08GroupRoutedFailurePreservesExactOutcomesBothStores(t *testing.T) {
 					wantKind, wantOutcome, wantReason := pipelineobligation.DispositionAcknowledged, "success", "pipeline_persisted"
 					if i == failed {
 						wantKind, wantOutcome, wantReason = pipelineobligation.DispositionTerminal, "dead_letter", "pipeline_outbox_dispatch_failed"
-						class, detail := failures.ClassInternalFailure, "event_interceptor_failed"
+						class, detail := failures.ClassComputeFailure, "b08_routed_failure"
 						if deadLetter {
 							wantKind, wantReason, class, detail = pipelineobligation.DispositionDeadLetter, "b08_routed_failure", failures.ClassComputeFailure, "b08_routed_failure"
 						}
