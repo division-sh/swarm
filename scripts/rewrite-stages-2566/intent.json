@@ -3347,7 +3347,7 @@
     {
       "file": "internal/runtime/engine/semantic_execution_test.go",
       "before_hash": "3fc2d37a800b89762aeee4e43faca204001b6835969b6d5755bb25940a3647c4",
-      "after_hash": "1eb5c4e325b2f908b66bee2c5952ed4c0f2ed7ca48541378921c0124d8542cad",
+      "after_hash": "dfc454ca4352fdb34d7846322f66d2664c32351eced4e3613ba9ddf84ff305b1",
       "edits": [
         {
           "offset": 4989,
@@ -3357,7 +3357,7 @@
         {
           "offset": 5305,
           "before": "",
-          "after": "\t\tschema := bundle.RootSchema\n\t\tif flowID != \".\" {\n\t\t\tchild, known := bundle.FlowSchemas[flowID]\n\t\t\tif !known {\n\t\t\t\treturn ExecutionResult{}, fmt.Errorf(\"isolated handler fixture has no flow %s\", flowID)\n\t\t\t}\n\t\t\tschema = \u0026child\n\t\t}\n\t\tif schema == nil {\n\t\t\tschema = \u0026runtimecontracts.FlowSchemaDocument{}\n\t\t}\n"
+          "after": "\t\tschema := bundle.RootSchema\n\t\tif flowID != \".\" {\n\t\t\tchild, known := bundle.FlowSchemas[flowID]\n\t\t\tif !known {\n\t\t\t\t// Missing-source tests must reach the executor's own rejection,\n\t\t\t\t// without a fixture graph inventing membership for that flow.\n\t\t\t\treturn e.Execute(ctx, req)\n\t\t\t}\n\t\t\tschema = \u0026child\n\t\t}\n\t\tif schema == nil {\n\t\t\tschema = \u0026runtimecontracts.FlowSchemaDocument{}\n\t\t}\n"
         },
         {
           "offset": 5653,
@@ -3498,12 +3498,32 @@
     {
       "file": "internal/runtime/manager/flow_activation_test.go",
       "before_hash": "888a01a9b98bd924d01d76c8222d2f387cba242b6c6f33c49e481a298d9615e7",
-      "after_hash": "7a9d72eae4254c6f6b4660b6c9e13401247ee3efcaf8f8daa79667642c26c95a",
+      "after_hash": "1c4fb42d17f686b5dad31ae3091448da1d4ee9686dd76ad9fe282e052119f7e7",
       "edits": [
+        {
+          "offset": 76172,
+          "before": "",
+          "after": "\t\t\t\"child\": {},\n"
+        },
         {
           "offset": 77580,
           "before": "\t\twriteFlowActivationFixtureFile(t, filepath.Join(root, flowID, \"schema.yaml\"), fmt.Sprintf(\"name: %s\\nstages:\\n  active: {initial: true}\\n\", flowID))\n",
           "after": "\t\twriteFlowActivationFixtureFile(t, filepath.Join(root, flowID, \"schema.yaml\"), fmt.Sprintf(\"name: %s\\nstages:\\n  active: {}\\n\", flowID))\n"
+        },
+        {
+          "offset": 78734,
+          "before": "",
+          "after": "\tprepareFlowActivationFixtureTree(bundle)\n"
+        },
+        {
+          "offset": 78881,
+          "before": "",
+          "after": "// Reconcile the fixture's value-copied tree with its final declarations before\n// compilation. Tests that corrupt a compiled source do so after this boundary.\nfunc prepareFlowActivationFixtureTree(bundle *runtimecontracts.WorkflowContractBundle) {\n\tif bundle.FlowTree.Root == nil {\n\t\treturn\n\t}\n\tif bundle.RootSchema == nil {\n\t\tbundle.RootSchema = \u0026runtimecontracts.FlowSchemaDocument{}\n\t}\n\tbundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{}\n\tvar index func(*runtimecontracts.FlowContractView, *runtimecontracts.FlowContractView)\n\tindex = func(view, parent *runtimecontracts.FlowContractView) {\n\t\tview.Parent = parent\n\t\tif parent == nil {\n\t\t\tview.Paths.FlowPath = \".\"\n\t\t\tview.Schema = *bundle.RootSchema\n\t\t} else {\n\t\t\tview.Schema = bundle.FlowSchemas[view.Paths.FlowPath]\n\t\t}\n\t\tbundle.FlowTree.ByID[view.Paths.FlowPath] = view\n\t\tfor i := range view.Children {\n\t\t\tindex(\u0026view.Children[i], view)\n\t\t}\n\t}\n\tindex(bundle.FlowTree.Root, nil)\n}\n\n"
+        },
+        {
+          "offset": 81127,
+          "before": "",
+          "after": "\tprepareFlowActivationFixtureTree(bundle)\n"
         },
         {
           "offset": 85584,
@@ -5565,7 +5585,7 @@
     {
       "file": "internal/runtime/pipeline/workflow_timer_owner_test.go",
       "before_hash": "e23e9a771088322c1f08168af03b650997d584a7f8209851ad5c85d8bf034661",
-      "after_hash": "416f37133afd8f05066726502f450695faf7606d3cbf40df230bef141a591461",
+      "after_hash": "f7b1f7b120ecbdd23c67eddd53687255641b13ea841ebba04c68a1b8fc95938b",
       "edits": [
         {
           "offset": 8318,
@@ -5591,6 +5611,11 @@
           "offset": 123566,
           "before": "\tschema := \"name: workflow-timer-first-revision\\nstages:\\n  waiting:\\n    initial: true\\n\"\n",
           "after": "\tschema := \"name: workflow-timer-first-revision\\nstages:\\n  waiting: {}\\n\"\n"
+        },
+        {
+          "offset": 123671,
+          "before": "\t\tschema += \"    timers:\\n      - {id: waiting.first, after: 1s, emit: timer.first}\\n\"\n",
+          "after": "\t\tschema = \"name: workflow-timer-first-revision\\nstages:\\n  waiting:\\n    timers:\\n      - {id: waiting.first, after: 1s, emit: timer.first}\\n\"\n"
         },
         {
           "offset": 124099,
@@ -10985,8 +11010,13 @@
     {
       "file": "scripts/rewrite-pins-2438/main_test.go",
       "before_hash": "02136255029b457337b76bc5bea8b1f2a97f02916c6fe3ce6fbc5c37010466f0",
-      "after_hash": "f7b767ebeed54595f8a33f1c15846a3d911f61748f599c0de06c3717fdc8bd27",
+      "after_hash": "150ab2317d16eb59dbe3e824ea332cf277678f8791dd9e4f80de2717c22c200e",
       "edits": [
+        {
+          "offset": 8906,
+          "before": "\tbefore := []byte(\"name: worker\\n# boundary heading\\npins:\\n  inputs:\\n    events: [work.start]\\n\\n# lifecycle heading\\n# another lifecycle line\\nstages: {idle: {initial: true}}\\n\")\n",
+          "after": "\tbefore := []byte(\"name: worker\\n# boundary heading\\npins:\\n  inputs:\\n    events: [work.start]\\n\\n# lifecycle heading\\n# another lifecycle line\\nstages: {idle: {}}\\n\")\n"
+        },
         {
           "offset": 9156,
           "before": "\tfor _, expected := range []string{\"name: worker\\n# boundary heading\\n\", \"\\n# lifecycle heading\\n# another lifecycle line\\nstages: {idle: {initial: true}}\\n\"} {\n",

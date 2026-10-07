@@ -2,8 +2,6 @@ package apiv1
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -16,27 +14,7 @@ import (
 
 func finiteRunStartLoadedSource(t *testing.T, finite bool) semanticview.Source {
 	t.Helper()
-	root := t.TempDir()
-	stages, target := "stages: {waiting: {}}\n", "waiting"
-	if finite {
-		stages, target = "stages: {waiting: {}, done: {final: true}}\n", "done"
-	}
-	files := map[string]string{
-		"schema.yaml":           "name: initiation\n" + stages + "pins:\n  inputs: [scan.requested]\n  outputs: [scan.requested]\nconnect:\n  - {event: scan.requested, from: ., to: discovery}\n",
-		"events.yaml":           "scan.requested:\n  topic: text\n",
-		"nodes.yaml":            "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: " + target + "\n",
-		"discovery/schema.yaml": "name: discovery\n" + stages + "pins:\n  inputs: [scan.requested]\n",
-		"discovery/nodes.yaml":  "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: " + target + "\n",
-	}
-	for name, body := range files {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	root := canonicalrouting.CopyFiniteInitiation(t, finite)
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

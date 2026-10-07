@@ -2,8 +2,6 @@ package runstart
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,18 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func finiteTestSource(t *testing.T, files map[string]string) semanticview.Source {
+func finiteTestSource(t *testing.T, root string) semanticview.Source {
 	t.Helper()
-	root := t.TempDir()
-	for name, body := range files {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -34,14 +22,7 @@ func finiteTestSource(t *testing.T, files map[string]string) semanticview.Source
 
 func TestFiniteStartIncludesEagerKeylessChildren(t *testing.T) {
 	for _, childFinal := range []bool{false, true} {
-		child := "stages: {waiting: {}}\n"
-		if childFinal {
-			child = "stages: {waiting: {}, done: {final: true}}\n"
-		}
-		source := finiteTestSource(t, map[string]string{
-			"schema.yaml":          "stages: {waiting: {}, done: {final: true}}\n",
-			"unrouted/schema.yaml": child,
-		})
+		source := finiteTestSource(t, canonicalrouting.CopyFiniteEagerClosure(t, childFinal))
 		err := ValidateFinite(source, nil)
 		if childFinal {
 			if err != nil {
@@ -57,10 +38,7 @@ func TestFiniteStartIncludesEagerKeylessChildren(t *testing.T) {
 }
 
 func TestFiniteStartStatelessRootIsNotAnExemptContainer(t *testing.T) {
-	source := finiteTestSource(t, map[string]string{
-		"schema.yaml":      "name: container\n",
-		"leaf/schema.yaml": "stages: {done: {final: true}}\n",
-	})
+	source := finiteTestSource(t, canonicalrouting.CopyFiniteStatelessContainer(t))
 	var refusal *FiniteStartError
 	if err := ValidateFinite(source, nil); !errors.As(err, &refusal) || refusal.FlowID != "." {
 		t.Fatalf("constructed stateless root was exempted: %v", err)
@@ -68,11 +46,7 @@ func TestFiniteStartStatelessRootIsNotAnExemptContainer(t *testing.T) {
 }
 
 func TestFiniteStartIgnoresUnrelatedDormantTemplate(t *testing.T) {
-	source := finiteTestSource(t, map[string]string{
-		"schema.yaml":           "stages: {done: {final: true}}\n",
-		"dormant/schema.yaml":   "instance: item_id\nstages: {waiting: {}}\n",
-		"dormant/entities.yaml": "Item:\n  item_id: {type: text, _unused_reason: dormant constructor}\n",
-	})
+	source := finiteTestSource(t, canonicalrouting.CopyFiniteDormantTemplate(t))
 	if err := ValidateFinite(source, nil); err != nil {
 		t.Fatalf("filesystem-only dormant template entered finite closure: %v", err)
 	}
@@ -87,43 +61,33 @@ func TestFiniteStartUnknownCatalogRefuses(t *testing.T) {
 }
 
 func TestFiniteStartIncludesConnectedTemplatesAndTheirEagerChildren(t *testing.T) {
-	for _, offender := range []string{"worker", "worker/support", "none"} {
-		t.Run(offender, func(t *testing.T) {
-			workerStages, childStages := "stages: {active: {}, done: {final: true}}\n", "stages: {done: {final: true}}\n"
-			if offender == "worker" {
-				workerStages = "stages: {active: {}}\n"
-			}
-			if offender == "worker/support" {
-				childStages = "stages: {active: {}}\n"
-			}
-			source := finiteTestSource(t, map[string]string{
-				"schema.yaml":                "stages: {active: {}, done: {final: true}}\npins:\n  inputs: [work.requested]\n  outputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: worker, resolution: create}\n",
-				"events.yaml":                "work.requested:\n  worker_id: text\n",
-				"worker/schema.yaml":         "instance: worker_id\n" + workerStages + "pins:\n  inputs: [work.requested]\n",
-				"worker/entities.yaml":       "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-				"worker/nodes.yaml":          "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
-				"worker/support/schema.yaml": childStages,
-			})
+	for _, tc := range []struct {
+		offender string
+		variant  canonicalrouting.FiniteClosureOffender
+	}{
+		{"worker", canonicalrouting.FiniteClosureWorkerService},
+		{"worker/support", canonicalrouting.FiniteClosureChildService},
+		{"none", canonicalrouting.FiniteClosureEnded},
+	} {
+		t.Run(tc.offender, func(t *testing.T) {
+			source := finiteTestSource(t, canonicalrouting.CopyFiniteConnectedClosure(t, tc.variant))
 			err := ValidateFinite(source, nil)
-			if offender == "none" {
+			if tc.offender == "none" {
 				if err != nil {
 					t.Fatal(err)
 				}
 				return
 			}
 			var refusal *FiniteStartError
-			if !errors.As(err, &refusal) || refusal.FlowID != offender {
-				t.Fatalf("connected constructor closure missed %s: %v", offender, err)
+			if !errors.As(err, &refusal) || refusal.FlowID != tc.offender {
+				t.Fatalf("connected constructor closure missed %s: %v", tc.offender, err)
 			}
 		})
 	}
 }
 
 func TestFiniteStartRejectsContradictoryConstructorEvidence(t *testing.T) {
-	source := finiteTestSource(t, map[string]string{
-		"schema.yaml":       "stages: {done: {final: true}}\n",
-		"child/schema.yaml": "stages: {done: {final: true}}\n",
-	})
+	source := finiteTestSource(t, canonicalrouting.CopyFiniteConstructorControl(t))
 	bundle, _ := semanticview.Bundle(source)
 	bundle.FlowTree.Root.Children[0].Parent = nil
 	if err := ValidateFinite(source, nil); err == nil || !strings.Contains(err.Error(), "contradicts its admitted constructor") {
