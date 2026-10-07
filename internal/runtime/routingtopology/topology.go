@@ -246,32 +246,8 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 		if !present {
 			continue
 		}
-		target := RootInputTarget{FlowPath: flowPath}
-		sourceFile := strings.TrimSpace(view.Paths.SchemaFile)
 		for providerIndex, binding := range view.Schema.Ingress.Providers {
-			admissionKind := strings.ToLower(strings.TrimSpace(binding.Admission.Kind))
-			if admissionKind == "" {
-				admissionKind = "pack-required"
-			}
-			item := RootInputSource{
-				Kind:             RootInputSourceStandingIngress,
-				Alias:            alias,
-				Provider:         strings.TrimSpace(binding.Provider),
-				Target:           target,
-				AuthoredLocation: sourceFile + ":ingress.providers[" + strconv.Itoa(providerIndex) + "]",
-				Admission:        RootInputAdmission{Kind: admissionKind, Event: strings.TrimSpace(binding.Admission.Event), Acknowledgement: strings.TrimSpace(binding.Admission.Acknowledge)},
-			}
-			if binding.Admission.Pack != nil {
-				item.Admission.PackID = strings.TrimSpace(binding.Admission.Pack.ID)
-			}
-			if binding.Admission.Authentication != nil {
-				item.Admission.DeclaredAuthentication = strings.ToUpper(strings.TrimSpace(binding.Admission.Authentication.Kind))
-				if item.Admission.DeclaredAuthentication == "NONE" {
-					item.Admission.DeclaredAuthentication = "UNAUTHENTICATED"
-				}
-			}
-			item.ID = rootInputSourceID(item)
-			out = append(out, item)
+			out = append(out, rootInputProviderSource(view, alias, binding, providerIndex))
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -290,6 +266,32 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 		return out[i].ID < out[j].ID
 	})
 	return out
+}
+
+func rootInputProviderSource(view runtimecontracts.FlowContractView, alias string, binding runtimecontracts.ProjectFlowIngressProvider, providerIndex int) RootInputSource {
+	admissionKind := strings.ToLower(strings.TrimSpace(binding.Admission.Kind))
+	if admissionKind == "" {
+		admissionKind = "pack-required"
+	}
+	item := RootInputSource{
+		Kind:             RootInputSourceStandingIngress,
+		Alias:            alias,
+		Provider:         strings.TrimSpace(binding.Provider),
+		Target:           RootInputTarget{FlowPath: strings.TrimSpace(view.Paths.FlowPath)},
+		AuthoredLocation: strings.TrimSpace(view.Paths.SchemaFile) + ":ingress.providers[" + strconv.Itoa(providerIndex) + "]",
+		Admission:        RootInputAdmission{Kind: admissionKind, Event: strings.TrimSpace(binding.Admission.Event), Acknowledgement: strings.TrimSpace(binding.Admission.Acknowledge)},
+	}
+	if binding.Admission.Pack != nil {
+		item.Admission.PackID = strings.TrimSpace(binding.Admission.Pack.ID)
+	}
+	if binding.Admission.Authentication != nil {
+		item.Admission.DeclaredAuthentication = strings.ToUpper(strings.TrimSpace(binding.Admission.Authentication.Kind))
+		if item.Admission.DeclaredAuthentication == "NONE" {
+			item.Admission.DeclaredAuthentication = "UNAUTHENTICATED"
+		}
+	}
+	item.ID = rootInputSourceID(item)
+	return item
 }
 
 type topologyBuilder struct {
