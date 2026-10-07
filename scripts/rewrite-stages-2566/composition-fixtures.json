@@ -162,16 +162,16 @@
     {
       "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion/schema.yaml",
       "before_hash": "dcab86952c8da79814fc497a06601a5c1c18cd0f39acc9aea90adbfa1175ad48",
-      "after_hash": "250d74a7e09a5dbd0929d9085e6346ad165b78ce2d975f28ec5fcdd6ae316d2d",
+      "after_hash": "e01fb6d4c5efa7d920d04b8c5e8a8c590c1b591251ebad17824bc635587ed4c4",
       "edits": [
         {
           "offset": 0,
           "before": "name: issue2564-final-entry-completion\npins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\nconnect:\n  - {event: overlap.start, from: ., to: work, resolution: select-or-create}\n  - {event: overlap.arm, from: ., to: work, resolution: select}\n  - {event: overlap.finish, from: ., to: work, resolution: select}\n",
-          "after": "name: issue2564-final-entry-completion\nstages: {done: {final: true}}\npins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\nconnect:\n  - {event: overlap.start, from: ., to: work, resolution: select-or-create}\n  - {event: overlap.arm, from: ., to: work, resolution: select}\n  - {event: overlap.finish, from: ., to: work, resolution: select}\n"
+          "after": "name: issue2564-final-entry-completion\nstages: {active: {}, done: {final: true}}\npins: {inputs: [overlap.start, overlap.arm, overlap.finish, overlap.root_closed]}\nconnect:\n  - {event: overlap.start, from: ., to: work, resolution: select-or-create}\n  - {event: overlap.arm, from: ., to: work, resolution: select}\n  - {event: overlap.finish, from: ., to: work, resolution: select}\n"
         }
       ],
       "equivalence": [],
-      "review": "Deliberate D2 fixture lifecycle: root has only pins/connect and no executable nodes or agents; declare the routing container ended while its child and accepted-work conjunction remain live. Original completion/ACK assertions preserved; not old-source equivalence."
+      "review": "Deliberate D2 fixture lifecycle: keep the routing root active through business-input admission, then end it with a separate declared overlap.root_closed control, fieldless primary entity and existing root handler. Held child ACK still blocks completion. Original business cardinality, public admission, acknowledged fields/history and no-retirement assertions remain. Not old-source equivalence."
     }
   ]
 }
