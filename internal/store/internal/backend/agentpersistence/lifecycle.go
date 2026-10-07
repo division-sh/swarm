@@ -485,7 +485,7 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, att
 }
 
 func rejectPostgresPendingDrainTransition(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, previous lifecycleCell, exists bool) error {
-	if !exists || previous.Phase != runtimemanager.AgentLifecycleDraining || req.TargetPhase == runtimemanager.AgentLifecycleDraining {
+	if !exists || (previous.Phase != runtimemanager.AgentLifecycleTerminated && previous.Phase != runtimemanager.AgentLifecycleFailed) {
 		return nil
 	}
 	fields, err := IdentityFields(req.Identity)
@@ -501,7 +501,7 @@ func rejectPostgresPendingDrainTransition(ctx context.Context, tx *sql.Tx, req r
 }
 
 func rejectSQLitePendingDrainTransition(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, previous lifecycleCell, exists bool) error {
-	if !exists || previous.Phase != runtimemanager.AgentLifecycleDraining || req.TargetPhase == runtimemanager.AgentLifecycleDraining {
+	if !exists || (previous.Phase != runtimemanager.AgentLifecycleTerminated && previous.Phase != runtimemanager.AgentLifecycleFailed) {
 		return nil
 	}
 	fields, err := IdentityFields(req.Identity)
@@ -778,9 +778,6 @@ func applyLifecycleProviderDrainResult(
 		return
 	}
 	result.ProviderDrainTarget = req.TargetPhase
-	if req.TargetPhase == runtimemanager.AgentLifecycleTerminated || req.TargetPhase == runtimemanager.AgentLifecycleFailed {
-		result.Phase = runtimemanager.AgentLifecycleDraining
-	}
 }
 
 type lifecycleSessionRow struct {

@@ -220,9 +220,12 @@ store_parity:
     - {id: served-agent-directive, kind: go_test, name: TestServedParityHarnessAgentDirectiveOutcomeLifecycle, path: internal/serveapp/main_runtime_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], required_children: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
     - {id: agent-manager-roles, kind: go_test, name: TestAgentManagerPersistenceRolesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
     - {id: external-effect-recovery, kind: go_test, name: TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres, path: internal/store/internal/runtimepersistence/external_effect_recovery_posture_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], capabilities: [{claim_id: external_effects, risk_dimensions: [writer_ownership]}]}
+    - {id: turn-cancellation-atomic, kind: go_test, name: TestCanceledTurnReactionCommitsAtomicallyBothStores, path: internal/store/internal/runtimepersistence/canceled_turn_publication_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], required_children: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres], capabilities: [{claim_id: external_effects, risk_dimensions: [writer_ownership]}]}
     - {id: served-selected-contract-fork, kind: go_test, name: TestServedParityHarnessRunForkLifecycle, path: internal/serveapp/main_runtime_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], required_children: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: selected_contract_fork, risk_dimensions: [served_lifecycle]}]}
     - {id: served-selected-reset-construction, kind: go_test, name: TestSelectedForkPublicChangedTargetAfterResetBothStores, path: internal/serveapp/selected_fork_public_execution_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], required_children: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: selected_contract_fork, risk_dimensions: [selected_construction]}]}
     - {id: workflow-settlement-parity, kind: go_test, name: TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores, path: internal/store/internal/runtimepersistence/workflow_engine_delivery_settlement_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
+    - {id: workflow-publication-stage, kind: go_test, name: TestWorkflowPublicationAcceptanceStageBothStores, path: internal/store/internal/runtimepersistence/workflow_publication_stage_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
+    - {id: workflow-handler-stage, kind: go_test, name: TestWorkflowEmitFeedbackBothStores, path: internal/store/internal/runtimepersistence/workflow_emit_feedback_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
     - {id: served-test-setup, kind: go_test, name: TestServedParityHarnessTestSetupEntitiesLifecycle, path: internal/serveapp/main_runtime_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], required_children: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [served_lifecycle]}]}
     - {id: workflow-opaque-owner, kind: go_test, name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape, path: internal/runtime/persistence_ownership_guard_test.go, profile: lifecycle, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
     - {id: conversation-sqlite, kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, path: internal/apiv1/sqlite_operator_read_supported_surface_test.go, profile: lifecycle, backends: [default_sqlite], capabilities: [{claim_id: session_conversation, risk_dimensions: [real_v1_handler, read_snapshot]}]}
@@ -357,7 +360,7 @@ store_parity:
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
         - {role: risk_split, risk_dimensions: [contention], proof_ids: [fanout-contention-2274]}
       runtime_deps: [EventStore, EventBusDurable, EventPayloadAdmissionBinder, DeliveryStore]
-      nested_roles: {runtime_event_bus: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, PreparedEvents, TargetFailureRecorder, RunOrigins, StandingRestarts, ScenarioSetup]}
+      nested_roles: {runtime_event_bus: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, PreparedEvents, TargetFailureRecorder, RunOrigins, StandingRestarts, ScenarioSetup, EmitFeedback]}
       platform_tables: [events, event_deliveries, event_delivery_handler_rule_selections, event_delivery_attempts, committed_replay_scopes, run_fork_delivery_event_replays, event_receipts]
       public_methods: [event.publish, event.replay, event.get, event.list, agent.replay]
     - id: author_activity
@@ -436,9 +439,9 @@ store_parity:
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [writer_ownership]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [external-effect-recovery]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [external-effect-recovery, turn-cancellation-atomic]}
       runtime_deps: [EffectsStore, CompletionStore, CompletionHeartbeatStore, EffectsRecoveryStore, ManagedCapabilitiesStore]
-      platform_tables: [runtime_external_effect_operations, runtime_external_effect_attempts, runtime_provider_attempt_drains, reply_contexts, activity_attempts]
+      platform_tables: [runtime_external_effect_operations, runtime_external_effect_attempts, runtime_provider_attempt_drains, runtime_agent_turn_lifetimes, reply_contexts, activity_attempts]
     - id: selected_contract_fork
       semantic_owners: [internal/store/selected.RunFork]
       selected_purposes: [runtime]
@@ -459,12 +462,12 @@ store_parity:
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [writer_ownership, served_lifecycle, restart]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership, served_lifecycle], proof_ids: [workflow-settlement-parity, served-test-setup, workflow-opaque-owner]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership, served_lifecycle], proof_ids: [workflow-settlement-parity, served-test-setup, workflow-opaque-owner, workflow-publication-stage, workflow-handler-stage]}
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [runs, entities, testSetup]
       runtime_deps: [WorkflowPersistence, PipelineObligations]
       nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutSummaryOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader]}
-      platform_tables: [entity_state, workflow_instance_initial_materializations, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, fan_out_obligation_barriers, standing_service_generations, standing_service_journal, standing_services]
+      platform_tables: [entity_state, workflow_instance_initial_materializations, workflow_publication_stage_receipts, workflow_handler_stage_receipts, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, fan_out_obligation_barriers, standing_service_generations, standing_service_journal, standing_services]
       public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.fan_out.list, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
     - id: session_conversation
       semantic_owners: [internal/runtime session registry, internal/store conversation]

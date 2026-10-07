@@ -201,7 +201,7 @@ func (c *agentLifecycleCoordinator) fenceTerminalFlow(plan terminalFlowInstanceS
 		if self {
 			disposition = terminalSelfAuthor
 		}
-		if cell.retirement != nil && (cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleFailed) {
+		if cell.retirement != nil && (cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed) {
 			disposition = terminalJoinExisting
 		}
 		set.members = append(set.members, terminalFlowMember{cell: cell, token: cell.execution.token, disposition: disposition, pendingTransition: cell.retirement != nil})
@@ -474,7 +474,7 @@ func retainAgentRetirement(cell *agentLifecycleCell, execution *agentExecutionPr
 		cell: cell, execution: execution, token: execution.routeToken,
 		done: execution.loopDone, settled: execution.loopSettled,
 	}
-	if execution.leases > 0 {
+	if len(execution.leases) > 0 {
 		retirement.leases = execution.leaseDrained
 	}
 	cell.retirement = retirement

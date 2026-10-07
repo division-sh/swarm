@@ -179,6 +179,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 				EventType:        rawEventType,
 				Guard:            handler.Guard,
 				AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
+				Terminate:        handler.Terminate,
 				SetsGate:         handler.SetsGate,
 				ClearGates:       handler.ClearGates,
 				DataAccumulation: handler.DataAccumulation,

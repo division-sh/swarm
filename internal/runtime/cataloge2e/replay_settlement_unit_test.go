@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func catalogSettledUnitDelivery() operatorread.OperatorEventDelivery {
@@ -133,37 +134,60 @@ func TestCatalogSuccessfulDeliveriesRejectsEquivalentDeadLetters(t *testing.T) {
 	}
 }
 
-func TestCatalogCreationDeliveriesOnlyExemptsExactConflictingRoot(t *testing.T) {
+func TestCatalogCreationDeliveriesOnlyExemptsExactRefusedPublication(t *testing.T) {
 	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, change := range []string{"exact_conflict", "failed_child", "failed_first_root", "missing_conflict", "conflict_delivered", "child_exception"} {
+	for _, change := range []string{"exact_refusal", "failed_child", "failed_first_root", "missing_refusal", "refusal_delivered", "wrong_cause", "wrong_class", "wrong_detail", "extra_refusal", "missing_reason", "parent_refused"} {
 		t.Run(change, func(t *testing.T) {
 			root := createdRootEvent(eventtest.UUID("creation-first"), "flow.spawn_requested", "author", "task", `{}`, catalogRuntimeRunID, events.EventEnvelope{}, created)
 			first := replayOperatorEvent(t, root)
 			first.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
 			conflict := replayOperatorEvent(t, createdRootEvent(eventtest.UUID("creation-conflict"), "flow.spawn_requested", "author", "task", `{}`, catalogRuntimeRunID, events.EventEnvelope{}, created.Add(time.Second)))
-			conflict.Deliveries = []operatorread.OperatorEventDelivery{replayProjectionDelivery(t, "conflict")}
+			conflict.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
 			child := replayOperatorEvent(t, eventtest.Child(eventtest.UUID("creation-child"), events.EventType("flow.spawned"), "worker", "task", json.RawMessage(`{}`), 1, root, events.EventEnvelope{}, created.Add(time.Second)))
 			child.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
-			full := map[string]operatorread.OperatorEventFull{first.EventID: first, conflict.EventID: conflict, child.EventID: child}
-			exception := conflict.EventID
+			conflictSource, err := conflict.EventSnapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			refused := replayOperatorEvent(t, eventtest.Child(eventtest.UUID("creation-refused"), "flow.spawned", "worker", "task", json.RawMessage(`{}`), 1, conflictSource, events.EventEnvelope{}, created.Add(2*time.Second)))
+			refused.NoDelivery = &operatorread.OperatorNoDelivery{Reason: "resolution_blocked"}
+			refused.DeadLetters = []operatorread.OperatorDeadLetterRecord{{
+				DeadLetterID: eventtest.UUID("refusal-dead-letter"), HandlerNode: "pin_routing",
+				Failure: replayFailure(runtimefailures.ClassTargetAmbiguous, "route_plan_instance_conflict"),
+			}}
+			want := &catalogRefusedPublication{Event: "flow.spawned", FailureClass: "platform.target_ambiguous", FailureDetail: "route_plan_instance_conflict", Reason: "resolution_blocked"}
+			full := map[string]operatorread.OperatorEventFull{}
 			switch change {
 			case "failed_child":
 				child.Deliveries[0] = replayProjectionDelivery(t, "unexpected-child-failure")
 			case "failed_first_root":
 				first.Deliveries[0] = replayProjectionDelivery(t, "unexpected-first-root-failure")
-			case "missing_conflict":
-				delete(full, conflict.EventID)
-			case "conflict_delivered":
-				conflict.Deliveries[0] = catalogSettledUnitDelivery()
-			case "child_exception":
-				child.EventName = "flow.spawn_requested"
-				child.Deliveries[0] = replayProjectionDelivery(t, "child")
-				full[child.EventID] = child
-				exception = child.EventID
+			case "refusal_delivered":
+				refused.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
+			case "wrong_cause":
+				refused.SourceEventID = first.EventID
+			case "wrong_class":
+				refused.DeadLetters[0].Failure = replayFailure(runtimefailures.ClassInternalFailure, "route_plan_instance_conflict")
+			case "wrong_detail":
+				refused.DeadLetters[0].Failure = replayFailure(runtimefailures.ClassTargetAmbiguous, "other_refusal")
+			case "extra_refusal":
+				extra := refused
+				extra.EventID = eventtest.UUID("extra-refusal")
+				full[extra.EventID] = extra
+			case "missing_reason":
+				refused.NoDelivery = nil
+			case "parent_refused":
+				conflict.Deliveries[0] = replayProjectionDelivery(t, "parent-refused")
 			}
-			err := validateCatalogCreationDeliveries(full, map[string]int{"flow.spawn_requested": 1, "flow.spawned": 1}, exception)
-			if (err == nil) != (change == "exact_conflict") {
-				t.Fatalf("creation success obligation: %v, want success=%t", err, change == "exact_conflict")
+			for _, event := range []operatorread.OperatorEventFull{first, conflict, child, refused} {
+				full[event.EventID] = event
+			}
+			if change == "missing_refusal" {
+				delete(full, refused.EventID)
+			}
+			err = validateCatalogCreationDeliveries(full, map[string]int{"flow.spawn_requested": 2, "flow.spawned": 1}, conflict.EventID, want)
+			if (err == nil) != (change == "exact_refusal") {
+				t.Fatalf("creation success obligation: %v, want success=%t", err, change == "exact_refusal")
 			}
 		})
 	}

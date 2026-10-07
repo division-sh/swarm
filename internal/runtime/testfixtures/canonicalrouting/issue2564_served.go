@@ -22,7 +22,6 @@ func CopyIssue2564H2Equivalent(t testing.TB) string {
 	copyTree(t, filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2"), root)
 	return root
 }
-
 // CopyIssue2564H3CollectionOperations copies the two-writer collection corpus.
 func CopyIssue2564H3CollectionOperations(t testing.TB) string {
 	t.Helper()

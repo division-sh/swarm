@@ -943,6 +943,9 @@ func agentViews(source semanticview.Source, ownerFlowID string) ([]AgentView, er
 		addAgentField(fields, entry, "model", entry.Model)
 		fields["memory"] = AgentFieldView{Value: entry.MemoryPlan.Enabled}
 		addAgentField(fields, entry, "max_turns_per_task", entry.MaxTurnsPerTask)
+		if timeout := entry.TurnTimeout; timeout != nil {
+			addAgentField(fields, entry, "turn_timeout", map[string]any{"after": timeout.After.String(), "emit": timeout.Emit})
+		}
 		addAgentField(fields, entry, "workspace_class", entry.WorkspaceClass)
 		addAgentField(fields, entry, "manager_fallback", entry.ManagerFallback)
 		out = append(out, AgentView{

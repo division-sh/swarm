@@ -79,19 +79,25 @@ const (
 	StatusDelivered  Status = "delivered"
 	StatusFailed     Status = "failed"
 	StatusDeadLetter Status = "dead_letter"
+	StatusCanceled   Status = "canceled"
 )
 
 func ParseStatus(raw string) (Status, error) {
 	status := Status(strings.TrimSpace(raw))
+	if status == StatusCanceled && raw != string(status) {
+		return "", fmt.Errorf("authored cancellation status must be canonical")
+	}
 	switch status {
-	case StatusPending, StatusInProgress, StatusDelivered, StatusFailed, StatusDeadLetter:
+	case StatusPending, StatusInProgress, StatusDelivered, StatusFailed, StatusDeadLetter, StatusCanceled:
 		return status, nil
 	default:
 		return "", fmt.Errorf("delivery status %q is invalid", raw)
 	}
 }
 
-func (s Status) Terminal() bool { return s == StatusDelivered || s == StatusDeadLetter }
+func (s Status) Terminal() bool {
+	return s == StatusDelivered || s == StatusDeadLetter || s == StatusCanceled
+}
 
 type State string
 
@@ -102,6 +108,7 @@ const (
 	StateRetrying  State = "retrying"
 	StateDelivered State = "delivered"
 	StateExhausted State = "exhausted"
+	StateCanceled  State = "canceled"
 )
 
 type Transition struct {
@@ -132,6 +139,8 @@ func StateFromStatus(status Status, activeSessionID string) State {
 		return StateDelivered
 	case StatusDeadLetter:
 		return StateExhausted
+	case StatusCanceled:
+		return StateCanceled
 	default:
 		return ""
 	}
@@ -378,6 +387,7 @@ func (s Snapshot) State() State   { return StateFromStatus(s.Status, s.ActiveSes
 // prove COMMIT or validate the opaque claim token checked by the store.
 func (s Snapshot) MatchesSettlementClaim(claim Claim) bool {
 	if ValidateSelectionPresence(s.Status, s.FinalSelection) != nil ||
+		ValidateCanceledSnapshot(s) != nil ||
 		claim.Validate() != nil || s.DeliveryID != claim.DeliveryID() ||
 		s.RunID != claim.RunID() || s.ClaimVersion != claim.Version() ||
 		s.SubscriberClass != claim.SubscriberClass() || s.SubscriberID != claim.SubscriberID() ||
@@ -836,6 +846,7 @@ type RunSummary struct {
 	RetryScheduled    int
 	Delivered         int
 	DeadLetter        int
+	Canceled          int
 	NextEligibleAt    time.Time
 	ActiveDeliveryIDs []string
 }
@@ -844,12 +855,12 @@ func (s RunSummary) Validate() error {
 	if strings.TrimSpace(s.RunID) == "" {
 		return fmt.Errorf("delivery run summary requires run_id")
 	}
-	for _, count := range []int{s.Total, s.Pending, s.InProgress, s.RetryScheduled, s.Delivered, s.DeadLetter} {
+	for _, count := range []int{s.Total, s.Pending, s.InProgress, s.RetryScheduled, s.Delivered, s.DeadLetter, s.Canceled} {
 		if count < 0 {
 			return fmt.Errorf("delivery run summary counts cannot be negative")
 		}
 	}
-	if s.Pending+s.InProgress+s.RetryScheduled+s.Delivered+s.DeadLetter != s.Total {
+	if s.Pending+s.InProgress+s.RetryScheduled+s.Delivered+s.DeadLetter+s.Canceled != s.Total {
 		return fmt.Errorf("delivery run summary counts do not cover total")
 	}
 	return nil

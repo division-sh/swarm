@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -95,9 +96,63 @@ func (r RetryRelease) Failure() *runtimefailures.Envelope {
 // unchanged and replayable.
 type ExecutionOutcome struct {
 	// Committed marks a completed intercepted mutation, independent of cleanup errors.
-	Committed    bool
-	disposition  *Disposition
-	retryRelease *RetryRelease
+	Committed     bool
+	disposition   *Disposition
+	retryRelease  *RetryRelease
+	stageReceipts []CommittedStageReceipt
+}
+
+// CommittedStageReceipt is one exact publication or handler stage fact. Its
+// enclosing commit result distinguishes acceptance from handler completion; the
+// receipt never acknowledges dispatch or authorizes another handler execution.
+type CommittedStageReceipt struct {
+	eventID string
+	stage   engine.CommittedStage
+}
+
+func (r CommittedStageReceipt) EventID() string              { return r.eventID }
+func (r CommittedStageReceipt) Stage() engine.CommittedStage { return r.stage }
+
+// StageReceiptEvidence describes the transaction's exact stage facts. It carries no
+// transaction acknowledgment or permission to run the handler again.
+func StageReceiptEvidence(eventID string, stage engine.CommittedStage) (CommittedStageReceipt, error) {
+	receipt := CommittedStageReceipt{eventID: eventID, stage: stage}
+	return receipt, receipt.Validate()
+}
+
+func (o ExecutionOutcome) WithCommittedStage(eventID string, stage engine.CommittedStage) (ExecutionOutcome, error) {
+	if !o.Committed || eventID == "" || strings.TrimSpace(eventID) != eventID {
+		return o, fmt.Errorf("stage receipt requires an acknowledged exact handler occurrence")
+	}
+	receipt, err := StageReceiptEvidence(eventID, stage)
+	if err != nil {
+		return o, err
+	}
+	return o.RetainStageReceipts(ExecutionOutcome{stageReceipts: []CommittedStageReceipt{receipt}}), nil
+}
+
+func (o ExecutionOutcome) StageReceipts() []CommittedStageReceipt {
+	return append([]CommittedStageReceipt(nil), o.stageReceipts...)
+}
+
+// RetainStageReceipts preserves sibling evidence without changing the selected
+// parent's disposition, retry release or acknowledgment policy.
+func (o ExecutionOutcome) RetainStageReceipts(other ExecutionOutcome) ExecutionOutcome {
+	receipts := append([]CommittedStageReceipt(nil), o.stageReceipts...)
+	for _, receipt := range other.stageReceipts {
+		duplicate := false
+		for _, retained := range receipts {
+			if retained == receipt {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			receipts = append(receipts, receipt)
+		}
+	}
+	o.stageReceipts = receipts
+	return o
 }
 
 func Continue() ExecutionOutcome {

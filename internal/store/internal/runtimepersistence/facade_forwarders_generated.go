@@ -195,6 +195,10 @@ func (s *PostgresStore) CommitAPIEventPublication(ctx context.Context, command b
 	return s.eventPostgresOwner.CommitAPIEventPublication(ctx, command)
 }
 
+func (s *PostgresStore) CommitCanceledTurn(ctx context.Context, command effects.CanceledTurnCommand) (effects.CanceledTurnCommit, error) {
+	return s.effectPostgresOwner.CommitCanceledTurn(ctx, command)
+}
+
 func (s *PostgresStore) CommitFlowInstanceActivation(ctx context.Context, command bus.FlowInstanceActivationCommand) (pipeline.CommittedFlowInstanceActivation, error) {
 	return s.pipelinePostgresOwner.CommitFlowInstanceActivation(ctx, command)
 }
@@ -229,6 +233,10 @@ func (s *PostgresStore) CommitRuntimeLogEvent(ctx context.Context, admitted even
 
 func (s *PostgresStore) CommitSelectedForkEvent(ctx context.Context, request bus.CommitSelectedForkEventRequest) (bus.CommittedSelectedForkEvent, error) {
 	return s.pipelinePostgresOwner.CommitSelectedForkEvent(ctx, request)
+}
+
+func (s *PostgresStore) CommitWorkflowEmitFeedback(ctx context.Context, candidate pipeline.WorkflowEmitFeedback) (pipeline.WorkflowEmitFeedbackCommit, error) {
+	return s.pipelinePostgresOwner.CommitWorkflowEmitFeedback(ctx, candidate)
 }
 
 func (s *PostgresStore) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
@@ -513,6 +521,10 @@ func (s *PostgresStore) ListAuthorActivity(ctx context.Context, opts authoractiv
 
 func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context) ([]budgetspend.ProjectionTarget, error) {
 	return s.budgetPostgresOwner.ListBudgetProjectionTargets(ctx)
+}
+
+func (s *PostgresStore) ListCanceledTurnRecoveries(ctx context.Context, request effects.RecoveryRequest) ([]effects.TurnExecutionResult, error) {
+	return s.effectPostgresOwner.ListCanceledTurnRecoveries(ctx, request)
 }
 
 func (s *PostgresStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
@@ -863,7 +875,7 @@ func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record
 	return s.activityPostgresOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) error {
+func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) (effects.ExternalAttemptLaunch, error) {
 	return s.effectPostgresOwner.MarkExternalAttemptLaunched(ctx, attempt, now)
 }
 
@@ -957,6 +969,18 @@ func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructiverese
 
 func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
 	return s.timerObligationPostgresReader.ReadTimerObligations(ctx, scope, observedAt)
+}
+
+func (s *PostgresStore) ReadWorkflowEmitFeedback(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowEmitFeedback, bool, error) {
+	return s.pipelinePostgresOwner.ReadWorkflowEmitFeedback(ctx, eventID, instance)
+}
+
+func (s *PostgresStore) ReadWorkflowHandlerStageReceipts(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) ([]pipelineobligation.CommittedStageReceipt, error) {
+	return s.pipelinePostgresOwner.ReadWorkflowHandlerStageReceipts(ctx, eventID, instance)
+}
+
+func (s *PostgresStore) ReadWorkflowPublicationStages(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowPublicationStageEvidence, bool, error) {
+	return s.pipelinePostgresOwner.ReadWorkflowPublicationStages(ctx, eventID, instance)
 }
 
 func (s *PostgresStore) ReconcileChannelOnboardingBinding(ctx context.Context, req channelonboarding.ReconcileBindingRequest) (channelonboarding.Operation, error) {
@@ -1057,6 +1081,10 @@ func (s *PostgresStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, se
 
 func (s *PostgresStore) RequestCompletionCandidate(ctx context.Context, request runlifecycle.CandidateRequest) (runlifecycle.CandidateRequestDisposition, error) {
 	return s.runLifecyclePostgresOwner.RequestCompletionCandidate(ctx, request)
+}
+
+func (s *PostgresStore) RequestTurnTimeout(ctx context.Context, attempt effects.Attempt, now time.Time) (effects.TurnCancellation, error) {
+	return s.effectPostgresOwner.RequestTurnTimeout(ctx, attempt, now)
 }
 
 func (s *PostgresStore) RequireActiveRun(ctx context.Context, runID string) error {
@@ -1447,6 +1475,10 @@ func (s *SQLiteRuntimeStore) CommitAPIEventPublication(ctx context.Context, comm
 	return s.eventSQLiteOwner.CommitAPIEventPublication(ctx, command)
 }
 
+func (s *SQLiteRuntimeStore) CommitCanceledTurn(ctx context.Context, command effects.CanceledTurnCommand) (effects.CanceledTurnCommit, error) {
+	return s.effectSQLiteOwner.CommitCanceledTurn(ctx, command)
+}
+
 func (s *SQLiteRuntimeStore) CommitFlowInstanceActivation(ctx context.Context, command bus.FlowInstanceActivationCommand) (pipeline.CommittedFlowInstanceActivation, error) {
 	return s.pipelineSQLiteOwner.CommitFlowInstanceActivation(ctx, command)
 }
@@ -1481,6 +1513,10 @@ func (s *SQLiteRuntimeStore) CommitRuntimeLogEvent(ctx context.Context, admitted
 
 func (s *SQLiteRuntimeStore) CommitSelectedForkEvent(ctx context.Context, request bus.CommitSelectedForkEventRequest) (bus.CommittedSelectedForkEvent, error) {
 	return s.pipelineSQLiteOwner.CommitSelectedForkEvent(ctx, request)
+}
+
+func (s *SQLiteRuntimeStore) CommitWorkflowEmitFeedback(ctx context.Context, candidate pipeline.WorkflowEmitFeedback) (pipeline.WorkflowEmitFeedbackCommit, error) {
+	return s.pipelineSQLiteOwner.CommitWorkflowEmitFeedback(ctx, candidate)
 }
 
 func (s *SQLiteRuntimeStore) CommitWorkflowEngineMutation(ctx context.Context, command pipeline.WorkflowEngineMutationCommand) (pipeline.CommittedWorkflowEngineMutation, error) {
@@ -1769,6 +1805,10 @@ func (s *SQLiteRuntimeStore) ListAuthorActivity(ctx context.Context, opts author
 
 func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context) ([]budgetspend.ProjectionTarget, error) {
 	return s.budgetSQLiteOwner.ListBudgetProjectionTargets(ctx)
+}
+
+func (s *SQLiteRuntimeStore) ListCanceledTurnRecoveries(ctx context.Context, request effects.RecoveryRequest) ([]effects.TurnExecutionResult, error) {
+	return s.effectSQLiteOwner.ListCanceledTurnRecoveries(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
@@ -2087,7 +2127,7 @@ func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, r
 	return s.activitySQLiteOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) error {
+func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) (effects.ExternalAttemptLaunch, error) {
 	return s.effectSQLiteOwner.MarkExternalAttemptLaunched(ctx, attempt, now)
 }
 
@@ -2181,6 +2221,18 @@ func (s *SQLiteRuntimeStore) ReadResetInventory(ctx context.Context) (destructiv
 
 func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
 	return s.timerObligationSQLiteReader.ReadTimerObligations(ctx, scope, observedAt)
+}
+
+func (s *SQLiteRuntimeStore) ReadWorkflowEmitFeedback(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowEmitFeedback, bool, error) {
+	return s.pipelineSQLiteOwner.ReadWorkflowEmitFeedback(ctx, eventID, instance)
+}
+
+func (s *SQLiteRuntimeStore) ReadWorkflowHandlerStageReceipts(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) ([]pipelineobligation.CommittedStageReceipt, error) {
+	return s.pipelineSQLiteOwner.ReadWorkflowHandlerStageReceipts(ctx, eventID, instance)
+}
+
+func (s *SQLiteRuntimeStore) ReadWorkflowPublicationStages(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowPublicationStageEvidence, bool, error) {
+	return s.pipelineSQLiteOwner.ReadWorkflowPublicationStages(ctx, eventID, instance)
 }
 
 func (s *SQLiteRuntimeStore) ReconcileChannelOnboardingBinding(ctx context.Context, req channelonboarding.ReconcileBindingRequest) (channelonboarding.Operation, error) {
@@ -2285,6 +2337,10 @@ func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopology(ctx context.Contex
 
 func (s *SQLiteRuntimeStore) RequestCompletionCandidate(ctx context.Context, request runlifecycle.CandidateRequest) (runlifecycle.CandidateRequestDisposition, error) {
 	return s.runLifecycleSQLiteOwner.RequestCompletionCandidate(ctx, request)
+}
+
+func (s *SQLiteRuntimeStore) RequestTurnTimeout(ctx context.Context, attempt effects.Attempt, now time.Time) (effects.TurnCancellation, error) {
+	return s.effectSQLiteOwner.RequestTurnTimeout(ctx, attempt, now)
 }
 
 func (s *SQLiteRuntimeStore) RequireActiveRun(ctx context.Context, runID string) error {

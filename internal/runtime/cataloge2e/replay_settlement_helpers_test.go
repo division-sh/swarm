@@ -95,23 +95,55 @@ func validateCatalogSuccessfulDeliveries(full map[string]operatorread.OperatorEv
 	return nil
 }
 
-func validateCatalogCreationDeliveries(full map[string]operatorread.OperatorEventFull, required map[string]int, conflictEventID string) error {
+func validateCatalogRefusedPublication(full map[string]operatorread.OperatorEventFull, causeID string, want catalogRefusedPublication) (string, error) {
+	cause, found := full[causeID]
+	if !found {
+		return "", fmt.Errorf("refused publication cause %s is missing", causeID)
+	}
+	settled, err := catalogEventSuccessfullySettled(cause)
+	if err != nil || !settled {
+		return "", fmt.Errorf("refused publication cause %s is not successfully settled: %v", causeID, err)
+	}
+	var matches []operatorread.OperatorEventFull
+	for _, child := range full {
+		if child.SourceEventID == causeID && child.EventName == want.Event {
+			matches = append(matches, child)
+		}
+	}
+	if len(matches) != 1 {
+		return "", fmt.Errorf("cause %s has %d %s publications, want exactly one", causeID, len(matches), want.Event)
+	}
+	child := matches[0]
+	event, err := child.EventSnapshot()
+	if err != nil || event.AdmissionClass() == events.EventAdmissionRootIngress {
+		return "", fmt.Errorf("refusal %s is not an admitted child publication: %v", child.EventID, err)
+	}
+	if len(child.Deliveries) != 0 || child.NoDelivery == nil || child.NoDelivery.Reason != want.Reason || len(child.DeadLetters) != 1 {
+		return "", fmt.Errorf("refusal %s changed its exact no-delivery/dead-letter evidence: %+v", child.EventID, child)
+	}
+	failure := child.DeadLetters[0]
+	if string(failure.Failure.Class) != want.FailureClass || failure.Failure.Detail.Code != want.FailureDetail || failure.HandlerNode != "pin_routing" {
+		return "", fmt.Errorf("refusal %s failure = %+v, want %s/%s from pin_routing", child.EventID, failure, want.FailureClass, want.FailureDetail)
+	}
+	return child.EventID, nil
+}
+
+func validateCatalogCreationDeliveries(full map[string]operatorread.OperatorEventFull, required map[string]int, conflictEventID string, refusal *catalogRefusedPublication) error {
 	if conflictEventID == "" {
 		return validateCatalogSuccessfulDeliveries(full, required)
 	}
-	conflict, found := full[conflictEventID]
-	if !found || conflict.EventName != "flow.spawn_requested" || len(conflict.Deliveries) != 1 || conflict.Deliveries[0].Status != "dead_letter" || !conflict.Deliveries[0].Terminal {
-		return fmt.Errorf("exact conflicting second root %s did not settle as a dead letter", conflictEventID)
+	if refusal == nil {
+		return fmt.Errorf("creation refusal %s lacks an exact expectation", conflictEventID)
 	}
-	event, err := conflict.EventSnapshot()
-	if err != nil || event.AdmissionClass() != events.EventAdmissionRootIngress {
-		return fmt.Errorf("conflict exception is not an admitted root: %s: %v", conflictEventID, err)
+	refusedID, err := validateCatalogRefusedPublication(full, conflictEventID, *refusal)
+	if err != nil {
+		return err
 	}
-	// Receipt assertions independently require the declared conflicting-duplicate
-	// class/detail. Only that exact root may fail, never the creation's children.
+	// Only this cause-bound child may refuse. Its parent and every sibling must
+	// still prove successful settlement, including both authored parent triggers.
 	successful := make(map[string]operatorread.OperatorEventFull, len(full)-1)
 	for id, event := range full {
-		if id != conflictEventID {
+		if id != refusedID {
 			successful[id] = event
 		}
 	}

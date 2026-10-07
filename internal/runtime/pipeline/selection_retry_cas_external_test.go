@@ -13,13 +13,13 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -116,13 +116,13 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 				return event
 			}
 			publish("seed")
-			var initialFields []byte
-			if err := selected.db.QueryRow(`SELECT fields FROM entity_state WHERE run_id=$1`, runID).Scan(&initialFields); err != nil {
+			owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(".", runID, runID))
+			if err != nil {
 				t.Fatal(err)
 			}
-			var initial map[string]any
-			if err := json.Unmarshal(initialFields, &initial); err != nil || initial["marker"] != "first" {
-				t.Fatalf("seed state=%s err=%v", initialFields, err)
+			initial, found, err := selected.persistence.LoadWorkflowInstance(ctx, owner)
+			if err != nil || !found || initial.Fields["marker"] != "first" {
+				t.Fatalf("seed state=%+v found=%v err=%v", initial, found, err)
 			}
 			event := publish("select")
 			failure, typed := failures.EnvelopeFromError(fault.err)
@@ -148,9 +148,20 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			}
 			assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")
 			assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")
-			var payload []byte
-			if err := selected.db.QueryRow(`SELECT payload FROM events WHERE run_id=$1 AND event_name='ack'`, runID).Scan(&payload); err != nil {
+			report, err := reader.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{EventLimit: 100})
+			if err != nil {
 				t.Fatal(err)
+			}
+			var payload []byte
+			count = 0
+			for _, row := range report.Events {
+				if row.EventName == "ack" {
+					payload = row.Payload
+					count++
+				}
+			}
+			if count != 1 {
+				t.Fatalf("final effect events=%d, want 1", count)
 			}
 			var value map[string]any
 			if err := json.Unmarshal(payload, &value); err != nil || value["marker"] != "second" {

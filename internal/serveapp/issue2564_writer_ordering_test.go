@@ -264,7 +264,6 @@ func (g issue2564StageTimerPublicationGate) NotifyLifecycle(ctx context.Context,
 	case <-ctx.Done():
 	}
 }
-
 type issue2564ProviderStep struct {
 	calls   []issue2564Call
 	entered chan error

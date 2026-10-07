@@ -26,7 +26,6 @@ type PipelineReceiptEvidence struct {
 
 type WriterStageEvidence struct{ EntityID, State string }
 type CardContentionEvidence struct{ Requests, DecidedChanges int }
-
 func (s *PipelinePostgresOwner) ObserveWriterStageForTest(ctx context.Context, runID, entityID, stage string) (WriterStageEvidence, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return WriterStageEvidence{}, err
@@ -105,7 +104,6 @@ func observeCardContention(ctx context.Context, tx *sql.Tx, key, cardID string, 
 	}
 	return tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM api_idempotency WHERE idempotency_key=$1),(SELECT COUNT(*) FROM decision_card_changes WHERE card_id=$2 AND change_type='decided')`, key, cardID).Scan(&out.Requests, &out.DecidedChanges)
 }
-
 func (s *PipelinePostgresOwner) ObservePendingFixtureCardForTest(ctx context.Context, runID string) (string, error) {
 	var id string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {

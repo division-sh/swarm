@@ -518,7 +518,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 		}
 		if ok {
 			now := time.Now().UTC()
-			if (existing.State == runtimeagentcontrol.DirectiveOperationSucceeded || existing.State == runtimeagentcontrol.DirectiveOperationFailed) && !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(now) {
+			if (existing.State == runtimeagentcontrol.DirectiveOperationSucceeded || existing.State == runtimeagentcontrol.DirectiveOperationFailed || existing.State == runtimeagentcontrol.DirectiveOperationCanceled) && !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(now) {
 				existing, ok, err = operationStore.ReconcileDirectiveOperation(ctx, existing.OperationID, now, directiveOperationTTL)
 				if err != nil {
 					return runtimeagentcontrol.SendDirectiveResult{}, err
@@ -636,7 +636,7 @@ func (am *AgentManager) continueDirectiveOperation(ctx context.Context, store ru
 			am.logDirectivePostcommitError(ctx, "directive_success_finalization_post_commit_failure", finalized.OperationID, err)
 		}
 		return directiveResultFromOperation(finalized)
-	case runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate:
+	case runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate, runtimeagentcontrol.DirectiveOperationCanceled:
 		return runtimeagentcontrol.SendDirectiveResult{}, runtimeagentcontrol.ErrorForDirectiveOperation(op)
 	case runtimeagentcontrol.DirectiveOperationPrepared:
 		return am.executePreparedDirectiveOperation(ctx, store, op)
@@ -690,13 +690,22 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		defer func() { _ = heartbeatLease.Done() }()
 		runDirectiveExecutionHeartbeat(heartbeatCtx, heartbeatDone, store, admitted.OperationID, ownerID, heartbeatConfig)
 	}()
-	response, executionErr := chatAgent.BoardStep(directiveCtx, runtimeagentcontrol.BoardDirective{
+	turnCtx, turnOwner := runtimeeffects.WithTurnExecution(directiveCtx)
+	defer func() { _, _ = turnOwner.Finish() }()
+	if err := am.attachLogicalTurn(directiveCtx, turnOwner); err != nil {
+		stopHeartbeat()
+		<-heartbeatDone
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	response, executionErr := chatAgent.BoardStep(turnCtx, runtimeagentcontrol.BoardDirective{
 		Directive:       admitted.Directive,
 		Event:           directiveEvent,
 		RunIDResolution: admitted.RunIDResolution,
 		OperatorID:      admitted.OperatorID,
 		Source:          admitted.Source,
 	})
+	turn, turnFinishErr := turnOwner.Finish()
+	executionErr = errors.Join(executionErr, turnFinishErr)
 	providerSettlement := completionSettlement()
 	stopHeartbeat()
 	heartbeatShutdown := time.NewTimer(heartbeatConfig.shutdownTimeout)
@@ -716,6 +725,16 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 			Err:       runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate,
 			Operation: admitted,
 		}
+	}
+	if turn.Cancellation.Requested {
+		if turn.Attempt.Origin.Kind != runtimeeffects.CompletionOriginDirective || !turn.Attempt.Origin.Directive.Same(directiveOrigin) {
+			return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, errors.New("canceled directive substituted its admitted operation"))
+		}
+		canceled, settleErr := am.settleCanceledDirective(directiveCtx, turn, providerSettlement)
+		if !canceled.Acknowledged || canceled.Validate() != nil {
+			return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, settleErr)
+		}
+		return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(runtimeagentcontrol.ErrorForDirectiveOperation(canceled.Directive), executionErr, settleErr)
 	}
 	if executionErr != nil {
 		if terminal, terminalErr := consumeProviderSettledDirective(ctx, store, admitted, directiveOrigin, providerSettlement); terminal || terminalErr != nil {
@@ -786,7 +805,7 @@ func consumeProviderSettledDirective(ctx context.Context, store runtimeagentcont
 		return true, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "directive_completion_execution_owner_mismatch", "agent-manager", "execute_directive", map[string]any{"operation_id": admitted.OperationID})
 	}
 	switch persisted.State {
-	case runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate:
+	case runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate, runtimeagentcontrol.DirectiveOperationCanceled:
 		return true, runtimeagentcontrol.ErrorForDirectiveOperation(persisted)
 	default:
 		if observation.OriginSettled {
@@ -1054,9 +1073,6 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 	if err := am.reconcileExternalEffectsForStartup(ctx); err != nil {
 		return summary, err
 	}
-	if err := am.lifecycle.refreshRecoveredProviderDrainFinalizations(ctx); err != nil {
-		return summary, err
-	}
 	if am.budget != nil {
 		if err := am.budget.ProjectRecoveryBudgetState(ctx); err != nil {
 			return summary, fmt.Errorf("project recovered budget state: %w", err)
@@ -1091,6 +1107,9 @@ func (am *AgentManager) reconcileExternalEffectsForStartup(ctx context.Context) 
 		request := runtimeeffects.NewRecoveryRequest(time.Now().UTC(), am.executionPosture)
 		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, request); err != nil {
 			return fmt.Errorf("reconcile external effect attempts: %w", err)
+		}
+		if err := am.reconcileCanceledTurnsForStartup(ctx, request); err != nil {
+			return fmt.Errorf("reconcile canceled agent turns: %w", err)
 		}
 	}
 	am.startupEffectsReconciled = true
@@ -1441,7 +1460,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 
 	am.lifecycle.mu.Lock()
 	execution := cell.execution
-	if execution == nil || execution.agent == nil || cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if execution == nil || execution.agent == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
 		am.lifecycle.mu.Unlock()
 		return replaceExecutionResult{}, fmt.Errorf("%w: %s", ErrAgentNotFound, strings.TrimSpace(agentID))
 	}

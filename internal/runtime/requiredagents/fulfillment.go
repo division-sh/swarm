@@ -122,7 +122,7 @@ func CheckScope(scope Scope) []Finding {
 				Missing: missing,
 			})
 		}
-		if missing := missingStrings(required.Emits, agent.EmitEvents); len(missing) > 0 {
+		if missing := missingStrings(required.Emits, agent.ProducedEvents()); len(missing) > 0 {
 			findings = append(findings, Finding{
 				Kind:    FindingMissingEmits,
 				ScopeID: scope.ID,

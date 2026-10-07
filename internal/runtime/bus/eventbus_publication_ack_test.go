@@ -238,6 +238,19 @@ func TestAcknowledgedPublishPostCommitErrorStillStartsAsyncDispatch(t *testing.T
 	}
 }
 
+func TestPublicationNilErrorCannotInventCommitAcknowledgment(t *testing.T) {
+	store := &publicationAcknowledgementProbeStore{acknowledged: false}
+	probe := &publicationAcknowledgementProbe{}
+	bus, err := newScopedTestEventBus(store, EventBusOptions{TestLifecycleProbe: probe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "task.requested", "provider", "", json.RawMessage(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err == nil || store.commits != 1 || probe.persisted.Load() != 0 || probe.dispatched.Load() != 0 {
+		t.Fatalf("nil error was promoted into publication proof: err=%v commits=%d persisted=%d dispatched=%d", err, store.commits, probe.persisted.Load(), probe.dispatched.Load())
+	}
+}
+
 func TestAPIEventReplayReleaseErrorUsesReplayProofWithoutNewAcknowledgement(t *testing.T) {
 	fault := errors.New("API replay authority release fault")
 	store := &publicationAcknowledgementProbeStore{replay: true, err: fault}

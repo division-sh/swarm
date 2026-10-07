@@ -14,6 +14,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -380,6 +381,9 @@ func (s *AgentPostgresOwner) RecordDirectiveExecuted(ctx context.Context, operat
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive response must be valid JSON")
 	}
 	op, acknowledged, err := s.transitionPostgresDirectiveOperation(ctx, operationID, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireDirectiveTurnUncanceled(txctx, tx, true, operationID); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = 'executed', response = $3::jsonb, executed_at = $4, execution_lease_expires_at = NULL, updated_at = $4 WHERE operation_id = $1::uuid AND execution_owner_id = $2 AND state = 'executing'`, operationID, ownerID, string(response), now.UTC())
 		return requireDirectiveTransition(res, err)
 	})
@@ -395,6 +399,9 @@ func (s *AgentSQLiteOwner) RecordDirectiveExecuted(ctx context.Context, operatio
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive response must be valid JSON")
 	}
 	op, acknowledged, err := s.transitionSQLiteDirectiveOperation(ctx, operationID, func(txctx context.Context, tx *sql.Tx) error {
+		if err := requireDirectiveTurnUncanceled(txctx, tx, false, operationID); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = 'executed', response = ?, executed_at = ?, execution_lease_expires_at = NULL, updated_at = ? WHERE operation_id = ? AND execution_owner_id = ? AND state = 'executing'`, string(response), now.UTC(), now.UTC(), operationID, ownerID)
 		return requireDirectiveTransition(res, err)
 	})
@@ -565,6 +572,9 @@ func (s *AgentPostgresOwner) finalizePostgresDirectiveFailure(ctx context.Contex
 		if op.State != from || (ownerID != "" && op.ExecutionOwnerID != ownerID) {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
+		if err := requireDirectiveTurnUncanceled(txctx, tx, true, operationID); err != nil {
+			return err
+		}
 		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, attempt, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 			return err
 		}
@@ -613,6 +623,9 @@ func (s *AgentSQLiteOwner) finalizeSQLiteDirectiveFailure(ctx context.Context, o
 		if op.State != from || (ownerID != "" && op.ExecutionOwnerID != ownerID) {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
+		if err := requireDirectiveTurnUncanceled(txctx, tx, false, operationID); err != nil {
+			return err
+		}
 		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, attempt, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 			return err
 		}
@@ -640,7 +653,7 @@ func (s *AgentSQLiteOwner) finalizeSQLiteDirectiveFailure(ctx context.Context, o
 }
 
 func terminalDirectiveExpiry(state runtimeagentcontrol.DirectiveOperationState, now time.Time, ttl time.Duration) any {
-	if state != runtimeagentcontrol.DirectiveOperationFailed && state != runtimeagentcontrol.DirectiveOperationSucceeded {
+	if state != runtimeagentcontrol.DirectiveOperationFailed && state != runtimeagentcontrol.DirectiveOperationSucceeded && state != runtimeagentcontrol.DirectiveOperationCanceled {
 		return nil
 	}
 	return now.Add(normalizeDirectiveTTL(ttl)).UTC()
@@ -758,6 +771,8 @@ func recordDirectiveAuthorActivity(ctx context.Context, story runtimeauthoractiv
 		transition = "failed"
 	case runtimeagentcontrol.DirectiveOperationIndeterminate:
 		transition = "outcome_uncertain"
+	case runtimeagentcontrol.DirectiveOperationCanceled:
+		transition = "canceled"
 	case runtimeagentcontrol.DirectiveOperationExecuted:
 		return nil
 	default:
@@ -773,6 +788,7 @@ func recordDirectiveAuthorActivity(ctx context.Context, story runtimeauthoractiv
 		RunID: op.ResolvedRunID, AgentID: op.AgentID(), Failure: failure,
 		Projection: runtimeauthoractivity.Projection{
 			SubjectType: "agent", SubjectID: op.AgentID(), Method: op.Method, Source: op.Source,
+			ReasonCode: string(op.CancellationReason),
 		},
 	})
 }
@@ -783,7 +799,7 @@ func (s *AgentPostgresOwner) ReconcileDirectiveOperations(ctx context.Context, n
 		FROM agent_directive_operations o
 		JOIN runs run ON run.run_id = o.resolved_run_id
 		WHERE run.status IN (`+runLifecycleActiveStateSQLValues+`)
-		  AND (o.state IN ('executed', 'succeeded') OR (o.state = 'executing' AND o.execution_lease_expires_at <= $1) OR (o.state = 'prepared' AND o.idempotency_key IS NULL) OR (o.state IN ('succeeded', 'failed') AND o.expires_at <= $1))
+		  AND (o.state IN ('executed', 'succeeded') OR (o.state = 'executing' AND o.execution_lease_expires_at <= $1) OR (o.state = 'prepared' AND o.idempotency_key IS NULL) OR (o.state IN ('succeeded', 'failed', 'canceled') AND o.expires_at <= $1))
 		ORDER BY o.created_at
 	`, now.UTC())
 	if err != nil {
@@ -809,7 +825,7 @@ func (s *AgentSQLiteOwner) ReconcileDirectiveOperations(ctx context.Context, now
 		FROM agent_directive_operations o
 		JOIN runs run ON run.run_id = o.resolved_run_id
 		WHERE run.status IN (`+runLifecycleActiveStateSQLValues+`)
-		  AND (o.state IN ('executed', 'succeeded') OR (o.state = 'executing' AND o.execution_lease_expires_at <= ?) OR (o.state = 'prepared' AND o.idempotency_key IS NULL) OR (o.state IN ('succeeded', 'failed') AND o.expires_at <= ?))
+		  AND (o.state IN ('executed', 'succeeded') OR (o.state = 'executing' AND o.execution_lease_expires_at <= ?) OR (o.state = 'prepared' AND o.idempotency_key IS NULL) OR (o.state IN ('succeeded', 'failed', 'canceled') AND o.expires_at <= ?))
 		ORDER BY o.created_at
 	`, now.UTC(), now.UTC())
 	if err != nil {
@@ -853,11 +869,11 @@ func (s *AgentPostgresOwner) reconcilePostgresDirectiveOperationIDs(ctx context.
 			continue
 		}
 		switch {
-		case (op.State == runtimeagentcontrol.DirectiveOperationSucceeded || op.State == runtimeagentcontrol.DirectiveOperationFailed) && !op.ExpiresAt.IsZero() && !op.ExpiresAt.After(now):
+		case (op.State == runtimeagentcontrol.DirectiveOperationSucceeded || op.State == runtimeagentcontrol.DirectiveOperationFailed || op.State == runtimeagentcontrol.DirectiveOperationCanceled) && !op.ExpiresAt.IsZero() && !op.ExpiresAt.After(now):
 			result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (int64, error) {
 				var deleted int64
 				err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-					res, err := tx.ExecContext(txctx, `DELETE FROM agent_directive_operations o WHERE o.operation_id = $1::uuid AND o.state IN ('succeeded', 'failed') AND o.expires_at <= $2 AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
+					res, err := tx.ExecContext(txctx, `DELETE FROM agent_directive_operations o WHERE o.operation_id = $1::uuid AND o.state IN ('succeeded', 'failed', 'canceled') AND o.expires_at <= $2 AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
 					if err != nil {
 						return err
 					}
@@ -912,11 +928,11 @@ func (s *AgentSQLiteOwner) reconcileSQLiteDirectiveOperationIDs(ctx context.Cont
 			continue
 		}
 		switch {
-		case (op.State == runtimeagentcontrol.DirectiveOperationSucceeded || op.State == runtimeagentcontrol.DirectiveOperationFailed) && !op.ExpiresAt.IsZero() && !op.ExpiresAt.After(now):
+		case (op.State == runtimeagentcontrol.DirectiveOperationSucceeded || op.State == runtimeagentcontrol.DirectiveOperationFailed || op.State == runtimeagentcontrol.DirectiveOperationCanceled) && !op.ExpiresAt.IsZero() && !op.ExpiresAt.After(now):
 			result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite delete expired directive operation", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (int64, error) {
 				var deleted int64
 				err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-					res, err := tx.ExecContext(txctx, `DELETE FROM agent_directive_operations AS o WHERE o.operation_id = ? AND o.state IN ('succeeded', 'failed') AND o.expires_at <= ? AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
+					res, err := tx.ExecContext(txctx, `DELETE FROM agent_directive_operations AS o WHERE o.operation_id = ? AND o.state IN ('succeeded', 'failed', 'canceled') AND o.expires_at <= ? AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
 					if err != nil {
 						return err
 					}
@@ -963,7 +979,7 @@ func (s *AgentSQLiteOwner) reconcileSQLiteDirectiveOperationIDs(ctx context.Cont
 func purgeExpiredPostgresDirectiveOperations(ctx context.Context, tx *sql.Tx, now time.Time) error {
 	_, err := tx.ExecContext(ctx, `
 		DELETE FROM agent_directive_operations o
-		WHERE o.state IN ('succeeded', 'failed')
+		WHERE o.state IN ('succeeded', 'failed', 'canceled')
 		  AND o.expires_at <= $1
 		  AND EXISTS (
 			SELECT 1 FROM runs run
@@ -977,7 +993,7 @@ func purgeExpiredPostgresDirectiveOperations(ctx context.Context, tx *sql.Tx, no
 func purgeExpiredSQLiteDirectiveOperationsTx(ctx context.Context, tx *sql.Tx, now time.Time) error {
 	_, err := tx.ExecContext(ctx, `
 		DELETE FROM agent_directive_operations
-		WHERE state IN ('succeeded', 'failed')
+		WHERE state IN ('succeeded', 'failed', 'canceled')
 		  AND expires_at <= ?
 		  AND EXISTS (
 			SELECT 1 FROM runs run
@@ -1043,9 +1059,9 @@ func requireActiveSQLiteDirectiveOperation(ctx context.Context, tx *sql.Tx, oper
 	return op, nil
 }
 
-const postgresDirectiveOperationSelect = `SELECT operation_id::text, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, directive_text, COALESCE(requested_run_id::text, ''), resolved_run_id::text, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id::text, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
+const postgresDirectiveOperationSelect = `SELECT operation_id::text, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, directive_text, COALESCE(requested_run_id::text, ''), resolved_run_id::text, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id::text, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at, cancellation_reason FROM agent_directive_operations`
 
-const sqliteDirectiveOperationSelect = `SELECT operation_id, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, directive_text, COALESCE(requested_run_id, ''), resolved_run_id, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
+const sqliteDirectiveOperationSelect = `SELECT operation_id, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, directive_text, COALESCE(requested_run_id, ''), resolved_run_id, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at, cancellation_reason FROM agent_directive_operations`
 
 type directiveOperationRow interface {
 	Scan(...any) error
@@ -1054,6 +1070,7 @@ type directiveOperationRow interface {
 func scanDirectiveOperation(row directiveOperationRow) (runtimeagentcontrol.DirectiveOperation, bool, error) {
 	var op runtimeagentcontrol.DirectiveOperation
 	var state string
+	var cancellation sql.NullString
 	var agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string
 	var leaseRaw, responseRaw, failureRaw, admittedRaw, executedRaw, completedRaw, createdRaw, updatedRaw, expiresRaw any
 	err := row.Scan(
@@ -1061,7 +1078,7 @@ func scanDirectiveOperation(row directiveOperationRow) (runtimeagentcontrol.Dire
 		&agentID, &nameOwner, &nameSource, &routePresence, &flowScopeKey, &flowInstanceID, &flowInstance,
 		&op.Directive, &op.RequestedRunID, &op.ResolvedRunID, &op.RunIDResolution, &op.Source, &op.OperatorID,
 		&op.DirectiveEventID, &state, &op.ExecutionOwnerID, &leaseRaw, &responseRaw, &failureRaw,
-		&admittedRaw, &executedRaw, &completedRaw, &createdRaw, &updatedRaw, &expiresRaw,
+		&admittedRaw, &executedRaw, &completedRaw, &createdRaw, &updatedRaw, &expiresRaw, &cancellation,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimeagentcontrol.DirectiveOperation{}, false, nil
@@ -1075,7 +1092,8 @@ func scanDirectiveOperation(row directiveOperationRow) (runtimeagentcontrol.Dire
 	if err != nil {
 		return runtimeagentcontrol.DirectiveOperation{}, false, fmt.Errorf("scan directive operation agent identity: %w", err)
 	}
-	op.State = runtimeagentcontrol.DirectiveOperationState(strings.TrimSpace(state))
+	op.State = runtimeagentcontrol.DirectiveOperationState(state)
+	op.CancellationReason = deliverylifecycle.CancellationReason(cancellation.String)
 	op.Response = jsonRawMessageValue(responseRaw)
 	op.Failure, err = decodeStoredFailure(failureRaw)
 	if err != nil {

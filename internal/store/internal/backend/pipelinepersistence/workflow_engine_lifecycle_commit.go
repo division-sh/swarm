@@ -15,10 +15,22 @@ func commitWorkflowEngineLifecycle(
 	attempt *mutationprotocol.Attempt,
 	decisions workflowDecisionLifecycleTxOwner,
 	genericSchedules GenericScheduleTxOwner,
+	turnTerminations WorkflowTurnTerminationTxOwner,
 	postgres bool,
 	plan runtimepipeline.WorkflowLifecycleMutationPlan,
 ) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
 	result := runtimepipeline.CommittedWorkflowLifecycleMutation{}
+	if plan.TurnTermination != nil {
+		if turnTerminations == nil {
+			return result, fmt.Errorf("authored termination requires its exact selected-store turn owner")
+		}
+		intents, err := turnTerminations.RequestWorkflowTurnTerminationTx(ctx, attempt, *plan.TurnTermination)
+		if err != nil {
+			return result, err
+		}
+		result.TurnCancellations, result.QueuedCancellations = intents.Active, intents.Queued
+		result.QueuedDirectiveCancellations = intents.QueuedDirectives
+	}
 	for index, mutation := range plan.Timers {
 		ref, changed, err := commitWorkflowEngineTimerMutation(ctx, attempt, postgres, mutation)
 		if err != nil {

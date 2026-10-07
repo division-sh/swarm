@@ -23,12 +23,13 @@ type postCommitCredentialStore struct {
 	staleAfterLaunch bool
 }
 
-func (s *postCommitCredentialStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) error {
+func (s *postCommitCredentialStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
 	if s.reject {
-		return s.launchErr
+		return runtimeeffects.ExternalAttemptLaunch{}, s.launchErr
 	}
-	if err := s.Store.MarkExternalAttemptLaunched(ctx, attempt, at); err != nil {
-		return err
+	launch, err := s.Store.MarkExternalAttemptLaunched(ctx, attempt, at)
+	if err != nil {
+		return launch, err
 	}
 	if s.cancel != nil {
 		s.cancel()
@@ -36,7 +37,7 @@ func (s *postCommitCredentialStore) MarkExternalAttemptLaunched(ctx context.Cont
 	if s.staleAfterLaunch {
 		s.stale = true
 	}
-	return runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, s.launchErr)
+	return launch, runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, s.launchErr)
 }
 
 func (s *postCommitCredentialStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority runtimeeffects.Authority) (bool, error) {

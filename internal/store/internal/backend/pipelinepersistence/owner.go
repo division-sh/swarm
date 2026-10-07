@@ -58,6 +58,7 @@ type eventCommitTxStore interface {
 	CommitFlowInstanceActivationsTx(context.Context, *mutationprotocol.Attempt, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
 	workflowDecisionLifecycleOwner() workflowDecisionLifecycleTxOwner
 	genericScheduleTxOwner() GenericScheduleTxOwner
+	workflowTurnTerminationOwner() WorkflowTurnTerminationTxOwner
 	commitPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
 	SettleWorkflowNodeSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error)
 	RequireWorkflowAcceptedEventTx(context.Context, *sql.Tx, runtimedelivery.Claim, workflowlifecycle.Effect) error
@@ -139,6 +140,7 @@ type PipelinePostgresOwner struct {
 	resourceData           *storedurabledata.Owner
 	selectedFork           SelectedForkCommitTxOwner
 	genericSchedules       GenericScheduleTxOwner
+	turnTerminations       WorkflowTurnTerminationTxOwner
 }
 
 type PipelineSQLiteOwner struct {
@@ -161,6 +163,7 @@ type PipelineSQLiteOwner struct {
 	resourceData           *storedurabledata.Owner
 	selectedFork           SelectedForkCommitTxOwner
 	genericSchedules       GenericScheduleTxOwner
+	turnTerminations       WorkflowTurnTerminationTxOwner
 	nowFn                  func() time.Time
 	mutationMu             sync.Mutex
 	pipelineClaimMu        sync.Mutex

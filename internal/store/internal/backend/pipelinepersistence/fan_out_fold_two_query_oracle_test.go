@@ -175,6 +175,7 @@ func foldFanOutIntentTwoQueryBefore(
 				case settlement.Delivered() && len(deliveries) > 0:
 					allTerminal := true
 					deadLettered := false
+					canceled := false
 					for _, delivery := range deliveries {
 						if !delivery.Terminal() {
 							allTerminal = false
@@ -182,11 +183,16 @@ func foldFanOutIntentTwoQueryBefore(
 						if delivery.Status == runtimedelivery.StatusDeadLetter {
 							deadLettered = true
 						}
+						if delivery.Status == runtimedelivery.StatusCanceled {
+							canceled = true
+						}
 					}
 					if !allTerminal {
 						fold.PendingCommitted++
 					} else if deadLettered {
 						fold.Summary.DeadLettered++
+					} else if canceled {
+						fold.Summary.Canceled++
 					} else {
 						fold.Summary.Succeeded++
 					}

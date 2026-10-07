@@ -40,8 +40,8 @@ func (receiverProjectionEffectStore) IsExternalEffectAuthorityCurrent(context.Co
 func (receiverProjectionEffectStore) AuthorizeExternalAttempt(context.Context, runtimeeffects.Authority, runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
 	return runtimeeffects.Attempt{}, nil
 }
-func (receiverProjectionEffectStore) MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) error {
-	return nil
+func (receiverProjectionEffectStore) MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	return runtimeeffects.ExternalAttemptLaunch{Committed: true}, nil
 }
 func (receiverProjectionEffectStore) MarkExternalAttemptResponseObserved(context.Context, runtimeeffects.Attempt, map[string]any, time.Time) error {
 	return nil

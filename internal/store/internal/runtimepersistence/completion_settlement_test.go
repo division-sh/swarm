@@ -805,7 +805,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 					}
 					altered := handle.Attempt()
 					altered.SessionGrantID = replacement.GrantID
-					if err := fixture.store.MarkExternalAttemptLaunched(ctx, altered, time.Now().UTC()); err == nil {
+					if _, err := fixture.store.MarkExternalAttemptLaunched(ctx, altered, time.Now().UTC()); err == nil {
 						t.Fatal("borrowed new grant launched old attempt")
 					}
 					requireExternalAttemptState(t, selected.db, !selected.postgres, handle.Attempt().AttemptID, runtimeeffects.StateAuthorized)
@@ -1486,6 +1486,10 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 }
 
 func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan) completionSettlementFixture {
+	return newCompletionSettlementFixtureForFlow(t, store, db, sqlite, memory, "global")
+}
+
+func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string) completionSettlementFixture {
 	t.Helper()
 	return newCompletionSettlementFixtureWithActor(t, store, db, sqlite, memory, runtimeactors.AgentConfig{
 		ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli",
@@ -1499,7 +1503,6 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 	agentID := "completion-settlement-agent"
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
-	flowInstance := "global"
 	leaseHolder := "completion-worker"
 	grantID := uuid.NewString()
 	identity := mustTestAgentIdentityForRun(runID, agentID, flowInstance)

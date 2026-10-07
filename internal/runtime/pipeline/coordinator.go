@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,8 @@ type PipelineCoordinator struct {
 	deadLetters            runtimedeadletters.AcknowledgedRecorder
 	deliveryRuntime        WorkflowDeliveryRuntime
 	flowRoutes             FlowInstanceRouteOwner
+	turnCancellationMu     sync.Mutex
+	turnCancellations      effects.TurnCancellationDispatcher
 	credentials            runtimecredentials.Store
 	providerCredentials    runtimecredentials.Store
 	managedCredentials     runtimemanagedcredentials.Store
@@ -318,7 +321,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		return nil
 	}
 	if requireObligationOwner {
-		if err := opts.ReceiverExecution.Validate(); err != nil {
+		if err := opts.ReceiverExecution.ValidateExecutable(); err != nil {
 			return nil
 		}
 		if !opts.ExecutionPosture.Valid() {
@@ -695,19 +698,19 @@ func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Con
 	if evt.Type() == activityRequestEventType {
 		return pc.handleActivityRequestEventWithEmissionPlan(ctx, evt, emissions)
 	}
-	handled, committed, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, emissions)
-	if committed {
-		return handled, runtimepipelineobligation.ExecutionOutcome{Committed: true}, err
+	handled, outcome, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, emissions)
+	if outcome.Committed {
+		return handled, outcome, err
 	}
 	if err == nil {
-		return handled, runtimepipelineobligation.Continue(), nil
+		return handled, outcome, nil
 	}
 	var unclaimed *unclaimedNodeDeliveryError
 	if errors.As(err, &unclaimed) {
-		return handled, runtimepipelineobligation.Continue(), err
+		return handled, outcome, err
 	}
 	failure := runtimefailures.Normalize(err, runtimeWorkflowID, "execute_handler")
-	return handled, runtimepipelineobligation.DeadLetterExecution("handler_terminal_failure", &failure), nil
+	return handled, runtimepipelineobligation.DeadLetterExecution("handler_terminal_failure", &failure).RetainStageReceipts(outcome), nil
 }
 
 type unclaimedNodeDeliveryError struct{ cause error }
@@ -715,17 +718,7 @@ type unclaimedNodeDeliveryError struct{ cause error }
 func (e *unclaimedNodeDeliveryError) Error() string { return e.cause.Error() }
 func (e *unclaimedNodeDeliveryError) Unwrap() error { return e.cause }
 
-func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event) bool {
-	handled, _ := pc.executeNodeHandlerPlanResult(ctx, node, evt)
-	return handled
-}
-
-func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context, node identity.ExecutableNode, evt events.Event) (bool, error) {
-	handled, _, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node, evt, nil)
-	return handled, err
-}
-
-func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event, emissions *pipelineEmissionPlan) (handled, committed bool, resultErr error) {
+func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event, emissions *pipelineEmissionPlan) (handled bool, outcome runtimepipelineobligation.ExecutionOutcome, resultErr error) {
 	var probeErr error
 	claimOwned := false
 	defer func() {
@@ -735,36 +728,36 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		}
 	}()
 	if pc == nil {
-		return false, false, nil
+		return false, runtimepipelineobligation.Continue(), nil
 	}
 	if !node.Valid() {
-		return false, false, nil
+		return false, runtimepipelineobligation.Continue(), nil
 	}
 	source := pc.SemanticSource()
 	if source == nil {
-		return false, false, nil
+		return false, runtimepipelineobligation.Continue(), nil
 	}
 	trigger := strings.TrimSpace(string(evt.Type()))
 	if trigger == "" {
-		return false, false, nil
+		return false, runtimepipelineobligation.Continue(), nil
 	}
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, node, evt)
 	if resolved.Failure != "" {
-		return false, false, fmt.Errorf("resolve workflow handler for node %s: %s", node.Key(), resolved.Failure)
+		return false, runtimepipelineobligation.Continue(), fmt.Errorf("resolve workflow handler for node %s: %s", node.Key(), resolved.Failure)
 	}
 	if !resolved.Matched {
-		return false, false, nil
+		return false, runtimepipelineobligation.Continue(), nil
 	}
 	handler := resolved.Handler
 	handlerEventKey := resolved.HandlerEventKey
 	deliveryStore := pc.deliveryStore
 	if deliveryStore == nil {
-		return false, false, fmt.Errorf("workflow node delivery lifecycle owner is required")
+		return false, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node delivery lifecycle owner is required")
 	}
 	route, routeOK := runtimedelivery.RouteFromContext(ctx)
 	recipientNode, recipientOK := route.Recipient.Node()
 	if !routeOK || !recipientOK || !recipientNode.Equal(node) {
-		return false, false, fmt.Errorf("workflow node %s requires its exact admitted delivery route", node.Key())
+		return false, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node %s requires its exact admitted delivery route", node.Key())
 	}
 	nodeFlowID := strings.TrimSpace(resolved.FlowID)
 	if nodeFlowID == "" {
@@ -772,12 +765,12 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	}
 	handlerFact, err := NewDeliveryTargetHandler(node)
 	if err != nil {
-		return false, false, fmt.Errorf("workflow node %s target handler: %w", node.Key(), err)
+		return false, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node %s target handler: %w", node.Key(), err)
 	}
 	handlerFact = handlerFact.ForEvent(events.EventType(handlerEventKey))
 	claim, claimed := runtimedelivery.ClaimFromContext(ctx)
 	if claimed && (claim.SubscriberClass() != runtimedelivery.SubscriberNode || claim.SubscriberID() != node.Key()) {
-		return false, false, fmt.Errorf("workflow node %s received a claim for %s/%s", node.Key(), claim.SubscriberClass(), claim.SubscriberID())
+		return false, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node %s received a claim for %s/%s", node.Key(), claim.SubscriberClass(), claim.SubscriberID())
 	}
 	claimOwned = claimed
 	recoveryClaim := claimed
@@ -786,7 +779,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		if !claimed {
 			authorityProvider := pc.deliveryRuntime
 			if authorityProvider == nil {
-				return false, false, fmt.Errorf("workflow node delivery continuation authority is required")
+				return false, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node delivery continuation authority is required")
 			}
 			reportCarrierFailure := func(err error) {
 				diaglog.ProcessLog(diaglog.LevelError, "pipeline", "workflow node delivery carrier transfer failed",
@@ -794,13 +787,13 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			}
 			admission, err := admitWorkflowNodeDelivery(ctx, evt, route, authorityProvider, deliveryStore, reportCarrierFailure)
 			if err != nil {
-				return false, false, err
+				return false, runtimepipelineobligation.Continue(), err
 			}
 			if admission.postCommitErr != nil {
 				defer func() { resultErr = errors.Join(resultErr, admission.postCommitErr) }()
 			}
 			if admission.handled {
-				return true, false, nil
+				return true, runtimepipelineobligation.Continue(), nil
 			}
 			claim = admission.claim
 			admissionRenewal = admission.renewal
@@ -819,7 +812,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			heartbeat, heartbeatErr = runtimedelivery.StartClaimHeartbeatFromClaim(attemptCtx, pc.workOwner, deliveryStore, claim, admissionRenewal)
 		}
 		if heartbeatErr != nil {
-			return false, false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
+			return false, runtimepipelineobligation.Continue(), fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}
 		defer func() { resultErr = errors.Join(resultErr, heartbeat.Stop()) }()
 		executionCtx := heartbeat.Context()
@@ -856,7 +849,13 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			retryBase: semanticview.HandlerRetryBase(source), recoveryClaim: recoveryClaim,
 		})
 		probeErr = errors.Join(probeErr, finishProbeErr)
-		return handled, result.Committed, finishErr
+		outcome = runtimepipelineobligation.ExecutionOutcome{Committed: result.Committed}
+		if result.CommittedStage != nil {
+			var receiptErr error
+			outcome, receiptErr = outcome.WithCommittedStage(evt.ID(), *result.CommittedStage)
+			finishErr = errors.Join(finishErr, receiptErr)
+		}
+		return handled, outcome, finishErr
 	}
 }
 

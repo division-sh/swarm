@@ -12,6 +12,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -371,32 +372,28 @@ func (pc *PipelineCoordinator) workflowNodeConnectedInputFailureApplies(ctx cont
 	return false, nil
 }
 
-func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Context, evt events.Event) (bool, error) {
-	handled, _, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, nil)
-	return handled, err
-}
-
-func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, bool, error) {
+func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {
-		return false, false, nil
+		return false, runtimepipelineobligation.Continue(), nil
 	}
 	handledAny := false
-	committedAny := false
+	outcome := runtimepipelineobligation.Continue()
 	for _, node := range pc.WorkflowNodes() {
 		if !pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.RunID(), evt.TargetRoute()) {
 			continue
 		}
-		handled, committed, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node.Node, evt, emissions)
-		committedAny = committedAny || committed
+		handled, execution, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node.Node, evt, emissions)
+		outcome.Committed = outcome.Committed || execution.Committed
+		outcome = outcome.RetainStageReceipts(execution)
 		if err != nil {
-			return handledAny || handled, committedAny, err
+			return handledAny || handled, outcome, err
 		}
 		if handled {
 			handledAny = true
 		}
 	}
-	return handledAny, committedAny, nil
+	return handledAny, outcome, nil
 }
 
 func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Context, node runtimeidentity.ExecutableNode, runID string, eventTarget events.RouteIdentity) bool {

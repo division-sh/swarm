@@ -143,7 +143,7 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 					}
 				})
 			}
-			if err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err != nil {
+			if _, err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			if err := store.MarkExternalAttemptResponseObserved(ctx, attempt, map[string]any{"probe": true}, time.Now().UTC()); err != nil {
@@ -167,7 +167,7 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			if current, err := store.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
 				t.Fatalf("released process remains current: %v %v", current, err)
 			}
-			if err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err == nil {
+			if _, err := store.MarkExternalAttemptLaunched(ctx, attempt, time.Now().UTC()); err == nil {
 				t.Fatal("released process launched prepared probe")
 			}
 			request.OperationID, request.AttemptID = uuid.NewString(), uuid.NewString()

@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/platform"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -37,6 +38,7 @@ func cloneEventCatalogEntryMap(in map[string]EventCatalogEntry) map[string]Event
 
 func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	out := in
+	out.TurnTimeout = timeridentity.CloneTurnTimeout(in.TurnTimeout)
 	out.Mock.Source = append([]byte(nil), in.Mock.Source...)
 	out.AuthoredFields = cloneBoolMap(in.AuthoredFields)
 	out.EffectiveFieldSources = cloneStringMap(in.EffectiveFieldSources)

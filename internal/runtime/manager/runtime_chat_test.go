@@ -16,6 +16,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -433,6 +434,20 @@ func TestConsumeProviderSettledDirectiveUsesExactDurableTerminalState(t *testing
 	}
 	if got := store.finalizeFailureCallCount(); got != 0 {
 		t.Fatalf("provider-settled directive secondary failure calls=%d, want 0", got)
+	}
+	store.operations[operationID] = runtimeagentcontrol.DirectiveOperation{
+		OperationID: operationID, ExecutionOwnerID: ownerID, State: runtimeagentcontrol.DirectiveOperationCanceled,
+		CancellationReason: runtimedelivery.CancellationTurnTimeout, CompletedAt: time.Now().UTC(),
+	}
+	terminal, err = consumeProviderSettledDirective(context.Background(), store, store.operations[operationID], origin, runtimeeffects.CompletionSettlementObservation{
+		AttemptID: "00000000-0000-0000-0000-000000000803", Disposition: runtimeeffects.CompletionSettlementDrained,
+		Origin: completionOrigin, OriginSettled: true,
+	})
+	if !terminal || !errors.Is(err, runtimeagentcontrol.ErrDirectiveCanceled) {
+		t.Fatalf("consume canceled directive terminal=%v err=%v", terminal, err)
+	}
+	if got := store.finalizeFailureCallCount(); got != 0 {
+		t.Fatalf("canceled directive invented secondary failure calls=%d", got)
 	}
 }
 

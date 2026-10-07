@@ -164,6 +164,9 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
 		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
 	}
+	if feedback, ok := store.(runtimepipeline.WorkflowEmitFeedbackOwner); ok {
+		opts.Durable.EmitFeedback = feedback
+	}
 	bus, err := runtimebus.NewEventBusWithOptions(store, opts)
 	if err != nil {
 		return nil, err

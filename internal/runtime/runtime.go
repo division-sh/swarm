@@ -431,7 +431,16 @@ func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context) error {
 	if grant == nil {
 		return errors.New("runtime generation grant is required before startup preparation")
 	}
-	if _, err := grant.Evidence(); err != nil {
+	evidence, err := grant.Evidence()
+	if err != nil {
+		return err
+	}
+	preparationAuthority, err := runtimedelivery.NewNormalExecutionAuthority(rt.Options.SourceArtifactFact, evidence.GrantID, evidence.RuntimeGeneration)
+	if err != nil {
+		return err
+	}
+	ctx, err = runtimebus.WithTurnTimeoutRecoveryDeliveryAuthority(ctx, preparationAuthority)
+	if err != nil {
 		return err
 	}
 	if err := rt.Manager.RebindLifecycleExecutionForStartup(ctx); err != nil {
@@ -1483,6 +1492,11 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		managerOptions.WorkflowInstances = rt.Pipeline
 	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, managerOptions, runtimeDeps.ManagerStore)
+	if rt.Pipeline != nil {
+		if err := rt.Pipeline.BindTurnCancellationDispatcher(rt.Manager); err != nil {
+			return nil, err
+		}
+	}
 	managerRef = rt.Manager
 	rt.Bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
 		return managerRef.FinalizeCommittedAgentReadiness(ctx, event, routes)

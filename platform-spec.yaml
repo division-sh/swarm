@@ -4058,6 +4058,7 @@ handler_specification:
       branch_fields:
         condition: string — expression evaluated against entity state and policy
         advances_to: string — target state
+        terminate: Optional boolean transition cancellation intent; requires advances_to on this entry.
         emit: string or object — event to emit, optionally with local fields payload construction
       _note: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching
         condition executes.
@@ -4065,6 +4066,15 @@ handler_specification:
       field: advances_to
       type: string
       purpose: Set the platform lifecycle state exposed as _entity.current_state to the target state. Skipped if on_complete already advanced.
+    terminate:
+      field: terminate
+      type: boolean
+      purpose: >-
+        Opt in to cancellation of predecessor work through the actual selected authored
+        transition. This property requires advances_to on its own carrier. Omission or
+        false declares no cancellation; neither a destination label nor stage movement
+        supplies implicit cancellation. The intent is committed with that transition,
+        while canceled settlement waits for the exact work's effects and cleanup joins.
     sets_gate:
       field: sets_gate
       type: string
@@ -4358,6 +4368,7 @@ handler_specification:
         emit: string or object — rule-local event to emit, or an eventless object with fields only when participating in
           rules emit template specialization.
         advances_to: string — optional state change
+        terminate: Optional boolean transition cancellation intent; requires advances_to on this row.
         data_accumulation: object — optional data write (same format as handler-level)
         description: string — human-readable note
       admission_rule: >-
@@ -4862,7 +4873,8 @@ handler_specification:
           Once enumeration is closed, each direct ordinal contributes exactly one disposition: succeeded when every
           concrete route delivered; dead_lettered when every concrete route is terminal and at least one dead-lettered;
           no_route when canonical route settlement created no deliveries; semantic_rejected from the durable ordinal
-          outcome; or canceled for the unissued suffix terminalized by cancellation. Pending, in-progress, and retryable
+          outcome; or canceled for the unissued suffix terminalized by cancellation or a fully terminal routed member
+          containing an authored canceled delivery and no dead-letter outcome. Pending, in-progress, and retryable
           routes keep the barrier armed. The five counts must be nonnegative and sum exactly to the intent cardinality.
           Descendant fan-outs and unrelated intents never contribute.
         completion: >-
@@ -5357,6 +5369,12 @@ handler_specification:
     side_effect_resolution:
       advances_to: Handler-level advances_to is the default transition target. A matched rule with a non-empty advances_to
         overrides the handler-level target for that execution only.
+      terminate: >-
+        Cancellation belongs to the carrier that supplies the selected advances_to.
+        A selected rule/on_complete/join outcome with its own advances_to uses its own
+        terminate value, never the displaced handler's. If it inherits the handler's
+        advances_to, it consumes the handler's terminate value. Unselected entries
+        grant no cancellation, and terminate cannot be declared without advances_to.
       sets_gate: sets_gate is handler-level only in the supported handler/rule vocabulary. Rules, on_complete entries,
         and join outcome entries do not declare or override sets_gate.
       data_accumulation: Handler-level data_accumulation supplements the selected rule/on_complete/join-outcome data_accumulation in
@@ -5368,6 +5386,23 @@ handler_specification:
         emit. Explicit on_success.emit is additive only as a second distinct success event.
 engine:
   description: Specification for the platform engine — how it loads, validates, and executes flows.
+  committed_stage_evidence:
+    owner: existing acknowledged workflow engine mutation result
+    rule: >-
+      A constructed workflow mutation returns its exact run, instance, entity,
+      stage, stage-defined flag and committed revision from the guarded write.
+      An update returns the accepted predecessor revision plus one; accepted-event
+      preservation returns the unchanged revision. No later read may fill in or
+      replace this evidence. Failed or unresolved acknowledgment returns no
+      committed stage. Acknowledged commit with auxiliary cleanup failure retains
+      the original stage and cannot authorize repeating the mutation. Missing or
+      contradictory result evidence fails closed while retaining acknowledged
+      cleanup and publication responsibility. The receipt describes this handler's
+      instance only; a receiver receipt is not the emitting actor's own stage, and
+      queued publication acceptance is not an unexecuted handler's completion.
+      Selected-contract execution construction requires the typed publication
+      feedback owner before admitting execution; a missing owner is a construction
+      error, not a dependency to discover after a provider's emit call.
   committed_publication_handoff:
     owner: existing workflow engine mutation result
     rule: >-
@@ -6357,6 +6392,7 @@ engine:
       - Entity stops accepting new events (handlers reject events for terminal entities)
       - Stage changes, including entry to a terminal stage, do not cancel accepted agent work or discard late results. A stage deadline only advances the stage.
       - Stage movement does not itself retire the flow instance or its agents. Explicit termination and work-derived resource cleanup retain their existing ownership and validation.
+      - Stage transitions cannot declare operational flow retirement. Authored cancellation and work-derived resource cleanup are separate from graph terminality.
       - All persisted state remains in the database
       - Entity remains queryable through explicit read/query surfaces; for normal agents this means generated current-entity
         reads, while legacy query_entities remains a trusted runtime-internal compatibility surface.
@@ -8190,6 +8226,19 @@ engine:
         intent: Required authored source under agent_intent_model; no generated prose, filename, directory, role, or runtime fallback exists.
         model: Cost/provider-bearing. It remains explicit in Layer 1 and missing model aliases fail validation.
         manager_fallback: No platform default in Layer 1; explicit value only.
+        turn_timeout: Optional authored logical provider-turn bound. Omission introduces no bound; no default is inferred.
+      turn_timeout_declaration:
+        syntax: 'turn_timeout: {after: 10m, emit: investigation.aborted}'
+        admission: >-
+          The object requires exactly after and emit. after is a positive duration
+          string, not a number or expression. emit is a nonblank exact declared
+          event reference in the agent's owner scope whose schema admits an empty
+          payload. Null, bare, empty, unknown-field and malformed forms fail before
+          runtime construction on both disk and retained-source loaders.
+        ownership: >-
+          The declaration is preserved in exact agent configuration and plan
+          identity. Its event is a platform-owned agent timeout producer, not an
+          additional provider emit tool or inferred routing permission.
       generated_view:
         rule: Generated/expanded views MUST show each effective Layer 1 field value and whether it was authored
           directly or platform-defaulted, except memory which is shown only by value.
@@ -15241,6 +15290,8 @@ platform_tables:
         - entity_mutations
         - entity_state
         - workflow_instance_initial_materializations
+        - workflow_publication_stage_receipts
+        - workflow_handler_stage_receipts
         - flow_instance_runtime_readiness
         - agents
         - flow_instances
@@ -15297,6 +15348,7 @@ platform_tables:
         - runtime_generation_grants
         - runtime_external_effect_operations
         - runtime_external_effect_attempts
+        - runtime_agent_turn_lifetimes
         - runtime_provider_attempt_drains
         - operator_principals
         - operator_channel_operations
@@ -15382,7 +15434,8 @@ platform_tables:
         subject vocabulary, exact scope policy, human visibility, and rendered action. Producers and renderers MUST consume
         that same row; parallel source, field, scope, visibility, action, or subject registries are forbidden.
       delivery_lifecycle_contract: >-
-        delivery.lifecycle/v2 admits in_progress, delivered, failed, dead_letter, and terminalized. failed and dead_letter
+        delivery.lifecycle/v2 admits in_progress, delivered, failed, dead_letter, terminalized, and canceled. Canceled
+        carries the exact authored terminate or turn_timeout reason, without a failure envelope. failed and dead_letter
         are failure-bearing author-visible transitions. terminalized records a parent-owned lifecycle fence without a
         failure envelope and is not author-visible; it MUST NOT be rendered or reclassified as handler failure.
       event_descriptor_projection: >-
@@ -16701,7 +16754,7 @@ platform_tables:
             tools                       JSONB NOT NULL DEFAULT '[]',
             permissions                 JSONB NOT NULL DEFAULT '[]',
             runtime_descriptor          JSONB NOT NULL DEFAULT '{}',
-            lifecycle_phase             TEXT NOT NULL DEFAULT 'registered' CHECK (lifecycle_phase IN ('registered', 'running', 'draining', 'terminated', 'failed')),
+            lifecycle_phase             TEXT NOT NULL DEFAULT 'registered' CHECK (lifecycle_phase IN ('registered', 'running', 'terminated', 'failed')),
             lifecycle_generation        BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_generation >= 0),
             lifecycle_runtime_epoch     BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_runtime_epoch >= 0),
             lifecycle_config_revision   TEXT NOT NULL DEFAULT '',
@@ -16737,6 +16790,11 @@ platform_tables:
         settlement, the keyed API completion projection, and recovery. api_idempotency is
         a success projection only for this method. Event existence never proves execution
         or success. Transactions and locks must not span BoardStep.
+        Authored cancellation settles this existing operation as canceled with
+        an exact terminate or turn_timeout reason, without fabricating a delivery
+        or a successful API projection. Immutable accepted provider effects still
+        settle. Canceled operations retain their exact owner, no response/failure,
+        and closed execution lease; retry returns the same terminal evidence.
       ddl: |
         CREATE TABLE agent_directive_operations (
             operation_id               UUID PRIMARY KEY,
@@ -16758,7 +16816,8 @@ platform_tables:
             source                     TEXT NOT NULL,
             operator_id                TEXT,
             directive_event_id         UUID NOT NULL UNIQUE REFERENCES events(event_id),
-            state                      TEXT NOT NULL CHECK (state IN ('prepared', 'executing', 'executed', 'succeeded', 'failed', 'indeterminate')),
+            state                      TEXT NOT NULL CHECK (state IN ('prepared', 'executing', 'executed', 'succeeded', 'failed', 'indeterminate', 'canceled')),
+            cancellation_reason        TEXT CHECK (cancellation_reason IS NULL OR cancellation_reason IN ('terminate', 'turn_timeout')),
             execution_owner_id         TEXT,
             execution_lease_expires_at TIMESTAMPTZ,
             response                   JSONB,
@@ -16773,6 +16832,7 @@ platform_tables:
             CHECK (requested_run_id = resolved_run_id),
             CHECK ((state IN ('executed', 'succeeded')) = (response IS NOT NULL)),
             CHECK ((state IN ('failed', 'indeterminate')) = (failure IS NOT NULL)),
+            CHECK ((state = 'canceled' AND cancellation_reason IS NOT NULL AND execution_lease_expires_at IS NULL AND completed_at IS NOT NULL AND executed_at IS NULL) OR (state <> 'canceled' AND cancellation_reason IS NULL)),
             FOREIGN KEY (resolved_run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE INDEX idx_agent_directive_operations_active_key (method, actor_token_id, idempotency_key) WHERE idempotency_key IS NOT NULL,
             INDEX idx_agent_directive_operations_recovery (state, execution_lease_expires_at, updated_at),
@@ -16812,7 +16872,7 @@ platform_tables:
             expected_epoch     BIGINT NOT NULL,
             expected_generation BIGINT NOT NULL,
             target_generation BIGINT NOT NULL,
-            target_phase      TEXT NOT NULL CHECK (target_phase IN ('registered', 'running', 'draining', 'terminated', 'failed')),
+            target_phase      TEXT NOT NULL CHECK (target_phase IN ('registered', 'running', 'terminated', 'failed')),
             config_revision   TEXT NOT NULL,
             run_mode          TEXT NOT NULL CHECK (run_mode IN ('stopped', 'standard', 'authoritative_delivery_only')),
             process_authority_id UUID NOT NULL,
@@ -16955,7 +17015,7 @@ platform_tables:
         );
     runtime_external_effect_attempts:
       description: >-
-        One actual transport/process/write attempt under a durable external-effect operation. A normal-provider origin
+        One actual transport/process/write attempt under a durable external-effect operation. An agent-provider origin
         is exactly one closed delivery or directive-operation snapshot rather than a foreign key: destructive reset may
         delete mutable origin history only after all provider authority is terminal, while no-redispatch evidence survives.
         Successful normal-provider settlement evidence also owns the canonical parsed response required to continue the
@@ -17015,11 +17075,267 @@ platform_tables:
             INDEX idx_runtime_external_effect_attempts_target (usage_target_kind, usage_target_id) WHERE usage_target_id IS NOT NULL,
             UNIQUE INDEX idx_runtime_external_effect_attempts_active_continuation (origin_delivery_id) WHERE completion_continuation_active = TRUE
         );
+    workflow_publication_stage_receipts:
+      description: >-
+        The publication transaction captures its author's own exact constructed
+        header at acceptance, separately from any receiver's handler result.
+        Queued or cross-flow publication never presents that snapshot as a
+        completed handler. Exact duplicate publication consumes this immutable
+        receipt, not a newer header. Missing or contradictory receipt fails closed.
+        An entityless agent still names its exact run and constructed instance;
+        the transaction captures that header's entity, never another receiver's
+        entity. This feedback grants no targeting or routing permission.
+        The existing publication owner also freezes the emit call's result in
+        feedback: its exact acceptance or own-handler receipt and explicit
+        dispatch_returned, accepted_deferred, or post_commit_error disposition.
+        This describes the call, not queued receiver completion. The first
+        acknowledged result is immutable; exact retry consumes it without
+        repeating dispatch or substituting a newer stage. An unresolved feedback
+        commit grants no acknowledgment. This evidence grants no execution or
+        settlement rights and never mutates the workflow header.
+      ddl: |
+        CREATE TABLE workflow_publication_stage_receipts (
+            event_id UUID PRIMARY KEY REFERENCES events(event_id) ON DELETE CASCADE,
+            run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            instance_path TEXT NOT NULL,
+            receipt JSONB NOT NULL,
+            feedback JSONB
+        );
+    workflow_handler_stage_receipts:
+      description: >-
+        Immutable exact post-handler workflow stage evidence, written by the
+        existing workflow mutation owner in the same transaction as the guarded
+        header mutation and exact node-delivery success. The key is the actual
+        delivery and claim version; no current-header read reconstructs a receipt.
+        Publication feedback selects only its own event/run/constructed instance.
+        A receipt is evidence, not handler dispatch or settlement authority.
+        Its guarded mutation timestamp and revision remain unchanged on readback.
+        Failed or unresolved commit cannot produce acknowledged stage feedback.
+      ddl: |
+        CREATE TABLE workflow_handler_stage_receipts (
+            delivery_id UUID NOT NULL REFERENCES event_deliveries(delivery_id) ON DELETE CASCADE,
+            claim_version BIGINT NOT NULL CHECK (claim_version > 0),
+            event_id UUID NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+            run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            instance_path TEXT NOT NULL,
+            receipt JSONB NOT NULL,
+            PRIMARY KEY (delivery_id, claim_version),
+            INDEX idx_workflow_handler_stage_receipts_event (event_id, run_id, instance_path)
+        );
+    runtime_agent_turn_lifetimes:
+      description: >-
+        The existing external-effect owner retains one logical business-turn clock
+        and authored cancellation intent for an exact delivery or directive origin.
+        Logical-turn ownership uses the constructed run-scoped instance coordinate.
+        A root actor keeps its root declaration and empty usage-target flow_instance,
+        while its logical-turn row, cancellation and recovery use the run-root path.
+        Child actors retain the constructor's exact scope and concrete instance path.
+        The authority projection grants no new execution or routing permission.
+        Admission does not start the clock. The first actual provider launch
+        atomically fixes its first attempt and deadline; later tool rounds and
+        recovery consume those immutable coordinates. This is not an execution
+        serializer, replay registry, resource lifecycle phase, or new work origin.
+        Origin settlement remains owned by the delivery/directive owner.
+        The durable deadline is the canonical first_launched_at plus the exact
+        bound_ns duration, not a second rounded timestamp. The effects owner
+        computes that same deadline for launch readback and timeout decisions.
+        Canceled delivery-turn settlement consumes the exact durable intent after
+        all origin-bound provider attempts have recorded terminal physical facts.
+        It commits the delivery's canceled outcome and logical-turn settlement
+        together. Ordinary success/failure cannot bypass an acknowledged intent.
+        The named CommitCanceledTurn operation consumes an already-admitted
+        timeout reaction publication plan and commits its event, routing and
+        pipeline obligations in that same origin-settlement transaction. The
+        reaction must match the persisted declaration, cause identity and run.
+        Missing or foreign reaction evidence refuses the entire mutation. Its
+        acknowledged result carries the original canceled origin and exact
+        committed publication for owned post-commit dispatch; known rollback
+        carries neither, and exact retry cannot append a second reaction.
+        Manager delivery and directive carriers install the logical-turn owner
+        before invoking the agent. The agent supplies its immutable admitted
+        turn_timeout configuration, not a reload from a newer generation.
+        The canonical persisted runtime descriptor carries that exact optional
+        bound and event. Projection and hydration validate it and preserve its
+        configuration identity; opaque user config is not an alternative owner.
+        Required-agent fulfillment consumes the canonical produced-event set,
+        including the platform-owned timeout reaction. This does not grant a
+        corresponding emit tool or satisfy unrelated output requirements.
+        Finishing the invocation joins timeout mutation before exact origin
+        settlement. Delivery settlement stops claim renewal and releases its
+        exact continuation before dispatching the committed reaction. Directives
+        return typed canceled operation evidence instead of a second ordinary
+        failure write. Reaction production preserves the constructed source
+        coordinate and never turns that source into an explicit target. The
+        settlement-only canceled-delivery/directive ports are retired; both
+        foreground and captured-origin cancellation consume CommitCanceledTurn.
+        Immutable response, spend and uncertainty evidence survive; cancellation
+        does not become retry or dead-letter failure. Lost acknowledgment retries
+        return the exact existing outcome. Canceled source history is lineage only,
+        never executable fork replay and never a successful delivery.
+        Each process-local logical carrier owns one joinable timeout timer,
+        armed from acknowledged first-launch evidence, never authorization or a
+        later tool round. Only acknowledged exact authored intent cancels its
+        execution context; shutdown, stale authority and unrelated context
+        cancellation retain their distinct meanings. Finishing the carrier stops
+        and joins any in-flight timeout mutation before origin settlement.
+        Captured lifecycle provider tails record and close their immutable physical
+        evidence, without independently settling a canceled business origin. The
+        original carrier or startup uses CommitCanceledTurn only after the complete
+        physical set has closed. Retirement finalization retains the complete
+        captured set; completion results report cancellation intent separately from
+        an actual origin-settled acknowledgment. Normal startup reads bounded,
+        consistent ListCanceledTurnRecoveries snapshots of unresolved authored
+        cancellation, reconstructing the persisted first physical attempt and exact
+        original authority, origin, launch clock and declaration. It never mints a
+        turn, chooses a latest attempt, or readmits physical work. Corrupt or foreign
+        evidence fails closed. Selected-fork recovery remains possession-scoped.
+        The selected recovery owner retains unresolved authored cancellation after
+        fencing the exact predecessor and settling its physical effects. Pending
+        cancellation is settlement-only evidence, never executable replay or a
+        normal lifecycle token. The same named recovery transaction consumes its
+        exact canceled-origin commands and admitted timeout reaction, returning
+        acknowledged cancellation/publication evidence. It cannot terminalize
+        that origin or admit recovered finite-feed execution before this handoff
+        completes. Exact retry preserves the original launch clock and cancellation
+        cause, and does not repeatedly advance the predecessor fence. Normal
+        cancellation inventory never acquires selected-fork possession.
+        Selected timeout preparation inspects the exact immutable selected source
+        without allocating its execution projection. A publication-only recovery
+        posture retains the recorded predecessor identity, admits only that turn's
+        timeout producer/run/mode, and cannot bind a receiver or launch work. It
+        neither issues managed provider admission nor restores an executable grant.
+        Startup inventory locking ends before source preparation, settlement and
+        cleanup joins; process possession and exact preparation cleanup ownership
+        remain held until their acknowledgments. Concurrent startup recovery is
+        refused. Any unexpectedly allocated inspection resource remains owned by
+        the existing preparation retirement path until cleanup succeeds.
+        Startup commits the canceled origin and reaction atomically, releases the
+        preparation claim, and defers execution to the existing durable pipeline
+        recovery after startup admission. PrepareRecoveredTurnTimeoutReaction
+        persists the complete canonical recipient manifest with the exact
+        already-issued generation's delivery stamp, not an empty manifest
+        interpreted as successful dispatch. The stamp is preparation data: it
+        neither admits execution nor acquires a receiver claim, and the bus
+        dispatch remains queued until admission. Normal preparation does not
+        install the stamp as bus execution authority. This applies to normal and
+        selected startup. The original targetless source is checked
+        against immutable admitted publication evidence; journal receiver-target
+        projections are not producer target claims. Failure before this commit leaves the
+        unresolved intent discoverable; acknowledged cleanup errors retain committed
+        evidence and never justify repeating business work.
+        Current completion settlement also returns acknowledged authored intent to
+        its exact process-owned logical carrier. A retained late response and spend
+        remain immutable physical facts; canceled response projection is not an
+        executable completion continuation. This observation neither invents intent
+        for stage movement nor independently settles the canceled business origin.
+        An authored terminate command belongs to the exact compiled advances_to
+        carrier and commits its intent in the guarded stage-write transaction.
+        The immutable admitted_attempt_id anchors the first real provider authorization;
+        first_attempt_id and first_launched_at separately anchor the first actual
+        launch. A retryable prelaunch rejection can put these immutable anchors
+        on different exact delivery claims. Neither anchor grants settlement
+        authority. Successful provider authorization atomically binds
+        current_attempt_id to the actual authorized attempt, after the existing
+        origin owner admits its exact claim. Cancellation freezes that binding;
+        startup, timeout admission, launch and physical canceled settlement
+        consume it, never a latest-attempt query. Additional physical rounds of
+        the same exact claim can settle under that binding, but an obsolete
+        claim cannot act on its successor. Historical anchors must agree on the
+        logical delivery, constructed run/instance, agent and authority kind;
+        directive execution ownership remains exact and does not inherit delivery
+        claim-renewal semantics. The first launch/deadline, bound, physical facts
+        and replay policy remain unchanged. A
+        prelaunch terminate intent prevents launch and further rounds, while the
+        owning carrier still closes its authorized physical work and joins cleanup
+        before CommitCanceledTurn settles the business origin. Startup consumes
+        that exact current authorization binding without manufacturing a launch clock.
+        An unclaimed pending or retry delivery or prepared directive can instead be canceled in the
+        guarded terminate transaction through the existing delivery owner. It
+        preserves claim/retry versions and prior attempt evidence, never creates
+        a provider or execution attempt, and consumes the recipient's exact
+        persisted run/flow identity rather than its target's entity. A prepared
+        directive is canceled together with its pipeline obligation, without an
+        execution owner or admission timestamp. Admission and termination
+        serialize on that exact operation; a canceled operation cannot execute.
+        Its acknowledged lifecycle result carries the exact terminal operation,
+        not a fabricated executing origin or process callback. The logical
+        row records the real delivery or directive ID and terminal cause; its authorization
+        anchor may be absent for an already-settled queued terminate origin, or
+        for claimed work terminated before any provider authorization. Claimed
+        unstarted work persists a closed versioned origin_evidence record with
+        the exact delivery claim or executing directive operation/owner and
+        constructor-owned run/scope/instance coordinate; it
+        never fabricates a provider attempt, launch, deadline or usage target.
+        Provider authorization and termination serialize on the real delivery
+        claim or directive operation, using the existing origin owner.
+        Termination winning that lock forbids later authorization; authorization
+        winning retains its actual attempt and owes physical cleanup. The Manager
+        retains the real origin before invocation and finishes owned cleanup before
+        passing an origin-only CommitCanceledTurn command. The same operation
+        validates either explicit physical-attempt evidence or exact origin-only
+        evidence, never an implicit fallback between them. Origin-only settlement
+        refuses any physical attempt for the exact current claim and cannot declare a timeout
+        reaction. Normal startup reconstructs unresolved origin-only cancellation
+        without minting provider authority or execution mode, and keeps selected
+        execution authority out of its normal snapshot. Directive recovery
+        consumes the persisted exact execution owner and actor route; read-only
+        snapshots do not acquire mutation locks. Exact constructor identity
+        is read from persisted evidence, not reconstructed from an instance path.
+        An open physical provider set refuses premature queued settlement.
+        A reclaimed delivery terminated before current provider authorization
+        stores its exact claim in origin_evidence with current_attempt_id absent.
+        Closed predecessor attempts and immutable clock anchors remain history,
+        not current execution authority. Origin-only settlement still requires
+        the entire logical origin's physical history to be closed; it never
+        bypasses a predecessor's outstanding cleanup or invents a provider attempt.
+        A canceled retry origin also retires its saved completion continuations in
+        the same transaction, preserving prior physical attempts, responses, spend
+        and claim outcomes. Shared physical-turn decoding consumes each exact
+        attempt's immutable authority evidence for normal and selected agents;
+        it never replaces selected authority with a normal lifecycle token.
+        Ordinary selected response-loss recovery settles physical evidence before
+        its selected owner terminalizes outstanding deliveries. That failed
+        predecessor does not regain executable delivery-settlement authority.
+        The committed lifecycle result carries exact canceled snapshots for owned
+        post-commit continuation release. Rolled-back stage/node settlement cannot
+        leave cancellation evidence or grant this release.
+      ddl: |
+        CREATE TABLE runtime_agent_turn_lifetimes (
+            turn_id UUID PRIMARY KEY,
+            origin_kind TEXT NOT NULL CHECK (origin_kind IN ('delivery', 'directive')),
+            origin_id UUID NOT NULL,
+            run_id UUID NOT NULL,
+            agent_id TEXT NOT NULL CHECK (NULLIF(TRIM(agent_id), '') IS NOT NULL),
+            flow_instance TEXT NOT NULL,
+            bound_ns BIGINT CHECK (bound_ns > 0),
+            bound_emit TEXT CHECK (bound_emit IS NULL OR NULLIF(TRIM(bound_emit), '') IS NOT NULL),
+            admitted_attempt_id UUID,
+            current_attempt_id UUID,
+            origin_evidence JSONB,
+            first_attempt_id UUID,
+            first_launched_at TIMESTAMPTZ,
+            timeout_event_id UUID,
+            cancel_reason TEXT CHECK (cancel_reason IN ('terminate', 'turn_timeout')),
+            cancel_cause_event_id UUID,
+            cancel_requested_at TIMESTAMPTZ,
+            settled_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL,
+            UNIQUE (origin_kind, origin_id),
+            CHECK (admitted_attempt_id IS NOT NULL OR (cancel_reason IS NOT NULL AND cancel_reason = 'terminate' AND first_attempt_id IS NULL AND first_launched_at IS NULL AND bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL AND (origin_evidence IS NOT NULL OR settled_at IS NOT NULL))),
+            CHECK (current_attempt_id IS NULL OR admitted_attempt_id IS NOT NULL),
+            CHECK (origin_evidence IS NULL OR (current_attempt_id IS NULL AND cancel_reason = 'terminate')),
+            CHECK ((bound_ns IS NULL AND bound_emit IS NULL AND timeout_event_id IS NULL) OR (bound_ns IS NOT NULL AND bound_emit IS NOT NULL AND timeout_event_id IS NOT NULL)),
+            CHECK ((first_attempt_id IS NULL AND first_launched_at IS NULL) OR (first_attempt_id IS NOT NULL AND first_launched_at IS NOT NULL)),
+            CHECK ((cancel_reason IS NULL AND cancel_cause_event_id IS NULL AND cancel_requested_at IS NULL) OR (cancel_reason IS NOT NULL AND cancel_cause_event_id IS NOT NULL AND cancel_requested_at IS NOT NULL)),
+            INDEX idx_agent_turn_lifetimes_instance (run_id, flow_instance) WHERE settled_at IS NULL,
+            INDEX idx_agent_turn_lifetimes_bounded (first_launched_at) WHERE bound_ns IS NOT NULL AND first_launched_at IS NOT NULL AND settled_at IS NULL
+        );
     runtime_provider_attempt_drains:
       description: >-
         Exact normal-agent predecessor provider attempts captured atomically by lifecycle supersession after launch.
         A pending row authorizes only immutable completion evidence, budget settlement, and the exact delivery or
-        directive-operation origin outcome. Running successors remain running; terminal targets expose draining until their last row settles or expires.
+        directive-operation origin outcome. Every successor exposes its actual lifecycle target immediately. Pending
+        predecessor work is represented only by these exact sidecar rows, never by an intermediate lifecycle phase.
         The closed delivery/directive origin snapshot deliberately does not retain a foreign key into mutable origin
         history deleted by destructive reset. Its complete run-scoped agent coordinate is immutable evidence rather than
         a live foreign-key selector. The row never authorizes provider dispatch, mutable session/provider-head projection,
@@ -17416,7 +17732,7 @@ platform_tables:
             selected_fork_run_id UUID,
             selected_execution_generation BIGINT,
             continuation_handoff_at TIMESTAMPTZ,
-            status            TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'delivered', 'failed', 'dead_letter')),
+            status            TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'delivered', 'failed', 'dead_letter', 'canceled')),
             retry_count       INTEGER NOT NULL CHECK (retry_count >= 0),
             max_retries       INTEGER NOT NULL CHECK ((subscriber_type = 'agent' AND max_retries = 1) OR (subscriber_type = 'node' AND max_retries = 3)),
             next_eligible_at  TIMESTAMPTZ,
@@ -17437,7 +17753,7 @@ platform_tables:
             FOREIGN KEY (selected_execution_id, selected_fork_run_id, selected_execution_generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation),
             CHECK ((execution_authority_kind = 'normal_runtime' AND selected_execution_id IS NULL AND selected_fork_run_id IS NULL AND selected_execution_generation IS NULL) OR (execution_authority_kind = 'selected_contract_fork' AND selected_execution_id IS NOT NULL AND selected_fork_run_id = run_id AND selected_execution_generation = execution_authority_generation AND execution_authority_id = CAST(selected_execution_id AS TEXT))),
             CHECK (retry_count <= max_retries),
-            CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_version > 0 AND current_attempt_version = claim_version AND current_attempt_open = TRUE AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL)),
+            CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_version > 0 AND current_attempt_version = claim_version AND current_attempt_open = TRUE AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL) OR (status = 'canceled' AND subscriber_type = 'agent' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IN ('terminate', 'turn_timeout'))),
             CHECK (updated_at >= created_at),
             INDEX idx_deliveries_run (run_id, status) WHERE run_id IS NOT NULL,
             INDEX idx_deliveries_eligibility (subscriber_type, subscriber_id, status, next_eligible_at),
@@ -17508,7 +17824,7 @@ platform_tables:
             session_agent_flow_instance_path TEXT,
             open_marker       BOOLEAN NOT NULL,
             closure_kind      TEXT NOT NULL CHECK (closure_kind IN ('open', 'lease_expired', 'parent_interrupted', 'settled')),
-            outcome          TEXT CHECK (outcome IS NULL OR outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'lease_expired', 'terminalized')),
+            outcome          TEXT CHECK (outcome IS NULL OR outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'lease_expired', 'terminalized', 'canceled')),
             reason_code      TEXT,
             failure          JSONB,
             side_effects     JSONB NOT NULL DEFAULT '[]',
@@ -17525,7 +17841,8 @@ platform_tables:
             CHECK ((open_marker = TRUE AND current_delivery_id = delivery_id) OR (open_marker = FALSE AND current_delivery_id IS NULL)),
             CHECK ((active_session_id IS NULL AND session_delivery_id IS NULL AND session_run_id IS NULL AND session_subscriber_type IS NULL AND session_agent_id IS NULL AND session_agent_name_owner IS NULL AND session_agent_name_source IS NULL AND session_agent_route_presence IS NULL AND session_agent_flow_scope_key IS NULL AND session_agent_flow_instance_id IS NULL AND session_agent_flow_instance_path IS NULL) OR (active_session_id IS NOT NULL AND session_delivery_id = delivery_id AND session_run_id IS NOT NULL AND session_subscriber_type = 'agent' AND NULLIF(TRIM(COALESCE(session_agent_id, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(session_agent_name_owner, '')), '') IS NOT NULL AND session_agent_name_source IN ('declared', 'runtime_created') AND session_agent_route_presence IN ('present', 'root') AND session_agent_flow_scope_key IS NOT NULL AND session_agent_flow_instance_id IS NOT NULL AND session_agent_flow_instance_path IS NOT NULL)),
             CHECK ((open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL) OR (open_marker = FALSE AND outcome IS NOT NULL AND completed_at IS NOT NULL)),
-            CHECK ((closure_kind = 'open' AND open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL AND duration_ms IS NULL) OR (closure_kind = 'lease_expired' AND open_marker = FALSE AND outcome = 'lease_expired' AND completed_at IS NOT NULL AND duration_ms IS NULL) OR (closure_kind = 'parent_interrupted' AND open_marker = FALSE AND outcome = 'terminalized' AND completed_at IS NOT NULL AND duration_ms IS NOT NULL) OR (closure_kind = 'settled' AND open_marker = FALSE AND outcome IS NOT NULL AND outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'terminalized') AND completed_at IS NOT NULL AND duration_ms IS NOT NULL)),
+            CHECK ((closure_kind = 'open' AND open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL AND duration_ms IS NULL) OR (closure_kind = 'lease_expired' AND open_marker = FALSE AND outcome = 'lease_expired' AND completed_at IS NOT NULL AND duration_ms IS NULL) OR (closure_kind = 'parent_interrupted' AND open_marker = FALSE AND outcome = 'terminalized' AND completed_at IS NOT NULL AND duration_ms IS NOT NULL) OR (closure_kind = 'settled' AND open_marker = FALSE AND outcome IS NOT NULL AND outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'terminalized', 'canceled') AND completed_at IS NOT NULL AND duration_ms IS NOT NULL)),
+            CHECK (outcome <> 'canceled' OR (failure IS NULL AND reason_code IN ('terminate', 'turn_timeout'))),
             CHECK (completed_at IS NULL OR completed_at >= started_at),
             INDEX idx_delivery_attempts_open (lease_expires_at) WHERE outcome IS NULL
         );
@@ -39709,6 +40026,13 @@ durable_pipeline_processing_obligation_authority:
       cursor wrapper and later recovery opens a fresh selected-store cursor.
   disposition_contract:
     vocabulary: [acknowledged, deferred, terminal_error, dead_letter, quarantined]
+    committed_publication_handoff: >
+      A target refusal committed with publication is carried as that exact closed disposition through prepared
+      publication, engine outbox and grouped dispatch. Consumers release the exact publication claim without
+      executing or settling the refused publication again. Commit acknowledgement, prerequisite errors, event
+      identity and delivery-handoff checks remain required; a failed commit is not a committed refusal. Provider
+      raw settlement keeps its separately admitted treatment. Repeated callbacks without local handoff evidence
+      use the existing exact durable recovery owner, never new settlement rights or reconstructed refusal evidence.
     dispatch_decision: >
       One EventBus decision owner classifies execution outcomes and dispatch failures for ordinary and inbound
       committed publication, committed outbox/group publication, and claimed recovery. Foreground classification
@@ -40158,8 +40482,8 @@ agent_lifecycle_authority:
   durable_cell:
     table: agents
     fields: [lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id, lifecycle_process_authority_id, lifecycle_process_owner_id, lifecycle_process_boot_id, lifecycle_generation_grant_id, lifecycle_bundle_hash, lifecycle_runtime_instance_id, lifecycle_runtime_generation, topology_authority_kind, topology_admission, execution_lifetime]
-    phases: [registered, running, draining, terminated, failed]
-    rule: The agents row is the sole durable lifecycle cell. Process memory is a fenced projection and never an independent authority. Draining is terminal-target truth only while one or more exact predecessor provider-attempt drains remain pending; a running successor remains running and represents predecessor drains only in runtime_provider_attempt_drains.
+    phases: [registered, running, terminated, failed]
+    rule: The agents row is the sole durable lifecycle cell. Process memory is a fenced projection and never an independent authority. Every transition records its actual target phase. Pending predecessor provider work remains exact runtime_provider_attempt_drains evidence, not another lifecycle phase. Terminal or failed targets cannot be reused while their exact successor-bound sidecars remain pending; running successors remain independently running.
   lifecycle_token:
     fields: [runtime_epoch, agent_id, generation]
     rule: Every managed agent execution context carries exactly one token. Missing or superseded authority fails before external launch.
@@ -40176,6 +40500,7 @@ agent_lifecycle_authority:
     receiver_execution_variant:
       variants: [normal, selected_contract_fork]
       rule: AgentManager receives one explicit closed variant at construction. Normal turns install the acting lifecycle token and receiver-owned normal admission/controller state. Selected-contract turns install the exact selected authority, admission, controller, and lineage supplied by the selected runtime owner. No variant is inferred from delivery-context values.
+      selected_recovery_publication: EventBus alone may prepare an exact fenced-predecessor timeout reaction with a non-executable publication posture. AgentManager, executable Pipeline composition and receiver binding reject this posture; it carries no managed admission, controller or receiver occurrence. The selected cancellation transaction still validates its exact intent and original clock, and execution is deferred until ordinary startup admission.
     replace:
       rule: Start, restart, reconfigure, recovery, flow activation, and spawn-during-run enumerate agent IDs only and select the current projection after acquiring the per-agent operation lock. Replacement fences new leases and serializes against provider-attempt launch in the selected-store lifecycle transaction. Every authorized attempt for which transition wins is terminally abandoned with its reservation and exact typed origin settled before return. Every already-launched or response-observed predecessor attempt for which launch wins is captured into one exact durable drain in that transaction. Only after commit may the runtime cancel the predecessor generation, remove its exact route, await generation-owned work, install one successor projection, and start that successor.
       same_current: Reconfigure compares the validated candidate revision with the authoritative locked current revision before invoking the Agent factory. Same-current preserves Agent/config identity, loop, route channel/token, generation, sessions, and factory count.
@@ -40199,6 +40524,12 @@ agent_lifecycle_authority:
           rejection: Arbitrary values and publisher Authority, Admission, Controller, execution mode, runtime lineage, or equivalent execution identity never cross the handoff. Missing or conflicting receiver-owned state fails closed; key blacklists, context-value delegation, authority shadowing, and compatibility fallbacks are forbidden.
   transitions:
     operations: [spawn, hydrate, materialize, start, restart, reconfigure, source_set_rebind, source_set_retire, process_takeover, teardown, self_release, shutdown, reset]
+    execution_lease_identity: >-
+      The existing coordinator retains each exact execution lease object under its
+      decision lock. Release removes only that lease from its captured generation,
+      once; an identified settling carrier cannot decrement another acquisition or
+      a replacement generation. Retirement joins close only after the exact set is
+      empty. A copied count or arbitrary subtraction is not cleanup authority.
     serialization: >
       All creators, replacers, destroyers, and self-release paths serialize through one per-agent coordinator decision
       point. A pending predecessor retirement retains typed exact transition authority, not an operation mutex or
@@ -40569,7 +40900,7 @@ managed_external_effect_authority:
     required_fields: [effect_kind, effect_class, adapter, transport, launch_site, primitive_keys, launch_observed, prelaunch_failure, postlaunch_failure, outcome_mapping, canonical_evidence, settlement_recovery, proof]
     rule: Registration is incomplete unless every field is concrete and the source-derived primitive contract binds every actual launch/write boundary to its adapter, Begin admission, pre-primitive launched marker, outcome table, and named execution proof. A delegated mock model must bind both host and Docker launch branches to the existing completion owner's Begin, heartbeat and committed launched marker before handing the exact model request to the shared worker. The same worker's free identity/list observations and internal gateway transport do not acquire model-attempt or authored-effect authority from that registration; the gateway admits the actual tool effect through its existing owner.
   context_authority:
-    managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface carrying the typed concrete actor identity, selected-store controller, and typed logical-operation identity. Normal agents additionally require an exactly matching lifecycle token, usage target, and exactly one live typed origin, either the event-delivery claim with exact delivery ID, run, route identity, claim token/version, agent subscriber class, and subscriber identity, or the executing directive operation with exact operation and execution-owner identity. The two variants are mutually exclusive and neither may be inferred from event, run, latest-row, or context coincidence. Selected-contract-fork agents require the exact selected execution authority and actor usage target and cannot carry a normal origin. Same-slug sibling identity is a mismatch. Missing, ambiguous, or mismatched context fails closed before authorization.
+    managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface carrying the typed concrete actor identity, selected-store controller, typed logical-operation identity, and exactly one live typed business origin. The origin is either the event-delivery claim with exact delivery ID, run, route identity, claim token/version, agent subscriber class, and subscriber identity, or the executing directive operation with exact operation and execution-owner identity. The two variants are mutually exclusive and neither may be inferred from event, run, latest-row, or context coincidence. Normal agents additionally require an exactly matching lifecycle token and usage target. Selected-contract-fork agents require the exact selected execution authority and actor usage target; their delivery origin must carry the same selected execution ID, generation, fork run and source artifact and the exact concrete actor identity. A normal-runtime delivery cannot serve as a selected origin. Preparation probes and fork chat do not become business turns. Same-slug sibling identity is a mismatch. Missing, ambiguous, or mismatched context fails closed before authorization.
     eventbus_handoff: Managed-effect context authority installed after EventBus transfer is receiver-owned. Normal authority derives from the acting lifecycle token; selected-contract authority is the exact typed selected owner. Publisher context ancestry cannot establish, replace, or shadow either authority.
     startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, matching normal startup or selected-fork preparation authority, and selected-store controller. Pre-admission probing carries the exact runless agent plan. Selected-fork preparation additionally requires current process possession and the fixed target/plan/configuration/catalog evidence; it carries no fork-run or executable generation. Its effect mode is the admitted actor configuration mode checked against the selected process controller's immutable execution posture before issuing probe authority; preparation cannot mint live authority or bypass mock_only. Startup authority cannot authorize a provider turn or be reused after execution admission.
     activation_gateway_observation: >
@@ -40663,7 +40994,7 @@ managed_external_effect_authority:
     different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
   logical_operation:
     identity: For normal agents, a deterministic operation_id is derived from the stable complete typed concrete agent identity, typed inbound/explicit logical identity, deterministic provider-turn or provider-owned tool-call occurrence coordinate, adapter, and declared lineage. Same-slug concrete siblings are distinct. Exact replay and successor lifecycle generations of the same concrete identity remain stable. Selected-contract-fork, conversation-fork-chat, and startup-probe authority derivations remain owned by their exact execution authorities. Runtime epoch and generation are deliberately excluded so the same logical work cannot redispatch after restart; they remain fenced evidence on the original operation/attempt. Request bytes are excluded from identity and stored as a separate fingerprint.
-    session_binding: Normal-provider fresh session and acquired/adopted continuation consume the same closed delivery-or-directive origin decision as completion admission across every provider adapter. Only an exact delivery-origin memory session binds and activates its current delivery through EventBus. An executing directive-origin session never calls a delivery binder or fabricates a delivery; its exact operation and execution owner remain fenced by durable completion authorization and launch. Stateless normal turns retain the same origin requirement before dispatch without a memory-session binding. Missing, malformed, dual, foreign or stale authority fails closed before provider dispatch. Selected-contract, startup-probe and fork-chat execution retain their distinct authorities; event names, payload tags, latest-row lookup and absent-claim success cannot replace origin authority.
+    session_binding: Agent-provider fresh sessions and acquired/adopted sessions consume the same closed delivery-or-directive origin decision as completion admission across every provider adapter. Only an exact delivery-origin memory session binds and activates its current delivery through EventBus. An executing directive-origin session never calls a delivery binder or fabricates a delivery; its exact operation and execution owner remain fenced by durable completion authorization and launch. Stateless agent turns retain the same origin requirement before dispatch without a memory-session binding. Missing, malformed, dual, foreign or stale authority fails closed before provider dispatch. Selected-contract execution retains its exact selected authority in addition to its actual business origin. Startup-probe and fork-chat execution retain their distinct authorities and are not business turns. Event names, payload tags, latest-row lookup and absent-claim success cannot replace origin authority. Session-origin binding does not expand historical selected-fork delivery replay or provider-head settlement rights.
     replay: Authorization loads the existing operation and latest attempt under the same operation_id. Exact replay is refused without dispatch; launched, response-observed, or uncertain replay never dispatches; changed request or registration fields return a fingerprint conflict. One settled normal-provider exception is closed over the same durable delivery identity after lease-fenced reclaim. When operation/request/callable-plan/bundle/actor/run/route/subscriber facts match exactly and immutable settlement evidence contains the canonical parsed provider response, authorization projects that response onto the current claim without creating an operation, attempt, reservation, spend, or provider dispatch. Claim token/version and process/session coordinates must be current but are not durable work identity. The normal adapter tool/output loop consumes the response and the Manager later settles the current delivery. Missing/corrupt evidence, directive origins, foreign delivery facts, or any semantic mismatch fail closed.
     attempts: One actual attempt is authorized for each logical operation except Claude CLI may allocate the next ordinal after the preceding attempt has exact durable zero-process-launch proof, and provider_registration may allocate the next ordinal only after the preceding attempt settled terminal_failure with exact launch_rejected=true and zero provider dispatch. The attempt ID is deterministically derived from operation_id and ordinal. No adapter creates a later ordinal after launch, response observation, settlement, or outcome uncertainty.
   effect_classes:
@@ -40702,12 +41033,12 @@ managed_external_effect_authority:
       capture: A lifecycle transition captures every exact normal-agent provider attempt in launched or response_observed under the lifecycle-cell lock. The row binds the complete predecessor token, successor generation, lifecycle transition, target phase, operation/attempt, expiry, and exact closed delivery or directive-operation origin.
       permit: Current and drained completion permits are distinct closed variants selected from locked lifecycle truth. The drained projection structurally carries only immutable agent_turns evidence, exact effect terminal evidence, exact spend and reservation release, the exact delivery terminal outcome/receipt or directive-operation terminal outcome, drain settlement, and last-drain terminal lifecycle finalization. A provider-head candidate created while the generation appeared current is not authority and is excluded when the locked permit is drained.
       atomicity: The drained operation commits or rolls back every permitted fact together. Exact origin mismatch, mutable session/conversation/watchdog/output mutation outside the excluded provider-head candidate, stale drain identity, duplicate non-exact evidence, or any subordinate writer failure changes nothing. Its committed typed drained disposition reaches the adapter and Manager handoff without a second settlement attempt.
-      lifecycle_truth: Terminated or failed targets remain draining until their last pending drain settles or expires with a typed loud failure, then atomically finalize to their target. A running successor stays running while predecessor drains remain exact sidecar facts. A drained predecessor cannot mutate or block the successor.
-      process_lifetime: Provider heartbeat and post-tool tail execution are process-owned after launch. Before launch, the generation-owned delivery heartbeat or directive execution heartbeat yields renewal authority while one selected-store provider heartbeat atomically renews the effect attempt, its exact origin authority, and its pending drain when present. At provider-tail completion that authority returns only when the generation remains current; supersession instead consumes the exact drained settlement. Generation retirement rejects new work and may cancel generation-local consumers, but it cannot discard the accepted process-local tail before exact terminal settlement. On startup, external-effect recovery is one idempotent Manager finalizer and must complete before the first static-agent readback or declaration reconciliation; a terminal-target drain therefore finalizes at its bound successor generation before static reintroduction may compute a later generation. An ordinary lifecycle transition out of draining is rejected while an exact drain remains pending. Hydration consumes the same finalizer and cannot run it twice.
+      lifecycle_truth: The locked successor cell exposes the actual running, terminated or failed target throughout predecessor settlement. A predecessor permit matches its exact successor epoch, generation, target and lifecycle transition. Closing the last pending sidecar acknowledges provider settlement without rewriting the lifecycle cell. A running successor stays running; a drained predecessor cannot mutate or block it. Terminal or failed successor reuse is rejected while exact pending sidecars remain.
+      process_lifetime: Provider heartbeat and post-tool tail execution are process-owned after launch. Before launch, the generation-owned delivery heartbeat or directive execution heartbeat yields renewal authority while one selected-store provider heartbeat atomically renews the effect attempt, its exact origin authority, and its pending drain when present. At provider-tail completion that authority returns only when the generation remains current; supersession instead consumes the exact drained settlement. Generation retirement rejects new work and may cancel generation-local consumers, but it cannot discard the accepted process-local tail before exact terminal settlement. On startup, external-effect recovery is one idempotent Manager finalizer and must complete before the first static-agent readback or declaration reconciliation; terminal-target predecessor work settles at its bound successor before static reintroduction may compute a later generation. Hydration consumes that same finalizer, not a phase-specific second projection pass.
       forbidden: [provider redispatch, provider-head mutation, session or conversation mutation, watchdog mutation, output publication, successor projection, inferred event-to-delivery lookup, latest-claim lookup, stale-error fallback, compatibility settlement]
   recovery:
     authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch. Exact authorized/prelaunch attempts remain eligible for this no-dispatch resolution when their run has become terminal, including non-provider effects. Recovery must preserve selected-process possession and live-owner fences, must not resurrect the run, must not reacquire a session grant for abandoned work, and must not request new external work or completion from a terminal run.
-    launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact delivery or directive-operation origin and pending drain when present, releases reservation authority, and finalizes the terminal lifecycle cell when the last drain closes. The original attempt's session grant is historical evidence, not authority to touch a replacement session. Recovery with an expired or replaced grant commits only permitted immutable evidence and exact-origin effects, never an agent_sessions timestamp, revision fact, conversation or provider head. Recovery may restore a bounded delivery or directive lease only for the exact still-open origin token/version while holding that origin's lifecycle row; any newer origin, foreign execution owner or identity mismatch fails closed. It does not reacquire a session grant to settle abandoned work. If the exact origin already has its terminal attempt/outcome, recovery verifies and preserves that settlement. A terminal run does not hide its pending normal-provider attempts; exact-origin recovery remains mandatory and may settle only through the stored closed origin. Delivery recovery starts only after this phase reaches explicit completion.
+    launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact delivery or directive-operation origin and pending drain when present, releases reservation authority, and acknowledges terminal-target provider settlement when the last drain closes without rewriting the lifecycle cell. The original attempt's session grant is historical evidence, not authority to touch a replacement session. Recovery with an expired or replaced grant commits only permitted immutable evidence and exact-origin effects, never an agent_sessions timestamp, revision fact, conversation or provider head. Recovery may restore a bounded delivery or directive lease only for the exact still-open origin token/version while holding that origin's lifecycle row; any newer origin, foreign execution owner or identity mismatch fails closed. It does not reacquire a session grant to settle abandoned work. If the exact origin already has its terminal attempt/outcome, recovery verifies and preserves that settlement. A terminal run does not hide its pending normal-provider attempts; exact-origin recovery remains mandatory and may settle only through the stored closed origin. Delivery recovery starts only after this phase reaches explicit completion.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
     channel_source_projection: >
       Ordinary startup channel_delivery and channel_native_setting recovery loads exact original

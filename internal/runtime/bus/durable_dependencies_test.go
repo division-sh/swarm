@@ -216,6 +216,9 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 // a synthetic store. Ephemeral fixtures use it without installing defaults.
 func DurableTestDependencyProjection(selected any) DurableDependencies {
 	var deps DurableDependencies
+	if role, ok := selected.(runtimepipeline.WorkflowEmitFeedbackOwner); ok {
+		deps.EmitFeedback = role
+	}
 	if role, ok := selected.(runtimereplycontext.Store); ok {
 		deps.ReplyContext = role
 	}

@@ -106,10 +106,12 @@ func TestEventBusReceiverOwnershipBoundaryStructuralGuard(t *testing.T) {
 func TestEventBusReceiverOwnerAdmissionStructuralGuard(t *testing.T) {
 	files := parseReceiverOwnershipProductionFiles(t)
 	requiredValidation := map[string]string{
-		"newEventBusWithOptions":            "Validate",
-		"NewAgentManagerWithOptions":        "Validate",
-		"newPipelineCoordinatorWithOptions": "Validate",
-		"PipelineCoordinator.intercept":     "ValidateBound",
+		"newEventBusWithOptions":              "Validate",
+		"NewAgentManagerWithOptions":          "ValidateExecutable",
+		"newPipelineCoordinatorWithOptions":   "ValidateExecutable",
+		"PipelineCoordinator.intercept":       "ValidateBound",
+		"ExecutionVariant.ValidateExecutable": "Validate",
+		"ExecutionVariant.ValidateBound":      "ValidateExecutable",
 	}
 	found := make(map[string]bool, len(requiredValidation)+1)
 	receiverOwnerSelected := false

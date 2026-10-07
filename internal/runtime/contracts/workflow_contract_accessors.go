@@ -914,7 +914,7 @@ func (b *WorkflowContractBundle) inferredRequiredAgentFacts(ownerFlowID string) 
 		out = append(out, RequiredAgentFact{
 			Role:         role,
 			SubscribesTo: normalizeStrings(record.Entry.Subscriptions),
-			Emits:        normalizeStrings(record.Entry.EmitEvents),
+			Emits:        record.Entry.ProducedEvents(),
 			Source:       RequiredAgentSourceInferred,
 			SourceFile:   strings.TrimSpace(record.Source.File),
 		})
