@@ -92,6 +92,7 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 	switch selected := selected.(type) {
 	case *PostgresStore:
 		durable := runtimebus.DurableDependencies{
+			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
 			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
@@ -113,6 +114,7 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 		return owner
 	case *SQLiteRuntimeStore:
 		durable := runtimebus.DurableDependencies{
+			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
 			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
