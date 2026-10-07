@@ -244,6 +244,9 @@ func executeOperatorEventPublication(
 			return apiidempotency.Completion{}, err
 		}
 		if cfg.rootInputOnly && params.NewRunCreated {
+			if _, err := checkEventPublicationRecipientPlan(ctx, selectedOpts, params, cfg); err != nil {
+				return apiidempotency.Completion{}, err
+			}
 			if err := runtimerunstart.ValidateFinite(selectedOpts.Source, selectedFeeds); err != nil {
 				return apiidempotency.Completion{}, finiteRunStartApplicationError(err)
 			}
@@ -841,10 +844,10 @@ type apiEventRecipientPlanChecker interface {
 	CheckAPIEventPublishRecipientPlan(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint) (runtimebus.PublishRecipientPlan, error)
 }
 
-func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, cfg eventPublicationConfig) error {
+func checkEventPublicationRecipientPlan(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, cfg eventPublicationConfig) (runtimebus.PublishRecipientPlan, error) {
 	checker := opts.RecipientPlans
 	if checker == nil {
-		return NewApplicationError(EventPublishFailedCode, true, map[string]any{
+		return runtimebus.PublishRecipientPlan{}, NewApplicationError(EventPublishFailedCode, true, map[string]any{
 			"event_name": params.EventName,
 			"event_id":   params.EventID,
 			"run_id":     params.RunID,
@@ -854,13 +857,13 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 	}
 	publication, err := eventPublicationEvent(params, time.Time{}, opts.ExecutionPosture)
 	if err != nil {
-		return err
+		return runtimebus.PublishRecipientPlan{}, err
 	}
 	var plan runtimebus.PublishRecipientPlan
 	if params.APIEventEndpoint != nil {
 		apiChecker, ok := checker.(apiEventRecipientPlanChecker)
 		if !ok {
-			return NewApplicationError(EventPublishFailedCode, true, map[string]any{
+			return runtimebus.PublishRecipientPlan{}, NewApplicationError(EventPublishFailedCode, true, map[string]any{
 				"event_name": params.EventName,
 				"event_id":   params.EventID,
 				"run_id":     params.RunID,
@@ -874,9 +877,17 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 	}
 	if err != nil {
 		if cfg.publishError != nil {
-			return cfg.publishError(params, err)
+			return runtimebus.PublishRecipientPlan{}, cfg.publishError(params, err)
 		}
-		return eventCatalogPublishError(params.EventName, err)
+		return runtimebus.PublishRecipientPlan{}, eventCatalogPublishError(params.EventName, err)
+	}
+	return plan, nil
+}
+
+func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, cfg eventPublicationConfig) error {
+	plan, err := checkEventPublicationRecipientPlan(ctx, opts, params, cfg)
+	if err != nil {
+		return err
 	}
 	if strings.TrimSpace(plan.TargetFailure) != "" {
 		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{

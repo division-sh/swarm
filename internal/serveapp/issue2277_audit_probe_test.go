@@ -3,7 +3,6 @@ package serveapp
 import (
 	"context"
 	"database/sql"
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -17,7 +16,6 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 // These are baseline classification probes, not assertions of the proposed
@@ -151,23 +149,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 				t.Fatalf("first exit=%d\n%s", code, first.outputString())
 			}
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
-			path := filepath.Join(root, "schema.yaml")
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var schema map[string]any
-			if err := yaml.Unmarshal(raw, &schema); err != nil {
-				t.Fatal(err)
-			}
-			schema["name"] = "audit2277-new-source"
-			raw, err = yaml.Marshal(schema)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, raw, 0600); err != nil {
-				t.Fatal(err)
-			}
+			canonicalrouting.RenameStoppedRunReadinessSource(t, root)
 			newBundle := servedEventPublishFixtureBundleHash(t, root)
 			if bundle == newBundle {
 				t.Fatal("restart did not replace the source coordinate")

@@ -74,6 +74,19 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 		expected []entryGolden
 	}
 	fixtures := []generatedFixture{
+		{"stopped-readiness-source-replacement", func(t testing.TB) string {
+			root := canonicalrouting.CopyRootIngressLegacyTemplateTargetRoute(t)
+			canonicalrouting.RenameStoppedRunReadinessSource(t, root)
+			return root
+		}, []entryGolden{
+			{Flow: ".", Entry: "new", Order: []string{"new", "waiting", "done"}, Finals: []string{"done"}},
+			{Flow: "operating", Entry: "initializing", Order: []string{"initializing", "waiting", "ready"}, Finals: []string{"ready"}},
+		}},
+		{"receiver-mailbox-gate", canonicalrouting.CopyForkReceiverMailboxGate, []entryGolden{
+			{Flow: ".", Entry: "waiting", Order: []string{"waiting", "active", "done"}, Finals: []string{"done"}},
+			{Flow: "consumer", Entry: "waiting", Order: []string{"waiting", "active", "done"}, Finals: []string{"done"}},
+			{Flow: "producer", Entry: "waiting", Order: []string{"waiting", "active"}, Finals: []string{"active"}},
+		}},
 		{"stage-completion", canonicalrouting.CopyStageCompletionJourney, []entryGolden{
 			{Flow: ".", Entry: "active", Order: []string{"active", "done"}, Finals: []string{"done"}},
 			{Flow: "discovery", Entry: "ready", Order: []string{"ready", "Ready"}, Finals: []string{"Ready"}},

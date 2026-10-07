@@ -1,41 +1,18 @@
 package serveapp
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"gopkg.in/yaml.v3"
 )
 
 func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
-			path := filepath.Join(root, "consumer", "schema.yaml")
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var schema map[string]any
-			if err := yaml.Unmarshal(raw, &schema); err != nil {
-				t.Fatal(err)
-			}
-			stages := schema["stages"].(map[string]any)
-			stages["active"] = map[string]any{"gate": map[string]any{
-				"decision": "review_receiver", "outcomes": map[string]any{"approve": map[string]any{"advances_to": "done"}},
-			}}
-			raw, err = yaml.Marshal(schema)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, raw, 0600); err != nil {
-				t.Fatal(err)
-			}
+			root := canonicalrouting.CopyForkReceiverMailboxGate(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
