@@ -859,7 +859,7 @@ func (eb *EventBus) dispatchLiveRecipientsWithRoutes(ctx context.Context, evt ev
 }
 
 // DispatchDeliveryContinuation re-enters one exact persisted route. It is used
-// by the execution-generation coordinator after a selected-store scan.
+// by the execution-generation coordinator for initial attempts and recovery.
 func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events.Event, route events.DeliveryRoute) (result runtimedeliverycontinuation.DispatchResult) {
 	if eb == nil {
 		return runtimedeliverycontinuation.Fatal(errors.New("event bus is required"))

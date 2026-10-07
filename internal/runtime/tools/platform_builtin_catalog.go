@@ -588,56 +588,68 @@ func collectEntityToolLeafSelectors(contract entityruntime.Contract, path, typeR
 }
 
 func entityContractJSONSchema(contract entityruntime.Contract, typeRef string, seen map[string]struct{}) map[string]any {
-	typeRef = strings.TrimSpace(typeRef)
-	switch {
-	case deliveryListType(typeRef):
+	resolved, err := resolveEntityToolStructuralType(contract, typeRef)
+	if err != nil {
+		return map[string]any{}
+	}
+	return entityResolvedContractJSONSchema(contract, resolved, seen)
+}
+
+func entityResolvedContractJSONSchema(contract entityruntime.Contract, resolved runtimecontracts.ResolvedCatalogType, seen map[string]struct{}) map[string]any {
+	switch resolved.Kind {
+	case runtimecontracts.CatalogTypeList:
 		return map[string]any{
 			"type":  "array",
-			"items": entityContractJSONSchema(contract, deliveryListItemType(typeRef), seen),
+			"items": entityResolvedContractJSONSchema(contract, *resolved.Element, seen),
 		}
-	case deliveryTextType(typeRef):
-		return map[string]any{"type": "string"}
-	case deliveryIntegerType(contract, typeRef):
+	case runtimecontracts.CatalogTypeMap:
+		key := entityResolvedContractJSONSchema(contract, *resolved.Key, seen)
+		key["minLength"] = 1
+		return map[string]any{
+			"type": "object", "propertyNames": key,
+			"additionalProperties": entityResolvedContractJSONSchema(contract, *resolved.Value, seen),
+		}
+	case runtimecontracts.CatalogTypeText:
+		schema := map[string]any{"type": "string"}
+		if enum, ok := contract.Types.Enums[resolved.Name]; ok {
+			values := make([]any, 0, len(enum.Values))
+			for _, value := range enum.Values {
+				values = append(values, strings.TrimSpace(value))
+			}
+			schema["enum"] = values
+		} else if resolved.Format != "" {
+			schema["format"] = resolved.Format
+		}
+		return schema
+	case runtimecontracts.CatalogTypeInteger:
 		return map[string]any{"type": "integer"}
-	case deliveryNumericType(contract, typeRef):
+	case runtimecontracts.CatalogTypeNumber:
 		return map[string]any{"type": "number"}
-	case deliveryBooleanType(contract, typeRef):
+	case runtimecontracts.CatalogTypeBoolean:
 		return map[string]any{"type": "boolean"}
-	case deliveryTimestampType(contract, typeRef):
-		return map[string]any{"type": "string", "format": "date-time"}
-	case deliveryUUIDType(contract, typeRef):
-		return map[string]any{"type": "string", "format": "uuid"}
-	case deliveryEnumType(contract, typeRef):
-		enum := contract.Types.Enums[deliveryTypeName(contract, typeRef)]
-		values := make([]any, 0, len(enum.Values))
-		for _, value := range enum.Values {
-			values = append(values, strings.TrimSpace(value))
-		}
-		return map[string]any{"type": "string", "enum": values}
-	case deliveryNamedType(contract, typeRef):
-		typeName := deliveryTypeName(contract, typeRef)
-		if _, ok := seen[typeName]; ok {
+	case runtimecontracts.CatalogTypeObject:
+		if _, ok := seen[resolved.Name]; ok {
 			return ObjectSchema(map[string]any{})
 		}
-		seen[typeName] = struct{}{}
-		resolved, err := resolveEntityToolStructuralType(contract, typeRef)
-		if err != nil {
-			delete(seen, typeName)
-			return map[string]any{}
-		}
+		seen[resolved.Name] = struct{}{}
+		defer delete(seen, resolved.Name)
 		props := make(map[string]any, len(resolved.Fields))
 		required := make([]string, 0, len(resolved.Fields))
 		for _, field := range resolved.Fields {
-			props[field.Name] = entityContractJSONSchemaWithRefinements(contract, field.TypeRef, field.Refinements, true, seen)
+			value := entityResolvedContractJSONSchema(contract, field.Type, seen)
+			applyEntitySchemaRefinements(value, field.Refinements, true)
+			props[field.Name] = value
 			if !field.IsOptional {
 				required = append(required, field.Name)
 			}
 		}
-		delete(seen, typeName)
 		schema := ObjectSchema(props, required...)
 		schema["additionalProperties"] = false
 		return schema
 	default:
+		if resolved.Name == "array" {
+			return map[string]any{"type": "array", "items": map[string]any{}}
+		}
 		return map[string]any{}
 	}
 }
@@ -735,18 +747,4 @@ func deliveryListType(typeRef string) bool {
 	return strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">") ||
 		strings.HasSuffix(typeRef, "[]") ||
 		strings.HasPrefix(typeRef, "[]")
-}
-
-func deliveryListItemType(typeRef string) string {
-	typeRef = strings.TrimSpace(typeRef)
-	switch {
-	case strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">"):
-		return strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])
-	case strings.HasSuffix(typeRef, "[]"):
-		return strings.TrimSpace(typeRef[:len(typeRef)-2])
-	case strings.HasPrefix(typeRef, "[]"):
-		return strings.TrimSpace(typeRef[2:])
-	default:
-		return typeRef
-	}
 }

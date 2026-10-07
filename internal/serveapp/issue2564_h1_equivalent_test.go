@@ -1,0 +1,790 @@
+package serveapp
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
+)
+
+// Reconstructed equivalent H1, NOT the unchanged/unavailable original archive.
+// Sources: https://github.com/division-sh/swarm/issues/2564 and approval
+// https://github.com/division-sh/swarm/issues/2564#issuecomment-6001398406.
+// Comparison: the published fieldless lu-h1 root and template hub, four inputs,
+// explicit count=0 creation workaround, two roles with 60 disjoint integer
+// fields each, six hubs/twelve real sessions, seven <=9-tool rounds after a
+// 1.5s first-response delay, value=1, plain stop, and 600 bumps/eight publishers
+// are preserved. Differences: expanded abridged field lists; current admitted
+// expression syntax (payload/entity, without legacy ${}); a marker in the intent
+// identifies the scripted role. Fresh selected stores, fake file credentials,
+// and the normal served test launch replace the unavailable archived driver.
+// No provider prewarming, first-turn serialization, writer injection or budgets
+// are introduced. Per-file/corpus SHA256 and the admitted bundle hash are logged.
+const (
+	issue2564H1Hubs       = 6
+	issue2564H1Fields     = 60
+	issue2564H1Bumps      = 600
+	issue2564H1Publishers = 8
+	issue2564H1Batch      = 9
+	issue2564H1CorpusSHA  = "5fd534a663d9e0c39b0e646b0825897325354da5e129714f88a48d0a7a65bb91"
+)
+
+func TestIssue2564H1EquivalentCorpus(t *testing.T) {
+	root := issue2564H1WriteCorpus(t)
+	files := issue2564H1Corpus(t, root)
+	if len(files) != 7 || files["entities.yaml"] != "" || strings.Contains(files["hub/nodes.yaml"], "has(") {
+		t.Fatal("published fieldless root / explicit-counter corpus drift")
+	}
+	for _, side := range []string{"a", "b"} {
+		for n := 1; n <= issue2564H1Fields; n++ {
+			field := fmt.Sprintf("%s%02d", side, n)
+			if strings.Count(files["hub/entities.yaml"], "  "+field+": {type: integer, initial: 0}\n") != 1 || strings.Count(files["hub/agents.yaml"], field) != 1 {
+				t.Fatalf("published distinct field assignment drift: %s", field)
+			}
+		}
+	}
+	t.Logf("reconstructed equivalent H1 admitted bundle=%s", servedEventPublishFixtureBundleHash(t, root))
+}
+
+func TestIssue2564ServedH1ReconstructedEquivalentBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, mode := range []string{"overlap", "no_overlap"} {
+			t.Run(backend+"/"+mode, func(t *testing.T) {
+				deadline, bounded := t.Deadline()
+				if !bounded {
+					t.Fatal("reconstructed H1 requires a bounded qualification deadline")
+				}
+				ctx, cancel := context.WithDeadline(t.Context(), deadline)
+				defer cancel()
+				provider := &issue2564H1Provider{t: t, sessions: map[string]*issue2564H1Session{}}
+				rt := issue2564H1StartServed(t, backend, issue2564H1WriteCorpus(t), provider)
+				seed := issue2564H1Publish(t, ctx, rt.Endpoint, map[string]any{
+					"event_name": "hub.start", "bundle_hash": rt.BundleHash,
+					"payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "h1-start-h01",
+				})
+				if !seed.NewRunCreated || seed.RunID == "" {
+					t.Fatalf("normal served run/construction missing: %+v", seed)
+				}
+				// Start requests, and hence actual first provider turns, are concurrent.
+				var starts sync.WaitGroup
+				for hub := 2; hub <= issue2564H1Hubs; hub++ {
+					starts.Add(1)
+					go func(hub int) {
+						defer starts.Done()
+						key := fmt.Sprintf("h%02d", hub)
+						result := issue2564H1Publish(t, ctx, rt.Endpoint, map[string]any{
+							"event_name": "hub.start", "run_id": seed.RunID, "source_event_id": seed.EventID,
+							"payload": map[string]any{"hub_id": key}, "idempotency_key": "h1-start-" + key,
+						})
+						if result.RunID != seed.RunID || result.NewRunCreated {
+							t.Errorf("template hub escaped the original served run: %+v", result)
+						}
+					}(hub)
+				}
+				starts.Wait()
+				if t.Failed() {
+					return
+				}
+				if mode == "no_overlap" {
+					issue2564H1WaitQuiescence(t, ctx, rt, seed.RunID, provider)
+					provider.assert(t, issue2564H1Hubs*2*issue2564H1Fields)
+				}
+				issue2564H1PublishBumps(t, ctx, rt, seed.RunID, seed.EventID)
+				issue2564H1WaitQuiescence(t, ctx, rt, seed.RunID, provider)
+				acks := provider.assert(t, issue2564H1Hubs*2*issue2564H1Fields)
+				issue2564H1AssertStore(t, rt, seed.RunID, mode, acks)
+				if t.Failed() {
+					return
+				}
+				t.Logf("RECONSTRUCTED_EQUIVALENT_H1 store=%s mode=%s run=%s bundle=%s hubs=6 sessions=12 rounds=7+stop ack=720 mutations=720 bumps=600 count=600 lost=0 reverts=0 retry_count=0 dead_letters=0", backend, mode, seed.RunID, rt.BundleHash)
+			})
+		}
+	}
+}
+
+func issue2564H1Corpus(t *testing.T, root string) map[string]string {
+	t.Helper()
+	files := make(map[string]string)
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(relative)] = string(contents)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+func issue2564H1WriteCorpus(t *testing.T) string {
+	t.Helper()
+	root := canonicalrouting.CopyIssue2564H1Equivalent(t)
+	files := issue2564H1Corpus(t, root)
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+	manifest := sha256.New()
+	for _, path := range paths {
+		contents := files[path]
+		checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(contents)))
+		fmt.Fprintf(manifest, "%s  %s\n", checksum, path)
+		t.Logf("H1_EQUIVALENT_SHA256 %s  %s", checksum, path)
+	}
+	checksum := fmt.Sprintf("%x", manifest.Sum(nil))
+	if checksum != issue2564H1CorpusSHA {
+		t.Fatalf("reconstructed equivalent H1 corpus drift: sha256=%s pinned=%s", checksum, issue2564H1CorpusSHA)
+	}
+	t.Logf("H1_EQUIVALENT_CORPUS_SHA256 %s", checksum)
+	return root
+}
+
+func issue2564H1StartServed(t *testing.T, backend, root string, provider *issue2564H1Provider) issue2564ServedFixture {
+	t.Helper()
+	opts, start := issue2564ServeHarness(t, backend, root, false)
+	server := httptest.NewServer(provider)
+	t.Cleanup(server.Close)
+	setDoctorProviderSecret(t, "OPENAI_COMPATIBLE_API_KEY", "issue2564-h1-proof-key")
+	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "")
+	config, err := os.ReadFile(opts.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Replace(string(config), "  backend: anthropic\n", "  backend: openai_compatible\n  openai_compatible:\n    base_url: "+server.URL+"\n", 1)
+	if text == string(config) {
+		t.Fatal("normal served launch no longer exposes the expected provider config")
+	}
+	writeWorkflowValidationFixtureFile(t, opts.ConfigPath, text)
+	process, rt := start()
+	t.Cleanup(func() {
+		if code := process.stop(); code != 0 {
+			t.Errorf("H1 normal served shutdown=%d", code)
+		}
+		if t.Failed() {
+			t.Logf("H1 served output:\n%s", process.outputString())
+		}
+	})
+	return rt
+}
+
+type issue2564H1Request struct {
+	Messages []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"messages"`
+	Tools []struct {
+		Function struct {
+			Name       string         `json:"name"`
+			Parameters map[string]any `json:"parameters"`
+		} `json:"function"`
+	} `json:"tools"`
+}
+
+type issue2564H1Ack struct {
+	entity, field string
+	revision      int
+}
+
+type issue2564H1Session struct {
+	round int
+	acks  map[string]issue2564H1Ack
+}
+
+type issue2564H1Provider struct {
+	t                     *testing.T
+	mu                    sync.Mutex
+	sessions              map[string]*issue2564H1Session
+	firstActive, firstMax int
+}
+
+var issue2564H1HubPattern = regexp.MustCompile(`\bh0[1-6]\b`)
+
+func (p *issue2564H1Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var request issue2564H1Request
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		p.refuse(w, fmt.Errorf("decode real OpenAI-compatible request: %w", err))
+		return
+	}
+	if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer issue2564-h1-proof-key" {
+		p.refuse(w, fmt.Errorf("real provider route/credential mismatch: %s", r.URL.Path))
+		return
+	}
+	side, hub := "", ""
+	for _, message := range request.Messages {
+		if message.Role == "system" {
+			for _, candidate := range []string{"a", "b"} {
+				if strings.Contains(message.Content, "H1_MARKER_"+candidate) {
+					side = candidate
+				}
+			}
+		}
+		if hub == "" && message.Role == "user" {
+			hub = issue2564H1HubPattern.FindString(message.Content)
+		}
+	}
+	if side == "" || hub == "" {
+		p.refuse(w, fmt.Errorf("real provider request omitted authored role/hub: side=%q hub=%q messages=%+v", side, hub, request.Messages))
+		return
+	}
+	key := hub + "/" + side
+	p.mu.Lock()
+	session := p.sessions[key]
+	if session == nil {
+		session = &issue2564H1Session{acks: map[string]issue2564H1Ack{}}
+		p.sessions[key] = session
+	}
+	round := session.round
+	session.round++
+	if round == 0 {
+		p.firstActive++
+		p.firstMax = max(p.firstMax, p.firstActive)
+	}
+	p.mu.Unlock()
+	if round == 0 {
+		defer func() {
+			p.mu.Lock()
+			p.firstActive--
+			p.mu.Unlock()
+		}()
+		timer := time.NewTimer(1500 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-r.Context().Done():
+			return
+		}
+	}
+	if round > 7 {
+		p.refuse(w, fmt.Errorf("H1 exceeded published seven tool rounds + stop: %s/%d", key, round))
+		return
+	}
+	for n := 1; n <= issue2564H1Fields; n++ {
+		name := fmt.Sprintf("save_hub_%s%02d", side, n)
+		found := false
+		for _, tool := range request.Tools {
+			if tool.Function.Name == name && issue2564H1SchemaProperty(tool.Function.Parameters, "value") {
+				found = true
+			}
+		}
+		if !found {
+			p.refuse(w, fmt.Errorf("generated role-scoped scalar tool missing: %s", name))
+			return
+		}
+	}
+	if round > 0 {
+		var results []any
+		for i := len(request.Messages) - 1; i >= 0; i-- {
+			if results = issue2564H1ToolResults(request.Messages[i].Content); results != nil {
+				break
+			}
+		}
+		first := (round-1)*issue2564H1Batch + 1
+		last := min(first+issue2564H1Batch-1, issue2564H1Fields)
+		if len(results) != last-first+1 {
+			p.refuse(w, fmt.Errorf("canonical current H1 result batch %s/%d has %d entries, want %d", key, round, len(results), last-first+1))
+			return
+		}
+		for i, raw := range results {
+			field := fmt.Sprintf("%s%02d", side, first+i)
+			entry, _ := raw.(map[string]any)
+			result, _ := entry["result"].(map[string]any)
+			entity, _ := result["entity_id"].(string)
+			revision, _ := result["revision"].(float64)
+			if entry["name"] != "save_hub_"+field || entry["ok"] != true || result["field"] != field || entity == "" || revision < 1 || revision != float64(int(revision)) {
+				p.refuse(w, fmt.Errorf("unacknowledged H1 scalar %s/%s: %#v", key, field, entry))
+				return
+			}
+			p.mu.Lock()
+			_, duplicate := session.acks[field]
+			session.acks[field] = issue2564H1Ack{entity: entity, field: field, revision: int(revision)}
+			p.mu.Unlock()
+			if duplicate {
+				p.refuse(w, fmt.Errorf("H1 repeated an acknowledged distinct save: %s/%s", key, field))
+				return
+			}
+		}
+	}
+	message := map[string]any{"role": "assistant", "content": "All assigned fields written; stop."}
+	finish := "stop"
+	if round < 7 {
+		calls := []any{}
+		first := round*issue2564H1Batch + 1
+		for n := first; n <= min(first+issue2564H1Batch-1, issue2564H1Fields); n++ {
+			field := fmt.Sprintf("%s%02d", side, n)
+			calls = append(calls, map[string]any{"id": hub + "-" + field, "type": "function", "function": map[string]any{"name": "save_hub_" + field, "arguments": `{"value":1}`}})
+		}
+		message["content"], message["tool_calls"], finish = "", calls, "tool_calls"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"model": "gpt-compatible", "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finish}}, "usage": map[string]int{"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}}); err != nil && r.Context().Err() == nil {
+		p.t.Error(err)
+	}
+}
+
+func (p *issue2564H1Provider) refuse(w http.ResponseWriter, err error) {
+	p.t.Error(err)
+	http.Error(w, err.Error(), http.StatusBadRequest)
+}
+
+func (p *issue2564H1Provider) assert(t *testing.T, want int) map[string]issue2564H1Ack {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	acks := map[string]issue2564H1Ack{}
+	for key, session := range p.sessions {
+		if session.round != 8 || len(session.acks) != issue2564H1Fields {
+			t.Fatalf("published session not complete: %s rounds=%d acks=%d", key, session.round, len(session.acks))
+		}
+		for field, ack := range session.acks {
+			acks[ack.entity+"/"+field] = ack
+		}
+	}
+	if len(p.sessions) != issue2564H1Hubs*2 || len(acks) != want || p.firstMax < 2 {
+		t.Fatalf("H1 concurrent provider/session acknowledgments: sessions=%d acks=%d want=%d overlapping_first_requests=%d", len(p.sessions), len(acks), want, p.firstMax)
+	}
+	t.Logf("H1_PROVIDER_RECEIPT sessions=%d acknowledgments=%d requests=%d overlapping_first_requests=%d first_round_delay=1.5s", len(p.sessions), len(acks), len(p.sessions)*8, p.firstMax)
+	return acks
+}
+
+// The published H1 has no per-request or per-phase stopwatch. Keep its single
+// qualification deadline instead of borrowing short budgets from small fixtures.
+func issue2564H1Publish(t *testing.T, ctx context.Context, endpoint string, params map[string]any) servedEventPublishRPCResult {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": params["idempotency_key"], "method": "event.publish", "params": params})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
+	started := time.Now()
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("H1 public event.publish: %v", err)
+	}
+	defer response.Body.Close()
+	var envelope servedJSONRPCEnvelope
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || envelope.Error != nil {
+		t.Fatalf("H1 publication HTTP=%d error=%+v", response.StatusCode, envelope.Error)
+	}
+	var result servedEventPublishRPCResult
+	if err := json.Unmarshal(envelope.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Logf("H1_PUBLICATION_LATENCY key=%v elapsed=%s event=%s", params["idempotency_key"], elapsed, result.EventID)
+	}
+	return result
+}
+
+func issue2564H1WaitQuiescence(t *testing.T, ctx context.Context, rt issue2564ServedFixture, run string, provider *issue2564H1Provider) {
+	t.Helper()
+	stable, nextLog := 0, time.Now()
+	for {
+		summary, err := rt.selected.SummarizeRun(ctx, run)
+		if err != nil {
+			t.Fatalf("H1 durable delivery progress: %v", err)
+		}
+		active := summary.Pending + summary.InProgress
+		if active == 0 {
+			stable++
+			if stable == 4 {
+				return
+			}
+		} else {
+			stable = 0
+		}
+		if time.Now().After(nextLog) {
+			provider.mu.Lock()
+			acks := 0
+			for _, session := range provider.sessions {
+				acks += len(session.acks)
+			}
+			t.Logf("H1_PROGRESS active_deliveries=%d provider_sessions=%d acknowledged_saves=%d", active, len(provider.sessions), acks)
+			provider.mu.Unlock()
+			nextLog = time.Now().Add(5 * time.Second)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("H1 qualification deadline before quiescence: %v", ctx.Err())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+func issue2564H1PublishBumps(t *testing.T, ctx context.Context, rt issue2564ServedFixture, runID, sourceEvent string) {
+	t.Helper()
+	var workers sync.WaitGroup
+	start := make(chan struct{})
+	accepted := make(chan string, issue2564H1Bumps)
+	for publisher := 0; publisher < issue2564H1Publishers; publisher++ {
+		workers.Add(1)
+		go func(publisher int) {
+			defer workers.Done()
+			<-start
+			for n := publisher; n < issue2564H1Bumps; n += issue2564H1Publishers {
+				result := issue2564H1Publish(t, ctx, rt.Endpoint, map[string]any{
+					"event_name": "hub.bump", "run_id": runID, "source_event_id": sourceEvent,
+					"payload":         map[string]any{"hub_id": fmt.Sprintf("h%02d", n%issue2564H1Hubs+1), "n": n},
+					"idempotency_key": fmt.Sprintf("h1-bump-%03d", n),
+				})
+				if result.RunID != runID || result.EventID == "" || result.NewRunCreated {
+					t.Errorf("H1 publisher %d bump %d escaped run: %+v", publisher, n, result)
+					return
+				}
+				accepted <- result.EventID
+			}
+		}(publisher)
+	}
+	close(start)
+	workers.Wait()
+	close(accepted)
+	ids := map[string]bool{}
+	for id := range accepted {
+		ids[id] = true
+	}
+	if len(ids) != issue2564H1Bumps {
+		t.Fatalf("eight actual publishers accepted %d distinct bumps, want 600", len(ids))
+	}
+}
+
+func issue2564H1AssertStore(t *testing.T, rt issue2564ServedFixture, runID, mode string, acks map[string]issue2564H1Ack) {
+	t.Helper()
+	issue2564H1LogFailureWitnesses(t, rt, runID, acks)
+	issue2564H1AssertSameEntityOverlap(t, rt, runID, mode)
+	flows, err := storetest.ObserveH1FlowAccounting(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turns, err := storetest.ObserveH1TurnAccounting(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := storetest.ObserveH1BumpAccounting(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveries, err := storetest.ObserveH1DeliveryAccounting(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range []struct {
+		name      string
+		got, want int
+	}{
+		{"fieldless root", flows.FieldlessRoots, 1},
+		{"root entities", flows.RootEntities, 0},
+		{"active template hubs", flows.ActiveHubs, 6},
+		{"live parsed identities", turns.Identities, 12},
+		{"live parsed turns", turns.Turns, 96},
+		{"live parsed sessions", turns.Sessions, 12},
+		{"failed/retried/non-live turns", turns.Failed, 0},
+		{"bump events", events.Bumps, 600},
+		{"delivered node bumps", deliveries.DeliveredBumps, 600},
+		{"delivered agents", deliveries.DeliveredAgents, 12},
+		{"undelivered", deliveries.Undelivered, 0},
+		{"delivery retries", deliveries.Retries, 0},
+		{"dead letters", deliveries.DeadLetters, 0},
+		{"unsettled/reclaimed/non-delivered attempts", deliveries.BadAttempts, 0},
+	} {
+		if fact.got != fact.want {
+			t.Errorf("H1 store accounting=%d want=%d fact=%s", fact.got, fact.want, fact.name)
+		}
+	}
+	h1HubFields, err := storetest.ObserveH1HubFields(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts, lost := 0, 0
+	losses := []string{}
+	for _, row := range h1HubFields {
+		entity, raw := row.Entity, row.Fields
+		revision := row.Revision
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["count"] != float64(100) {
+			t.Errorf("H1 count not exact per-hub delivered bumps: entity=%s count=%v want=100", entity, fields["count"])
+		}
+		count, _ := fields["count"].(float64)
+		counts += int(count)
+		for _, side := range []string{"a", "b"} {
+			for n := 1; n <= issue2564H1Fields; n++ {
+				field := fmt.Sprintf("%s%02d", side, n)
+				ack, ok := acks[entity+"/"+field]
+				if fields[field] != float64(1) || !ok {
+					lost++
+					losses = append(losses, fmt.Sprintf("entity=%s field=%s value=%v receipt=%+v header=%d", entity, field, fields[field], ack, revision))
+				}
+			}
+		}
+	}
+	t.Logf("H1_FIELD_RECEIPT acknowledgments=%d lost=%d count=%d planned_bumps=600", len(acks), lost, counts)
+	if lost != 0 {
+		t.Errorf("lost/reverted H1 acknowledged scalars=%d: %s", lost, strings.Join(losses, "; "))
+	}
+	if counts != issue2564H1Bumps {
+		t.Errorf("H1 total count=%d, want exact600", counts)
+	}
+	issue2564H1AssertBumpHistory(t, rt, runID)
+	h1AttributedMutations, err := storetest.ObserveH1AttributedMutations(context.Background(), rt.selected, runID, rt.BundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutations, writers := map[string]bool{}, map[string]int{}
+	initials := map[string]bool{}
+	for _, row := range h1AttributedMutations {
+		entity, field, kind, writer, step, before, after, event, owner := row.Entity, row.Field, row.Kind, row.Writer, row.Step, row.Before, row.After, row.Event, row.Owner
+		key := entity + "/" + field
+		var old, value any
+		if err := json.Unmarshal([]byte(before), &old); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(after), &value); err != nil {
+			t.Fatal(err)
+		}
+		if kind == "platform" && writer == "entity_initial_value" && step == "create_entity" && old == nil && value == float64(0) && event == "hub.start" {
+			if initials[key] {
+				t.Fatalf("H1 constructor repeated an initial value: %s", key)
+			}
+			initials[key] = true
+			continue
+		}
+		if _, ok := acks[key]; !ok || mutations[key] || kind != "agent" || writer == "" || owner != "swarm://hub/marker-"+field[:1] || step != "save_entity_field" || !strings.HasSuffix(event, "/hub.work") || value != float64(1) || old != nil && old != float64(0) {
+			t.Fatalf("H1 missing attribution/repeated save or platform reversion: %s kind=%s writer=%s step=%s old=%s new=%s event=%s", key, kind, writer, step, before, after, event)
+		}
+		mutations[key] = true
+		writers[entity+"/"+writer]++
+	}
+	if len(mutations) != 720 || len(writers) != 12 {
+		t.Fatalf("H1 exact agent mutation corpus=%d writers=%v", len(mutations), writers)
+	}
+	for writer, n := range writers {
+		if n != 60 {
+			t.Fatalf("H1 writer %s mutations=%d want60", writer, n)
+		}
+	}
+	// Keep the run-wide control too; the same-entity witness is checked above.
+	overlapEvidence, err := storetest.ObserveH1RunOverlap(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlap := overlapEvidence.Bumps
+	if mode == "overlap" && overlap == 0 || mode == "no_overlap" && overlap != 0 {
+		t.Fatalf("H1 actual committed overlap=%d mode=%s", overlap, mode)
+	}
+	t.Logf("H1 run-wide mutation-time overlap bumps=%d; constructor initial receipts=%d; per-agent mutation counts=%v", overlap, len(initials), writers)
+}
+
+func issue2564H1AssertSameEntityOverlap(t *testing.T, rt issue2564ServedFixture, runID, mode string) {
+	t.Helper()
+	h1SameEntityOverlap, err := storetest.ObserveH1SameEntityOverlap(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hubs, overlappingHubs, bumps := 0, 0, 0
+	for _, row := range h1SameEntityOverlap {
+		entity, route, raw, count := row.Entity, row.Route, row.Fields, row.Count
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+			t.Fatal(err)
+		}
+		hubs++
+		bumps += count
+		if count > 0 {
+			overlappingHubs++
+		}
+		t.Logf("H1_SAME_ENTITY_OVERLAP hub=%v entity=%s route=%s count_mutations_between_agent_times=%d", fields["hub_id"], entity, route, count)
+	}
+	t.Logf("H1_SAME_ENTITY_OVERLAP_TOTAL mode=%s hubs=%d overlapping_hubs=%d count_mutations=%d", mode, hubs, overlappingHubs, bumps)
+	if hubs != issue2564H1Hubs || mode == "overlap" && overlappingHubs == 0 || mode == "no_overlap" && overlappingHubs != 0 {
+		t.Errorf("H1 same-entity mutation-time overlap mode=%s hubs=%d overlapping_hubs=%d count_mutations=%d", mode, hubs, overlappingHubs, bumps)
+	}
+}
+
+type issue2564H1MutationEvidence struct {
+	id, entity, field, kind, writer, step, before, after, event, eventName, recordedAt string
+}
+
+// Read all failure witnesses before any fatal acceptance assertion can hide a
+// baseline agent acknowledgment followed by its real platform overwrite.
+func issue2564H1LogFailureWitnesses(t *testing.T, rt issue2564ServedFixture, runID string, acks map[string]issue2564H1Ack) {
+	t.Helper()
+	h1FailureMutations, err := storetest.ObserveH1FailureMutations(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents := map[string][]issue2564H1MutationEvidence{}
+	var reversions []issue2564H1MutationEvidence
+	agentMutations := 0
+	for _, row := range h1FailureMutations {
+		m := issue2564H1MutationEvidence{id: row.ID, entity: row.Entity, field: row.Field, kind: row.Kind, writer: row.Writer, step: row.Step, before: row.Before, after: row.After, event: row.Event, eventName: row.EventName, recordedAt: row.RecordedAt}
+		var before, after any
+		if err := json.Unmarshal([]byte(m.before), &before); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(m.after), &after); err != nil {
+			t.Fatal(err)
+		}
+		key := m.entity + "/" + m.field
+		if _, acknowledged := acks[key]; !acknowledged {
+			continue
+		}
+		if m.kind == "agent" && after == float64(1) {
+			agents[key] = append(agents[key], m)
+			agentMutations++
+		}
+		if m.kind == "platform" && before == float64(1) && (after == nil || after == float64(0)) {
+			reversions = append(reversions, m)
+		}
+	}
+	for _, m := range reversions {
+		key := m.entity + "/" + m.field
+		t.Logf("H1_PLATFORM_REVERSION ack=%+v agent_mutations=%+v overwrite=%+v", acks[key], agents[key], m)
+	}
+	t.Logf("H1_EARLY_MUTATION_RECEIPT acknowledgments=%d agent_mutations=%d platform_reversions=%d", len(acks), agentMutations, len(reversions))
+	h1NodeFailures, err := storetest.ObserveH1NodeFailures(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range h1NodeFailures {
+		delivery, event, name, status, reason, failure := row.Delivery, row.Event, row.Name, row.Status, row.Reason, row.Failure
+		retries := row.Retries
+		t.Logf("H1_NODE_FAILURE delivery=%s event=%s name=%s status=%s retry_count=%d reason=%s failure=%s", delivery, event, name, status, retries, reason, failure)
+	}
+	h1AttemptFailures, err := storetest.ObserveH1AttemptFailures(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range h1AttemptFailures {
+		delivery, event, name, closure, outcome, reason, failure := row.Delivery, row.Event, row.Name, row.Closure, row.Outcome, row.Reason, row.Failure
+		version := row.Version
+		t.Logf("H1_NODE_ATTEMPT_FAILURE delivery=%s event=%s name=%s claim_version=%d closure=%s outcome=%s reason=%s failure=%s", delivery, event, name, version, closure, outcome, reason, failure)
+	}
+	h1DeadLetters, err := storetest.ObserveH1DeadLetters(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range h1DeadLetters {
+		id, event, name, delivery, node, failure := row.ID, row.Event, row.Name, row.Delivery, row.Node, row.Failure
+		version, retries := row.Version, row.Retries
+		t.Logf("H1_DEAD_LETTER id=%s event=%s name=%s delivery=%s claim_version=%d retry_count=%d node=%s failure=%s", id, event, name, delivery, version, retries, node, failure)
+	}
+}
+
+func issue2564H1AssertBumpHistory(t *testing.T, rt issue2564ServedFixture, runID string) {
+	t.Helper()
+	h1BumpHistory, err := storetest.ObserveH1BumpHistory(context.Background(), rt.selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chains, events := map[string]map[int]bool{}, map[string]bool{}
+	for _, row := range h1BumpHistory {
+		entity, event, before, after := row.Entity, row.Event, row.Before, row.After
+		var old, next float64
+		if err := json.Unmarshal([]byte(before), &old); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(after), &next); err != nil {
+			t.Fatal(err)
+		}
+		if chains[entity] == nil {
+			chains[entity] = map[int]bool{}
+		}
+		if next != old+1 || old != float64(int(old)) || old < 0 || old >= 100 || events[event] || chains[entity][int(old)] {
+			t.Fatalf("H1 counter reversion/repeated effect: entity=%s event=%s %s -> %s", entity, event, before, after)
+		}
+		chains[entity][int(old)], events[event] = true, true
+	}
+	if len(events) != issue2564H1Bumps || len(chains) != issue2564H1Hubs {
+		t.Fatalf("H1 exact retained bump history=%d hubs=%d", len(events), len(chains))
+	}
+	for entity, chain := range chains {
+		if len(chain) != 100 {
+			t.Fatalf("H1 retained count chain for %s has %d steps, want100", entity, len(chain))
+		}
+	}
+}
+
+// Same canonical-continuation parsing as the read-only H3 helper, scoped here
+// so this exact source can execute on the unmodified baseline production tree.
+func issue2564H1ToolResults(value any) []any {
+	switch v := value.(type) {
+	case map[string]any:
+		if v["kind"] == "tool_continuation" {
+			results, _ := v["tool_result"].([]any)
+			return results
+		}
+		for _, child := range v {
+			if found := issue2564H1ToolResults(child); found != nil {
+				return found
+			}
+		}
+	case []any:
+		for i := len(v) - 1; i >= 0; i-- {
+			if found := issue2564H1ToolResults(v[i]); found != nil {
+				return found
+			}
+		}
+	case string:
+		var decoded any
+		if json.Unmarshal([]byte(strings.TrimPrefix(v, "Tool result:\n")), &decoded) == nil {
+			if _, isString := decoded.(string); !isString {
+				return issue2564H1ToolResults(decoded)
+			}
+		}
+	}
+	return nil
+}
+
+func issue2564H1SchemaProperty(value any, name string) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		if properties, ok := v["properties"].(map[string]any); ok && properties[name] != nil {
+			return true
+		}
+		for _, child := range v {
+			if issue2564H1SchemaProperty(child, name) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if issue2564H1SchemaProperty(child, name) {
+				return true
+			}
+		}
+	}
+	return false
+}

@@ -120,7 +120,9 @@ func TestReceiverCompositionFailureSettlementBothStores(t *testing.T) {
 			if outcomes != 1 {
 				t.Fatalf("duplicate receiver settlement: %d outcomes", outcomes)
 			}
-			waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, published.EventID, "platform", "pipeline", "dead_letter", 1)
+			// Async pipeline acknowledgement owns durable handoff, not the later
+			// receiver outcome proved above. The exact node still refuses once.
+			waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, published.EventID, "platform", "pipeline", "success", 1)
 			requireReceiverPublicReadback(t, rt, seed.RunID)
 		})
 	}

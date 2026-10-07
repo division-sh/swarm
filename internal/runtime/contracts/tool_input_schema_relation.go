@@ -18,6 +18,16 @@ func (source ToolInputSchema) ValidateAssignableTo(subject string, target ToolIn
 }
 
 func validateToolSchemaSubset(subject string, source, target ToolInputSchema) error {
+	_, sourceBranches := source.OneOfSchemas()
+	_, targetBranches := target.OneOfSchemas()
+	if sourceBranches || targetBranches {
+		// General exclusive-union implication is outside this finite proof owner.
+		_, targetEnum := target.EnumValues()
+		if source.Equal(target) || (target.Kind() == ToolSchemaAny && !targetBranches && !targetEnum && target.EqualTo() == "") {
+			return nil
+		}
+		return fmt.Errorf("%s oneOf schemas are not provably assignable unless identical", subject)
+	}
 	sourceType := string(source.Kind())
 	targetType := string(target.Kind())
 	if target.EqualTo() != "" && source.EqualTo() != target.EqualTo() {
@@ -43,15 +53,7 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema) er
 
 	switch sourceType {
 	case "string":
-		if err := validateToolSchemaIntBoundsSubset(subject+" string length", admittedToolSchemaInt(source.MinLength), admittedToolSchemaInt(source.MaxLength), admittedToolSchemaInt(target.MinLength), admittedToolSchemaInt(target.MaxLength)); err != nil {
-			return err
-		}
-		if target.Pattern() != "" && source.Pattern() != target.Pattern() {
-			return fmt.Errorf("%s source pattern %q is not provably assignable to target pattern %q", subject, source.Pattern(), target.Pattern())
-		}
-		if target.Format() != "" && source.Format() != target.Format() {
-			return fmt.Errorf("%s source format %q is not provably assignable to target format %q", subject, source.Format(), target.Format())
-		}
+		return validateToolSchemaStringSubset(subject, source, target)
 	case "integer", "number":
 		if err := validateToolSchemaFloatBoundsSubset(subject+" numeric range", admittedToolSchemaFloat(source.Minimum), admittedToolSchemaFloat(source.Maximum), admittedToolSchemaFloat(target.Minimum), admittedToolSchemaFloat(target.Maximum)); err != nil {
 			return err
@@ -75,6 +77,19 @@ func validateToolSchemaSubset(subject string, source, target ToolInputSchema) er
 	case "boolean", "null":
 	default:
 		return fmt.Errorf("%s has unsupported schema type %q", subject, sourceType)
+	}
+	return nil
+}
+
+func validateToolSchemaStringSubset(subject string, source, target ToolInputSchema) error {
+	if err := validateToolSchemaIntBoundsSubset(subject+" string length", admittedToolSchemaInt(source.MinLength), admittedToolSchemaInt(source.MaxLength), admittedToolSchemaInt(target.MinLength), admittedToolSchemaInt(target.MaxLength)); err != nil {
+		return err
+	}
+	if target.Pattern() != "" && source.Pattern() != target.Pattern() {
+		return fmt.Errorf("%s source pattern %q is not provably assignable to target pattern %q", subject, source.Pattern(), target.Pattern())
+	}
+	if target.Format() != "" && source.Format() != target.Format() {
+		return fmt.Errorf("%s source format %q is not provably assignable to target format %q", subject, source.Format(), target.Format())
 	}
 	return nil
 }
@@ -161,6 +176,22 @@ func validateToolSchemaFloatBoundsSubset(subject string, sourceMin, sourceMax, t
 }
 
 func validateToolSchemaObjectSubset(subject string, source, target ToolInputSchema) error {
+	if targetNames, constrained := target.PropertyNamesSchema(); constrained {
+		if sourceNames, sourceConstrained := source.PropertyNamesSchema(); sourceConstrained {
+			if err := validateToolSchemaSubset(subject+" propertyNames", sourceNames, targetNames); err != nil {
+				return err
+			}
+		} else {
+			if admittedToolSchemaAdditionalProperties(source).allowed {
+				return fmt.Errorf("%s source admits unconstrained property names while target constrains them", subject)
+			}
+			for _, name := range source.PropertyNames() {
+				if err := targetNames.Validate(name); err != nil {
+					return fmt.Errorf("%s source property name %q is outside target propertyNames: %w", subject, name, err)
+				}
+			}
+		}
+	}
 	sourceRequired := toolSchemaStringSet(source.RequiredProperties())
 	for _, name := range target.RequiredProperties() {
 		if _, ok := sourceRequired[name]; !ok {

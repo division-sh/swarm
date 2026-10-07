@@ -37,7 +37,7 @@ func (d engineDispatcher) DispatchCommittedPublication(ctx context.Context, valu
 		return errors.New("committed publication handoff requires its finalized outbox operation")
 	}
 	defer func() { err = errors.Join(err, operation.publicationClaim.Release(ctx)) }()
-	if operation.outcome == EventAppendExactDuplicate {
+	if operation.outcome == EventAppendExactDuplicate || operation.targetFailure {
 		return nil
 	}
 	if err := d.bus.validateContinuationPublication(operation, committed.plan.prepared.plan); err != nil {
@@ -49,7 +49,7 @@ func (d engineDispatcher) DispatchCommittedPublication(ctx context.Context, valu
 	// The same selected-store decision boundary used by finite fan-out makes
 	// the exact routes executable. The coordinator owns their bounded workers,
 	// independent receiver lifetimes, retry, restart recovery and shutdown join.
-	if err := operation.publicationClaim.Settle(ctx, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+	if _, err := operation.publicationClaim.Settle(ctx, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		return err
 	}
 	d.bus.clearPendingInternalDeliveryRoutes(operation.intent.Event.ID())

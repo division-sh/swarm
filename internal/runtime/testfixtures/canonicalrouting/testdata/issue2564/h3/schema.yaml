@@ -1,0 +1,7 @@
+name: issue2564-proof
+pins:
+  inputs: [hub.start, hub.begin, hub.close]
+connect:
+  - {event: hub.start, from: ., to: hub, resolution: select-or-create}
+  - {event: hub.begin, from: ., to: hub, resolution: select}
+  - {event: hub.close, from: ., to: hub, resolution: select}

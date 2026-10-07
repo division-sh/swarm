@@ -1,19 +1,23 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.T) {
@@ -133,64 +137,197 @@ func readLifecycleTransitionHistory(t *testing.T, rt servedControlProofRuntime, 
 func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmits))
+			finishStarted, finishRelease := make(chan struct{}, 1), make(chan struct{})
+			var finishOnce sync.Once
+			unblockFinish := func() { finishOnce.Do(func() { close(finishRelease) }) }
+			defer unblockFinish()
+			backendName := "sqlite"
+			if backend == servedparity.BackendExplicitPostgres {
+				backendName = "postgres"
+			}
+			opts, start := issue2564ServeHarness(t, backendName, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmitsUntilObserverFinish), true)
+			opts.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, _ string, evt events.Event) error {
+				if evt.Type() != "ordinary.finish" {
+					return nil
+				}
+				finishStarted <- struct{}{}
+				select {
+				case <-finishRelease:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			process, rt := start()
+			t.Cleanup(func() {
+				if code := process.stop(); code != 0 {
+					t.Errorf("loop proof serve stop=%d", code)
+				}
+			})
+			var finish servedEventPublishRPCResult
+			var staleAdmitEventID string
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create"})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, started.RunID, "waiting")
+			entityID := rt.waitEntityStage(t, started.RunID, started.RunID, "waiting")
+			readLoop := func() loopruntime.PublicActivation {
+				entity := issue2564Entity(t, rt, started.RunID, entityID)
+				if len(entity.Loops) != 1 {
+					t.Fatalf("expected one public loop: %#v", entity)
+				}
+				return entity.Loops[0]
+			}
+			snapshot := func() string {
+				stored, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), rt.selected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Compare every column of the same two business families,
+				// including all fields, config, revision and accumulator bytes.
+				business := make(map[string]storetest.SelectedForkStorageTableSnapshot, 2)
+				for _, table := range []string{"flow_instances", "entity_state"} {
+					rows, ok := stored[table]
+					if !ok || len(rows.Rows) == 0 {
+						t.Fatalf("missing lifecycle business evidence: %s", table)
+					}
+					business[table] = rows
+				}
+				raw, err := json.Marshal(business)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(raw)
+			}
+			requireEventCount := func(event string, want int) {
+				if count := len(rt.events(t, started.RunID, event)); count != want {
+					t.Fatalf("%s count=%d, want %d", event, count, want)
+				}
+			}
+			waitOtherDeliveries := func() {
+				if finish.EventID == "" {
+					rt.waitDeliveries(t, started.RunID)
+					return
+				}
+				// The known stale admit is rejected; all other work settles
+				// successfully except the one exact accepted finish delivery.
+				var last []storetest.H2NodeDeliveriesEvidence
+				stable := 0
+				for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+					var err error
+					last, err = storetest.ObserveH2NodeDeliveries(context.Background(), rt.selected, started.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					held, rejected, unsettled := 0, 0, 0
+					for _, row := range last {
+						switch {
+						case row.Event == finish.EventID && row.Name == "ordinary.finish" && row.Status == "in_progress":
+							held++
+						case row.Event == staleAdmitEventID && row.Status == "dead_letter":
+							rejected++
+						case row.Status == "pending" || row.Status == "in_progress":
+							unsettled++
+						case row.Status != "delivered":
+							t.Fatalf("unexpected observer-held delivery outcome: %#v", row)
+						}
+					}
+					all := storetest.ObserveWriterRunDelivery(t, context.Background(), rt.selected, started.RunID)
+					if held == 1 && rejected == 1 && unsettled == 0 && len(last) == all.Total && all.SettledDelivered+2 == all.Total {
+						stable++
+						if stable == 4 {
+							var event operatorread.OperatorEventFull
+							requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": finish.EventID}, &event)
+							if event.RunID != started.RunID || event.EventName != "ordinary.finish" || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "in_progress" || event.Deliveries[0].SubscriberType != "node" || event.Deliveries[0].Target.FlowID != "ordinary" {
+								t.Fatalf("held observer delivery=%#v", event)
+							}
+							return
+						}
+					} else {
+						stable = 0
+					}
+					time.Sleep(25 * time.Millisecond)
+				}
+				t.Fatalf("other deliveries did not settle with only observer held: %#v", last)
+			}
 			publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 				return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": event, "run_id": started.RunID, "source_event_id": started.EventID, "payload": payload, "idempotency_key": key})
 			}
 			publish("loop.start", "start", map[string]any{"seed": true})
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, "drafting")
-			first := readLifecycleLoop(t, rt, started.RunID, entityID)
+			rt.waitEntityStage(t, started.RunID, entityID, "drafting")
+			first := readLoop()
 			var capRepeat servedEventPublishRPCResult
 			var capPayload map[string]any
+			var ordinaryID string
 			for attempt := 1; attempt <= 2; attempt++ {
-				current := readLifecycleLoop(t, rt, started.RunID, entityID)
+				current := readLoop()
 				if current.Attempt != attempt || current.Status != loopruntime.StatusOpen {
 					t.Fatalf("loop=%#v", current)
 				}
 				payload := map[string]any{"revision_id": current.RevisionID}
 				if attempt == 2 {
-					before := lifecycleStoredSnapshot(t, rt, started.RunID)
-					publish("loop.admit", "stale-open-admit", map[string]any{"revision_id": first.RevisionID})
-					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
-					if lifecycleStoredSnapshot(t, rt, started.RunID) != before {
+					before := snapshot()
+					staleAdmitEventID = publish("loop.admit", "stale-open-admit", map[string]any{"revision_id": first.RevisionID}).EventID
+					rt.waitDeliveries(t, started.RunID)
+					if snapshot() != before {
 						t.Fatal("stale prior revision mutated open loop")
 					}
 				}
 				publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, "review")
+				rt.waitEntityStage(t, started.RunID, entityID, "review")
+				if attempt == 2 {
+					// Admit before the root becomes final. Hold actual work, not
+					// completion timing, while probing receiver-final admission.
+					finish = publish("ordinary.finish", "finish-observer", map[string]any{"seed": true})
+					select {
+					case <-finishStarted:
+					case <-time.After(servedProofPollDeadline):
+						t.Fatal("observer finish did not start")
+					}
+				}
 				capRepeat = publish("loop.repeat", fmt.Sprintf("repeat-%d", attempt), payload)
 				capPayload = payload
 				state := "drafting"
 				if attempt == 2 {
 					state = "escaped"
 				}
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, entityID, state)
-				ordinaryID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", "observed")
+				rt.waitEntityStage(t, started.RunID, entityID, state)
+				ordinaryID = rt.waitEntityStage(t, started.RunID, "", "observed")
 				var ordinary operatorread.OperatorEntityFull
 				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": started.RunID, "entity_id": ordinaryID}, &ordinary)
 				if ordinary.Fields["token"] != "ordinary" {
 					t.Fatalf("ordinary consumer=%#v", ordinary)
 				}
-				if ordinary.Fields["revision_id"] != readLifecycleLoop(t, rt, started.RunID, entityID).RevisionID {
+				if ordinary.Fields["revision_id"] != readLoop().RevisionID {
 					t.Fatalf("ordinary consumer lost next-attempt revision: %#v", ordinary)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
-				requireLifecycleEventCount(t, rt, started.RunID, "ordinary.repeated", 1)
-				requireLifecycleEventCount(t, rt, started.RunID, "loop.escaped", attempt-1)
+				waitOtherDeliveries()
+				requireEventCount("ordinary.repeated", 1)
+				requireEventCount("loop.escaped", attempt-1)
 			}
-			closed := readLifecycleLoop(t, rt, started.RunID, entityID)
+			closed := readLoop()
 			if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 || closed.RevisionID == first.RevisionID {
 				t.Fatalf("closed loop=%#v", closed)
 			}
-			receipt := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", "done")
+			receipt := rt.waitEntityStage(t, started.RunID, "", "done")
 			var received operatorread.OperatorEntityFull
 			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": started.RunID, "entity_id": receipt}, &received)
 			if receipt == entityID || received.Fields["revision_id"] != closed.RevisionID {
 				t.Fatalf("escape consumer=%#v loop=%#v", received, closed)
 			}
-			history := readLifecycleTransitionHistory(t, rt, started.RunID, entityID)
+			var config struct {
+				History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
+			}
+			flow := storetest.ObserveWriterFlow(t, context.Background(), rt.selected, started.RunID, entityID)
+			if err := json.Unmarshal(flow.Config, &config); err != nil {
+				t.Fatalf("history hydration: %v\n%s", err, flow.Config)
+			}
+			history := config.History
+			for _, record := range history {
+				if err := record.Evidence.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				if record.TransitionID != record.Evidence.ID() || record.From != record.Evidence.From() || record.To != record.Evidence.To() {
+					t.Fatalf("contradictory record: %#v", record)
+				}
+			}
 			if len(history) != 5 || history[4].TriggerEventID != capRepeat.EventID {
 				t.Fatalf("cap history=%#v", history)
 			}
@@ -198,7 +335,8 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			if !ok || compiled.FlowID() != "." || compiled.Edge().Source != "loop.escape" || compiled.Edge().LoopID != "revision" {
 				t.Fatalf("cap selected cause=%#v", compiled)
 			}
-			before := lifecycleStoredSnapshot(t, rt, started.RunID)
+			requireServedRunStatus(t, rt.Endpoint, started.RunID, "running")
+			before := snapshot()
 			duplicate := publish("loop.repeat", "repeat-2", capPayload)
 			if duplicate.EventID != capRepeat.EventID {
 				t.Fatal("duplicate reminted cap event")
@@ -211,12 +349,30 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 			if details["reason"] != "receiver_entity_terminal" || details["stage"] != "escaped" || details["flow_id"] != "." {
 				t.Fatalf("late repeat reason=%#v", details)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
-			if after := lifecycleStoredSnapshot(t, rt, started.RunID); after != before {
+			waitOtherDeliveries()
+			if after := snapshot(); after != before {
 				t.Fatalf("duplicate/stale repeat mutated lifecycle:\nbefore=%s\nafter=%s", before, after)
 			}
-			requireLifecycleEventCount(t, rt, started.RunID, "ordinary.repeated", 1)
-			requireLifecycleEventCount(t, rt, started.RunID, "loop.escaped", 1)
+			requireEventCount("ordinary.repeated", 1)
+			requireEventCount("loop.escaped", 1)
+			unblockFinish()
+			rt.waitEntityStage(t, started.RunID, ordinaryID, "done")
+			rt.waitDeliveries(t, started.RunID)
+			requireServedRunStatus(t, rt.Endpoint, started.RunID, "completed")
+			completed := snapshot()
+			terminal := requestServedJSONRPC(t, rt.Endpoint, "event.publish", map[string]any{"event_name": "loop.repeat", "run_id": started.RunID, "source_event_id": started.EventID, "payload": map[string]any{"revision_id": first.RevisionID}, "idempotency_key": "completed-stale-repeat"})
+			if terminal.Error == nil || terminal.Error.Data["code"] != "RUN_ALREADY_TERMINAL" || terminal.Error.Data["retryable"] != false {
+				t.Fatalf("completed repeat admission=%#v", terminal.Error)
+			}
+			terminalDetails, _ := terminal.Error.Data["details"].(map[string]any)
+			if terminalDetails["current_status"] != "completed" || terminalDetails["run_id"] != started.RunID {
+				t.Fatalf("completed repeat reason=%#v", terminalDetails)
+			}
+			if after := snapshot(); after != completed {
+				t.Fatalf("completed stale repeat mutated lifecycle:\nbefore=%s\nafter=%s", completed, after)
+			}
+			requireEventCount("ordinary.repeated", 1)
+			requireEventCount("loop.escaped", 1)
 		})
 	}
 }

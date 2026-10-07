@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -23,6 +24,33 @@ type ProviderCredential struct {
 	Source      string
 	EnvPresent  bool
 	EnvShadowed bool
+}
+
+// The cache belongs to one API runtime. Resolution failures leave it empty;
+// request snapshots release synchronization before any provider I/O.
+type providerCredentialCache struct {
+	mu    sync.Mutex
+	value string
+}
+
+func (c *providerCredentialCache) resolve(ctx context.Context, resolver ProviderCredentialResolver, profile llmselection.Profile) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if strings.TrimSpace(c.value) != "" {
+		return nil
+	}
+	credential, err := resolver.Resolve(ctx, profile)
+	if err != nil {
+		return err
+	}
+	c.value = credential.Value
+	return nil
+}
+
+func (c *providerCredentialCache) snapshot() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.value
 }
 
 type MissingProviderCredentialError struct {

@@ -866,6 +866,7 @@ type PreparedPublish struct {
 	providerRawSettlement providerRawSettlementAdmission
 	receiver              receiverDispatchProjection
 	committedHandoffs     []runtimedelivery.DurableHandoffProof
+	durableHandoffReady   bool
 	authorScope           runtimeauthoractivity.Scope
 	hasAuthorScope        bool
 	authorDescriptor      runtimeauthoractivity.EventDescriptor
@@ -1458,6 +1459,36 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 		_ = lease.Done()
 		return releaseOnFailure(err)
 	}
+	if eb.canTransferPreparedNodeDeliveries(prepared) {
+		receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(dispatchCtx, prepared.receiver, prepared.Event)
+		if err != nil {
+			closeDispatchContext()
+			_ = lease.Done()
+			return releaseOnFailure(err)
+		}
+		dispatchCtx = receiverCtx.Context
+		// Finish the fenced handoff before returning durable acceptance. Moving
+		// this settlement to another goroutine would retain the same unbounded
+		// post-ACK publication-session backlog; node execution is still asynchronous.
+		handoff, handoffErr := eb.transferPreparedNodeDeliveries(dispatchCtx, prepared)
+		if handoff.DeliveryHandoffCommitted() {
+			handoffErr = errors.Join(handoffErr, eb.DeliveryContinuationOwner().DispatchPublished(prepared.Event, prepared.plan.DeliveryRoutes()))
+		}
+		go func() {
+			defer closeDispatchContext()
+			defer func() { _ = lease.Done() }()
+			defer eb.notifyTestPostCommitDispatchCompleted(dispatchCtx, prepared.Event)
+			defer func() {
+				if err := closeReceiver(); err != nil {
+					eb.reportLocalDispatchFailure("publication_diagnostic_cleanup_failed", prepared.Event, err)
+				}
+			}()
+			eb.notifyTestPostCommitDispatchStarted(dispatchCtx, prepared.Event)
+			// Publication evidence retains the admitted occurrence, not its SQL claim.
+			eb.logPublished(dispatchCtx, prepared.Event, 0)
+		}()
+		return handoffErr
+	}
 	go func() {
 		defer closeDispatchContext()
 		defer func() { _ = lease.Done() }()
@@ -1466,6 +1497,29 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 		}
 	}()
 	return nil
+}
+
+func (eb *EventBus) canTransferPreparedNodeDeliveries(prepared PreparedPublish) bool {
+	if !prepared.durableHandoffReady || !prepared.requiresReceiver() || prepared.direct ||
+		prepared.receiver.completion != nil || prepared.receiver.channelExecution != nil {
+		return false
+	}
+	authority, err := eb.DeliveryAuthority()
+	return err == nil && authority.Kind() == runtimedelivery.ExecutionAuthorityNormalRuntime &&
+		eb.canTransferNodeDeliveries(prepared.Event, prepared.plan, prepared.committedHandoffs)
+}
+
+func (eb *EventBus) transferPreparedNodeDeliveries(ctx context.Context, prepared PreparedPublish) (outcome runtimepipelineobligation.SettlementOutcome, err error) {
+	defer func() { err = errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(ctx))) }()
+	if !eb.canTransferPreparedNodeDeliveries(prepared) {
+		return outcome, errors.New("committed publication is not eligible for node continuation handoff")
+	}
+	if err := eb.AcceptCommittedDeliveryHandoffs(prepared.committedHandoffs); err != nil {
+		return outcome, err
+	}
+	// Pipeline acknowledgement enables exact durable deliveries atomically. A
+	// pending node retains its continuation, not a publication SQL session.
+	return prepared.publicationClaim.Settle(ctx, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
 }
 
 func (eb *EventBus) reportLocalDispatchFailure(action string, evt events.Event, err error) {
@@ -1592,7 +1646,8 @@ func (eb *EventBus) settleCommittedPublish(ctx context.Context, claim *pipelineP
 		}
 		return nil
 	}
-	return claim.Settle(ctx, disposition)
+	_, err := claim.Settle(ctx, disposition)
+	return err
 }
 
 type deliveryRouteInterception struct {
@@ -1962,9 +2017,13 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 	for _, it := range interceptors {
 		pass, out, outcome, err := it.Intercept(ctx, evt)
 		if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
-			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
-				"event_id": evt.ID(), "event_type": string(evt.Type()),
-			}, err))
+			interceptorErr := fmt.Errorf("event interceptor failed for %s (%s): %w", evt.ID(), evt.Type(), err)
+			if _, typed := runtimefailures.As(err); !typed && !runtimefailures.IsContextInterruption(err) {
+				interceptorErr = runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
+					"event_id": evt.ID(), "event_type": string(evt.Type()),
+				}, err)
+			}
+			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, interceptorErr)
 		}
 		postCommitErr = errors.Join(postCommitErr, err)
 		result.Committed = result.Committed || outcome.Committed

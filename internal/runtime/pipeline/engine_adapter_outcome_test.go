@@ -41,28 +41,6 @@ type outcomeEnginePlanner struct {
 	finalizePanic       bool
 }
 
-type outcomeTerminalReservation struct {
-	commits, aborts int
-	commitPanic     bool
-	abortPanic      bool
-}
-
-func (r *outcomeTerminalReservation) Commit() error {
-	r.commits++
-	if r.commitPanic {
-		panic("terminal cleanup panic")
-	}
-	return nil
-}
-
-func (r *outcomeTerminalReservation) Abort() error {
-	r.aborts++
-	if r.abortPanic {
-		panic("terminal reservation abort panic")
-	}
-	return nil
-}
-
 func (p *outcomeEnginePlanner) ReleaseEnginePublications(context.Context, []runtimeengine.DurablePublicationPlan) error {
 	p.releases++
 	return nil
@@ -99,7 +77,7 @@ func TestConstructedEngineMissingAcknowledgementDoesNotFinalize(t *testing.T) {
 	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}}
 	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
 	mutation, command := outcomeConstructedMutation(t)
-	result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, nil, nil)
+	result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, nil)
 	if err == nil || !strings.Contains(err.Error(), "no acknowledged result") || result.Committed || storeOwner.calls != 1 || planner.releases != 1 || planner.finalizes != 0 {
 		t.Fatalf("result=%+v error=%v commits=%d releases=%d finalizes=%d", result, err, storeOwner.calls, planner.releases, planner.finalizes)
 	}
@@ -119,7 +97,7 @@ func TestConstructedEngineKeepsAcknowledgementThroughCleanupFailureAndPanic(t *t
 			planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}, finalizeErr: test.postErr, finalizePanic: test.panicNow}
 			owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
 			mutation, command := outcomeConstructedMutation(t)
-			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, nil, nil)
+			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, nil)
 			if !result.Committed || planner.finalizes != 1 || planner.releases != 0 || err == nil {
 				t.Fatalf("result=%+v error=%v finalizes=%d releases=%d", result, err, planner.finalizes, planner.releases)
 			}
@@ -140,7 +118,7 @@ func TestConstructedEngineKeepsAcknowledgementAfterCommitCancellation(t *testing
 	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}, finalizeErr: context.Canceled}
 	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner}, publication: planner}
 	mutation, command := outcomeConstructedMutation(t)
-	result, err := owner.commitPreparedEngineMutation(ctx, mutation, command, nil, nil)
+	result, err := owner.commitPreparedEngineMutation(ctx, mutation, command, nil)
 	if !result.Committed || !errors.Is(err, context.Canceled) || planner.finalizes != 1 || planner.releases != 0 {
 		t.Fatalf("result=%+v error=%v finalizes=%d releases=%d", result, err, planner.finalizes, planner.releases)
 	}
@@ -156,39 +134,9 @@ func TestCommittedEngineAttemptsIndependentFinalizersAfterPublicationPanic(t *te
 		store: &workflowInstanceStore{engineMutations: storeOwner},
 		state: pipelineEngineStateRepo{coordinator: &PipelineCoordinator{}}, publication: planner,
 	}
-	result, err := owner.commitPreparedEngineMutation(context.Background(), runtimeengine.EngineMutation{}, WorkflowEngineMutationCommand{}, nil, nil)
+	result, err := owner.commitPreparedEngineMutation(context.Background(), runtimeengine.EngineMutation{}, WorkflowEngineMutationCommand{}, nil)
 	if !result.Committed || planner.finalizes != 1 || planner.releases != 0 || err == nil ||
 		!strings.Contains(err.Error(), "publication cleanup panic") || !strings.Contains(err.Error(), "wakeup evidence 0 is invalid") {
 		t.Fatalf("result=%+v error=%v finalizes=%d releases=%d", result, err, planner.finalizes, planner.releases)
-	}
-}
-
-func TestCommittedEngineAttemptsIndependentFinalizersAfterTerminalPanic(t *testing.T) {
-	storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{
-		Committed:  true,
-		PostCommit: WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{}},
-		Lifecycle:  CommittedWorkflowLifecycleMutation{Wakeups: []timeridentity.WorkflowTimerActivationRef{{}}},
-	}}
-	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}}
-	terminal := &outcomeTerminalReservation{commitPanic: true}
-	owner := pipelineEngineMutationOwner{
-		store: &workflowInstanceStore{engineMutations: storeOwner},
-		state: pipelineEngineStateRepo{coordinator: &PipelineCoordinator{}}, publication: planner,
-	}
-	result, err := owner.commitPreparedEngineMutation(context.Background(), runtimeengine.EngineMutation{}, WorkflowEngineMutationCommand{}, nil, terminal)
-	if !result.Committed || terminal.commits != 1 || terminal.aborts != 1 || planner.finalizes != 1 || err == nil ||
-		!strings.Contains(err.Error(), "terminal cleanup panic") || !strings.Contains(err.Error(), "wakeup evidence 0 is invalid") {
-		t.Fatalf("result=%+v error=%v terminal=%+v finalizes=%d", result, err, terminal, planner.finalizes)
-	}
-}
-
-func TestUnacknowledgedEngineAbortsTerminalReservation(t *testing.T) {
-	terminal := &outcomeTerminalReservation{abortPanic: true}
-	owner := pipelineEngineMutationOwner{
-		store: &workflowInstanceStore{engineMutations: &missingAcknowledgementEngineOwner{}},
-	}
-	result, err := owner.commitPreparedEngineMutation(context.Background(), runtimeengine.EngineMutation{}, WorkflowEngineMutationCommand{}, nil, terminal)
-	if result.Committed || err == nil || !strings.Contains(err.Error(), "terminal reservation abort panic") || terminal.commits != 0 || terminal.aborts != 1 {
-		t.Fatalf("result=%+v error=%v terminal=%+v", result, err, terminal)
 	}
 }

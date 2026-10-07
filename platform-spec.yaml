@@ -2662,8 +2662,10 @@ contract_formats:
         non_lossy_invariant: 'Generated typed reads return the complete typed value or fail closed with an explicit typed-read
           error. They MUST NOT silently return preview, truncated, omitted, or follow-up-file placeholder shapes as the value.'
       generated_writes:
-        save_field: 'save_{entity_type}_{field}({value}) writes exactly one top-level declared field authorized by agents.yaml
-          entity_writes.<entity_type>.save or entity_writes.<flow_id>.<entity_type>.save.'
+        save_field: 'save_{entity_type}_{field}({value, op?, index?, key?}) operates on exactly one top-level declared field
+          authorized by agents.yaml entity_writes.<entity_type>.save or entity_writes.<flow_id>.<entity_type>.save.
+          Default/explicit set, list append, integer-index update and map-key set share runtime_enforcement.save_entity_field;
+          each generated branch carries the exact value/key/index types and excludes unrelated operands.'
         update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
           named-object field. The value schema is the exact declared subpath type. Runtime lowering consumes the same
           declared typed mutation plan as handlers. A missing named parent rejects; the tool never synthesizes it.'
@@ -2678,7 +2680,9 @@ contract_formats:
         create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
           expose a generic agent-facing create_entity replacement for current-entity tools.'
       generated_schema_closure: 'Generated entity-tool input and output schemas are closed recursively: additionalProperties
-        is false for object schemas, required fields are explicit, and enum values come from the shared type system.
+        is false for named-record and argument object schemas; declared maps retain their typed additionalProperties
+        value schema and exact key constraints. Exclusive operation branches use oneOf through the canonical tool-schema
+        owner and require exactly one matching branch. Required fields are explicit, and enum values come from the shared type system.
         Closure does not require every declared property: whole-entity read fields preserve progressive root omission,
         while assigned named records preserve exactly their declared required members. Provider-visible
         schemas, runtime validation, and bootverify schema-closure checks must agree. Provider schema enforcement is a first
@@ -3686,12 +3690,24 @@ runtime_enforcement:
       save_entity_field targets only declared non-envelope top-level fields
       or declared dotted subpaths on the inferred entity contract. Dotted
       paths must resolve from a declared top-level field through declared
-      named types; the operation is whole-value replacement at the resolved
-      field path, not keyed or indexed contained-state mutation. Bracket,
-      index, and dynamic path writes are rejected. Immutable fields reject
+      named types. An omitted op or explicit set replaces the resolved scalar
+      or whole value. Append adds a typed list element, retaining equal-value
+      multiplicity. Update takes an explicit zero-based, non-negative integer
+      index and replaces an existing position; out-of-range indices reject
+      atomically. Set with an explicit typed map key replaces that map entry.
+      Bracket, index, and dynamic path spellings are rejected; index and key
+      are operation operands, never inferred business identities. No keyed-list
+      matching or upsert exists. Immutable fields reject
       post-create value changes. Materialized/runtime-owned fields are rejected.
       Values and the final candidate must satisfy the shared entity contract,
       including sparse equality; no tool-local mutation interpretation exists.
+      Contention retries retain the original operation, value, key and index
+      and apply them to fresh state. An index denotes its current position,
+      not the item occupying that position in an earlier snapshot. A2 keyed
+      arrival deduplication and conflicting-payload rejection are unchanged.
+      Agent writes use the ordinary pipeline's entity lock and header revision
+      CAS; a fields-only persistence writer is not an alternative authority.
+      History retains agent identity and save_entity_field attribution.
   get_entity:
     rule: |
       get_entity returns the complete stored entity object plus its envelope.
@@ -3844,6 +3860,9 @@ handler_specification:
       positively acknowledged result remains committed despite later cancellation, panic or cleanup failure; those
       diagnostics do not authorize rollback, plan release or handler retry. Provider calls, asynchronous waits,
       descendant execution and postcommit dispatch run under neither the handler SQL transaction nor its entity lock.
+      Ordinary handler or stage-timer entry into a terminal stage does not prepare operational flow retirement or
+      transfer a retirement callback. Explicit flow termination retains its own acknowledged state mutation and
+      postcommit route cleanup, releasing the entity lock before acquiring or joining retirement authority.
       After acknowledgement, publication and lifecycle finalizers attempt every independent committed consequence;
       one diagnostic does not abandon sibling handoffs. A publication with failed activation or receiver-readiness
       prerequisites retains an exact recovery disposition and cannot be dispatched directly. A diagnostic-only
@@ -3857,6 +3876,12 @@ handler_specification:
       reconstruction of whether cleanup succeeded. Engine-owned process-local internal-recipient staging is only
       used by the engine's deferred handoff; ordinary and inbound publication dispatch from their prepared route
       and do not populate that engine-only cache.
+      A route rejection settled in the publication transaction remains terminal through ordinary, deferred,
+      committed-continuation and fan-out dispatch. Each handoff carries that exact prepared rejection; dispatch
+      MUST NOT execute recipients or write a second pipeline acknowledgment for the already settled publication.
+      A declared create collision discovered while preparing an engine mutation rejects that mutation with
+      platform.conflicting_duplicate / flow_instance_already_exists before any business effects commit, matching
+      the constructor's commit-time conflict refusal. It MUST NOT become a successful handler with a failed output.
       An activity-request event admitted in the selected-store mutation is carried unchanged through immediate or
       deferred post-commit dispatch. Consumers use the committed publication's exact event, including its timestamp
       and route projection; they MUST NOT reconstruct a second event with the same ID after COMMIT or retry a failed
@@ -4114,6 +4139,13 @@ handler_specification:
               With `key`, appends `value` to a list stored as the map value or
               under a declared nested list field of the map value type. The list
               item is type-checked against the declared list element type.
+          map_key_normalization: >
+            Whole-map assignment and contained operations consume the same
+            declared key normalizer. Nonempty text keys retain their exact
+            spelling; enum and UUID keys retain their typed canonical form.
+            If distinct supplied properties normalize to the same map key,
+            reject the entire assignment, even for equal values. Map iteration
+            order must never select a replacement winner.
           list_operations:
             append: >
               Without `key`, `target` must resolve to a declared list field on
@@ -6220,6 +6252,30 @@ engine:
         Y. The platform can process thousands of entities simultaneously.
       entity_lock: 'The platform acquires an entity-level lock before handler execution. Lock scope: one entity, one handler.
         Released after commit or rollback. Lock mechanism is implementation-specific (DB row lock, in-memory mutex, etc.).'
+      live_writer_contract: >-
+        Ordinary handlers, agent field operations, accepted stage-timer transitions, gate/card mutations and explicit
+        instance termination share the existing per-entity lock from their first mutable-state read through guarded
+        commit. Evaluation carries its complete R1 header, fields, lifecycle/config and fieldless projection unchanged
+        into preparation. Commit compares the canonical flow_instances revision with that R1 revision; no second read
+        may substitute a newer revision for an older draft. Header and fields counters need not be globally equal.
+        Recognized precommit state contention reevaluates inside the same claimed attempt, without charging delivery
+        retry_count or producing a dead letter. Source, run, claim, generation and ownership refusals remain strict.
+        The lock is released before recursive dispatch, joins or provider waits. Run-level control freezing remains
+        a run-before-instance SQL-locked operation with header CAS, not a stale business-field replacement.
+      stage_deadline_write_ordering: >-
+        A stage deadline advances the stage but does not by itself cancel accepted agent work. A late agent field
+        operation is evaluated against current state and kept; its starting stage is not write authorization.
+        Explicit authored cancellation is a separate lifecycle contract. Timer publication and a persisted fired row
+        are not acknowledgement of a stage transition: the exact accepted occurrence remains reachable through live
+        retry and restart until transition handling is acknowledged. No replacement timer event or reset of fired
+        history grants new occurrence authority.
+      interrupted_pipeline_admission: >-
+        Before an acknowledged effect or explicit disposition, a pipeline check interrupted only by context
+        cancellation/deadline retains its exact claimed obligation for recovery, even when the caller's outer
+        context remains live. Interception must not convert that interruption into an internal terminal failure.
+        This grants no domain authority: recovery reruns ordinary admission. Typed refusals, independent joined
+        failures and explicit dispositions retain their own semantics; acknowledged work never replays because
+        cleanup was interrupted.
       agent_concurrency: Agent deliveries are asynchronous. Live dispatch and standing recovery enter one per-agent
         claimed-attempt executor before claiming work. That executor processes admitted obligations sequentially from exact
         claim through handler execution, deterministic emitted-output publication, required diagnostics, and settlement;
@@ -6299,8 +6355,8 @@ engine:
         and decision history for post-mortem analysis.
       behavior:
       - Entity stops accepting new events (handlers reject events for terminal entities)
-      - Timers are cancelled
-      - Agent sessions are terminated
+      - Stage changes, including entry to a terminal stage, do not cancel accepted agent work or discard late results. A stage deadline only advances the stage.
+      - Stage movement does not itself retire the flow instance or its agents. Explicit termination and work-derived resource cleanup retain their existing ownership and validation.
       - All persisted state remains in the database
       - Entity remains queryable through explicit read/query surfaces; for normal agents this means generated current-entity
         reads, while legacy query_entities remains a trusted runtime-internal compatibility surface.
@@ -6744,7 +6800,7 @@ engine:
             - boundary: closed operation owners below internal/store/internal
               reason: Non-backend operation owners may open one transaction through a private backend root and consume exact backend row-family helpers inside that operation, but their exported method sets remain typed and raw-authority-free.
             - boundary: private bounded fixture operations below internal/store/internal
-              reason: Named storage observations and hostile faults consume the original selected coordinator. Public storetest bridges return detached facts or typed outcomes, never handles, arbitrary callbacks, selectors or reconstructed coordinators. Backend qualification and PostgreSQL sandbox infrastructure are distinct roles.
+              reason: Named storage observations and hostile faults consume the original selected coordinator. Public storetest bridges return detached facts or typed outcomes, never handles, arbitrary callbacks, selectors or reconstructed coordinators. Executable-delivery writer and H1/H2 evidence use the closed delivery read-projection owner; pipeline mutation-history witnesses consume its fixed delivered-event join through a named helper in the original read transaction, preserving their predicates and detached fields. Backend qualification and PostgreSQL sandbox infrastructure are distinct roles.
               notify_all_children_item_metadata_observation: Notify-all-children witnesses observe committed outcome-to-event rows through the original selected native read coordinator, retaining the event/outcome run equality, exact triggering source event and fixed child event name, all ordinal ties, native payload bytes and driver timestamp rendering. They separately read latest stored entity fields by exact concrete flow_instance ordered by updated_at with LIMIT 1, without adding a run or eligibility filter. Existing payload decoding, ordinal/account checks, metadata comparison, poll bounds and replay assertions stay with their consumers. Six whole-store diagnostic sections retain their exact columns, scopes and order as independent original-owner reads; the delivery section delegates its fixed physical query to the closed executable-delivery projection owner, never a parallel runtime-adapter SQL owner. A failed section is explicit, returns no partial section and cannot poison later sections or grant runtime success. Closed fault wrappers project only their original embedded native owner; no raw-handle map, reconstructed coordinator, SQL, table, predicate or callback authority crosses the public fixture boundary.
               fork_receiver_execution_faults: The active fork-receiver header fault changes only current_state from active to done for the exact run and entity, requiring exactly one row without adding a path filter or workflow transition. The exact delivery-claim age fault consumes the actual held opaque claim and changes only the original UTC now-minus-two-hours started/created and now-minus-one-hour updated/expiry cuts. Its obligation predicate retains delivery, run, version and in-progress status; its attempt predicate retains delivery, version, token and open-marker. Both statements require one row in a single original unrevisioned native write transaction, and any mismatch rolls back the complete fault. Neither operation changes business fields, revisions, companions, status, history or claim identity; real ClaimDelivery alone mints a successor. Public fixture bridges are SQL-free error-only operations, not selectors, raw getters, reconstructed coordinators or mutation-admission overrides.
               conformance_storage_column_observation: Conversation, runtime-log, mutation and delivery conformance preflights check their fixed canonical column inventories through one original admitted native read transaction per surface, without exposing a public table/column selector or a raw getter. Qualified zero-row queries prove PostgreSQL public-schema and SQLite main-store columns are available without introducing a post-admission catalog interpreter; table-qualified columns prevent SQLite string-literal fallback from accepting a missing identifier. A missing column names its exact canonical table and column, and cancellation or unavailable ownership fails closed. These witnesses neither bootstrap a second store nor substitute for canonical schema admission or actual conversation, diagnostic, mutation and delivery workloads. The obsolete generic table-column selector is removed rather than preserved as another storage authority.
@@ -6938,6 +6994,7 @@ engine:
           - A SQLite COMMIT error is not proof of rollback. Only an actual SQLite busy/locked noncommit result, with completed cleanup or disposal and no cleanup error, may enter the existing busy retry policy. Uncertain commit and cleanup failure never authorize callback replay. Subsequent unrelated reads and writes must not inherit an abandoned transaction.
           - SQLite read and write boundaries preserve caller cancellation or deadline identity alongside callback and genuine cleanup errors, including when database/sql automatic rollback wins before Commit and reports sql.ErrTxDone. Cancellation never authorizes a read retry or revives a completed transaction.
           - PostgreSQL uses an unmodified upstream driver. Existing private transaction and retained-session owners, not driver cancellation attribution, own admitted SQL, result drain and cleanup. Observable callback, query, commit, rollback and disposal errors remain errors; SQLSTATE, text or concurrent context cancellation never erase independent evidence. No custom native operation scope, cancellation worker, socket wrapper or mandatory transport timeout is required.
+          - PostgreSQL mutation-protocol fence acquisition may retry a serialization conflict only after the native owner proves an explicit pre-COMMIT rollback and clean connection/session settlement, and only before any domain writer has run. A fresh transaction reacquires current ordering and authority and discards attempt-local evidence; it preserves the fixed historical cut and operation identity and consumes no business retry budget. Persistent fence contention remains caller-cancellable with bounded backoff. Raw SQLSTATE40001, an unacknowledged result, sql.ErrTxDone, an independent cleanup error, revoked possession, domain/finalization failure or uncertain COMMIT never authorizes this retry. Native arbitrary callbacks, acknowledged materialization, attachments, provider effects and whole public fork operations are not replayed.
           - Graceful process shutdown closes new-work admission and drains already-admitted closed persistence operations while their dependencies remain available. Shutdown is not automatically explicit cancellation of each operation. Only the admitted SQL/result/cleanup unit consumes its owner's non-cancellable SQL context; arbitrary provider/network callbacks, new downstream work and callback replay are not authorized by that context.
           - Delivery-continuation retirement joins an admitted scan-page, held-delivery observation or standing-disposition SQL read before settling its worker lifetime. The coordinator checks logical cancellation or retirement before each read and after it drains, retaining independent errors and refusing new pages or dispatch after retirement. This does not detach the dispatcher or change caller-cancellable standalone read APIs.
           - Explicit operation cancellation refuses admission and is rechecked before COMMIT admission. A canceled operation rolls back before that point; after COMMIT admission actual acknowledged outcome or honest uncertainty governs. Internal SQL statements belong to the admitted unit rather than creating per-statement cancellation scopes. Failed BEGIN, rollback, panic and result cleanup remain owned until completion or exact-session disposal, before pool release or a successor operation.
@@ -7513,6 +7570,16 @@ engine:
         backend_selection_config_discovery: '#1128'
         model_alias_runtime_migration: '#1129'
         docs_config_secrets_cleanup: '#1130'
+      api_credential_cache:
+        owner: internal/runtime/llm.ProviderCredentialResolver and runtime-local providerCredentialCache
+        applies_to: [anthropic, openai_compatible, openai_responses]
+        rule: >-
+          Concurrent sessions share only a safely synchronized successful credential cache within their owning
+          API runtime. Initialization and every request-header read consume the same cache owner; requests use
+          an immutable value snapshot and release cache synchronization before HTTP I/O or session/tool execution.
+          Failed or canceled resolution does not permanently populate the cache and a later call may resolve again.
+          The existing resolver owns source/precedence and typed missing/read failures. No process-global credential,
+          environment fallback, test prewarming, serialized first-turn execution or credential-rotation policy change.
       canonical_selector:
         cli_flag: --backend
         config_key: llm.backend
@@ -10209,6 +10276,9 @@ tool_model:
           field: string — required declared top-level field name or declared dotted subpath. Must resolve on the inferred
             entity contract and must not be an envelope field.
           value: any — required, the value to write
+          op: string — optional set (default), append, or update; generated plain/MCP schemas use the same typed branches
+          index: integer — required only for list update; zero-based existing position in fresh current state
+          key: any — optional only for set on a map; explicit key must satisfy the declared map key type
         output:
           entity_id: string
           field: string
@@ -10272,8 +10342,11 @@ tool_model:
     usage_hints: Provider-facing tool definitions for platform-owned delivered tools and generated emit tools MUST include
       the shared platform usage guidance. Generated emit tool usage guidance MUST describe concrete JSON payload arguments,
       not CEL or workflow expression arguments. Boot verification reports this through platform_tool_usage_hints.
-    generated_schema_closure: Generated platform-owned emit/entity tool schemas MUST be recursively closed, require every
-      declared property, reject undeclared required properties, and declare non-empty enums. Boot verification and workflow
+    generated_schema_closure: Generated platform-owned emit/entity tool schemas MUST be recursively closed, explicitly
+      declare required properties, reject undeclared required properties, and declare non-empty enums. Named records and
+      argument objects reject unknown properties; declared maps preserve typed value and key constraints. Generated entity
+      operation schemas use exclusive oneOf branches with only their applicable value/key/index operands. Required-member
+      semantics come from the shared type owner, not a blanket requirement for every declared property. Boot verification and workflow
       validation report this through generated_tool_schema_closure and consume the shared runtime tool-schema owner.
       Every declared emit is checked through the same exact actor/schema admission used by runtime generation. A missing
       schema or unresolved type is a validation error even when generation omits the unavailable tool; another flow's
@@ -19968,7 +20041,11 @@ run_model:
         exact resolved typed point: positive source revision, kind, and event ID if and only if event-kind. Deployment
         revision evidence has no event ID; an invented event or empty UUID is forbidden. Child origin, selected binding,
         source revision and permanent operation result must agree. Existing deployment-feed recovery admission and
-        historical/deferred-work refusals are unchanged.'
+        historical/deferred-work refusals are unchanged. Source-advancement classification covers every canonical
+        revision family; fan_out_obligations maps to source_fan_out_obligations_advanced_after_fork_point.
+        Only facts strictly after the fixed frontier are advancement. These facts remain selected branch lineage,
+        never copied executable post-frontier work; generic activation still refuses source advancement and unknown
+        revision families remain a hard corruption/admission failure.'
     selected_contract_source_advanced_conversation_history_policy: 'Mutating selected-contract fixed-event execution
       may consume runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy to classify
       source agent_sessions, agent_turns, and agent_conversation_audits committed after the selected revision as source-advanced branch-divergence
@@ -23414,7 +23491,7 @@ test_specification:
       - catalog.runtime.agent_instance_materialization
       - catalog.runtime.agent_turn_completion
       - catalog.runtime.agent_emission_delivery
-      - catalog.runtime.agent_terminal_teardown
+      - catalog.runtime.agent_final_stage_retention
     - source: tests/tier11-flow-composition/test-numeric-data-scatter-park
       executor: github.com/division-sh/swarm/internal/releasee2e
       proves:
@@ -23889,10 +23966,10 @@ test_specification:
         status: active
         required_disposition: runtime
         scope: Exact same-instance and cross-flow delivery of agent-emitted events with complete payload and structured target identity.
-      catalog.runtime.agent_terminal_teardown:
+      catalog.runtime.agent_final_stage_retention:
         status: active
         required_disposition: runtime
-        scope: Terminal child lifecycle convergence with no stale concrete agent, active work, failed delivery, or dead letter.
+        scope: Ordinary final-stage entry retains each exact run-scoped scout and template agent idle, with complete public-list multiplicity and no unsettled work, failed delivery, or dead letter. Explicit termination and process shutdown retain separate cleanup proof.
   deterministic_scenario_runner:
     id: testing.deterministic_scenario_runner_source_authority
     promoted_by: '#1646'
@@ -39329,6 +39406,35 @@ durable_pipeline_processing_obligation_authority:
       exact current publication-purpose claim inside the event and initial-side-effect transaction. Missing, foreign,
       wrong-purpose, stale, or released claims reject the whole operation before commit. Closed diagnostic-direct
       named operations are non-executable and are the only claim-free event commits.
+    asynchronous_delivery_handoff: >
+      A normal-runtime asynchronous publication may transfer downstream node execution to the existing persisted
+      delivery-continuation owner after acknowledged event commit and complete receiver activation/readiness.
+      The shared committed-node handoff decision requires nonempty node-only routes, one exact store-issued proof
+      per event/route delivery identity under the current execution generation, coverage of every live executable
+      recipient, and no event-wide interceptor. Runtime control/diagnostic and selected-replay events retain their
+      coordination contract; node routes alone do not authorize skipping timer, decision or activity work.
+      The selected-store current publication claim atomically commits its pipeline receipt and executable delivery
+      handoff through the existing settlement owner before its independent private session retires and asynchronous
+      publication returns. Only the short database handoff is joined, not downstream node/child/provider execution;
+      deferring this handoff itself would retain the same unbounded already-acknowledged session backlog. Pipeline
+      publication retains its ordinary initial asynchronous node attempt through the same current-generation
+      delivery-continuation owner and configured dispatcher used by recovery; unrelated recovery work is not a
+      prerequisite for launching that attempt. Initial dispatch and recovery compete at the same exact continuation
+      election and acquire fresh store claims before execution, with one shared dispatch-result interpretation.
+      Only the current settlement invocation's acknowledged result permits its initial dispatch. A spent or stale
+      claim returns no new handoff authority; an earlier acknowledgement is not reusable process admission.
+      A published diagnostic may finish after asynchronous return only in the original admitted receiver occurrence:
+      retain exact source/run/event projection, join it during quiescence and retirement, and never retain the SQL
+      publication claim for diagnostic persistence. This does not authorize an unowned logging tail or a second queue.
+      Pipeline acknowledgement means durable handoff, never recipient success; pending deliveries retain their own completion
+      blockers and acquire fresh exact delivery claims before execution. No new queue, pool enlargement, arbitrary
+      session group or recursive global permit is introduced. The existing fan-out group consumes the same exact
+      coverage decision without changing its finite membership/session contract. Synchronous dispatch and bounded
+      delivery-tree joins retain their completion/error semantics, as do direct publication, channel execution leases,
+      selected execution, mixed recipients and unfinished event-wide coordination. Missing proofs or failed receiver
+      finalization cannot transfer execution. A crash before transfer leaves canonical pipeline recovery; a crash after
+      acknowledged transfer leaves canonical delivery recovery. A committed handoff survives cleanup errors and request
+      cancellation; neither a successful callback nor a missing connection substitutes for durable acknowledgement.
     publication_group:
       owner: internal/runtime/pipelineobligation.Store through the selected pipelinepersistence owner
       admission: >
@@ -40088,6 +40194,7 @@ agent_lifecycle_authority:
           owner: one EventBus-owned closed receiver projection plus the explicit normal or selected-contract receiver execution variant
           rule: Before event-wide Pipeline policy, exact node-route policy, agent delivery, or internal-subscription delivery executes, EventBus constructs a value-empty receiver context from typed event, run, source, lineage, route, reply, occurrence, and continuation facts plus receiver-owned execution state. Prepared publication retains no raw publisher context. Fresh commit, persisted replay, engine outbox, and delivery-continuation recovery consume the same projection.
           cancellation: Caller cancellation may bound admission and waiting before transfer. Accepted work follows the receiver runtime/fork occurrence and exact routed-delivery lifetime; ending the publisher or outer dispatch context cannot cancel accepted receiver work.
+          nested_dispatch_lifetime: Synchronous committed follow-up preserves the exact receiver's opaque accepted work admission through each empty-value receiver projection. Continuation-owner retirement cancels that owned execution before joining it; nested dispatch cannot silently replace that lifetime with unrelated background work. Independently queued receivers still acquire their own exact routed-delivery work admission. Admitted SQL cleanup retains its existing uncancelled drain and join obligations.
           execution_mode: events.Event.ExecutionMode is causal truth for Pipeline work. At each selected-contract receiver handoff, EventBus copies the fixed selected authority identity, fences, and admission and binds that copy to the event's exact causal mode. A container-level default mode cannot reject mixed live/mock source events or override their mode; authority owner drift still fails closed.
           rejection: Arbitrary values and publisher Authority, Admission, Controller, execution mode, runtime lineage, or equivalent execution identity never cross the handoff. Missing or conflicting receiver-owned state fails closed; key blacklists, context-value delegation, authority shadowing, and compatibility fallbacks are forbidden.
   transitions:

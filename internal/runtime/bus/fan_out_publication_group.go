@@ -271,7 +271,8 @@ func (eb *EventBus) takeCommittedOutboxOperation(committed CommittedEnginePublic
 	if operation.publicationClaim == nil || operation.publicationClaim != committed.plan.prepared.publicationClaim ||
 		!reflect.DeepEqual(actual, want) ||
 		!reflect.DeepEqual(operation.intent.Context, committed.plan.intent.Context) ||
-		operation.outcome != committed.committed.AppendOutcome {
+		operation.outcome != committed.committed.AppendOutcome ||
+		operation.targetFailure != committed.plan.prepared.targetFailure {
 		return pendingOutboxOperation{}, false, errors.New("pending operation differs from exact committed publication")
 	}
 	if len(operations) == 1 {
@@ -290,7 +291,7 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 			err = errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 		}
 	}()
-	if operation.outcome == EventAppendExactDuplicate {
+	if operation.outcome == EventAppendExactDuplicate || operation.targetFailure {
 		return nil
 	}
 	if operation.outcome != EventAppendInserted {
@@ -317,7 +318,8 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 		if err := settlement.flushBeforeNestedPublication(); err != nil {
 			return errors.Join(dispatchErr, err)
 		}
-		return errors.Join(dispatchErr, claim.Settle(ctx, disposition))
+		_, settleErr := claim.Settle(ctx, disposition)
+		return errors.Join(dispatchErr, settleErr)
 	}
 	if err := settlement.collect(claim, disposition); err != nil {
 		return errors.Join(dispatchErr, err)
@@ -356,22 +358,11 @@ func (eb *EventBus) canTransferFanOutDelivery(operation pendingOutboxOperation, 
 	if operation.outcome != EventAppendInserted || len(operation.deliveryHandoffs) == 0 {
 		return false
 	}
-	routes := plan.DeliveryRoutes()
-	if !plan.TargetFailure.Empty() || len(routes) != len(operation.deliveryHandoffs) {
-		return false
-	}
-	if !nodeRoutesCoverLiveRecipients(plan.LiveRecipients, routes) {
-		return false
-	}
-	eventInterceptors, _ := splitDeliveryRouteInterceptors(eb.interceptorsSnapshot())
-	return len(eventInterceptors) == 0
+	return eb.canTransferNodeDeliveries(operation.intent.Event, plan, operation.deliveryHandoffs)
 }
 
 func nodeRoutesCoverLiveRecipients(recipients []RoutePlanLiveRecipient, routes []events.DeliveryRoute) bool {
 	for _, recipient := range recipients {
-		if recipient.PersistAsDelivery {
-			continue
-		}
 		if recipient.Recipient.IsAgent() {
 			return false
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
@@ -22,10 +23,12 @@ import (
 
 type preservedTimerMutationWitness struct {
 	WorkflowEngineMutationOwner
-	test    *testing.T
-	fault   string
-	calls   int
-	lastErr error
+	test     *testing.T
+	fault    string
+	calls    int
+	lastErr  error
+	staleErr error
+	onStale  func()
 }
 
 var errPreservedTimerCleanup = errors.New("acknowledged timer cleanup failure")
@@ -37,7 +40,9 @@ func (w *preservedTimerMutationWitness) CommitWorkflowEngineMutation(ctx context
 	}
 	switch w.fault {
 	case "stale_revision":
-		command.State.ExpectedRevision++
+		if w.calls == 1 {
+			command.State.ExpectedRevision++
+		}
 	case "changed_fields":
 		command.State.Fields = json.RawMessage(`{"marker":"unapproved"}`)
 	case "changed_config":
@@ -72,6 +77,15 @@ func (w *preservedTimerMutationWitness) CommitWorkflowEngineMutation(ctx context
 		command.DeliverySuccess.Claim = foreign
 	}
 	result, err := w.WorkflowEngineMutationOwner.CommitWorkflowEngineMutation(ctx, command)
+	if w.fault == "stale_revision" && w.calls == 1 {
+		w.staleErr = err
+		if result.Committed || err == nil {
+			w.test.Fatal("stale timer attempt committed")
+		}
+		if w.onStale != nil {
+			w.onStale()
+		}
+	}
 	if w.fault == "committed_cleanup" && result.Committed {
 		err = errors.Join(err, errPreservedTimerCleanup)
 	}
@@ -117,6 +131,11 @@ func VerifyMutationFreeAcceptedEventTimersBothStoresForTest(t *testing.T, factor
 					}
 					before := load()
 					witness := &preservedTimerMutationWitness{WorkflowEngineMutationOwner: pc.workflowStore.engineMutations, test: t, fault: fault}
+					witness.onStale = func() {
+						if !reflect.DeepEqual(before, load()) || len(listTimerCauseReplayActivationsForTest(t, pc.workflowStore.timerActivations, ctx, runID)) != 0 {
+							t.Fatal("stale timer attempt changed construction or leaked an activation")
+						}
+					}
 					pc.workflowStore.engineMutations = witness
 					publish := func(name string, offset time.Duration) events.Event {
 						t.Helper()
@@ -132,13 +151,20 @@ func VerifyMutationFreeAcceptedEventTimersBothStoresForTest(t *testing.T, factor
 						t.Fatal("accepted-event reaction or refusal changed exact header/field/stage-entry bytes")
 					}
 					rows := listTimerCauseReplayActivationsForTest(t, pc.workflowStore.timerActivations, ctx, runID)
-					if fault != "none" && fault != "committed_cleanup" {
+					if fault != "none" && fault != "committed_cleanup" && fault != "stale_revision" {
 						if len(rows) != 0 || witness.calls != 1 {
 							t.Fatalf("refusal leaked timers or replayed settlement: rows=%+v calls=%d", rows, witness.calls)
 						}
 						return
 					}
-					if len(rows) != 1 || rows[0].Status != workflowTimerStatusActive || witness.calls != 1 {
+					armCalls := 1
+					if fault == "stale_revision" {
+						armCalls = 2
+						if !runtimefailures.IsStateContention(witness.staleErr) {
+							t.Fatalf("stale timer attempt did not retain exact contention: %v", witness.staleErr)
+						}
+					}
+					if len(rows) != 1 || rows[0].Status != workflowTimerStatusActive || witness.calls != armCalls {
 						t.Fatalf("accepted-event timer not committed exactly once: %+v calls=%d error=%v", rows, witness.calls, witness.lastErr)
 					}
 					assertSettled := func(event events.Event) {
@@ -157,18 +183,18 @@ func VerifyMutationFreeAcceptedEventTimersBothStoresForTest(t *testing.T, factor
 					}
 					assertSettled(arm)
 					assertSettled(publish("work.noted", 2*time.Minute))
-					if witness.calls != 1 {
+					if witness.calls != armCalls {
 						t.Fatal("no-reaction event acquired lifecycle commit authority")
 					}
 					assertSettled(publish("timer.cancel", 3*time.Minute))
 					rows = listTimerCauseReplayActivationsForTest(t, pc.workflowStore.timerActivations, ctx, runID)
-					if len(rows) != 1 || rows[0].Status != workflowTimerStatusCancelled || witness.calls != 2 || !reflect.DeepEqual(before, load()) {
+					if len(rows) != 1 || rows[0].Status != workflowTimerStatusCancelled || witness.calls != armCalls+1 || !reflect.DeepEqual(before, load()) {
 						t.Fatalf("cancel changed construction or repeated state entry: %+v calls=%d", rows, witness.calls)
 					}
 					if err := f.Publish(runtimecorrelation.WithInboundEvent(ctx, arm), arm); err != nil {
 						t.Fatal(err)
 					}
-					if got := listTimerCauseReplayActivationsForTest(t, pc.workflowStore.timerActivations, ctx, runID); !reflect.DeepEqual(rows, got) || !reflect.DeepEqual(before, load()) || witness.calls != 2 {
+					if got := listTimerCauseReplayActivationsForTest(t, pc.workflowStore.timerActivations, ctx, runID); !reflect.DeepEqual(rows, got) || !reflect.DeepEqual(before, load()) || witness.calls != armCalls+1 {
 						t.Fatal("receipt replay resurrected cancelled timer or mutated construction")
 					}
 				})

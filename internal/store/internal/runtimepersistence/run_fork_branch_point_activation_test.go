@@ -214,6 +214,12 @@ func newBranchPointFixture(t *testing.T, backend eventRecordContractBackend, kin
 	if kind == runfork.RunForkPointEvent {
 		return newConstructedGateFixtureForFields(t, backend, true, true)
 	}
+	f, _ := newBranchPointDeploymentFixture(t, backend, nil)
+	return f
+}
+
+func newBranchPointDeploymentFixture(t *testing.T, backend eventRecordContractBackend, input []byte) (forkContentionFixture, receiverConfigActivationFixture) {
+	t.Helper()
 	opened := backend.open(t)
 	construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, map[string]string{
 		"schema.yaml": "name: branch-revision\nstages:\n  pending: {}\n  later: {final: true}\npins:\n  outputs:\n    - records.ready\n",
@@ -249,7 +255,7 @@ func newBranchPointFixture(t *testing.T, backend eventRecordContractBackend, kin
 	}
 	imported, err := data.ExecuteDataSourceOperation(construction.ctx, durabledata.SourceCommand{
 		Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: catalog.BundleHash,
-		Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte{},
+		Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: input,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +294,7 @@ func newBranchPointFixture(t *testing.T, backend eventRecordContractBackend, kin
 		_, err := store.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: f.state})
 		return err
 	}
-	return f
+	return f, construction
 }
 
 func assertSelectedBranchCleanupCount(t *testing.T, db *sql.DB, forkRunID string, want int) {

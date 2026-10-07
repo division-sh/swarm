@@ -1,0 +1,24 @@
+hub-node:
+  execution_type: system_node
+  subscribes_to: [hub.start, hub.bump, hub.close]
+  event_handlers:
+    hub.start:
+      data_accumulation:
+        writes:
+          - {source_field: hub_id, target_field: hub_id}
+          - {target_field: count, value: 0}
+          - {target_field: c1, value: 0}
+          - {target_field: c2, value: 0}
+    hub.bump:
+      data_accumulation:
+        writes: [{target_field: count, value: entity.count + 1}]
+      rules:
+        - id: in_s1
+          when: _entity.current_state == 's1'
+          data_accumulation:
+            writes: [{target_field: c1, value: entity.c1 + 1}]
+        - id: in_s2
+          else: true
+          data_accumulation:
+            writes: [{target_field: c2, value: entity.c2 + 1}]
+    hub.close: {advances_to: closed}

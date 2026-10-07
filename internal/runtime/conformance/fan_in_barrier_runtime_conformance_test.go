@@ -44,6 +44,7 @@ import (
 
 type fanInBarrierConformanceStore interface {
 	agentfixture.Store
+	runtimemanager.ManagerPersistence
 	conformanceDurableEventBusStore
 	runtimebus.CommitPublicationOwner
 	runtimepipeline.WorkflowPersistenceOwner
@@ -869,7 +870,7 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 		DeliveryStore:      backend,
 		LifecycleStore:     lifecycle,
 		PersistenceRoles:   conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
-	})
+	}, backend)
 	ctx := runtimecorrelation.WithRuntimeInstanceID(baseCtx, authorActivityTestRuntimeInstanceID)
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)

@@ -15,6 +15,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
@@ -166,6 +167,8 @@ func (r WorkflowEngineStateRecord) Validate() error {
 
 type WorkflowEngineMutationCommand struct {
 	State                   WorkflowEngineStateRecord
+	Writer                  *mutationlog.Writer
+	WriterSource            correlation.SourceArtifactFact
 	AcceptedEvent           *workflowlifecycle.Effect
 	AcceptedEventSource     correlation.SourceArtifactFact
 	GateRouteAdmissionRunID string
@@ -249,6 +252,22 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 	runID := strings.TrimSpace(c.State.Identity.RunID)
 	if err := c.State.Validate(); err != nil {
 		return err
+	}
+	if c.Writer != nil {
+		if c.Writer.Type != "agent" || strings.TrimSpace(c.Writer.ID) == "" || c.Writer.HandlerStep != "save_entity_field" || !c.State.Transition.UpdatesState() || c.State.Status != "active" {
+			return fmt.Errorf("entity tool mutation requires exact agent writer attribution")
+		}
+		if err := c.WriterSource.Validate(); err != nil {
+			return fmt.Errorf("entity tool mutation source: %w", err)
+		}
+		if c.AcceptedEvent != nil || c.GateRouteAdmissionRunID != "" || len(c.ProposedEffects) != 0 || len(c.Publications) != 0 ||
+			c.RouteRetirement != nil || c.DeliverySuccess != nil || c.PostCommit.FlowDeactivation != nil ||
+			c.FanOutIntent != nil || c.FanOutBarrier != nil || c.FanOutBarrierCompletion != nil ||
+			c.Lifecycle.StageEntry != nil || len(c.Lifecycle.Timers) != 0 || len(c.Lifecycle.Schedules) != 0 || len(c.Lifecycle.GateCards) != 0 {
+			return fmt.Errorf("entity tool attribution permits only the exact field mutation")
+		}
+	} else if c.WriterSource != (correlation.SourceArtifactFact{}) {
+		return fmt.Errorf("entity tool source requires its attributed writer")
 	}
 	if err := c.Lifecycle.ValidateState(c.State); err != nil {
 		return fmt.Errorf("workflow engine lifecycle plan: %w", err)
@@ -347,6 +366,9 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		}
 	}
 	if deactivation := c.PostCommit.FlowDeactivation; deactivation != nil {
+		if c.State.Status != "terminated" {
+			return fmt.Errorf("stage mutation cannot declare operational flow retirement")
+		}
 		identity := deactivation.Identity.Normalize()
 		if identity.Validate() != nil || identity != c.State.Identity || strings.TrimSpace(deactivation.EntityID) != c.State.EntityID || strings.TrimSpace(deactivation.NextState) == "" {
 			return fmt.Errorf("workflow engine post-commit flow deactivation requires exact state identity")

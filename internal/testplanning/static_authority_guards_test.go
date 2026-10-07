@@ -47,8 +47,8 @@ func staticAuthorityGuardRoots(t *testing.T, repo string) []TestRoot {
 	sort.Slice(roots, func(i, j int) bool {
 		return roots[i].Package+roots[i].Name < roots[j].Package+roots[j].Name
 	})
-	if len(roots) != 78 {
-		t.Fatalf("static authority source census changed: %d roots, want 78", len(roots))
+	if len(roots) != 79 {
+		t.Fatalf("static authority source census changed: %d roots, want 79", len(roots))
 	}
 	return roots
 }

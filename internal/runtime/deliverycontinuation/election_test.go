@@ -259,7 +259,7 @@ func TestCoordinatorSynchronousDeferralDoesNotScheduleItsOwnRetry(t *testing.T) 
 	if err := job.lease.Done(); err != nil {
 		t.Fatal(err)
 	}
-	c.completeDispatch(job.deliveryID, nil)
+	c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
 	select {
 	case <-c.wake:
 		t.Fatal("synchronous deferral scheduled its own retry without a named lifecycle transition")

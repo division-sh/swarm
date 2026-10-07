@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -172,6 +173,7 @@ func TestToolDefinitionsForActor_RetireSameNameEntityToolOverrideWithoutActorCon
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"lifecycle": {
+			SchemaYAML: "name: lifecycle\nstages: []\n",
 			AgentsYAML: entityToolAgentYAML(lifecycle),
 			ToolsYAML: `
 get_entity:
@@ -197,6 +199,9 @@ validation_case:
 		},
 	})
 
+	if _, ok := entityruntime.ResolveForActor(semanticview.Wrap(bundle), lifecycle); ok {
+		t.Fatal("stateless lifecycle actor unexpectedly has an entity contract")
+	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		WorkflowSource: semanticview.Wrap(bundle),
 	})

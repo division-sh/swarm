@@ -1,0 +1,6 @@
+name: lu-h2-equivalent
+pins: {inputs: [hub.start, hub.bump, hub.close]}
+connect:
+  - {event: hub.start, from: ., to: hub, resolution: select-or-create}
+  - {event: hub.bump, from: ., to: hub, resolution: select}
+  - {event: hub.close, from: ., to: hub, resolution: select}

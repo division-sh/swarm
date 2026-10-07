@@ -17,15 +17,27 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deadletters"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -42,11 +54,130 @@ type entityToolImportOwner interface {
 }
 
 type entityToolImportFixture struct {
-	owner  entityToolImportOwner
-	source semanticview.Source
+	owner    entityToolImportOwner
+	source   semanticview.Source
+	selected any
+	pipeline *pipeline.PipelineCoordinator
 }
 
 type entityToolImportFixtureKey struct{}
+
+type entityToolPipelineModule struct{ source semanticview.Source }
+
+func (m entityToolPipelineModule) SemanticSource() semanticview.Source  { return m.source }
+func (entityToolPipelineModule) WorkflowNodes() []pipeline.WorkflowNode { return nil }
+func (entityToolPipelineModule) GuardRegistry() pipeline.GuardRegistry  { return nil }
+
+type entityToolPipelineBus struct {
+	pipeline.WorkflowDeliveryRuntime
+}
+
+func (entityToolPipelineBus) Publish(context.Context, events.Event) error {
+	return errors.New("unexpected fixture publication")
+}
+func (entityToolPipelineBus) PublishDirect(context.Context, events.Event, []string) error {
+	return errors.New("unexpected fixture publication")
+}
+func (entityToolPipelineBus) ResolveSubscribedRecipients(string) []string                { return nil }
+func (entityToolPipelineBus) LogRuntime(context.Context, pipeline.RuntimeLogEntry) error { return nil }
+func (entityToolPipelineBus) EngineDispatcher() engine.PostCommitDispatcher {
+	return entityToolPipelineDispatcher{}
+}
+
+type entityToolPipelineDispatcher struct{}
+
+func (entityToolPipelineDispatcher) DispatchPostCommit(context.Context, []engine.EmitIntent) error {
+	return errors.New("unexpected fixture dispatch")
+}
+
+func newEntityToolPipeline(t *testing.T, selected any, source semanticview.Source) *pipeline.PipelineCoordinator {
+	t.Helper()
+	bus := entityToolPipelineBus{}
+	pc := pipeline.NewPipelineCoordinatorWithOptions(bus, pipeline.PipelineCoordinatorOptions{
+		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
+		Module: entityToolPipelineModule{source: source}, Persistence: pipeline.NewWorkflowPersistence(selected.(pipeline.WorkflowPersistenceOwner)),
+		DeliveryStore: selected.(deliverylifecycle.Store), DeadLetters: selected.(deadletters.AcknowledgedRecorder),
+		PipelineObligations: selected.(interface {
+			PipelineObligations() pipelineobligation.Store
+		}).PipelineObligations(),
+		DecisionCards: selected.(decisioncard.Store), ProposedEffects: selected.(decisioncard.ProposedEffectStore), HumanTasks: selected.(decisioncard.HumanTaskStore),
+		DecisionCardDraftExpiry: selected.(pipeline.DecisionCardDraftExpiry), HumanTaskExpiry: selected.(pipeline.HumanTaskExpiry),
+		DeliveryRuntime: bus, RunLifecycle: selected.(runlifecycle.OperationOwner),
+	})
+	if pc == nil {
+		t.Fatal("constructed entity fixture requires the selected pipeline")
+	}
+	return pc
+}
+
+func entityToolFixtureActor(t *testing.T, source semanticview.Source, actor models.AgentConfig, runID, flowID, flowInstance string) models.AgentConfig {
+	t.Helper()
+	actor.FlowID = flowID
+	declaration, ok := semanticview.ResolveAgentDeclaration(source, actor)
+	if !ok {
+		t.Fatalf("fixture actor %s requires its exact declaration in %s", actor.ID, flowID)
+	}
+	plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := plan.Materialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := agentidentity.RootRoute()
+	if flowID != "." {
+		route, err = agentidentity.PresentRoute(flowID, flowidentity.LogicalInstanceID(flowInstance), flowInstance)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	actor.Identity, err = agentidentity.New(runID, name, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor.ID, actor.FlowPath = name.AgentID, actor.Identity.FlowInstance()
+	return actor
+}
+
+func withEntityToolFixtureRoute(t *testing.T, ctx context.Context, flowInstance string) context.Context {
+	t.Helper()
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	actor, ok := tools.ActorFromContext(ctx)
+	if !ok {
+		t.Fatal("fixture route requires actor context")
+	}
+	actor = entityToolFixtureActor(t, fixture.source, actor, correlation.RunIDFromContext(ctx), actor.FlowID, flowInstance)
+	return tools.WithActor(ctx, actor)
+}
+
+func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any, pc *pipeline.PipelineCoordinator, source semanticview.Source, flowID, flowInstance, entityID, stage string, fields map[string]any, at time.Time) flowidentity.RunScopedFlowInstance {
+	t.Helper()
+	owner := flowidentity.RunScopedFlowInstance{RunID: correlation.RunIDFromContext(ctx), Route: flowidentity.Route{ScopeKey: flowID, InstanceID: flowidentity.LogicalInstanceID(flowInstance), InstancePath: flowInstance}}
+	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
+	initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, owner, pipeline.WorkflowInstance{
+		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: flowInstance, InstanceID: owner.Route.InstanceID, EntityID: entityID,
+		EntityType:   func() string { contract, _ := entityruntime.ResolveForFlow(source, flowID); return contract.EntityType }(),
+		CurrentState: stage, StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
+	}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := flowactivationfixture.Command(ctx, initial, lifecycle, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
+	if err != nil || !committed.Acknowledged {
+		t.Fatalf("construct entity tool fixture: acknowledged=%v err=%v", committed.Acknowledged, err)
+	}
+	if committed.Created {
+		if err := pc.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return owner
+}
 
 func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.WorkflowContractBundle) context.Context {
 	t.Helper()
@@ -73,7 +204,8 @@ func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.Workf
 	if !ok {
 		t.Fatalf("entity test backend %T has no scenario import owner", selected)
 	}
-	return context.WithValue(ctx, entityToolImportFixtureKey{}, entityToolImportFixture{owner: owner, source: semanticview.Wrap(bundle)})
+	source := semanticview.Wrap(bundle)
+	return context.WithValue(ctx, entityToolImportFixtureKey{}, entityToolImportFixture{owner: owner, source: source, selected: selected, pipeline: newEntityToolPipeline(t, selected, source)})
 }
 
 func TestEntitySparseGeneratedToolMutation(t *testing.T) {
@@ -82,7 +214,7 @@ func TestEntitySparseGeneratedToolMutation(t *testing.T) {
 			actor := models.AgentConfig{ExecutionMode: "live", ID: "writer", Role: "writer"}
 			bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 				"work": {
-					SchemaYAML: "name: work\nstages:\n  queued: {}\n  done: {final: true}\n",
+					SchemaYAML: "name: work\ninstance: fixture_key\nstages:\n  queued: {}\n  done: {final: true}\n",
 					TypesYAML:  "types:\n  Profile:\n    name: text\n    note: text?\n",
 					EntitiesYAML: `
 work:
@@ -147,21 +279,16 @@ writer:
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := persistence.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
-				RunID: runID, CreatedAt: time.Now().UTC(),
-				Entities: []pipeline.ScenarioSetupEntityRequest{{
-					Alias: "work", EntityID: entityID, FlowInstance: "work/one", EntityType: "work", CurrentState: "queued", Fields: fields,
-				}},
-			}); err != nil {
-				t.Fatal(err)
-			}
+			pc := newEntityToolPipeline(t, persistence, source)
+			owner := constructEntityToolFixture(t, ctx, persistence, pc, source, "work", "work/one", entityID, "queued", fields, time.Now().UTC())
+			actor = entityToolFixtureActor(t, source, actor, runID, "work", "work/one")
 			inbound := eventtest.PersistedChildForProducer(
 				uuid.NewString(), events.EventType("work.ready"), eventtest.Producer(events.EventProducerNode, "creator"), "", []byte(`{}`), 0,
 				runID, uuid.NewString(), events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "work/one"), time.Now().UTC(),
 			)
 			storetest.CommitSemanticEvent(t, ctx, persistence, inbound)
 			ctx = tools.WithActor(bus.WithInboundEvent(ctx, inbound), actor)
-			exec := tools.NewExecutorWithOptions(nil, tools.ExecutorOptions{EntityStore: persistence, WorkflowSource: source})
+			exec := tools.NewExecutorWithOptions(nil, tools.ExecutorOptions{EntityStore: persistence, EntityWriter: pc, WorkflowSource: source})
 			identity := tools.EntityIdentity{RunID: runID, EntityID: entityID}
 			read := func() map[string]any {
 				t.Helper()
@@ -239,49 +366,33 @@ writer:
 			}
 			assertSparseToolContinuation(t, whole, fields)
 
-			// Exercise the persistence entry directly, without optimistic executor checks.
+			// Exercise the canonical writer directly, without optimistic tool checks.
 			before := read()
 			otherSource := semanticview.Wrap(loadWave1EntityToolBundle(t, actor, "other", "work", "", "work:\n  label: text?\n"))
-			for _, update := range []tools.EntityFieldUpdate{
-				{Source: source, FieldPath: "token", Value: "changed"},
-				{Source: source, FieldPath: "left", Value: "unpaired"},
-				{Source: source, FieldPath: "label", Value: nil},
-				{FieldPath: "label", Value: "unbound"},
-				{Source: otherSource, FieldPath: "label", Value: "wrong source"},
+			for _, update := range []pipeline.EntityFieldMutation{
+				{Source: source, Mutation: entityruntime.Mutation{Target: "entity.token", Value: "changed"}},
+				{Source: source, Mutation: entityruntime.Mutation{Target: "entity.left", Value: "unpaired"}},
+				{Source: source, Mutation: entityruntime.Mutation{Target: "entity.label", Value: nil}},
+				{Mutation: entityruntime.Mutation{Target: "entity.label", Value: "unbound"}},
+				{Source: otherSource, Mutation: entityruntime.Mutation{Target: "entity.label", Value: "wrong source"}},
 			} {
 				update.RunID, update.EntityID = runID, entityID
-				update.Writer = tools.EntityMutationWriter{Type: "agent", ID: actor.ID, HandlerStep: "save_entity_field"}
-				if _, err := persistence.SaveEntityField(ctx, update); err == nil {
-					t.Fatalf("backend accepted invalid update: %#v", update)
+				update.Owner, update.FlowID = owner, "work"
+				update.Writer = mutationlog.Writer{Type: "agent", ID: actor.ID, HandlerStep: "save_entity_field"}
+				if _, err := pc.ApplyEntityFieldMutation(ctx, update); err == nil {
+					t.Fatalf("canonical writer accepted invalid update: %#v", update)
 				}
 			}
 			if !reflect.DeepEqual(before, read()) {
-				t.Fatal("backend rejection changed state or revision")
+				t.Fatal("canonical writer rejection changed state or revision")
 			}
 			// Inspect actual persisted history on both stores. Only PostgreSQL's
 			// existing internal debug reader exposes these records; neither store
 			// has a public entity.history RPC.
-			historyRows, err := db.QueryContext(ctx, `SELECT entity_id, domain, path, COALESCE(new_value, 'null')
-				FROM entity_mutations WHERE run_id = $1 ORDER BY created_at DESC, mutation_id DESC`, runID)
-			if err != nil {
-				t.Fatal(err)
-			}
 			var mutations []operatorread.RunDebugMutation
-			for historyRows.Next() {
-				var mutation operatorread.RunDebugMutation
-				var value []byte
-				if err := historyRows.Scan(&mutation.EntityID, &mutation.Domain, &mutation.Path, &value); err != nil {
-					historyRows.Close()
-					t.Fatal(err)
-				}
-				mutation.NewValue = append(json.RawMessage(nil), value...)
-				mutations = append(mutations, mutation)
+			for _, row := range storetest.ObserveEntityMutationHistory(t, ctx, persistence, runID) {
+				mutations = append(mutations, row.RunDebugMutation)
 			}
-			if err := historyRows.Err(); err != nil {
-				historyRows.Close()
-				t.Fatal(err)
-			}
-			historyRows.Close()
 			if backend == "postgres" {
 				report, err := persistence.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{MutationLimit: 100})
 				if err != nil {
@@ -300,6 +411,9 @@ writer:
 				switch mutation.Path {
 				case "label":
 					labels++
+					if mutation.WriterType != "agent" || mutation.WriterID != actor.ID || mutation.HandlerStep != "save_entity_field" {
+						t.Fatalf("label history lost attribution: %+v", mutation)
+					}
 					if string(mutation.NewValue) != `""` {
 						t.Fatalf("history lost explicit empty label: %+v", mutation)
 					}
@@ -308,23 +422,36 @@ writer:
 					if string(mutation.NewValue) != "7" {
 						t.Fatalf("history changed explicit initial: %+v", mutation)
 					}
-				case "profile.name":
-					nestedNames++
-					if string(mutation.NewValue) != `"second"` {
-						t.Fatalf("history changed nested update: %+v", mutation)
-					}
 				case "profile":
-					var value map[string]any
+					if mutation.WriterType != "agent" || mutation.WriterID != actor.ID || mutation.HandlerStep != "save_entity_field" {
+						t.Fatalf("profile history lost attribution: %+v", mutation)
+					}
+					var value, previous map[string]any
 					if err := json.Unmarshal(mutation.NewValue, &value); err != nil {
 						t.Fatal(err)
 					}
+					if err := json.Unmarshal(mutation.OldValue, &previous); err != nil {
+						t.Fatal(err)
+					}
+					// Canonical evidence describes the declared-root effect, not
+					// the retired logger's synthetic dotted-key projection.
 					if note, present := value["note"]; present {
-						if note != "previous" {
+						if note != "previous" || value["name"] != "first" || len(value) != 2 || len(previous) != 0 {
 							t.Fatalf("history fabricated note: %+v", mutation)
 						}
 						withNote++
-					} else {
+					} else if value["name"] == "first" {
+						if len(value) != 1 || !reflect.DeepEqual(previous, map[string]any{"name": "first", "note": "previous"}) {
+							t.Fatalf("whole replacement history changed old/new effect: %+v", mutation)
+						}
 						withoutNote++
+					} else if value["name"] == "second" {
+						if len(value) != 1 || !reflect.DeepEqual(previous, map[string]any{"name": "first"}) {
+							t.Fatalf("nested update history changed old/new effect: %+v", mutation)
+						}
+						nestedNames++
+					} else {
+						t.Fatalf("unexpected profile effect: %+v", mutation)
 					}
 				}
 			}

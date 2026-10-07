@@ -909,7 +909,12 @@ func (o *projectionResolutionOwner) Release(string) error {
 	return nil
 }
 func (*projectionResolutionOwner) OwnsPersistedRecovery() bool { return false }
-func (*projectionResolutionOwner) Signal()                     {}
+
+func (*projectionResolutionOwner) DispatchPublished(events.Event, []events.DeliveryRoute) error {
+	return errors.New("published delivery dispatch is unsupported by nonpersistent projection resolution owner")
+}
+
+func (*projectionResolutionOwner) Signal() {}
 
 type projectionResolutionContinuation struct {
 	owner      *projectionResolutionOwner

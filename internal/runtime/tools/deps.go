@@ -58,6 +58,7 @@ type ExecutorOptions struct {
 	MailboxStore       MailboxPersistence
 	NoticePresentation InformationalNoticePresentationSink
 	EntityStore        EntityPersistence
+	EntityWriter       runtimepipeline.EntityFieldMutationWriter
 	HumanTaskStore     HumanTaskCardStore
 	WorkflowInstances  WorkflowInstanceLoader
 	MCPClient          *runtimemcp.Client

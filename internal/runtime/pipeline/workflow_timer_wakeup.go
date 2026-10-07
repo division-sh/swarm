@@ -89,6 +89,8 @@ func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup Workfl
 		l.logFailure(callbackCtx, "workflow_timer_fire_failed", wakeup.Occurrence().Activation, err)
 	}
 	if outcome == WorkflowTimerFireRetry {
+		// Only an uncommitted occurrence retries via the active timer selector.
+		// A published occurrence remains reachable through its pipeline obligation.
 		l.startWakeupRecovery(wakeup.Occurrence().Activation)
 		return
 	}

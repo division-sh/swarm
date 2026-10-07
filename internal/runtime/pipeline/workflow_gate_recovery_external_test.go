@@ -113,18 +113,7 @@ func markGateRecoveryTopologyReadyFixture(t *testing.T, selected gateRecoverySto
 	}
 	// This is a persisted-projection fixture, not installed-topology proof. A
 	// completed historical attempt is retired, never a phase-advanced planned row.
-	query := `UPDATE flow_instance_runtime_readiness SET phase='ready', activation_attempt_state='retired', activation_attempt_grant_id=?, updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND phase='planned' AND plan_hash=? AND activation_attempt_state='planned'`
-	if selected.postgres {
-		query = `UPDATE flow_instance_runtime_readiness SET phase='ready', activation_attempt_state='retired', activation_attempt_grant_id=$1::uuid, updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5 AND phase='planned' AND plan_hash=$6 AND activation_attempt_state='planned'`
-	}
-	result, err := selected.db.ExecContext(ctx, query, uuid.NewString(), at.UTC(), plan.RunID, plan.Identity.InstancePath, current.AttemptOrdinal, want)
-	if err != nil {
-		t.Fatalf("mark exact topology fixture: %v", err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil || rows != 1 {
-		t.Fatalf("mark exact topology fixture affected %d rows: %v", rows, err)
-	}
+	storetest.RetirePlannedReadiness(t, ctx, selected.events, plan, current.AttemptOrdinal, at)
 }
 
 type gateRecoveryTraceStore interface {
@@ -1042,7 +1031,7 @@ func TestDecisionRouteObligationQuarantinesPoisonAndContinuesOnBothStores(t *tes
 				t.Fatalf("poison route sweep recovered = %d, %v; want 2 handled obligations, nil", result.Settled, err)
 			}
 			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
-			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
+			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "decision_route_fixture_invalid")
 			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
 			if result, err := bus.SweepPipelineObligations(testAuthorActivityContext(t, context.Background()), 10); err != nil || result.Settled != 0 {
 				t.Fatalf("second poison route sweep recovered = %d, %v; want 0, nil", result.Settled, err)
@@ -1073,7 +1062,7 @@ func TestDecisionRouteStartupRecoveryQuarantinesPoisonAndContinuesOnBothStores(t
 				t.Fatalf("startup poison route recovery: %v", err)
 			}
 			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
-			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
+			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "decision_route_fixture_invalid")
 			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
 			if err := recovery.Recover(testAuthorActivityContext(t, context.Background())); err != nil {
 				t.Fatalf("second startup poison route recovery: %v", err)
@@ -1119,7 +1108,7 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 				}
 
 				assertGateRecoveryObligationStatus(t, selected, fixture.event.ID(), "quarantined")
-				assertGateRecoveryErrorReceipt(t, selected, fixture.event.ID(), "event_interceptor_failed")
+				assertGateRecoveryErrorReceipt(t, selected, fixture.event.ID(), "decision_route_fixture_invalid")
 				assertGateRecoveryActivation(t, fixture.coordinator, runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), fixture.entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
 				card, err := selected.cards.GetDecisionCard(testAuthorActivityContext(t, context.Background()), fixture.cardID)
 				if err != nil {

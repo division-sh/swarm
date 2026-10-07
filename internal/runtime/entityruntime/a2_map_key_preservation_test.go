@@ -174,3 +174,45 @@ func TestA2NontextMapKeysRetainTypeOwnerNormalization(t *testing.T) {
 		})
 	}
 }
+
+func TestA2WholeMapRejectsDuplicateNormalizedKeysAtomically(t *testing.T) {
+	for _, tc := range []struct {
+		keyType string
+		key     string
+	}{
+		{"Status", "Ready"},
+		{"uuid", "d9428888-122b-11e1-b85c-61cd3cbb3210"},
+	} {
+		contract := Contract{
+			Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"items": {Type: "map[" + tc.keyType + "]integer"}}},
+			Types:  rc.TypeCatalogDocument{Enums: map[string]rc.EnumTypeDecl{"Status": {Values: []string{"Ready", "Done"}, Default: "Ready"}}},
+		}
+		for _, second := range []int64{1, 2} {
+			t.Run(fmt.Sprintf("%s/second=%d", tc.keyType, second), func(t *testing.T) {
+				input := map[string]any{tc.key: int64(1), " " + tc.key + " ": second}
+				before := cloneMap(input)
+				// Neither equal values nor map iteration order selects a winner.
+				for attempt := 0; attempt < 16; attempt++ {
+					if got, err := NormalizeFieldValue(contract, "items", input); err == nil || got != nil || !strings.Contains(err.Error(), "duplicate normalized map key") {
+						t.Fatalf("duplicate map admitted: got=%#v err=%v", got, err)
+					}
+					source := map[string]any{"items": map[string]any{tc.key: int64(9)}}
+					sourceBefore := cloneMap(source)
+					plan, err := NewMutationPlan(contract, source)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := plan.Append(Mutation{Target: "entity.items", Value: input}); err == nil || !strings.Contains(err.Error(), "duplicate normalized map key") {
+						t.Fatalf("whole set selected a collision winner: %v", err)
+					}
+					if got, err := plan.Validate(); err == nil || got != nil {
+						t.Fatalf("refusal exposed candidate: %#v, %v", got, err)
+					}
+					if !reflect.DeepEqual(plan.Draft(), sourceBefore) || !reflect.DeepEqual(source, sourceBefore) || !reflect.DeepEqual(input, before) {
+						t.Fatal("duplicate-key refusal changed candidate, source, or operand")
+					}
+				}
+			})
+		}
+	}
+}

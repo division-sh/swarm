@@ -1,0 +1,26 @@
+hub-node:
+  execution_type: system_node
+  subscribes_to: [hub.start, hub.begin, hub.close, hub.result]
+  event_handlers:
+    hub.start:
+      data_accumulation:
+        writes:
+          - {source_field: hub_id, target_field: hub_id}
+          - {target_field: items, value: []}
+          - {target_field: labels, value: {}}
+          - {target_field: positions, value: ["initial-0", "initial-1"]}
+          - {target_field: marker, value: "initial"}
+          - {target_field: results, value: 0}
+    hub.begin:
+      advances_to: working
+      emit: {event: hub.work, fields: {hub_id: payload.hub_id}}
+    hub.close: {advances_to: closed}
+    hub.result:
+      guard: {id: retained_in_new_stage, check: _entity.current_state == 'review'}
+      data_accumulation:
+        writes:
+          - {target_field: result, value: payload.value}
+          - {target_field: result_stage, value: _entity.current_state}
+          - target_field: results
+            value: |-
+              has(entity.results) ? entity.results + 1 : 1

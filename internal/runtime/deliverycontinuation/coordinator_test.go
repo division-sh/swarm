@@ -512,7 +512,7 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 		if err := job.lease.Done(); err != nil {
 			t.Fatal(err)
 		}
-		c.completeDispatch(job.deliveryID, nil)
+		c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
 	}
 	select {
 	case <-c.wake:
@@ -523,7 +523,7 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 	if err := refill.lease.Done(); err != nil {
 		t.Fatal(err)
 	}
-	c.completeDispatch(refill.deliveryID, nil)
+	c.completeDispatchWithWake(refill.deliveryID, nil, false, 0)
 	select {
 	case <-c.wake:
 	default:
@@ -549,7 +549,7 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 	if err := job.lease.Done(); err != nil {
 		t.Fatal(err)
 	}
-	c.completeDispatch(job.deliveryID, nil)
+	c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
 	select {
 	case <-c.wake:
 	default:
@@ -560,7 +560,7 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 		if err := job.lease.Done(); err != nil {
 			t.Fatal(err)
 		}
-		c.completeDispatch(job.deliveryID, nil)
+		c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
 	}
 }
 
@@ -664,7 +664,7 @@ func TestCoordinatorCanDispatchIndependentDeliveriesToOneTargetTogether(t *testi
 		if err := job.lease.Done(); err != nil {
 			t.Fatal(err)
 		}
-		c.completeDispatch(job.deliveryID, nil)
+		c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
 	}
 }
 

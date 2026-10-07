@@ -672,7 +672,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
 
 	runtime.apiURL = server.URL
-	runtime.apiKey = "test-key"
+	runtime.credentialCache = providerCredentialCache{value: "test-key"}
 	runtime.httpClient = server.Client()
 	runtime.completionController = liveTestCompletionController(effects, effects, effects, effects)
 

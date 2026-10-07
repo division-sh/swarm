@@ -79,6 +79,7 @@ type Coordinator struct {
 	sync          chan synchronizationRequest
 	done          chan struct{}
 	cancel        context.CancelFunc
+	runContext    context.Context
 	failure       error
 	workerFailure error
 	workerLimit   int
@@ -191,6 +192,7 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	runCtx := lease.Context()
 	c.mu.Lock()
 	retired := c.retired
+	c.runContext = runCtx
 	c.mu.Unlock()
 	if retired {
 		return c.finish(runCtx, cancel, lease, errCoordinatorRetired, false)
@@ -439,6 +441,75 @@ func (c *Coordinator) releaseTerminalLocked(deliveryID string) error {
 
 func (*Coordinator) OwnsPersistedRecovery() bool { return true }
 
+// DispatchPublished preserves ordinary publication's initial asynchronous
+// attempt after its SQL claim retires. Recovery uses the same dispatcher and
+// exact continuation election; it cannot create a second delivery attempt.
+func (c *Coordinator) DispatchPublished(event events.Event, routes []events.DeliveryRoute) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.authority.Kind() != runtimedelivery.ExecutionAuthorityNormalRuntime || len(routes) == 0 {
+		return errors.New("published continuation requires normal authority and exact node routes")
+	}
+	if c.retired {
+		return errCoordinatorRetired
+	}
+	if c.workerFailure != nil {
+		return c.workerFailure
+	}
+	ids := make([]string, len(routes))
+	seen := make(map[string]struct{}, len(routes))
+	for index, route := range routes {
+		if !route.Recipient.IsNode() {
+			return errors.New("published continuation requires an exact node route")
+		}
+		id, err := runtimedelivery.DeliveryID(event.ID(), route)
+		if err != nil {
+			return err
+		}
+		if _, found := c.entries[id]; !found {
+			return fmt.Errorf("published delivery %s has no committed continuation evidence", id)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return fmt.Errorf("published delivery %s is duplicated", id)
+		}
+		seen[id] = struct{}{}
+		ids[index] = id
+	}
+	if !c.started || c.runContext == nil {
+		// Startup's existing exhaustive scan consumes these committed handoffs.
+		return nil
+	}
+	if err := c.runContext.Err(); err != nil {
+		return err
+	}
+	jobs := make([]dispatchJob, 0, len(routes))
+	for index, route := range routes {
+		lease, err := c.workOwner.Begin(c.runContext)
+		if err != nil {
+			for _, job := range jobs {
+				err = errors.Join(err, job.lease.Done())
+			}
+			return err
+		}
+		jobs = append(jobs, dispatchJob{deliveryID: ids[index], event: event, route: route,
+			lease: lease, wakeVersion: c.wakeVersion.Load()})
+	}
+	c.workers.Add(len(jobs))
+	for _, job := range jobs {
+		go func() {
+			defer c.workers.Done()
+			deferred, err := c.dispatchAttempt(job.lease.Context(), job)
+			c.mu.Lock()
+			wake := c.dispatchResultWakeLocked(err, deferred, job.wakeVersion)
+			c.mu.Unlock()
+			if wake {
+				c.notify()
+			}
+		}()
+	}
+	return nil
+}
+
 // Acquire transfers one exact coordinator-held continuation to a carrier.
 // Callers must attach the returned capability before enqueueing the carrier.
 func (c *Coordinator) Acquire(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
@@ -626,48 +697,55 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case job := <-c.jobs:
-			if ctx.Err() != nil {
-				c.completeDispatch(job.deliveryID, job.lease.Done())
-				return
-			}
-			result := c.dispatcher.DispatchDeliveryContinuation(job.lease.Context(), job.event, job.route)
-			var err error
-			if validationErr := result.Validate(); validationErr != nil {
-				err = fmt.Errorf("dispatch delivery continuation %s returned invalid result: %w", job.deliveryID, validationErr)
-			} else {
-				switch result.Disposition() {
-				case DispatchTransferred, DispatchAlreadyOwned, DispatchDeferred:
-				case DispatchTerminal:
-					err = c.releaseTerminal(job.deliveryID)
-				case DispatchFatal:
-					err = fmt.Errorf("dispatch delivery continuation %s: %w", job.deliveryID, result.Failure())
-				default:
-					err = fmt.Errorf("dispatch delivery continuation %s returned unknown disposition", job.deliveryID)
-				}
-			}
-			c.mu.Lock()
-			retired := c.retired
-			c.mu.Unlock()
-			if ordinaryCoordinatorStop(job.lease.Context(), err, retired) {
-				err = nil
-			}
-			deferred := err == nil && result.Disposition() == DispatchDeferred
-			err = errors.Join(err, job.lease.Done())
+			deferred, err := c.dispatchAttempt(ctx, job)
 			c.completeDispatchWithWake(job.deliveryID, err, deferred, job.wakeVersion)
-			if err != nil {
+			if err != nil || ctx.Err() != nil {
 				return
 			}
 		}
 	}
 }
 
-func (c *Coordinator) completeDispatch(deliveryID string, err error) {
-	c.completeDispatchWithWake(deliveryID, err, false, 0)
+func (c *Coordinator) dispatchAttempt(ctx context.Context, job dispatchJob) (bool, error) {
+	if ctx.Err() != nil {
+		return false, job.lease.Done()
+	}
+	result := c.dispatcher.DispatchDeliveryContinuation(job.lease.Context(), job.event, job.route)
+	var err error
+	if validationErr := result.Validate(); validationErr != nil {
+		err = fmt.Errorf("dispatch delivery continuation %s returned invalid result: %w", job.deliveryID, validationErr)
+	} else {
+		switch result.Disposition() {
+		case DispatchTransferred, DispatchAlreadyOwned, DispatchDeferred:
+		case DispatchTerminal:
+			err = c.releaseTerminal(job.deliveryID)
+		case DispatchFatal:
+			err = fmt.Errorf("dispatch delivery continuation %s: %w", job.deliveryID, result.Failure())
+		default:
+			err = fmt.Errorf("dispatch delivery continuation %s returned unknown disposition", job.deliveryID)
+		}
+	}
+	c.mu.Lock()
+	retired := c.retired
+	c.mu.Unlock()
+	if ordinaryCoordinatorStop(job.lease.Context(), err, retired) {
+		err = nil
+	}
+	deferred := err == nil && result.Disposition() == DispatchDeferred
+	return deferred, errors.Join(err, job.lease.Done())
 }
 
 func (c *Coordinator) completeDispatchWithWake(deliveryID string, err error, deferred bool, wakeVersion uint64) {
 	c.mu.Lock()
 	delete(c.reserved, deliveryID)
+	wake := c.dispatchResultWakeLocked(err, deferred, wakeVersion)
+	c.mu.Unlock()
+	if wake {
+		c.notify()
+	}
+}
+
+func (c *Coordinator) dispatchResultWakeLocked(err error, deferred bool, wakeVersion uint64) bool {
 	if err != nil {
 		c.workerFailure = errors.Join(c.workerFailure, err)
 	}
@@ -676,10 +754,7 @@ func (c *Coordinator) completeDispatchWithWake(deliveryID string, err error, def
 	if wake {
 		c.rescanNeeded = false
 	}
-	c.mu.Unlock()
-	if wake {
-		c.notify()
-	}
+	return wake
 }
 
 func (c *Coordinator) schedule(ctx context.Context, item runtimedelivery.ContinuationItem) error {

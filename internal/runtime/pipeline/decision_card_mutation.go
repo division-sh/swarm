@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -371,12 +372,59 @@ func (pc *PipelineCoordinator) CommitDecisionCardMutation(
 }
 
 func (pc *PipelineCoordinator) commitDecisionCardMutation(ctx context.Context, lease DecisionCardMutationLease, mutation DecisionCardMutation) (json.RawMessage, error) {
-	command, plans, err := pc.prepareDecisionCardMutation(ctx, mutation)
+	var cardID string
+	switch mutation.kind {
+	case DecisionCardMutationDecide:
+		cardID = mutation.decide.CardID
+	case DecisionCardMutationDefer:
+		cardID = mutation.deferral.CardID
+	case DecisionCardMutationBeginInput:
+		cardID = mutation.beginInput.CardID
+	case DecisionCardMutationCancelInput:
+		cardID = mutation.cancelInput.CardID
+	default:
+		return nil, fmt.Errorf("decision-card mutation kind is required")
+	}
+	card, err := pc.decisionCards.GetDecisionCard(ctx, cardID)
 	if err != nil {
 		return nil, err
 	}
-	committed, err := lease.Commit(ctx, command)
-	return pc.finishDecisionCardMutation(ctx, committed, err, plans)
+	var unlock func()
+	if card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
+		anchor, err := card.Anchor.StageGate()
+		if err != nil {
+			return nil, err
+		}
+		unlock = pc.lockWorkflowEntity(anchor.EntityID)
+	}
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		command, plans, err := pc.prepareDecisionCardMutation(ctx, mutation)
+		if err != nil {
+			return nil, err
+		}
+		committed, err := lease.Commit(ctx, command)
+		if !committed.Acknowledged && failures.IsStateContention(err) {
+			if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
+				if releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans); releaseErr != nil {
+					return nil, errors.Join(err, releaseErr)
+				}
+			}
+			continue
+		}
+		if unlock != nil {
+			unlock()
+			unlock = nil
+		}
+		return pc.finishDecisionCardMutation(ctx, committed, err, plans)
+	}
 }
 
 func (pc *PipelineCoordinator) finishDecisionCardMutation(ctx context.Context, committed CommittedDecisionCardMutation, commitErr error, plans []runtimeengine.DurablePublicationPlan) (json.RawMessage, error) {

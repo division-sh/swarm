@@ -1,0 +1,3 @@
+hub.start: {key: hub_id, hub_id: text}
+hub.begin: {key: hub_id, hub_id: text}
+hub.close: {key: hub_id, hub_id: text}

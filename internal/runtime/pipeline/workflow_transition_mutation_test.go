@@ -210,10 +210,14 @@ func TestPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStores(t *t
 				return out
 			}
 			counts := rowCounts()
+			evaluated, found, err := workflowEngineEvaluationSnapshot(source, address.FlowID.String(), address, before, nil)
+			if err != nil || !found {
+				t.Fatalf("capture transition R1: found=%v error=%v", found, err)
+			}
 			owner := pipelineEngineMutationOwner{store: store, state: pipelineEngineStateRepo{coordinator: pc}}
 			completeMutation := func(state engine.StateMutation) engine.EngineMutation {
 				t.Helper()
-				result := engine.EngineMutation{Address: address, State: state, HandlerRuleSelection: handlerselection.NotApplicable()}
+				result := engine.EngineMutation{Address: address, EvaluatedState: evaluated, State: state, HandlerRuleSelection: handlerselection.NotApplicable()}
 				if state.Transition != nil {
 					result.HandlerRuleSelection = state.Transition.RuleSelection()
 					effect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID), state.TriggerEventID, state.TriggerEventType, executionmode.Live, state.TriggeredAt, state.Transition)

@@ -162,7 +162,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.agentPostgresOwner = agentOwner
-	entityOwner, err := storeentity.NewPostgres(backend, store.requireCurrentSchema)
+	entityOwner, err := storeentity.NewPostgres(backend)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +412,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.agentSQLiteOwner = agentOwner
-	entityOwner, err := storeentity.NewSQLite(backend, store.requireCurrentSchema, store.now)
+	entityOwner, err := storeentity.NewSQLite(backend)
 	if err != nil {
 		return nil, err
 	}

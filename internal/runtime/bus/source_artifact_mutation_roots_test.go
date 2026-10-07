@@ -1020,7 +1020,7 @@ func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *
 			case "release":
 				err = claim.Release(foreignCtx)
 			case "settle":
-				err = claim.Settle(foreignCtx, runtimepipelineobligation.Acknowledged("test"))
+				_, err = claim.Settle(foreignCtx, runtimepipelineobligation.Acknowledged("test"))
 			case "decision":
 				_, err = claim.MarkDecisionProcessedOutcome(foreignCtx)
 			}
@@ -1038,7 +1038,7 @@ func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *
 			case "release":
 				err = claim.Release(context.Background())
 			case "settle":
-				err = claim.Settle(context.Background(), runtimepipelineobligation.Acknowledged("test"))
+				_, err = claim.Settle(context.Background(), runtimepipelineobligation.Acknowledged("test"))
 			case "decision":
 				_, err = claim.MarkDecisionProcessedOutcome(context.Background())
 				if err == nil {

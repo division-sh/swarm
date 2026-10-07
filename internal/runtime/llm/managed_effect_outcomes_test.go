@@ -74,7 +74,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 		{
 			name: "anthropic_api", adapter: "anthropic_api",
 			send: func(ctx context.Context, client *http.Client) (*completionDispatch, error) {
-				runtime := &AnthropicAPIRuntime{httpClient: client, apiURL: "http://effect.test", apiKey: "test"}
+				runtime := &AnthropicAPIRuntime{httpClient: client, apiURL: "http://effect.test", credentialCache: providerCredentialCache{value: "test"}}
 				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return dispatch, err
 			},
@@ -82,7 +82,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 		{
 			name: "openai_compatible", adapter: "openai_compatible",
 			send: func(ctx context.Context, client *http.Client) (*completionDispatch, error) {
-				runtime := &OpenAICompatibleRuntime{httpClient: client, baseURL: "http://effect.test", apiKey: "test"}
+				runtime := &OpenAICompatibleRuntime{httpClient: client, baseURL: "http://effect.test", credentialCache: providerCredentialCache{value: "test"}}
 				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return dispatch, err
 			},
@@ -90,7 +90,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 		{
 			name: "openai_responses", adapter: "openai_responses",
 			send: func(ctx context.Context, client *http.Client) (*completionDispatch, error) {
-				runtime := &OpenAIResponsesRuntime{httpClient: client, baseURL: "http://effect.test", apiKey: "test"}
+				runtime := &OpenAIResponsesRuntime{httpClient: client, baseURL: "http://effect.test", credentialCache: providerCredentialCache{value: "test"}}
 				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return dispatch, err
 			},
@@ -154,11 +154,11 @@ func TestManagedHTTPProviderInvocationStopsOnSessionCancellation(t *testing.T) {
 				var err error
 				switch adapter {
 				case "anthropic_api":
-					_, _, dispatch, err = (&AnthropicAPIRuntime{httpClient: server.Client(), apiURL: server.URL, apiKey: "test"}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
+					_, _, dispatch, err = (&AnthropicAPIRuntime{httpClient: server.Client(), apiURL: server.URL, credentialCache: providerCredentialCache{value: "test"}}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
 				case "openai_compatible":
-					_, _, dispatch, err = (&OpenAICompatibleRuntime{httpClient: server.Client(), baseURL: server.URL, apiKey: "test"}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
+					_, _, dispatch, err = (&OpenAICompatibleRuntime{httpClient: server.Client(), baseURL: server.URL, credentialCache: providerCredentialCache{value: "test"}}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
 				case "openai_responses":
-					_, _, dispatch, err = (&OpenAIResponsesRuntime{httpClient: server.Client(), baseURL: server.URL, apiKey: "test"}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
+					_, _, dispatch, err = (&OpenAIResponsesRuntime{httpClient: server.Client(), baseURL: server.URL, credentialCache: providerCredentialCache{value: "test"}}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
 				}
 				finished <- result{dispatch: dispatch, err: err}
 			}()
@@ -222,7 +222,7 @@ func TestManagedHTTPProviderInvocationStopsOnSessionHeartbeatFailure(t *testing.
 			}
 			finished := make(chan result, 1)
 			go func() {
-				_, _, dispatch, err := (&OpenAIResponsesRuntime{httpClient: server.Client(), baseURL: server.URL, apiKey: "test"}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
+				_, _, dispatch, err := (&OpenAIResponsesRuntime{httpClient: server.Client(), baseURL: server.URL, credentialCache: providerCredentialCache{value: "test"}}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
 				finished <- result{dispatch: dispatch, err: err}
 			}()
 			select {
@@ -353,7 +353,7 @@ func TestManagedProviderLaunchBoundaryFailureSettlesAttemptOnly(t *testing.T) {
 		{
 			name: "anthropic", backend: llmselection.BackendAnthropic,
 			invoke: func(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, calls *atomic.Int32) (*completionDispatch, error) {
-				runtime := &AnthropicAPIRuntime{httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: calls}}, apiURL: "http://unreachable.test", apiKey: "test"}
+				runtime := &AnthropicAPIRuntime{httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: calls}}, apiURL: "http://unreachable.test", credentialCache: providerCredentialCache{value: "test"}}
 				_, _, dispatch, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return dispatch, err
 			},
@@ -361,7 +361,7 @@ func TestManagedProviderLaunchBoundaryFailureSettlesAttemptOnly(t *testing.T) {
 		{
 			name: "openai_compatible", backend: llmselection.BackendOpenAICompatible,
 			invoke: func(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, calls *atomic.Int32) (*completionDispatch, error) {
-				runtime := &OpenAICompatibleRuntime{httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: calls}}, baseURL: "http://unreachable.test", apiKey: "test"}
+				runtime := &OpenAICompatibleRuntime{httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: calls}}, baseURL: "http://unreachable.test", credentialCache: providerCredentialCache{value: "test"}}
 				_, _, dispatch, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return dispatch, err
 			},
@@ -369,7 +369,7 @@ func TestManagedProviderLaunchBoundaryFailureSettlesAttemptOnly(t *testing.T) {
 		{
 			name: "openai_responses", backend: llmselection.BackendOpenAIResponses,
 			invoke: func(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, calls *atomic.Int32) (*completionDispatch, error) {
-				runtime := &OpenAIResponsesRuntime{httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: calls}}, baseURL: "http://unreachable.test", apiKey: "test"}
+				runtime := &OpenAIResponsesRuntime{httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: calls}}, baseURL: "http://unreachable.test", credentialCache: providerCredentialCache{value: "test"}}
 				_, _, dispatch, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return dispatch, err
 			},

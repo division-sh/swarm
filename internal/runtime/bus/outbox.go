@@ -29,6 +29,7 @@ type pendingOutboxOperation struct {
 	outcome          EventAppendOutcome
 	publicationClaim *pipelinePublicationClaim
 	deliveryHandoffs []runtimedelivery.DurableHandoffProof
+	targetFailure    bool
 	finalizationErr  error
 }
 
@@ -215,6 +216,12 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 			release()
 			return nil, err
 		}
+		if prepared.plan.TargetFailure == runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureInstanceConflict) {
+			// A declared create conflict rejects the handler's mutation, just as
+			// the selected-store constructor does when the conflict races commit.
+			failure := runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "eventbus", "prepare_engine_publication", nil)
+			return nil, errors.Join(failure, prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx)), eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		}
 		// Post-commit dispatch must consume the same canonical route facts that
 		// the selected store committed, not the pre-projection engine event.
 		intent.Event = prepared.Event
@@ -281,7 +288,7 @@ func (eb *EventBus) finalizeOneEnginePublication(ctx context.Context, committed 
 	}
 	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, committed.plan.prepared, committed.committed, true)
 	if consequences.prerequisiteErr != nil {
-		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, consequences.prerequisiteErr)
+		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, committed.plan.prepared.targetFailure, consequences.prerequisiteErr)
 		staged = true
 		return errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 	}
@@ -290,11 +297,11 @@ func (eb *EventBus) finalizeOneEnginePublication(ctx context.Context, committed 
 	}
 	if !consequences.ready {
 		blockErr := errors.Join(err, errors.New("committed publication prerequisites did not finish"))
-		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, blockErr)
+		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, committed.plan.prepared.targetFailure, blockErr)
 		staged = true
 		return errors.Join(blockErr, claim.Release(context.WithoutCancel(ctx)))
 	}
-	eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, nil)
+	eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, committed.plan.prepared.targetFailure, nil)
 	staged = true
 	return err
 }
@@ -308,6 +315,7 @@ type committedPublicationConsequences struct {
 
 func (eb *EventBus) finalizeCommittedPublicationConsequences(ctx context.Context, prepared PreparedPublish, committed CommittedPublication, stageEngineInternalDelivery bool) (result committedPublicationConsequences, err error) {
 	result.prepared = prepared
+	result.prepared.durableHandoffReady = false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = errors.Join(err, fmt.Errorf("finalize committed publication %s panic: %v", prepared.Event.ID(), recovered))
@@ -336,6 +344,7 @@ func (eb *EventBus) finalizeCommittedPublicationConsequences(ctx context.Context
 		return result, result.prerequisiteErr
 	}
 	result.ready = true
+	result.prepared.durableHandoffReady = committed.Acknowledged
 	if eb.testLifecycleProbe != nil && !result.prepared.exactDuplicate {
 		eb.notifyTestPublishPersisted(ctx, result.prepared.Event, result.prepared.plan)
 	}
@@ -600,7 +609,8 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	if operation.intent.Event.Type() != fallback.Event.Type() {
 		return result, fmt.Errorf("pending outbox event type mismatch for %s: persisted=%s dispatch=%s", fallback.Event.ID(), operation.intent.Event.Type(), fallback.Event.Type())
 	}
-	if operation.outcome == EventAppendExactDuplicate {
+	// Route rejection was settled by the publication transaction, not by dispatch.
+	if operation.outcome == EventAppendExactDuplicate || operation.targetFailure {
 		return result, nil
 	}
 	if operation.outcome != EventAppendInserted {
@@ -641,7 +651,8 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 	}
 	settle := func(disposition runtimepipelineobligation.Disposition) error {
 		if publicationClaim != nil {
-			return publicationClaim.Settle(ctx, disposition)
+			_, err := publicationClaim.Settle(ctx, disposition)
+			return err
 		}
 		if d.bus.pipelineObligations == nil {
 			return nil
@@ -861,10 +872,10 @@ func (eb *EventBus) clearPendingInternalDeliveryRoutes(eventID string) {
 }
 
 func (eb *EventBus) stageCommittedOutboxOperation(intent runtimeengine.EmitIntent, outcome EventAppendOutcome, publicationClaim *pipelinePublicationClaim, handoffs []runtimedelivery.DurableHandoffProof) {
-	eb.stageCommittedOutboxOperationWithFinalization(intent, intent.Event, outcome, publicationClaim, handoffs, nil)
+	eb.stageCommittedOutboxOperationWithFinalization(intent, intent.Event, outcome, publicationClaim, handoffs, false, nil)
 }
 
-func (eb *EventBus) stageCommittedOutboxOperationWithFinalization(intent runtimeengine.EmitIntent, source events.Event, outcome EventAppendOutcome, publicationClaim *pipelinePublicationClaim, handoffs []runtimedelivery.DurableHandoffProof, finalizationErr error) {
+func (eb *EventBus) stageCommittedOutboxOperationWithFinalization(intent runtimeengine.EmitIntent, source events.Event, outcome EventAppendOutcome, publicationClaim *pipelinePublicationClaim, handoffs []runtimedelivery.DurableHandoffProof, targetFailure bool, finalizationErr error) {
 	if eb == nil {
 		return
 	}
@@ -879,6 +890,7 @@ func (eb *EventBus) stageCommittedOutboxOperationWithFinalization(intent runtime
 	eb.pendingOutboxByID[eventID] = append(eb.pendingOutboxByID[eventID], pendingOutboxOperation{
 		sequence: eb.pendingOutboxSequence, intent: intent, source: source.Clone(), outcome: outcome, publicationClaim: publicationClaim,
 		deliveryHandoffs: append([]runtimedelivery.DurableHandoffProof(nil), handoffs...),
+		targetFailure:    targetFailure,
 		finalizationErr:  finalizationErr,
 	})
 	eb.mu.Unlock()

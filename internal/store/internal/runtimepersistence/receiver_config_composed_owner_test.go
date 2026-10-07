@@ -430,7 +430,7 @@ func TestReceiverConfigPublicationContendersBothStores(t *testing.T) {
 					if err := f.db.QueryRow(`PRAGMA database_list`).Scan(&sequence, &name, &path); err != nil {
 						t.Fatal(err)
 					}
-					observed := barrier.observeSQLiteStore(t, f.raw.(*SQLiteRuntimeStore), path)
+					observed := barrier.observeSQLiteStore(t, path)
 					descriptors, err := runtimepkg.AuthorActivityEventDescriptors(semanticview.Wrap(f.bundle))
 					if err != nil {
 						t.Fatal(err)

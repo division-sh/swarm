@@ -81,38 +81,38 @@ func (c *pipelinePublicationClaim) releaseAndLog(ctx context.Context) {
 	}
 }
 
-func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runtimepipelineobligation.Disposition) error {
+func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
 	if c == nil || c.bus == nil {
-		return fmt.Errorf("pipeline publication claim owner is required")
+		return runtimepipelineobligation.SettlementOutcome{}, fmt.Errorf("pipeline publication claim owner is required")
 	}
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	var err error
 	ctx, err = c.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	if c.retired.Load() || !c.released.CompareAndSwap(false, true) {
-		return runtimepipelineobligation.ErrStaleClaim
+		return runtimepipelineobligation.SettlementOutcome{}, runtimepipelineobligation.ErrStaleClaim
 	}
 	if c.bus.pipelineObligations == nil {
 		if c.bus.ephemeral {
-			return nil
+			return runtimepipelineobligation.SettlementOutcome{}, nil
 		}
-		return fmt.Errorf("pipeline publication claim owner is required")
+		return runtimepipelineobligation.SettlementOutcome{}, fmt.Errorf("pipeline publication claim owner is required")
 	}
 	outcome, err := c.bus.settlePipelineObligationOutcome(ctx, c.claim, disposition)
 	if err != nil {
 		if outcome.Committed() {
-			return fmt.Errorf("settle pipeline publication %s: %w", c.eventID, err)
+			return outcome, fmt.Errorf("settle pipeline publication %s: %w", c.eventID, err)
 		}
 		releaseErr := c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
 		if errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
 			releaseErr = nil
 		}
-		return errors.Join(fmt.Errorf("settle pipeline publication %s: %w", c.eventID, err), releaseErr)
+		return outcome, errors.Join(fmt.Errorf("settle pipeline publication %s: %w", c.eventID, err), releaseErr)
 	}
-	return nil
+	return outcome, nil
 }
 
 func (eb *EventBus) settlePipelineObligationOutcome(

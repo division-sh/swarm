@@ -14,19 +14,67 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
+
+var errWorkflowTimerUncommittedInterruption = errors.New("authorized workflow timer transition interrupted before acknowledgment")
+
+func workflowTimerInterceptionOutcome(recognized, advanced bool, err error) (runtimepipelineobligation.ExecutionOutcome, bool) {
+	outcome := runtimepipelineobligation.Continue()
+	if !recognized {
+		return outcome, false
+	}
+	if advanced {
+		outcome.Committed = true
+		return outcome, false
+	}
+	if runtimefailures.IsStateContention(err) {
+		failure := runtimefailures.Normalize(err, runtimeWorkflowID, "workflow_timer_transition")
+		return runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, &failure), true
+	}
+	if !errors.Is(err, errWorkflowTimerUncommittedInterruption) {
+		return outcome, false
+	}
+	class := runtimefailures.ClassDependencyUnavailable
+	if errors.Is(err, context.DeadlineExceeded) {
+		class = runtimefailures.ClassTimeout
+	}
+	failure := runtimefailures.Normalize(runtimefailures.Wrap(class, "workflow_timer_transition_interrupted", runtimeWorkflowID, "workflow_timer_transition", nil, err), runtimeWorkflowID, "workflow_timer_transition")
+	return runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, &failure), true
+}
 
 func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (handled bool, advanced bool, resultErr error) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.workflowTimers == nil {
 		return false, false, nil
 	}
+	if evt.ProducerType() != events.EventProducerPlatform || evt.SourceAgent() != "runtime.workflow_timer" {
+		return false, false, nil
+	}
+	// Authorization also reads the instance. Fence that read through commit,
+	// but never retain the entity lock across post-commit joins or dispatch.
+	unlock := pc.lockWorkflowEntity(evt.RoutingSource().Route().EntityID)
+	release := func() {
+		if unlock != nil {
+			unlock()
+			unlock = nil
+		}
+	}
+	defer release()
 	activation, occurrence, recognized, err := pc.workflowTimers.AuthorizeAcceptedEvent(ctx, evt)
 	if err != nil || !recognized {
 		return recognized, false, err
 	}
+	// Only exact accepted occurrences may retain this obligation after a canceled
+	// unacknowledged step. Joined ownership/schema/cleanup failures are not retries.
+	defer func() {
+		if !advanced && runtimefailures.IsContextInterruption(resultErr) {
+			resultErr = errors.Join(errWorkflowTimerUncommittedInterruption, resultErr)
+		}
+	}()
 	source := pc.SemanticSource()
 	if source == nil {
 		return true, false, fmt.Errorf("workflow timer event requires semantic source")
@@ -79,8 +127,15 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if pc.workflowStore.engineMutations == nil {
 		return true, false, fmt.Errorf("workflow timer transition requires the selected workflow engine mutation owner")
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
-	if err != nil || !found {
+	target, err := pc.workflowStore.LoadTargetPersistence(ctx, flowIdentity, identity.NormalizeEntityID(entityID))
+	if err != nil {
+		return true, false, err
+	}
+	if !target.Presence.Constructed() {
+		return true, false, runtimeengine.ErrUnconstructedWorkflowTarget
+	}
+	instance, err := target.DecodeComplete(route, identity.NormalizeEntityID(entityID))
+	if err != nil {
 		return true, false, err
 	}
 	currentStage := strings.TrimSpace(instance.CurrentState)
@@ -104,6 +159,15 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if currentStage == nextStage {
 		return true, true, nil
 	}
+	address := runtimeengine.StateAddress{
+		FlowID:       identity.NormalizeFlowID(instance.WorkflowName),
+		FlowInstance: flowIdentity,
+		EntityID:     identity.NormalizeEntityID(entityID),
+	}
+	evaluated, _, err := workflowEngineEvaluationSnapshot(source, address.FlowID.String(), address, instance, target.Lifecycle.Config)
+	if err != nil {
+		return true, false, err
+	}
 	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		return true, false, err
@@ -123,16 +187,11 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 			return true, false, err
 		}
 	}
-	address := runtimeengine.StateAddress{
-		FlowID:       identity.NormalizeFlowID(instance.WorkflowName),
-		FlowInstance: runtimeflowidentity.RunScopedFlowInstance{RunID: evt.RunID(), Route: route}.Normalize(),
-		EntityID:     identity.NormalizeEntityID(entityID),
-	}
 	cause, err := runtimeworkflowlifecycle.NewCompiledTransition(compiled, handlerselection.NotApplicable(), nil)
 	if err != nil {
 		return true, false, err
 	}
-	prepared, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, runtimeengine.EngineMutation{Address: address, State: runtimeengine.StateMutation{
+	prepared, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, runtimeengine.EngineMutation{Address: address, EvaluatedState: evaluated, State: runtimeengine.StateMutation{
 		Transition: &cause,
 		NextState:  nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
 		TriggeredAt: evt.CreatedAt(), StateCarrier: carrier,
@@ -156,24 +215,15 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if err != nil {
 		return true, false, err
 	}
-	terminal, err := pc.prepareTerminalFlowInstanceDeactivation(ctx, flowIdentity, address.EntityID, nextStage)
-	if err != nil {
-		return true, false, err
-	}
-	if terminal != nil {
-		defer func() { resultErr = errors.Join(resultErr, terminal.Abort()) }()
-	}
 	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
 		State: state, Lifecycle: lifecycle.Commit,
-		PostCommit: WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{
-			Identity: flowIdentity, EntityID: entityID, NextState: nextStage,
-		}},
 	})
-	if err != nil && committed.PostCommit.FlowDeactivation == nil {
+	release()
+	if !committed.Committed {
+		if err == nil {
+			err = fmt.Errorf("workflow timer transition has no acknowledged commit")
+		}
 		return true, false, err
-	}
-	if committed.PostCommit.FlowDeactivation != nil && terminal != nil {
-		err = errors.Join(err, terminal.Commit())
 	}
 	err = errors.Join(err, pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle))
 	pc.notifyTestEntityStateUpdated(entityID, nextStage)

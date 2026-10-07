@@ -144,10 +144,15 @@ func TestFanOutGroupMixedExecutionBothStores(t *testing.T) {
 // disposition or a successful settlement acknowledgement.
 func TestFanOutGroupMixedDispatchFailureBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, kind := range []string{"terminal", "dead_letter"} {
+		for _, kind := range []string{"terminal", "wrapped_terminal", "untyped_terminal", "dead_letter"} {
 			t.Run(backend+"/"+kind, func(t *testing.T) {
 				f, _, coordinator := newMixedExecutionFixture(t, backend, nil)
 				fault := failures.New(failures.ClassComputeFailure, "mixed_dispatch_"+kind, "mixed-group-proof", "dispatch", nil)
+				if kind == "wrapped_terminal" {
+					fault = fmt.Errorf("mixed dispatch wrapper: %w", fault)
+				} else if kind == "untyped_terminal" {
+					fault = errors.New("mixed untyped dispatch failure")
+				}
 				f.bus.SetInterceptors(mixedDispatchFailure{eventID: f.events[3].ID(), deadLetter: kind == "dead_letter", failure: fault}, coordinator)
 				f.prepare(t)
 				f.seal(t)
@@ -160,7 +165,7 @@ func TestFanOutGroupMixedDispatchFailureBothStores(t *testing.T) {
 				}
 				observed := &mixedExecutionGroup{PublicationGroup: f.group}
 				err = f.bus.DispatchFanOutPublications(f.ctx, observed, committed.Publications)
-				if kind == "terminal" && !errors.Is(err, fault) || kind == "dead_letter" && err != nil {
+				if kind != "dead_letter" && !errors.Is(err, fault) || kind == "dead_letter" && err != nil {
 					t.Fatalf("canonical dispatch error=%v want=%s", err, kind)
 				}
 				if len(observed.requests) != 4 {
@@ -170,14 +175,19 @@ func TestFanOutGroupMixedDispatchFailureBothStores(t *testing.T) {
 					wantKind, wantReason, wantReceipt := pipelineobligation.DispositionAcknowledged, "pipeline_persisted", "success"
 					if i == 3 {
 						wantKind, wantReason, wantReceipt = pipelineobligation.DispositionTerminal, "pipeline_outbox_dispatch_failed", "dead_letter"
-						wantClass := failures.ClassInternalFailure
-						wantDetail := "event_interceptor_failed"
+						wantClass := failures.ClassComputeFailure
+						wantDetail := "mixed_dispatch_" + kind
+						wantComponent, wantOperation := "mixed-group-proof", "dispatch"
+						if kind == "untyped_terminal" {
+							wantClass, wantDetail = failures.ClassInternalFailure, "event_interceptor_failed"
+							wantComponent, wantOperation = "eventbus", "run_interceptor"
+						}
 						if kind == "dead_letter" {
 							wantKind, wantReceipt, wantReason, wantClass = pipelineobligation.DispositionDeadLetter, "dead_letter", "mixed_dispatch_dead_letter", failures.ClassComputeFailure
 							wantDetail = wantReason
 						}
 						failure := request.Disposition.Failure()
-						if failure == nil || failure.Class != wantClass || failure.Detail.Code != wantDetail {
+						if failure == nil || failure.Class != wantClass || failure.Detail.Code != wantDetail || failure.Component != wantComponent || failure.Operation != wantOperation {
 							t.Fatalf("failure precision: %+v", failure)
 						}
 						mixedAssertFailure(t, f, f.events[i].ID(), wantClass, wantDetail)

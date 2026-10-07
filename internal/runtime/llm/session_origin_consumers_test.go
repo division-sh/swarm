@@ -213,7 +213,7 @@ func originTestRuntime(t *testing.T, provider string, harness *effecttest.Harnes
 	t.Cleanup(server.Close)
 	if provider == "anthropic" {
 		runtime := NewAnthropicAPIRuntime(&config.Config{}, registry, "origin-test", nil, publisher)
-		runtime.apiURL, runtime.apiKey, runtime.httpClient, runtime.completionController = server.URL, "test-key", server.Client(), controller
+		runtime.apiURL, runtime.credentialCache, runtime.httpClient, runtime.completionController = server.URL, providerCredentialCache{value: "test-key"}, server.Client(), controller
 		return runtime, func() int { return int(calls.Load()) }
 	}
 	cfg := openAICompatibleTestConfig(server.URL)

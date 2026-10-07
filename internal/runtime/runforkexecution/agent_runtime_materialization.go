@@ -844,6 +844,7 @@ func newSelectedContractToolExecutor(options SelectedContractAgentRuntimeOptions
 		NoticePresentation: options.NoticePresentation,
 		MCPClient:          options.MCPClient,
 		EntityStore:        options.EntityStore,
+		EntityWriter:       pipeline,
 		HumanTaskStore:     options.HumanTaskStore,
 		WorkflowInstances:  pipeline,
 		WorkflowSource:     source,

@@ -423,6 +423,7 @@ const (
 	LifecycleGateNested
 	LifecycleLoopConnected
 	LifecycleLoopRepeatEmits
+	LifecycleLoopRepeatEmitsUntilObserverFinish
 )
 
 // CopyLifecycleEmitter constructs only the source-backed lifecycle census cases.
@@ -488,7 +489,7 @@ pins:
 	case LifecycleLoopConnected:
 		writeLifecycleLoopConnected(t, root)
 		return root
-	case LifecycleLoopRepeatEmits:
+	case LifecycleLoopRepeatEmits, LifecycleLoopRepeatEmitsUntilObserverFinish:
 		writeLifecycleLoopConnected(t, root)
 		for _, edit := range []struct{ path, old, replacement string }{
 			{"schema.yaml", "    - loop.escaped\n", "    - loop.escaped\n    - ordinary.repeated\n"},
@@ -520,6 +521,26 @@ pins:
             value: payload.revision_id
       advances_to: observed
 `)
+		if variant == LifecycleLoopRepeatEmitsUntilObserverFinish {
+			// The observer has its own finite work. Its explicit finish keeps
+			// receiver-final refusal distinct from whole-run terminal refusal.
+			for _, edit := range []struct{ path, old, replacement string }{
+				{"schema.yaml", "    - loop.close\n", "    - loop.close\n    - ordinary.finish\n"},
+				{"schema.yaml", "    - ordinary.repeated\n", "    - ordinary.repeated\n    - ordinary.finish\n"},
+				{"schema.yaml", "    to: ordinary\n", "    to: ordinary\n  - event: ordinary.finish\n    from: .\n    to: ordinary\n"},
+				{"ordinary/schema.yaml", "  observed: {terminal: true}\n", "  observed: {}\n  done: {terminal: true}\n"},
+				{"ordinary/schema.yaml", "    - ordinary.repeated\n", "    - ordinary.repeated\n    - ordinary.finish\n"},
+				{"ordinary/nodes.yaml", "  subscribes_to: [ordinary.repeated]\n", "  subscribes_to: [ordinary.repeated, ordinary.finish]\n"},
+			} {
+				raw := lifecycleStaticRead(t, root, edit.path)
+				if strings.Count(raw, edit.old) != 1 {
+					t.Fatalf("observer finish edit %s is not unique", edit.path)
+				}
+				writeClosedVariantFile(t, root, edit.path, strings.Replace(raw, edit.old, edit.replacement, 1))
+			}
+			writeClosedVariantFile(t, root, "events.yaml", lifecycleStaticRead(t, root, "events.yaml")+"ordinary.finish:\n  seed: boolean\n")
+			writeClosedVariantFile(t, root, "ordinary/nodes.yaml", lifecycleStaticRead(t, root, "ordinary/nodes.yaml")+"    ordinary.finish:\n      advances_to: done\n")
+		}
 		return root
 	default:
 		t.Fatalf("unsupported lifecycle emitter fixture %d", variant)

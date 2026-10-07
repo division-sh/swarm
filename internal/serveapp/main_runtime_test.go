@@ -5127,14 +5127,20 @@ func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql
 		t.Fatalf("%s lifecycle probe is required for event %s", backend, eventID)
 	}
 	probe.RequireNodePending(eventID, nodeID)
+	deadline := time.Now().Add(servedEventPublishLifecycleProbeWaitTimeout)
 	probe.Expect(eventID).
-		PostCommitDispatchStarted().
 		NodeInProgress(nodeID).
 		HandlerStarted(nodeID).
 		HandlerCompleted(nodeID).
 		NodeDelivered(nodeID).
-		PostCommitDispatchCompleted().
 		Within(servedEventPublishLifecycleProbeWaitTimeout)
+	// Publication diagnostics and the continuation can progress independently.
+	// Preserve each ordered lifecycle without imposing cross-owner ordering.
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		t.Fatal("node delivery consumed the complete lifecycle proof deadline")
+	}
+	probe.Expect(eventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
 	if count := servedEventPublishNodeDeliveryCount(t, db, backend, runID, eventID, nodeID); count != 1 {
 		t.Fatalf("%s node/%s delivery count for event %s = %d, want 1\n%s", backend, nodeID, eventID, count, servedEventPublishDebugSummary(t, db, backend, runID))
 	}

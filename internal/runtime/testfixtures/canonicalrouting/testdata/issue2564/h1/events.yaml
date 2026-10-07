@@ -1,0 +1,4 @@
+hub.start: {key: hub_id, hub_id: text}
+hub.bump: {key: hub_id, hub_id: text, n: integer}
+hub.close: {key: hub_id, hub_id: text}
+hub.again: {key: hub_id, hub_id: text, wave: integer}

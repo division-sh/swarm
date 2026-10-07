@@ -1,0 +1,4 @@
+name: hub
+instance: hub_id
+stages: {open: {initial: true}, active: {}, closed: {terminal: true}}
+pins: {inputs: [hub.start, hub.bump, hub.close, hub.again]}

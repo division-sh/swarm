@@ -60,7 +60,7 @@ func TestCatalogRequiredInventory(t *testing.T) {
 				"catalog.runtime.agent_instance_materialization",
 				"catalog.runtime.agent_turn_completion",
 				"catalog.runtime.agent_emission_delivery",
-				"catalog.runtime.agent_terminal_teardown",
+				"catalog.runtime.agent_final_stage_retention",
 			},
 		},
 	}
@@ -435,6 +435,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
 		"serveapp-mailbox", "serveapp-mailbox-p-q",
 		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-delayed-commit-preservation", "serveapp-standing",
+		"serveapp-2564-h1", "serveapp-2564-h2",
 	}
 	catalogUnits := []string{
 		"catalog-replay-1", "catalog-replay-2-3", "catalog-runtime",

@@ -30,7 +30,7 @@ type OpenAIResponsesRuntime struct {
 	lockOwner            string
 	httpClient           *http.Client
 	baseURL              string
-	apiKey               string
+	credentialCache      providerCredentialCache
 	events               EventPublisher
 	providerAdmission    *ProviderAdmissionRegistry
 	credentials          ProviderCredentialResolver
@@ -242,12 +242,8 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(r.apiKey) == "" {
-		credential, err := r.credentials.Resolve(ctx, profile)
-		if err != nil {
-			return nil, err
-		}
-		r.apiKey = credential.Value
+	if err := r.credentialCache.resolve(ctx, r.credentials, profile); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(r.baseURL) == "" {
 		baseURL, err := llmselection.ResolveBaseURL(profile, r.cfg.LLM.OpenAIResponses.BaseURL)
@@ -482,7 +478,7 @@ func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte
 		return nil, openAIResponsesResponse{}, nil, fmt.Errorf("build openai-responses request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("authorization", "Bearer "+r.apiKey)
+	req.Header.Set("authorization", "Bearer "+r.credentialCache.snapshot())
 	var attempt *runtimeeffects.Handle
 	if managed == nil {
 		attempt, err = runtimeeffects.BeginCompletion(ctx, "openai_responses", payload, nil)

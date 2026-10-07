@@ -85,6 +85,10 @@ func TestPipelineRejectsFabricatedGuardCauseOnBothStores(t *testing.T) {
 				if err != nil || !found {
 					t.Fatalf("load before: found=%v err=%v", found, err)
 				}
+				evaluated, found, err := workflowEngineEvaluationSnapshot(source, address.FlowID.String(), address, before, nil)
+				if err != nil || !found {
+					t.Fatalf("capture guard R1: found=%v error=%v", found, err)
+				}
 				node, err := identity.AdmitExecutableNodeDeclaration(".", tc.node)
 				if err != nil {
 					t.Fatal(err)
@@ -102,12 +106,22 @@ func TestPipelineRejectsFabricatedGuardCauseOnBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				mutation := engine.EngineMutation{Address: address, State: state, HandlerRuleSelection: handlerselection.NotApplicable(), LifecycleEffects: []workflowlifecycle.Effect{effect}}
+				mutation := engine.EngineMutation{Address: address, EvaluatedState: evaluated, State: state, HandlerRuleSelection: handlerselection.NotApplicable(), LifecycleEffects: []workflowlifecycle.Effect{effect}}
 				if err := mutation.ValidateTransitionEvidence(); err != nil {
 					t.Fatalf("projection-consistent hostile fixture rejected before source ownership check: %v", err)
 				}
 				owner := pipelineEngineMutationOwner{store: store, state: pipelineEngineStateRepo{coordinator: pc}}
+				r2 := &rejectWorkflowEvaluationR2Reader{}
+				pc.workflowStore.targetReader = r2
+				missingR1 := mutation
+				missingR1.EvaluatedState = engine.StateSnapshot{}
+				if _, err := owner.CommitEngineMutation(ctx, missingR1); err == nil || !strings.Contains(err.Error(), "requires its exact evaluated persistence snapshot") {
+					t.Fatalf("guard candidate without R1 crossed the evaluation boundary: %v", err)
+				}
 				_, commitErr := owner.CommitEngineMutation(ctx, mutation)
+				if r2.calls != 0 {
+					t.Fatalf("guard admission reread R2 %d times", r2.calls)
+				}
 				after, found, err := store.Load(ctx, address.FlowInstance)
 				if err != nil || !found {
 					t.Fatalf("load after: found=%v err=%v", found, err)

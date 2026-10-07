@@ -150,6 +150,10 @@ func TestPipelineTransitionRejectsCoherentEventSubstitutionOnBothStores(t *testi
 				if err != nil || !found {
 					t.Fatalf("before snapshot: found=%v err=%v", found, err)
 				}
+				mutation.EvaluatedState, found, err = workflowEngineEvaluationSnapshot(source, address.FlowID.String(), address, before, nil)
+				if err != nil || !found {
+					t.Fatalf("capture transition R1: found=%v error=%v", found, err)
+				}
 				snapshotRows := func() map[string][]string {
 					out := map[string][]string{}
 					for _, table := range []string{

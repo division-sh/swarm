@@ -53,9 +53,6 @@ func (*entityPersistenceStub) LoadEntityState(context.Context, EntityIdentity) (
 func (*entityPersistenceStub) QueryEntityStates(context.Context, EntityStateQuery) ([]map[string]any, error) {
 	return nil, nil
 }
-func (*entityPersistenceStub) SaveEntityField(context.Context, EntityFieldUpdate) (EntityFieldWriteResult, error) {
-	return EntityFieldWriteResult{Revision: 1, Acknowledged: true}, nil
-}
 
 type humanTaskPersistenceStub struct{}
 

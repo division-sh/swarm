@@ -13,6 +13,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
@@ -328,7 +329,24 @@ func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, flowIdentity 
 }
 
 func (pc *PipelineCoordinator) CommitDecision(ctx context.Context, card decisioncard.Card, decision string, decidedAt time.Time) error {
-	return pc.workflowStore.CommitDecision(ctx, card, decision, decidedAt)
+	if card.Anchor.Kind() != decisioncard.AnchorKindStageGate {
+		return pc.workflowStore.CommitDecision(ctx, card, decision, decidedAt)
+	}
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		return err
+	}
+	unlock := pc.lockWorkflowEntity(anchor.EntityID)
+	defer unlock()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := pc.workflowStore.CommitDecision(ctx, card, decision, decidedAt)
+		if !failures.IsStateContention(err) {
+			return err
+		}
+	}
 }
 
 func (pc *PipelineCoordinator) ReconcileStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
