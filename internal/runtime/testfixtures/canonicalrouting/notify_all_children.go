@@ -46,6 +46,7 @@ type NotifyAllChildrenOptions struct {
 	NumericReporterSink         bool
 	NumericInternalSettlement   bool
 	RegistrationUUIDField       bool
+	FiniteLifecycle             bool
 }
 
 // CopyNotifyAllChildren derives one closed variant from the checked-in owner.
@@ -405,6 +406,18 @@ retired:
 	}
 	if opts.ExplicitAgentName {
 		applyClosedReplacement(t, accountAgents, "account-worker:\n", "account-worker:\n  id: account-handler\n")
+	}
+	if opts.FiniteLifecycle {
+		// The root only forwards work. The portfolio stays active across rows
+		// until an explicit close, rather than completing on its first input.
+		applyClosedReplacement(t, connectFile, "name: notify-all-children\n", "name: notify-all-children\nstages: {done: {final: true}}\n")
+		applyClosedReplacement(t, connectFile, "  inputs:\n", "  inputs:\n    - fixture.close.requested\n")
+		applyClosedReplacement(t, connectFile, "  outputs:\n", "  outputs:\n    - fixture.close.requested\n")
+		applyClosedReplacement(t, connectFile, "connect:\n", "connect:\n  - {event: fixture.close.requested, from: ., to: portfolio}\n")
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "portfolio.opened:\n", "fixture.close.requested:\nportfolio.opened:\n")
+		applyClosedReplacement(t, ownerSchema, "name: portfolio\n", "name: portfolio\nstages: {active: {}, done: {final: true}}\n")
+		applyClosedReplacement(t, ownerSchema, "  inputs:\n", "  inputs:\n    - fixture.close.requested\n")
+		applyClosedReplacement(t, ownerNodes, "  event_handlers:\n", "    - fixture.close.requested\n  event_handlers:\n    fixture.close.requested: {advances_to: done}\n")
 	}
 	return root
 }

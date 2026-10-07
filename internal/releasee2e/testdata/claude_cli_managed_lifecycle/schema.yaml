@@ -1,4 +1,5 @@
 name: claude-cli-release-lifecycle
+stages: {done: {final: true}}
 pins:
   inputs:
     - task.assigned

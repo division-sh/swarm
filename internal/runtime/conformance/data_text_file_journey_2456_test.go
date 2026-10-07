@@ -39,7 +39,7 @@ func textFileDeploymentFixture2456(t *testing.T, backend string, keyed bool) (*d
 	if keyed {
 		declaration = "root.ready:\n  key: account_id\n  account_id: text\n  body: text\n  cover: text?\n"
 	}
-	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(declaration), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(declaration+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(conformanceRepoRoot(t), root, contracts.DefaultPlatformSpecFile(conformanceRepoRoot(t)))
@@ -341,7 +341,7 @@ func TestDataTextFile2456Keyed37DynamicReceiversBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopySelectedDeploymentResource(t, "dynamic", true)
-			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("root.ready:\n  key: account_id\n  account_id: text\n  body: text\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("root.ready:\n  key: account_id\n  account_id: text\n  body: text\n"+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(conformanceRepoRoot(t), root, contracts.DefaultPlatformSpecFile(conformanceRepoRoot(t)))
@@ -1328,7 +1328,7 @@ func TestDataTextFile2456HostileGrammarNoMutationBothStores(t *testing.T) {
 		})
 		t.Run(backend+"/dotted_collision", func(t *testing.T) {
 			root := canonicalrouting.CopySelectedDeploymentResource(t, "root", false)
-			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("root.ready:\n  body: text\nroot.ready.body:\n  note: text\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("root.ready:\n  body: text\nroot.ready.body:\n  note: text\n"+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			schemaPath := filepath.Join(root, "schema.yaml")
