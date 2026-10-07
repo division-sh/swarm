@@ -26,6 +26,7 @@ type PipelineReceiptEvidence struct {
 
 type WriterStageEvidence struct{ EntityID, State string }
 type CardContentionEvidence struct{ Requests, DecidedChanges int }
+
 func (s *PipelinePostgresOwner) ObserveWriterStageForTest(ctx context.Context, runID, entityID, stage string) (WriterStageEvidence, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return WriterStageEvidence{}, err

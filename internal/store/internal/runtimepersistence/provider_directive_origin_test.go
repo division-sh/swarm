@@ -259,6 +259,42 @@ func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixt
 	return origin, reservation.Operation, admittedEvent.Event()
 }
 
+func reserveProviderDirectiveOperation(t *testing.T, fixture completionSettlementFixture, store providerDirectiveTestStore, label string) (runtimeagentcontrol.DirectiveOperation, events.Event) {
+	t.Helper()
+	now := time.Now().UTC()
+	operationID, eventID := uuid.NewString(), uuid.NewString()
+	request := runtimeagentcontrol.SendDirectiveRequest{
+		AgentID: fixture.authority.Normal.Identity.AgentID(), FlowInstance: fixture.authority.Normal.Identity.FlowInstance(),
+		Directive: "continue " + label, RunID: fixture.authority.Target.RunID,
+		Source: runtimeagentcontrol.DirectiveSourceV1RPC, OperatorID: "provider-directive-test",
+	}
+	event, err := runtimeagentcontrol.NewDirectiveEvent(request, runtimeagentcontrol.RunTargetResolution{
+		RunID: fixture.authority.Target.RunID, Mode: runtimeagentcontrol.RunResolutionSpecified,
+	}, operationID, eventID, now, executionposture.Live)
+	if err != nil {
+		t.Fatalf("construct directive event: %v", err)
+	}
+	admittedEvent, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatalf("admit directive event: %v", err)
+	}
+	reservation, err := store.ReserveDirectiveOperation(testAuthorActivityContext(), runtimeagentcontrol.ReserveDirectiveOperationRequest{
+		Operation: runtimeagentcontrol.DirectiveOperation{
+			OperationID: operationID, Method: runtimeagentcontrol.DirectiveOperationMethod,
+			ActorTokenID: "provider-directive-test", IdempotencyKey: "provider-directive-" + label + "-" + operationID,
+			RequestHash: "provider-directive-hash-" + operationID, AgentIdentity: fixture.authority.Normal.Identity,
+			Directive: request.Directive, RequestedRunID: fixture.authority.Target.RunID, ResolvedRunID: fixture.authority.Target.RunID,
+			RunIDResolution: runtimeagentcontrol.RunResolutionSpecified, Source: request.Source, OperatorID: request.OperatorID,
+			DirectiveEventID: eventID, State: runtimeagentcontrol.DirectiveOperationPrepared,
+		},
+		Event: admittedEvent, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("reserve directive operation: %v", err)
+	}
+	return reservation.Operation, admittedEvent.Event()
+}
+
 func providerDirectiveContext(t *testing.T, fixture completionSettlementFixture, origin runtimeagentcontrol.DirectiveExecutionOrigin, event events.Event, operation string) context.Context {
 	t.Helper()
 	return runtimeeffects.WithDirectiveCompletionOrigin(providerDirectiveBaseContext(t, fixture, event, operation), origin)

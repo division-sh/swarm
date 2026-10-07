@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -129,22 +130,28 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			if !fault.fired || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || fault.selection.DisplayLabel() != "first" {
 				t.Fatalf("did not reach exact selected CAS rejection: fired=%v selection=%#v err=%v diagnostic=%s", fault.fired, fault.selection, fault.err, proposedEffectProofFailure(t, selected, event.ID()))
 			}
-			evidence := storetest.ObserveDeliveryEventEvidence(t, ctx, selected.events, event.ID())
-			if len(evidence.Deliveries) != 1 {
-				t.Fatalf("exact selected delivery count=%d", len(evidence.Deliveries))
+			reader := selected.events.(interface {
+				LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+				LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
+			})
+			observed, err := reader.LoadOperatorEvent(ctx, event.ID())
+			if err != nil || observed.EventID != event.ID() || observed.RunID != runID || len(observed.Deliveries) != 1 {
+				t.Fatalf("selected event delivery=%+v err=%v", observed, err)
 			}
-			delivery := evidence.Deliveries[0]
+			delivery := observed.Deliveries[0]
 			if delivery.Status != "delivered" || delivery.RetryCount != 0 || fault.losses != 9 {
 				t.Fatalf("contention charged delivery budget: status=%s retries=%d losses=%d", delivery.Status, delivery.RetryCount, fault.losses)
 			}
-			if len(delivery.Attempts) != 1 {
-				t.Fatalf("contention created attempts: %d", len(delivery.Attempts))
+			id := delivery.DeliveryID
+			var attempts, count int
+			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1`, id).Scan(&attempts); err != nil || attempts != 1 {
+				t.Fatalf("contention created attempts: %d %v", attempts, err)
 			}
-			if delivery.HandlerSelections != 1 {
-				t.Fatalf("final selection facts: %d", delivery.HandlerSelections)
+			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, id).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("final selection facts: %d %v", count, err)
 			}
-			if evidence.DeadLetters != 0 {
-				t.Fatalf("state contention dead letter: %d", evidence.DeadLetters)
+			if len(observed.DeadLetters) != 0 || len(delivery.DeadLetters) != 0 {
+				t.Fatalf("state contention dead letter: event=%+v delivery=%+v", observed.DeadLetters, delivery.DeadLetters)
 			}
 			assertPersistedHandlerRuleSelection(t, selected, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")
 			assertTraceHandlerRuleSelection(t, selected, ctx, runID, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected, `nodes["select"].handlers["select"].rules[1]`, "second")
@@ -170,9 +177,18 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			if err := bus.PublishAcknowledged(ctx, event); err != nil {
 				t.Fatal(err)
 			}
-			var count int
-			if err := selected.db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='ack'`, runID).Scan(&count); err != nil || count != 1 {
-				t.Fatalf("duplicate final effect: %d %v", count, err)
+			report, err = reader.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			count = 0
+			for _, row := range report.EventCounts {
+				if row.EventName == "ack" {
+					count += row.Count
+				}
+			}
+			if count != 1 {
+				t.Fatalf("duplicate final effect: %d", count)
 			}
 		})
 	}

@@ -72,7 +72,7 @@ func newOperationSurfaceFixture(t *testing.T) (context.Context, models.AgentConf
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "writer", Role: "operator", FlowID: "review"}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"review": {
-			SchemaYAML:   "name: review\nstages:\n  queued: {initial: true}\n  marginal_review: {}\n  closed: {terminal: true}\n",
+			SchemaYAML:   "name: review\nstages:\n  queued: {}\n  marginal_review: {}\n  closed: {final: true}\n",
 			EntitiesYAML: "case:\n  status: text\n  items: list<text>\n  labels: map[text]text\n  protected: text\n",
 			AgentsYAML:   "writer:\n  role: operator\n  intent: {inline: Write declared fields.}\n  entity_writes:\n    case:\n      save: [status, items, labels]\n",
 		},

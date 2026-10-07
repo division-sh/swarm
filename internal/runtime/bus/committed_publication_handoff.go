@@ -37,8 +37,14 @@ func (d engineDispatcher) DispatchCommittedPublication(ctx context.Context, valu
 		return errors.New("committed publication handoff requires its finalized outbox operation")
 	}
 	defer func() { err = errors.Join(err, operation.publicationClaim.Release(ctx)) }()
-	if operation.outcome == EventAppendExactDuplicate || operation.targetFailure {
+	if operation.outcome == EventAppendExactDuplicate {
 		return nil
+	}
+	if operation.finalizationErr != nil {
+		return operation.finalizationErr
+	}
+	if operation.committedDisposition != nil {
+		return d.bus.AcceptCommittedDeliveryHandoffs(operation.deliveryHandoffs)
 	}
 	if err := d.bus.validateContinuationPublication(operation, committed.plan.prepared.plan); err != nil {
 		return err

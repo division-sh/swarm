@@ -1,0 +1,177 @@
+{
+  "baseline": "bd99ef962",
+  "scope": "bounded D/A/E composition fixture cut; preserve five marked stage choices and explicitly complete the routing-only finite completion root",
+  "changes": [
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1/hub/schema.yaml",
+      "before_hash": "54a7caf1bddc8bdc801dd74fa623ccc5c25a075eb3b4e5b000bfd33bc1667353",
+      "after_hash": "3b87608e9eb71205e8471896d72bfda0549799d9c11566f5bc3dc392bf857150",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: hub\ninstance: hub_id\nstages: {open: {initial: true}, active: {}, closed: {terminal: true}}\npins: {inputs: [hub.start, hub.bump, hub.close, hub.again]}\n",
+          "after": "name: hub\ninstance: hub_id\nstages: {open: {}, active: {}, closed: {final: true}}\npins: {inputs: [hub.start, hub.bump, hub.close, hub.again]}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "open",
+          "before_order": [
+            "open",
+            "active",
+            "closed"
+          ],
+          "after_order": [
+            "open",
+            "active",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2/hub/schema.yaml",
+      "before_hash": "1533a0394306a5285b0efeb876a92d537408bdba81f6780f6137cecee61dd18c",
+      "after_hash": "b8034fbabb1331e33bfdad3ca3d1b4368d9be977d67a40f9da7abfda5c7af081",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: hub\ninstance: hub_id\nstages:\n  s1:\n    initial: true\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\n  s2:\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\n  closed: {terminal: true}\npins: {inputs: [hub.start, hub.bump, hub.close]}\n",
+          "after": "name: hub\ninstance: hub_id\nstages:\n  s1:\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\n  s2:\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\n  closed: {final: true}\npins: {inputs: [hub.start, hub.bump, hub.close]}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "s1",
+          "before_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "after_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3/hub/schema.yaml",
+      "before_hash": "c6df2b7a33de1d65ceffceced0464992fbbd903976876e0bfea525a6c187575a",
+      "after_hash": "2051c76e4ba3171731f665b4f64d547599df4a33c1c1c6afd99f2c4fa40d7365",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: hub\ninstance: hub_id\nstages:\n  idle: {initial: true}\n  working: {}\n  closed: {terminal: true}\npins:\n  inputs: [hub.start, hub.begin, hub.close]\n",
+          "after": "name: hub\ninstance: hub_id\nstages:\n  idle: {}\n  working: {}\n  closed: {final: true}\npins:\n  inputs: [hub.start, hub.begin, hub.close]\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "idle",
+          "before_order": [
+            "idle",
+            "working",
+            "closed"
+          ],
+          "after_order": [
+            "idle",
+            "working",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/m33/hub/schema.yaml",
+      "before_hash": "8eb97a54a5ec59797a0e408680c43e67f2c3fe05ccd26f74882884c64d7cfbe9",
+      "after_hash": "df26c097ef39384026dc57a39ae7d89751e8b4984bf651aa2b1382d3ed10bf71",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: hub\ninstance: hub_id\nstages:\n  idle: {initial: true}\n  working:\n    timers:\n      - {id: deadline, after: 5s, advances_to: review}\n  review: {}\n  closed: {terminal: true}\npins:\n  inputs: [hub.start, hub.begin, hub.close]\n",
+          "after": "name: hub\ninstance: hub_id\nstages:\n  idle: {}\n  working:\n    timers:\n      - {id: deadline, after: 5s, advances_to: review}\n  review: {}\n  closed: {final: true}\npins:\n  inputs: [hub.start, hub.begin, hub.close]\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "idle",
+          "before_order": [
+            "idle",
+            "working",
+            "review",
+            "closed"
+          ],
+          "after_order": [
+            "idle",
+            "working",
+            "review",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion/work/schema.yaml",
+      "before_hash": "53d1f8a2bbf334ae7bce5d211ddd3bbee076c6c2d66f9e279040a3d7d242b83f",
+      "after_hash": "84437103ed6b10dd2b3d0b9ebb6075447bb700fc4bdd39f37432aad1792f2604",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: work\ninstance: case_id\nstages:\n  waiting: {initial: true}\n  timed:\n    timers: [{id: overlap.finish_final, after: 1s, advances_to: done}]\n  done: {terminal: true}\npins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\n",
+          "after": "name: work\ninstance: case_id\nstages:\n  waiting: {}\n  timed:\n    timers: [{id: overlap.finish_final, after: 1s, advances_to: done}]\n  done: {final: true}\npins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "waiting",
+          "before_order": [
+            "waiting",
+            "timed",
+            "done"
+          ],
+          "after_order": [
+            "waiting",
+            "timed",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion/schema.yaml",
+      "before_hash": "dcab86952c8da79814fc497a06601a5c1c18cd0f39acc9aea90adbfa1175ad48",
+      "after_hash": "250d74a7e09a5dbd0929d9085e6346ad165b78ce2d975f28ec5fcdd6ae316d2d",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: issue2564-final-entry-completion\npins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\nconnect:\n  - {event: overlap.start, from: ., to: work, resolution: select-or-create}\n  - {event: overlap.arm, from: ., to: work, resolution: select}\n  - {event: overlap.finish, from: ., to: work, resolution: select}\n",
+          "after": "name: issue2564-final-entry-completion\nstages: {done: {final: true}}\npins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\nconnect:\n  - {event: overlap.start, from: ., to: work, resolution: select-or-create}\n  - {event: overlap.arm, from: ., to: work, resolution: select}\n  - {event: overlap.finish, from: ., to: work, resolution: select}\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Deliberate D2 fixture lifecycle: root has only pins/connect and no executable nodes or agents; declare the routing container ended while its child and accepted-work conjunction remain live. Original completion/ACK assertions preserved; not old-source equivalence."
+    }
+  ]
+}

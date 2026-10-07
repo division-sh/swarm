@@ -291,7 +291,7 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 			err = errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 		}
 	}()
-	if operation.outcome == EventAppendExactDuplicate || operation.targetFailure {
+	if operation.outcome == EventAppendExactDuplicate {
 		return nil
 	}
 	if operation.outcome != EventAppendInserted {

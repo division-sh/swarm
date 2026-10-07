@@ -614,7 +614,7 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 		return result, fmt.Errorf("pending outbox event type mismatch for %s: persisted=%s dispatch=%s", fallback.Event.ID(), operation.intent.Event.Type(), fallback.Event.Type())
 	}
 	// Route rejection was settled by the publication transaction, not by dispatch.
-	if operation.outcome == EventAppendExactDuplicate || operation.targetFailure {
+	if operation.outcome == EventAppendExactDuplicate {
 		return result, nil
 	}
 	if operation.outcome != EventAppendInserted {

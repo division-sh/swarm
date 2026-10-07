@@ -1492,12 +1492,16 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string) completionSettlementFixture {
 	t.Helper()
 	return newCompletionSettlementFixtureWithActor(t, store, db, sqlite, memory, runtimeactors.AgentConfig{
-		ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli",
+		ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", FlowPath: flowInstance,
 	})
 }
 
 func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, actor runtimeactors.AgentConfig) completionSettlementFixture {
 	t.Helper()
+	flowInstance := actor.FlowPath
+	if flowInstance == "" {
+		flowInstance = "global"
+	}
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"

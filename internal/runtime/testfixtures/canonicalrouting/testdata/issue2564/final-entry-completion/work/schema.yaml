@@ -1,8 +1,8 @@
 name: work
 instance: case_id
 stages:
-  waiting: {initial: true}
+  waiting: {}
   timed:
     timers: [{id: overlap.finish_final, after: 1s, advances_to: done}]
-  done: {terminal: true}
+  done: {final: true}
 pins: {inputs: [overlap.start, overlap.arm, overlap.finish]}

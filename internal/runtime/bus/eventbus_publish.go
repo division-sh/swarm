@@ -902,7 +902,7 @@ type PreparedPublish struct {
 	providerRawSettlement     providerRawSettlementAdmission
 	receiver                  receiverDispatchProjection
 	committedHandoffs         []runtimedelivery.DurableHandoffProof
-	durableHandoffReady bool
+	durableHandoffReady       bool
 	authorScope               runtimeauthoractivity.Scope
 	hasAuthorScope            bool
 	authorDescriptor          runtimeauthoractivity.EventDescriptor

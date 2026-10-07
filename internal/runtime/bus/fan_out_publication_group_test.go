@@ -162,7 +162,7 @@ func TestFanOutHandoffRejectsChangedCommittedDisposition(t *testing.T) {
 		committed: CommittedPublication{AppendOutcome: EventAppendInserted},
 	}
 	bus.stageCommittedOutboxOperationWithFinalization(intent, event, EventAppendInserted, claim, nil, nil, &changed)
-	if _, _, err := bus.takeFanOutOutboxOperation(committed); err == nil {
+	if _, _, err := bus.takeCommittedOutboxOperation(committed); err == nil {
 		t.Fatal("changed disposition passed exact committed-group matching")
 	}
 	if len(bus.pendingOutboxByID[event.ID()]) != 1 || claim.released.Load() || claim.retired.Load() {

@@ -120,7 +120,8 @@ func TestIssue2564CommittedRejectionCannotReplaceAcceptedEvidence(t *testing.T) 
 		t.Fatal(err)
 	}
 	bus.mu.Lock()
-	bus.pendingOutboxByID[event.ID()][0].targetFailure = true
+	forged := pipelineobligation.DeadLetter("route_plan_instance_conflict", nil)
+	bus.pendingOutboxByID[event.ID()][0].committedDisposition = &forged
 	bus.mu.Unlock()
 	if _, found, err := bus.takeCommittedOutboxOperation(proof); err == nil || found {
 		t.Fatalf("forged rejection replaced exact accepted evidence: found=%t err=%v", found, err)

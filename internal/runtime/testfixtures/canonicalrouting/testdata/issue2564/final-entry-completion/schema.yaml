@@ -1,4 +1,5 @@
 name: issue2564-final-entry-completion
+stages: {done: {final: true}}
 pins: {inputs: [overlap.start, overlap.arm, overlap.finish]}
 connect:
   - {event: overlap.start, from: ., to: work, resolution: select-or-create}

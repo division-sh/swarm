@@ -86,7 +86,7 @@ func newIssue2564PublicationFixture(t *testing.T, backend string, observer *issu
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
 		"schema.yaml": `name: issue2564-publication-handoff
 stages:
-  active: {initial: true}
+  active: {}
 pins:
   inputs: [bump, recurse]
   outputs: [child]
