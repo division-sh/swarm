@@ -271,7 +271,8 @@ func (eb *EventBus) takeCommittedOutboxOperation(committed CommittedEnginePublic
 	if operation.publicationClaim == nil || operation.publicationClaim != committed.plan.prepared.publicationClaim ||
 		!reflect.DeepEqual(actual, want) ||
 		!reflect.DeepEqual(operation.intent.Context, committed.plan.intent.Context) ||
-		operation.outcome != committed.committed.AppendOutcome {
+		operation.outcome != committed.committed.AppendOutcome ||
+		operation.targetFailure != committed.plan.prepared.targetFailure {
 		return pendingOutboxOperation{}, false, errors.New("pending operation differs from exact committed publication")
 	}
 	if len(operations) == 1 {
@@ -290,7 +291,7 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 			err = errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 		}
 	}()
-	if operation.outcome == EventAppendExactDuplicate {
+	if operation.outcome == EventAppendExactDuplicate || operation.targetFailure {
 		return nil
 	}
 	if operation.outcome != EventAppendInserted {
