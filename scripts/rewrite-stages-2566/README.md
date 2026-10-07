@@ -51,3 +51,22 @@ go test ./scripts/rewrite-stages-2566 -race -count=3
 The corpus receipt and permanent entry tests are not runtime closure by
 themselves. Finite initiation, catalog consumers, timer applicability,
 construction/restart/fork and completion require the separate execution proofs.
+
+`finite-fixtures.json` is the supplemental plan for the release and generated
+finite-call fixtures whose roots previously had no final stage. It
+does not reinterpret the original entry/end equivalence decisions or mark
+service examples final. Apply and replay it with the same applier:
+
+```sh
+go run ./scripts/rewrite-stages-2566 -ledger scripts/rewrite-stages-2566/finite-fixtures.json -write
+go run ./scripts/rewrite-stages-2566 -ledger scripts/rewrite-stages-2566/finite-fixtures.json -prove
+```
+
+The finite-caller regression checks 16 actual loaded root/constructor/connection
+closures, including generated feed sources and ordinary source verification.
+The no-final census explicitly classifies the 38 remaining disk roots, and
+deliberate service variants still refuse finite initiation. Reusable collectors
+have an explicit close path, not end-on-first-row or decorative final stages.
+Real release execution still must
+prove that an ended routing root does not finish a run while child or pinned
+fan-out work is outstanding.
