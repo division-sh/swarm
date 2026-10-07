@@ -1,0 +1,101 @@
+{
+  "baseline": "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
+  "scope": "three cycle-1 incoming positive sources with independently reviewed entry/final preservation",
+  "changes": [
+    {
+      "file": "internal/releasee2e/testdata/workspace_mcp/schema.yaml",
+      "entry_source_revision": "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
+      "before_hash": "843da7dfdf052436967a3432a0e7c5d5960784803bc90f92f5d1fca0f4f63811",
+      "after_hash": "01b48514aef93579c834731c0d3a5aa9f4464701f79ce140479821fd60acaa75",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: workspace-mcp\nstages:\n  pending: {initial: true}\n  working: {}\n  complete: {terminal: true}\npins:\n  inputs:\n    - work.requested\n",
+          "after": "name: workspace-mcp\nstages:\n  pending: {}\n  working: {}\n  complete: {final: true}\npins:\n  inputs:\n    - work.requested\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "pending",
+          "before_order": [
+            "pending",
+            "working",
+            "complete"
+          ],
+          "after_order": [
+            "pending",
+            "working",
+            "complete"
+          ],
+          "finals": [
+            "complete"
+          ]
+        }
+      ],
+      "review": "cycle-1 incoming source: preserve exact pending entry, declared final membership, all transport/lifecycle assertions; cheap source proof is independent of Docker opt-in"
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/finite/schema.yaml",
+      "entry_source_revision": "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
+      "before_hash": "f3ab9740aca00ac7c94be7bb4760a6375e58913e529f97a845efda5fbfea61a6",
+      "after_hash": "b42a0cd4792c82733b2205016b7da20d69c47d6ddd1961da4856ee1a408c2bdb",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: clock-public-boundary\nstages:\n  pending: {initial: true}\n  done: {terminal: true}\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\npins:\n  inputs: [start.requested]\n  outputs: [poll.tick]\n",
+          "after": "name: clock-public-boundary\nstages:\n  pending: {}\n  done: {final: true}\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\npins:\n  inputs: [start.requested]\n  outputs: [poll.tick]\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "pending",
+          "before_order": [
+            "pending",
+            "done"
+          ],
+          "after_order": [
+            "pending",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ],
+      "review": "cycle-1 incoming source: preserve exact pending entry, declared final membership, all transport/lifecycle assertions; cheap source proof is independent of Docker opt-in"
+    },
+    {
+      "file": "internal/serveapp/mock_docker_emission_test.go",
+      "entry_source_revision": "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
+      "before_hash": "0db9de20ed0b875ce6ee370b1a6439cc63ab8ac56d165a9ccdc0539f4a2cec40",
+      "after_hash": "01b2d7a68882ef76545d6af42998f65ca2dee06fbda4bf280773decc96da5ecc",
+      "edits": [
+        {
+          "offset": 1553,
+          "before": "\"name: native-docker-emission\\nstages:\\n  pending: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs: [items.ready, proof.finished]\\n\"",
+          "after": "\"name: native-docker-emission\\nstages:\\n  pending: {}\\n  done: {final: true}\\npins:\\n  inputs: [items.ready, proof.finished]\\n\""
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/serveapp/mock_docker_emission_test.go:36:70",
+          "entry": "pending",
+          "before_order": [
+            "pending",
+            "done"
+          ],
+          "after_order": [
+            "pending",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ],
+      "review": "cycle-1 incoming source: preserve exact pending entry, declared final membership, all transport/lifecycle assertions; cheap source proof is independent of Docker opt-in"
+    }
+  ]
+}

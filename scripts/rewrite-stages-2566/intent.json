@@ -1,5 +1,5 @@
 {
-  "baseline": "af250de638b413207372e70e709b95d1881b05cc",
+  "baseline": "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
   "scope": "reviewed positive entry/end equivalence plus explicitly classified generated/partial source and negative-oracle cut; runtime closure requires the separate execution proof matrix",
   "changes": [
     {
@@ -210,16 +210,16 @@
     },
     {
       "file": "internal/apiv1/operator_entity_test.go",
-      "before_hash": "77072bd9c5b99b03d234ee4f6464d92da1bff0348cc3685d8967cb35a9d92d8e",
-      "after_hash": "5b7d6f15e89ca1745c2171ab0233f994b99b50271cabece5d3d81bc77d6372af",
+      "before_hash": "47c1737e68fa5a1c55a6148fe76aaa202deba63fb1fba1896022d8f182d5b569",
+      "after_hash": "fd76ba8c4cde07d346dafe8424dd9076d630c47764758fb1a4705ba46a59d4e9",
       "edits": [
         {
-          "offset": 12576,
+          "offset": 12449,
           "before": "\t\t\"schema.yaml\":           \"stages:\\n  active: {initial: true}\\n\",\n",
           "after": "\t\t\"schema.yaml\":           \"stages:\\n  active: {}\\n\",\n"
         },
         {
-          "offset": 12683,
+          "offset": 12556,
           "before": "\t\t\"scoring/schema.yaml\":   \"name: scoring\\ninstance: vertical_id\\nstages:\\n  discovered: {initial: true}\\n  pending: {}\\n\",\n",
           "after": "\t\t\"scoring/schema.yaml\":   \"name: scoring\\ninstance: vertical_id\\nstages:\\n  discovered: {}\\n  pending: {}\\n\",\n"
         }
@@ -948,6 +948,44 @@
       ]
     },
     {
+      "file": "internal/releasee2e/testdata/workspace_mcp/schema.yaml",
+      "entry_source_revision": "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
+      "before_hash": "843da7dfdf052436967a3432a0e7c5d5960784803bc90f92f5d1fca0f4f63811",
+      "after_hash": "01b48514aef93579c834731c0d3a5aa9f4464701f79ce140479821fd60acaa75",
+      "edits": [
+        {
+          "offset": 28,
+          "before": "  pending: {initial: true}\n",
+          "after": "  pending: {}\n"
+        },
+        {
+          "offset": 69,
+          "before": "  complete: {terminal: true}\n",
+          "after": "  complete: {final: true}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "pending",
+          "before_order": [
+            "pending",
+            "working",
+            "complete"
+          ],
+          "after_order": [
+            "pending",
+            "working",
+            "complete"
+          ],
+          "finals": [
+            "complete"
+          ]
+        }
+      ],
+      "review": "cycle-1 incoming source: preserve exact pending entry, declared final membership, all transport/lifecycle assertions; cheap source proof is independent of Docker opt-in"
+    },
+    {
       "file": "internal/runtime/accprojection/resolver_test.go",
       "before_hash": "1ebf3946b4b2f96730bb1f76f15619a37fc7b6e8b79344cd70e1ed7d381cc713",
       "after_hash": "e851d5d6a0d56cc18026ef2798f57d7dcec05215c3cf9afa5bcd84c037926166",
@@ -1075,8 +1113,8 @@
     },
     {
       "file": "internal/runtime/bootverify/flow_data_access_test.go",
-      "before_hash": "1174395a27f7e1283c0615b5eb1e2a9a8a7e43d79d1c4327ea6cba0fcc34f239",
-      "after_hash": "ec772db4fb7e93a0f3bf21acb9a7dd4449c2dc78e017dab91e47154a80e390bb",
+      "before_hash": "7e1cb432591b8d87675725f36ac0454f8f2c5eda5e03639e472a8c4fae7225c3",
+      "after_hash": "98f40dcefc140f210afb3df1bffc7a329e4f205b950837f5808428538ae40703",
       "edits": [
         {
           "offset": 4408,
@@ -2467,16 +2505,16 @@
     },
     {
       "file": "internal/runtime/conformance/persisted_surfaces_test.go",
-      "before_hash": "82a6b45c51869a0df17efd8787396cd2490fa3177b162edef83141eed8a413f5",
-      "after_hash": "80fb481b9f8c5ac23b5f9bc57db56fa2137765a15969f6649ea51eb5d29c0c81",
+      "before_hash": "592975f40098bf51da44a18a57022ab1b39685994865281c199d58bca240a8d7",
+      "after_hash": "4c893bc6981198c5d01517b5f31b8870874396396c47feb74b5fbd2f071a3cf2",
       "edits": [
         {
-          "offset": 71046,
+          "offset": 71116,
           "before": "\twriteConformanceSnapshotFixture(t, fixtureRoot, \"mutation-flow/schema.yaml\", \"stages:\\n  done: {initial: true, terminal: true}\\n\")\n",
           "after": "\twriteConformanceSnapshotFixture(t, fixtureRoot, \"mutation-flow/schema.yaml\", \"stages:\\n  done: {final: true}\\n\")\n"
         },
         {
-          "offset": 84371,
+          "offset": 84441,
           "before": "\twriteConformanceSnapshotFixture(t, fixtureRoot, \"schema.yaml\", \"name: review\\nstages:\\n  queued: {initial: true}\\n  done: {terminal: true}\\n\")\n",
           "after": "\twriteConformanceSnapshotFixture(t, fixtureRoot, \"schema.yaml\", \"name: review\\nstages:\\n  queued: {}\\n  done: {final: true}\\n\")\n"
         }
@@ -3444,8 +3482,8 @@
     },
     {
       "file": "internal/runtime/inbound_postgres_test.go",
-      "before_hash": "821bde9832cbeb90801e9939ffbf8c671546fccc25c9860a7eed0a66f7ecf892",
-      "after_hash": "41a0fc9c851cafba9199238bb3f27da3ba1a06342861171c65a9394a80b6ae4d",
+      "before_hash": "a6be4f27e10e747c9d357db4795fbaee2bf3c6e23887f3c6b8f0805c7ef5a0b4",
+      "after_hash": "e56fa72bbdc677adfe610759c930a9059b564ef388a42cb1661ab1cca32bbc01",
       "edits": [
         {
           "offset": 2435,
@@ -3469,11 +3507,11 @@
     },
     {
       "file": "internal/runtime/inbound_raw_settlement_store_test.go",
-      "before_hash": "bde5089c65ffbb078b56048ab72b741c01e00e4aeef7789e3ca7d5d58334b164",
-      "after_hash": "32638d53694b345e2b01611baae5d0b8212a8c9119a0696d0bfad670d65babd2",
+      "before_hash": "64b678499579a9333975587048059495c67f785defa34403e03eae5b21ba73b6",
+      "after_hash": "1d5cf096bcb8afa23f7fbf64616846b641d2fd39afed0e4956d213c2e5a15e88",
       "edits": [
         {
-          "offset": 14642,
+          "offset": 14550,
           "before": "\t\t\t{ID: \"active\", Initial: true}, {ID: \"done\", Terminal: true},\n",
           "after": "\t\t\t{ID: \"active\"}, {ID: \"done\", Final: true},\n"
         }
@@ -3574,11 +3612,11 @@
     },
     {
       "file": "internal/runtime/mcp/gateway_story_selected_store_test.go",
-      "before_hash": "c877ce35d5844cf86591fbb3850cfcb6fa8c4c099c9bc7378f6812cd9dc686c0",
-      "after_hash": "83923d0b00205478d73bf9b67851606ae14ca15e74d2dc7c518d272b613d80b3",
+      "before_hash": "eed78ad4863e6c213f790fecb7934f68515c4fff0abf96945c2dcbf8832790b1",
+      "after_hash": "d5f508352e26fb7d8a98abbb2679f575fdf3ab05bb1d131d607cba432bd21ab2",
       "edits": [
         {
-          "offset": 11903,
+          "offset": 17028,
           "before": "  queued: {initial: true}\n  done: {terminal: true}\n",
           "after": "  queued: {}\n  done: {final: true}\n"
         }
@@ -6403,21 +6441,21 @@
     },
     {
       "file": "internal/runtime/testfixtures/canonicalrouting/channel_delivery.go",
-      "before_hash": "2ad43a9a3e22dabd09a4914282db0bb7a4ca1fdcaf71367c4c6433215ccd3df9",
-      "after_hash": "d761de761807bd1e95e9ad53243cc8d873e4777aa240d264b9b601a276b12988",
+      "before_hash": "7a23ada05e1941206db907772edeb7042782147f1d248c13194688d7832ec787",
+      "after_hash": "7a00bd9304cc2968b16aaad55dc20894ae71a429e9cbd0bb716caa1691602347",
       "edits": [
         {
-          "offset": 3570,
+          "offset": 6022,
           "before": "  waiting: {initial: true}\n",
           "after": "  waiting: {}\n"
         },
         {
-          "offset": 3850,
+          "offset": 6302,
           "before": "  done: {terminal: true}\n",
           "after": "  done: {final: true}\n"
         },
         {
-          "offset": 4393,
+          "offset": 6845,
           "before": "  active: {initial: true, gate: {decision: retire_service, outcomes: {retire: {advances_to: done}}}}\n  done: {terminal: true}\n",
           "after": "  active: {gate: {decision: retire_service, outcomes: {retire: {advances_to: done}}}}\n  done: {final: true}\n"
         }
@@ -9247,6 +9285,37 @@
       ]
     },
     {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/finite/schema.yaml",
+      "entry_source_revision": "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
+      "before_hash": "f3ab9740aca00ac7c94be7bb4760a6375e58913e529f97a845efda5fbfea61a6",
+      "after_hash": "b42a0cd4792c82733b2205016b7da20d69c47d6ddd1961da4856ee1a408c2bdb",
+      "edits": [
+        {
+          "offset": 36,
+          "before": "  pending: {initial: true}\n  done: {terminal: true}\n",
+          "after": "  pending: {}\n  done: {final: true}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "pending",
+          "before_order": [
+            "pending",
+            "done"
+          ],
+          "after_order": [
+            "pending",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ],
+      "review": "cycle-1 incoming source: preserve exact pending entry, declared final membership, all transport/lifecycle assertions; cheap source proof is independent of Docker opt-in"
+    },
+    {
       "file": "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent/agent-only/schema.yaml",
       "before_hash": "d5e4db93cca1d66e00085e0f831ed71a035e637e0931f011e8ede7cf9516fa37",
       "after_hash": "d4db78dbdc45ada819accb54066d9d6213604e13e587134802270090aa06f414",
@@ -9558,16 +9627,16 @@
     },
     {
       "file": "internal/runtime/tools/native_tools_validation_test.go",
-      "before_hash": "58c1e48ce2dd5e5744cf363f29e9c3c3042b46cfa087f6995b92fad36aa28d17",
-      "after_hash": "54bad06a88538316823ca91c7300755cb8458ddd825a158070f23e2b93e396e2",
+      "before_hash": "c0d273f74202324066f781995bcc03e1a8a1162d6feca1b53f353894931460c3",
+      "after_hash": "3838edbed20d448c26614844b96ae26e042a2fd52a41b1ae963da4831507100a",
       "edits": [
         {
-          "offset": 22309,
+          "offset": 22831,
           "before": "\twriteToolFlowDataFixtureFile(t, filepath.Join(flowDir, \"schema.yaml\"), \"name: operating\\nstages:\\n  active: {initial: true}\\n\")\n",
           "after": "\twriteToolFlowDataFixtureFile(t, filepath.Join(flowDir, \"schema.yaml\"), \"name: operating\\nstages:\\n  active: {}\\n\")\n"
         },
         {
-          "offset": 23382,
+          "offset": 23904,
           "before": "\twriteToolFlowDataFixtureFile(t, filepath.Join(flowDir, \"schema.yaml\"), \"name: review\\nstages:\\n  active: {initial: true}\\n\")\n",
           "after": "\twriteToolFlowDataFixtureFile(t, filepath.Join(flowDir, \"schema.yaml\"), \"name: review\\nstages:\\n  active: {}\\n\")\n"
         }
@@ -9629,6 +9698,37 @@
       ],
       "equivalence": null,
       "review": "generated/partial source or source-admission oracle; no standalone whole-file entry claim; preserve branch assertions and qualify the enclosing named test family"
+    },
+    {
+      "file": "internal/serveapp/mock_docker_emission_test.go",
+      "entry_source_revision": "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
+      "before_hash": "0db9de20ed0b875ce6ee370b1a6439cc63ab8ac56d165a9ccdc0539f4a2cec40",
+      "after_hash": "01b2d7a68882ef76545d6af42998f65ca2dee06fbda4bf280773decc96da5ecc",
+      "edits": [
+        {
+          "offset": 1484,
+          "before": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"schema.yaml\"), []byte(\"name: native-docker-emission\\nstages:\\n  pending: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs: [items.ready, proof.finished]\\n\"), 0o600); err != nil {\n",
+          "after": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"schema.yaml\"), []byte(\"name: native-docker-emission\\nstages:\\n  pending: {}\\n  done: {final: true}\\npins:\\n  inputs: [items.ready, proof.finished]\\n\"), 0o600); err != nil {\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/serveapp/mock_docker_emission_test.go:36:70",
+          "entry": "pending",
+          "before_order": [
+            "pending",
+            "done"
+          ],
+          "after_order": [
+            "pending",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ],
+      "review": "cycle-1 incoming source: preserve exact pending entry, declared final membership, all transport/lifecycle assertions; cheap source proof is independent of Docker opt-in"
     },
     {
       "file": "internal/serveapp/semantic_numeric_gate_test.go",
@@ -10890,101 +10990,101 @@
     },
     {
       "file": "platform-spec.yaml",
-      "before_hash": "1053af933001000d2d017ea7b8b0b6e151b850fa20042e6f255a618ea16f65cc",
-      "after_hash": "d82fd1362e41afcdbb4e8a70b06b1404b57e859c126efcf7ec520b4dec94ada2",
+      "before_hash": "64742038f881ab4b5afd82fe943f7891a41312caa29aa5d85294aafe82f8c073",
+      "after_hash": "1938935f8bcfa3ebe3733b313c3fb992ed5d2d3921b9cb49ce61c731de5cc297",
       "edits": [
         {
-          "offset": 33293,
+          "offset": 33663,
           "before": "        terminal-state guards are scoped to the exact executing flow, never\n",
           "after": "        final-stage guards are scoped to the exact executing flow, never\n"
         },
         {
-          "offset": 33526,
+          "offset": 33896,
           "before": "        compiled nonterminal source set, and loop/join/timer/gate carriers their\n",
           "after": "        compiled non-final source set, and loop/join/timer/gate carriers their\n"
         },
         {
-          "offset": 33978,
+          "offset": 34348,
           "before": "        membership and terminal metadata; execution, receiver admission,\n",
           "after": "        membership and final metadata; execution, receiver admission,\n"
         },
         {
-          "offset": 34284,
+          "offset": 34654,
           "before": "        not alternative membership or terminal-state owners. No case folding,\n",
           "after": "        not alternative membership or final-stage owners. No case folding,\n"
         },
         {
-          "offset": 38790,
+          "offset": 39160,
           "before": "      status: merge_bearing_first_slice\n      implementation_tracker: '#1845'\n",
           "after": "      status: canonical\n      implementation_tracker: '#2566'\n"
         },
         {
-          "offset": 39036,
+          "offset": 39406,
           "before": "        whose values carry declaration metadata such as `initial: true`,\n        `terminal: true`, and `description`. It lowers to the existing\n        `initial_state` / `states` / `terminal_states` kernel. It does not\n        replace transition-edge carriers; handlers still contribute edges\n        through `advances_to`, `rules`, and `on_complete` in this slice.\n",
           "after": "        whose values carry optional boolean `final`, `description`, timers\n        and gates. Entry is the first effective declaration in the existing\n        node-backed YAML order, including the existing alias/merge rules; map\n        iteration and sorted stage IDs must never choose entry. Describe exposes\n        the actual entry. The immutable compiled stage catalog owns entry and\n        final membership; mutable schema and metadata projections are not\n        runtime authority. Handlers still contribute transition carriers through\n        `advances_to`, `rules`, and `on_complete`.\n      final_stages: \u003e\n        `final: true` is an explicit optional end choice. Omission or false is\n        non-final; end membership is never inferred from graph outdegree or a\n        stage name. No handler fires and no timer arms on a final stage. Final\n        stages cannot own gates or admit an exit transition. Final entry alone\n        does not cancel accepted work, revoke writes or release resources.\n        Ordinary handlers are eligible in every non-final stage; independent\n        loop/join/guard/gate/timer carrier restrictions remain in force.\n      services: \u003e\n        A flow without final stages is a valid service and never completes.\n        Finite run.start refuses a service in its canonical construction/routing\n        closure before creating a run, event, data, feed or receipt. Include the\n        selected root, eagerly constructed keyless descendants and reachable\n        instance-bearing receivers/templates with their constructor children.\n        Stateless does not imply an exempt container. Unknown or contradictory\n        catalog evidence fails closed. The diagnostic names the offending flow\n        and says: this flow never completes; use `serve`, or mark its end stages\n        `final`. Standing/schedule/serve owners and existing-run event.publish\n        are separate; idempotent committed receipt replay remains authoritative.\n"
         },
         {
-          "offset": 39532,
+          "offset": 39902,
           "before": "        `initial_state`, `states`, and `terminal_states` are retired on any\n        authored presence, whether or not stages is present. Only stages owns\n",
           "after": "        `initial_state`, `states`, `terminal_states`, stage `initial` and stage\n        `terminal` are unsupported on any authored presence and receive the\n        canonical unknown-key diagnostic. There is no migration/compatibility\n        surface or marker-aware runtime lint. Only stages owns\n"
         },
         {
-          "offset": 39960,
+          "offset": 40330,
           "before": "          `stages.\u003cstage\u003e.timers`. Each row uses `after:` plus `emit:`,\n",
           "after": "          `stages.\u003cstage\u003e.timers`. Executable rows on final stages are rejected\n          at admission; new activation also consumes the same compiled final\n          fact. This cannot cancel or invalidate an accepted occurrence/retry.\n          Each row uses `after:` plus `emit:`,\n"
         },
         {
-          "offset": 205043,
+          "offset": 206379,
           "before": "    schema_yaml: \"stages:\\n  waiting: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs: [hello.requested]\\n  outputs: [hello.completed]\"\n",
           "after": "    schema_yaml: \"stages:\\n  waiting: {}\\n  done: {final: true}\\npins:\\n  inputs: [hello.requested]\\n  outputs: [hello.completed]\"\n"
         },
         {
-          "offset": 270011,
+          "offset": 272745,
           "before": "",
           "after": "    entry_and_final_authority: |\n      Entry is the first effective node-backed stages declaration, never a\n      sorted map or a mutable projection. Optional final: true is the explicit\n      end choice; omission or false is non-final. No handler executes and no\n      new timer arms there. Explicit loop and join source restrictions cannot\n      widen this eligibility: an authored final source is rejected during\n      verification and is excluded from executable topology. Arrival-join\n      stage applicability is checked once for the declaration, whether its\n      outcomes advance, emit, or write data and whether it owns a deadline;\n      stage-free fan-out delivery joins retain their separate semantics. Final entry alone\n      cancels no accepted work, revokes no acknowledged writes, and creates no\n      resource-cleanup authority. No-final flows are valid services that never\n      complete; finite run.start rejects their selected constructor/route\n      closure before creation, including independently selected feed receivers.\n"
         },
         {
-          "offset": 776716,
+          "offset": 794354,
           "before": "      \\      - after: \\\"{{marginal_park_days}}d\\\"\\n        advances_to: expired\\n  expired:\\n    terminal: true\\n\\\n",
           "after": "      \\      - after: \\\"{{marginal_park_days}}d\\\"\\n        advances_to: expired\\n  expired:\\n    final: true\\n\\\n"
         },
         {
-          "offset": 828264,
+          "offset": 845902,
           "before": "        a non-empty stages mapping lacks exactly one initial stage, or a non-empty stages mapping declares no terminal\n        stage. Retired legacy lifecycle fields fail during source admission before boot.\n",
           "after": "        the declaration-order entry is missing from its compiled catalog, or final-stage gate/exit restrictions\n        are violated. No-final flows are valid services; finite completion admission belongs to run.start.\n        Retired lifecycle fields fail during source admission before boot.\n"
         },
         {
-          "offset": 1629684,
+          "offset": 1660652,
           "before": "          full public summary and snapshot reads remain strict. The entity projection consumes the admitted terminal\n          catalog; a missing, malformed, or nonterminal entity is never guessed terminal. Once those blocking\n",
           "after": "          full public summary and snapshot reads remain strict. The entity projection consumes the admitted final-stage\n          catalog; a missing, malformed, or non-final entity is never guessed final. Once those blocking\n"
         },
         {
-          "offset": 1630384,
+          "offset": 1661352,
           "before": "          subordinate reservation ownership. Entity ownership resolves exact terminal descriptors through the admitted\n          terminal catalog. Constructed headers use the exact authored template '.', including a fieldless root;\n",
           "after": "          subordinate reservation ownership. Entity ownership resolves exact final-stage descriptors through the admitted\n          final-stage catalog. Constructed headers use the exact authored template '.', including a fieldless root;\n"
         },
         {
-          "offset": 1970562,
+          "offset": 2002525,
           "before": "        rule: Handlers source from all non-terminal declared states of their already-constructed instance;\n",
           "after": "        rule: Handlers source from all non-final declared stages of their already-constructed instance;\n"
         },
         {
-          "offset": 1970752,
+          "offset": 2002715,
           "before": "      terminal_states:\n        rule: terminal states are sinks in this slice.\n",
           "after": "      final_stages:\n        rule: Optional authored final stages admit no handler execution or exit. Their membership\n          is not inferred from outdegree; a no-final service is structurally valid. Explicit loop\n          sources and arrival-join outcome sources cannot override final exclusion and must reject\n          on authored final-source presence rather than silently removing the offending declaration.\n"
         },
         {
-          "offset": 2686761,
+          "offset": 2725202,
           "before": "",
           "after": "      RUN_NEVER_COMPLETES:\n        type: object\n        additionalProperties: false\n        required: [flow_id, detail]\n        properties:\n          flow_id: {type: string}\n          detail: {type: string}\n        description: Finite run.start requires an explicit final stage in every instance-bearing flow of its canonical constructor/routing closure. A no-final service remains valid for serve.\n"
         },
         {
-          "offset": 2721182,
+          "offset": 2759623,
           "before": "",
           "after": "        After exact source/input/feed admission, including canonical event payload preflight,\n        and before either atomic creation owner, require an explicit final stage for the selected root,\n        eagerly constructed keyless descendants, and possible compiled routing receivers/templates and\n        their constructor children. Independently selected nested imports and pins seed this closure\n        with the exact receivers matched by their already-admitted declaration/routing evidence;\n        they do not instantiate the source producer or select its unrelated output routes.\n        Unknown or contradictory catalog evidence fails closed. Do not\n        infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or\n        treat stateless instances as exempt containers. A no-final service is structurally valid but\n        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow.\n        Malformed event payloads fail PAYLOAD_VALIDATION_FAILED before this finite-eligibility\n        check; a valid payload cannot waive the no-final refusal. Committed\n        idempotency replay/conflicts retain their existing owners; existing-run event.publish and\n        standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,\n        resource, feed and permanent-receipt effects.\n\n"
         },
         {
-          "offset": 2723961,
+          "offset": 2762402,
           "before": "",
           "after": "      - RUN_NEVER_COMPLETES\n"
         }

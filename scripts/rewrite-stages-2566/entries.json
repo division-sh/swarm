@@ -399,6 +399,20 @@
     ]
   },
   {
+    "file": "internal/releasee2e/testdata/workspace_mcp/schema.yaml",
+    "source": "internal/releasee2e/testdata/workspace_mcp",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "working",
+      "complete"
+    ],
+    "finals": [
+      "complete"
+    ]
+  },
+  {
     "file": "internal/runtime/accprojection/resolver_test.go",
     "source": "internal/runtime/accprojection/resolver_test.go",
     "flow": "loadProjectionFlowBundle/literal-5",
@@ -4538,6 +4552,19 @@
     "literal": 2
   },
   {
+    "file": "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/finite/schema.yaml",
+    "source": "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/finite",
+    "flow": ".",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
     "file": "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent/agent-only/schema.yaml",
     "source": "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent",
     "flow": "agent-only",
@@ -4713,6 +4740,21 @@
     "finals": [],
     "function": "scopedFlowWorkspaceNativeToolFixture",
     "literal": 7
+  },
+  {
+    "file": "internal/serveapp/mock_docker_emission_test.go",
+    "source": "internal/serveapp/mock_docker_emission_test.go",
+    "flow": "TestMockNormalRealDockerEmissionBothStores/literal-5",
+    "entry": "pending",
+    "order": [
+      "pending",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "TestMockNormalRealDockerEmissionBothStores",
+    "literal": 5
   },
   {
     "file": "internal/serveapp/semantic_numeric_gate_test.go",
