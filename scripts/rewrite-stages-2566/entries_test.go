@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,11 +68,12 @@ func TestRewrite2566EntryGoldenInventoryCoversEveryReviewedSite(t *testing.T) {
 }
 
 func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
-	for _, fixture := range []struct {
+	type generatedFixture struct {
 		name     string
 		build    func(testing.TB) string
 		expected []entryGolden
-	}{
+	}
+	fixtures := []generatedFixture{
 		{"stage-completion", canonicalrouting.CopyStageCompletionJourney, []entryGolden{
 			{Flow: ".", Entry: "active", Order: []string{"active", "done"}, Finals: []string{"done"}},
 			{Flow: "discovery", Entry: "ready", Order: []string{"ready", "Ready"}, Finals: []string{"Ready"}},
@@ -88,7 +90,27 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 		{"describe-variant", canonicalrouting.CopyDescribeStageGraph, []entryGolden{
 			{Flow: "support", Entry: "waiting", Order: []string{"waiting", "active", "review", "timed_out"}, Finals: []string{"review", "timed_out"}},
 		}},
-	} {
+	}
+	for declarations := 0; declarations < 3; declarations++ {
+		for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure", "activity_loop", "activity_loop_rule", "activity_loop_failure", "agent", "mixed", "mixed_progress"} {
+			loop := strings.HasPrefix(frontier, "activity_loop")
+			if loop && declarations != 0 || declarations == 0 && frontier != "node" && !strings.HasPrefix(frontier, "activity") {
+				continue
+			}
+			order := []string{"idle", "complete"}
+			if loop {
+				order = []string{"idle", "working", "executing", "complete"}
+			}
+			fixtures = append(fixtures, generatedFixture{
+				name: fmt.Sprintf("local-readiness/declared_%d/%s", declarations, frontier),
+				build: func(t testing.TB) string {
+					return canonicalrouting.CopySelectedForkLocalReadiness(t, declarations, frontier)
+				},
+				expected: []entryGolden{{Flow: "worker-flow", Entry: "idle", Order: order, Finals: []string{"complete"}}},
+			})
+		}
+	}
+	for _, fixture := range fixtures {
 		t.Run(fixture.name, func(t *testing.T) {
 			root := fixture.build(t)
 			repo := canonicalrouting.RepoRoot(t)
