@@ -227,9 +227,16 @@ func inspectNumericFeedTimers(t *testing.T, ctx context.Context, binary, project
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := runReleaseCommand(t, 30*time.Second, project, append(append([]string{}, env...), "SWARM_TEST_NUMERIC_TIMER_INSPECTION="+string(request)), "", binary, "-test.run=^TestOwnedNumericTimerInspection$", "-test.v")
+	timeout := 30 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = min(timeout, time.Until(deadline))
+	}
+	result := runReleaseCommand(t, timeout, project, append(append([]string{}, env...), "SWARM_TEST_NUMERIC_TIMER_INSPECTION="+string(request)), "", binary, "-test.run=^TestOwnedNumericTimerInspection$", "-test.v")
 	if result.err != nil {
 		t.Fatalf("supplementary typed timer child: %v\n%s", result.err, result.output)
+	}
+	if err := ctx.Err(); err != nil {
+		t.Fatal(err)
 	}
 	body, err := os.ReadFile(output)
 	if err != nil {

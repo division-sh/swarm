@@ -1401,3 +1401,19 @@ Rerun the complete executable census/manifest/inventory/ownership/registry
 selection and finite structural guard unit at the clean signed rebased head.
 Do not push or alter the golden context pending the user's separate ruling;
 previous9d receipts retain their original SHA and are not rebased-head proof.
+
+### User-Ratified Golden Readback Budget: reviewer6032419741
+
+Only this numeric proof gets an independent60s post-settlement readback phase,
+after100 terminal deliveries and the first joined shutdown. Keep the global
+90s active context and every existing identity/cardinality/pause/receipt/timer
+assertion unchanged; refuse an already-expired active phase before resetting
+the readback budget. Readback readiness, replay command and timer child consume
+the remaining phase deadline, and the final comparison must finish before it.
+The deterministic ownership control proves the exact90s/60s constants,
+independence after active completion, refusal for expired/cancelled active work,
+and actual public-reader refusal/no HTTP dispatch on expired readback. No sleep,
+runtime/cache/driver change, retry, assertion or timing-unit ceiling relaxation.
+Rerun both-store golden and the complete census at the resulting signed head,
+then one push/hosted full. Old9d failures remain red; record this bounded
+test-health disposition under2353, not as a repaired product defect.
