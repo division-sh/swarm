@@ -27,6 +27,8 @@ type callbackGuard struct {
 	record       func(context.Context, callbackFailure) error
 	fenced       bool
 	failure      error
+	inFlight     int
+	drained      chan struct{}
 }
 
 func newCallbackGuard(ctx context.Context, connectionID, occurrenceID string,
@@ -35,7 +37,8 @@ func newCallbackGuard(ctx context.Context, connectionID, occurrenceID string,
 	if ctx == nil || uuid.Validate(connectionID) != nil || uuid.Validate(occurrenceID) != nil || handle == nil || record == nil {
 		return nil, fmt.Errorf("WhatsApp callback requires exact connection/occurrence and handler/failure owners")
 	}
-	return &callbackGuard{ctx: ctx, connectionID: connectionID, occurrenceID: occurrenceID, handle: handle, record: record}, nil
+	return &callbackGuard{ctx: ctx, connectionID: connectionID, occurrenceID: occurrenceID,
+		handle: handle, record: record, drained: make(chan struct{})}, nil
 }
 
 func (g *callbackGuard) install(client *whatsmeow.Client) (uint32, error) {
@@ -47,11 +50,13 @@ func (g *callbackGuard) install(client *whatsmeow.Client) (uint32, error) {
 
 func (g *callbackGuard) receive(event any) (success bool) {
 	g.mu.Lock()
-	fenced := g.fenced
-	g.mu.Unlock()
-	if fenced || g.ctx.Err() != nil {
+	if g.fenced || g.ctx.Err() != nil {
+		g.mu.Unlock()
 		return false
 	}
+	g.inFlight++
+	g.mu.Unlock()
+	defer g.release()
 	defer func() {
 		if recover() != nil {
 			// Panic payloads can contain private messages or provider state.
@@ -65,20 +70,53 @@ func (g *callbackGuard) receive(event any) (success bool) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return !g.fenced
+	return !g.fenced && g.ctx.Err() == nil
 }
 
 func (g *callbackGuard) fail(reason string, cause error) {
+	g.fence()
 	g.mu.Lock()
-	g.fenced = true
-	g.failure = cause
+	g.failure = errors.Join(g.failure, cause)
 	g.mu.Unlock()
 	if err := g.recordFailure(callbackFailure{
 		ConnectionID: g.connectionID, OccurrenceID: g.occurrenceID, Reason: reason,
 	}); err != nil {
 		g.mu.Lock()
-		g.failure = errors.Join(cause, err)
+		g.failure = errors.Join(g.failure, err)
 		g.mu.Unlock()
+	}
+}
+
+func (g *callbackGuard) release() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.inFlight--
+	if g.fenced && g.inFlight == 0 {
+		close(g.drained)
+	}
+}
+
+func (g *callbackGuard) fence() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.fenced {
+		return
+	}
+	g.fenced = true
+	if g.inFlight == 0 {
+		close(g.drained)
+	}
+}
+
+// The callback lease includes both capture and failure evidence. Cancellation
+// refuses new callbacks but is not proof that an admitted callback has finished.
+func (g *callbackGuard) join(ctx context.Context) error {
+	g.fence()
+	select {
+	case <-g.drained:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("join WhatsApp callback: %w", context.Cause(ctx))
 	}
 }
 

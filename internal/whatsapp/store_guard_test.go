@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -59,6 +60,15 @@ func newSDKDeviceFixture(t *testing.T, container *sqlstore.Container) *store.Dev
 		AccountSignatureKey: make([]byte, 32), DeviceSignature: make([]byte, 64),
 	}
 	if err := device.Save(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// This fixture represents an already paired account. Materialize its
+	// uploaded prekeys rather than making authentication generate a fresh batch.
+	prekeys, err := device.PreKeys.GetOrGenPreKeys(context.Background(), uint32(whatsmeow.MinPreKeyCount))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := device.PreKeys.MarkPreKeysAsUploaded(context.Background(), prekeys[len(prekeys)-1].KeyID); err != nil {
 		t.Fatal(err)
 	}
 	return device
