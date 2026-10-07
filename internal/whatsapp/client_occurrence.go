@@ -31,6 +31,7 @@ type clientOccurrence struct {
 	client       *whatsmeow.Client
 	stores       *sdkStores
 	callbacks    *callbackGuard
+	pairing      *pairingQR
 	started      bool
 	fenced       bool
 	inFlight     int
@@ -94,7 +95,16 @@ func (o *clientOccurrence) bindCallbacks(handle func(context.Context, any) error
 	if handle == nil || record == nil {
 		return nil, fmt.Errorf("WhatsApp callbacks require capture and failure owners")
 	}
-	guard, err := newCallbackGuard(o.ctx, o.connectionID, o.occurrenceID, handle,
+	pairing := o.pairing
+	guard, err := newCallbackGuard(o.ctx, o.connectionID, o.occurrenceID,
+		func(ctx context.Context, event any) error {
+			if pairing != nil {
+				if err := pairing.handle(event); err != nil {
+					return err
+				}
+			}
+			return handle(ctx, event)
+		},
 		func(ctx context.Context, failure callbackFailure) error {
 			o.fence()
 			return record(ctx, failure)
@@ -109,6 +119,24 @@ func (o *clientOccurrence) bindCallbacks(handle func(context.Context, any) error
 	return guard, nil
 }
 
+func (o *clientOccurrence) bindPairing(scope pairingQRScope) (*pairingQR, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.fenced || o.ctx.Err() != nil {
+		return nil, errClientOccurrenceFenced
+	}
+	if o.started || o.callbacks != nil || o.pairing != nil || o.client.Store.ID != nil ||
+		scope.ConnectionID != o.connectionID || scope.OccurrenceID != o.occurrenceID {
+		return nil, errPairingScope
+	}
+	pairing, err := newPairingQR(o.ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	o.pairing = pairing
+	return pairing, nil
+}
+
 func (o *clientOccurrence) connect() error {
 	o.mu.Lock()
 	if o.fenced || o.ctx.Err() != nil {
@@ -118,6 +146,10 @@ func (o *clientOccurrence) connect() error {
 	if o.started {
 		o.mu.Unlock()
 		return errClientOccurrenceUsed
+	}
+	if o.pairing != nil && o.callbacks == nil {
+		o.mu.Unlock()
+		return fmt.Errorf("WhatsApp pairing requires its guarded public event consumer before connect")
 	}
 	o.started = true
 	o.inFlight++
@@ -192,7 +224,11 @@ func (o *clientOccurrence) fence() {
 		}
 	}
 	callbacks := o.callbacks
+	pairing := o.pairing
 	o.mu.Unlock()
+	if pairing != nil {
+		pairing.stop()
+	}
 	if callbacks != nil {
 		callbacks.fence()
 	}
@@ -212,7 +248,13 @@ func (o *clientOccurrence) join(ctx context.Context) error {
 	o.fence()
 	o.mu.Lock()
 	callbacks := o.callbacks
+	pairing := o.pairing
 	o.mu.Unlock()
+	if pairing != nil {
+		if err := pairing.join(ctx); err != nil {
+			return err
+		}
+	}
 	if callbacks != nil {
 		if err := callbacks.join(ctx); err != nil {
 			return err

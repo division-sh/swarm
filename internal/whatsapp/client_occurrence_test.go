@@ -324,7 +324,9 @@ func TestWhatsAppClientOccurrenceLoginReconnectAndUnlinkRetainState(t *testing.T
 
 func TestWhatsAppSDKClientLifetimeConsumerInventory(t *testing.T) {
 	want := map[string]int{"NewClient": 1, "ConnectContext": 1, "Connect": 0,
-		"ResetConnection": 0, "SendMessage": 1, "Logout": 1, "Disconnect": 1}
+		"ResetConnection": 0, "SendMessage": 1, "Logout": 1, "Disconnect": 1,
+		"GetQRChannel": 0, "DangerousInternals": 0,
+		"SendPasskeyResponse": 0, "SendPasskeyConfirmation": 0}
 	got := make(map[string]int, len(want))
 	for name := range want {
 		got[name] = 0
