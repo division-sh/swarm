@@ -13,23 +13,34 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestSelectedContractExecutionOwnerRequiresEmitFeedback(t *testing.T) {
-	selected := new(store.PostgresStore)
-	durable := runtimebus.DurableDependencies{
-		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
-		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
-	}
-	_, err := NewSelectedContractExecutionOwner(
-		runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
-		selected, durable, selected.PipelineObligations(), selected, runtimemanager.PersistenceRoles{},
-		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
-	)
-	if err == nil || !strings.Contains(err.Error(), "event emit feedback") {
-		t.Fatalf("missing emit feedback admitted past selected construction: %v", err)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var owner SelectedContractExecutionOwner
+			if backend == "sqlite" {
+				owner = selectedContractSQLiteExecutionOwnerForTest(t, storetest.StartSQLiteRuntimeStore(t))
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				owner = selectedContractExecutionOwnerForTest(t, storetest.AdmitPostgresRuntimeStore(t, db))
+			}
+			ports := owner.ports
+			durable := ports.busDurable
+			durable.EmitFeedback = nil
+			_, err := NewSelectedContractExecutionOwner(
+				ports.workflow, ports.fork, ports.runtimeExecution, ports.replay,
+				ports.events, durable, ports.pipelineObligations, ports.manager, ports.managerRoles,
+				ports.effects, ports.completion, ports.completionHeartbeat, ports.liveSessions, ports.managedCapabilities,
+				ports.budget, ports.logs, ports.decisionCards, ports.proposedEffects, ports.humanTasks,
+				ports.decisionCardDraftExpiry, ports.humanTaskExpiry,
+			)
+			if err == nil || !strings.Contains(err.Error(), "event emit feedback") {
+				t.Fatalf("missing emit feedback admitted past selected construction: %v", err)
+			}
+		})
 	}
 }
 
