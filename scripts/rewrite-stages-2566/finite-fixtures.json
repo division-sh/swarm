@@ -43,7 +43,7 @@
     {
       "file": "internal/runtime/conformance/data_text_file_support_2456_test.go",
       "before_hash": "bb7d6d89660fd4a69669f001fed69697dddde7001f0093091166a581b209ca73",
-      "after_hash": "d45f28ebab1c90c9eacf216e2a848c71014a2f56ee4b545f03b536cc5ef4cb1b",
+      "after_hash": "1f0e8b070cc1c3a3340f1f3041a4433b61abd7947edb3f19f278c1ea40e42bbf",
       "edits": [
         {
           "offset": 881,
@@ -54,6 +54,21 @@
           "offset": 5517,
           "before": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(\"root.ready:\\n\"), 0o600); err != nil {\n",
           "after": "\t\t\tif err := os.WriteFile(filepath.Join(root, \"events.yaml\"), []byte(\"root.ready:\\n\"+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {\n"
+        },
+        {
+          "offset": 5918,
+          "before": "\t\t\tif err != nil || len(compiled.Shapes) != 1 || compiled.Shapes[0].Fields == nil || len(compiled.Shapes[0].Fields) != 0 {\n\t\t\t\tt.Fatalf(\"fieldless compiled shape = %#v, %v\", compiled, err)\n",
+          "after": "\t\t\tif err != nil || len(compiled.Shapes) != 2 {\n\t\t\t\tt.Fatalf(\"fieldless and close compiled shapes = %#v, %v\", compiled, err)\n"
+        },
+        {
+          "offset": 6112,
+          "before": "\t\t\tf := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))\n",
+          "after": ""
+        },
+        {
+          "offset": 6305,
+          "before": "",
+          "after": "\t\t\tcloseRef, err := durabledata.ParseDeclarationRef(\".\", \"fixture.close.requested\")\n\t\t\tif err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n\t\t\tvar fieldless *durabledata.ImportShape\n\t\t\tfor i := range compiled.Shapes {\n\t\t\t\tshape := \u0026compiled.Shapes[i]\n\t\t\t\tswitch shape.Declaration {\n\t\t\t\tcase ref:\n\t\t\t\t\tfieldless = shape\n\t\t\t\tcase closeRef:\n\t\t\t\t\tif len(shape.Fields) != 1 || shape.Fields[0] != (durabledata.ImportShapeField{Name: \"account_id\", Required: true, Text: true}) {\n\t\t\t\t\t\tt.Fatalf(\"close compiled shape = %#v\", shape)\n\t\t\t\t\t}\n\t\t\t\tdefault:\n\t\t\t\t\tt.Fatalf(\"unexpected compiled shape = %#v\", shape)\n\t\t\t\t}\n\t\t\t}\n\t\t\tif fieldless == nil || fieldless.Fields == nil || len(fieldless.Fields) != 0 {\n\t\t\t\tt.Fatalf(\"fieldless compiled shape = %#v\", fieldless)\n\t\t\t}\n\t\t\tf := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))\n"
         }
       ],
       "equivalence": [],
@@ -76,7 +91,7 @@
     {
       "file": "internal/runtime/testfixtures/canonicalrouting/deployment_resource_feeds.go",
       "before_hash": "707312003714f36ac05ef6aa603082359c88337217c1d4319a875dce377c6fdf",
-      "after_hash": "26c815df0885ddb1763c98e673f28d063733c8e52f24f22bda164b3277b1e0d3",
+      "after_hash": "820a86b78782db7cb4a905c9fa218f52f13422bef7aa4895d24ec603ec9b5ab8",
       "edits": [
         {
           "offset": 83,
@@ -91,7 +106,7 @@
         {
           "offset": 1042,
           "before": "\twriteClosedVariantFile(t, root, \"events.yaml\", eventsYAML)\n",
-          "after": "\twriteClosedVariantFile(t, root, \"events.yaml\", eventsYAML+DeploymentFixtureCloseDeclaration)\n\twriteClosedVariantFile(t, root, \"schema.yaml\", \"name: root-output-singleton-connect\\nstages: {active: {}, done: {final: true}}\\npins:\\n  inputs: [fixture.close.requested]\\n  outputs: [root.ready, fixture.close.requested]\\nconnect:\\n  - event: root.ready\\n    from: .\\n    to: consumer\\n  - event: fixture.close.requested\\n    from: .\\n    to: consumer\\n\")\n\twriteClosedVariantFile(t, root, \"entities.yaml\", \"fixture_state: {}\\n\")\n\twriteClosedVariantFile(t, root, \"nodes.yaml\", \"close-fixture:\\n  execution_type: system_node\\n  event_handlers:\\n    fixture.close.requested: {advances_to: done}\\n\")\n\twriteClosedVariantFile(t, root, \"consumer/schema.yaml\", \"name: consumer\\nstages: {active: {}, done: {final: true}}\\npins:\\n  inputs: [root.ready, fixture.close.requested]\\n\")\n\twriteClosedVariantFile(t, root, \"consumer/entities.yaml\", \"consumer_state: {}\\n\")\n\twriteClosedVariantFile(t, root, \"consumer/nodes.yaml\", \"consumer-node:\\n  execution_type: system_node\\n  event_handlers:\\n    root.ready: {}\\n    fixture.close.requested: {advances_to: done}\\n\")\n"
+          "after": "\twriteClosedVariantFile(t, root, \"events.yaml\", eventsYAML+DeploymentFixtureCloseDeclaration)\n\twriteClosedVariantFile(t, root, \"schema.yaml\", \"name: root-output-singleton-connect\\nstages: {active: {}, done: {final: true}}\\npins:\\n  inputs: [fixture.close.requested]\\n  outputs:\\n    - root.ready\\n    - fixture.close.requested\\nconnect:\\n  - event: root.ready\\n    from: .\\n    to: consumer\\n  - event: fixture.close.requested\\n    from: .\\n    to: consumer\\n\")\n\twriteClosedVariantFile(t, root, \"entities.yaml\", \"fixture_state: {}\\n\")\n\twriteClosedVariantFile(t, root, \"nodes.yaml\", \"close-fixture:\\n  execution_type: system_node\\n  event_handlers:\\n    fixture.close.requested: {advances_to: done}\\n\")\n\twriteClosedVariantFile(t, root, \"consumer/schema.yaml\", \"name: consumer\\nstages: {active: {}, done: {final: true}}\\npins:\\n  inputs: [root.ready, fixture.close.requested]\\n\")\n\twriteClosedVariantFile(t, root, \"consumer/entities.yaml\", \"consumer_state: {}\\n\")\n\twriteClosedVariantFile(t, root, \"consumer/nodes.yaml\", \"consumer-node:\\n  execution_type: system_node\\n  event_handlers:\\n    root.ready: {}\\n    fixture.close.requested: {advances_to: done}\\n\")\n"
         },
         {
           "offset": 1302,

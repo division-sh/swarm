@@ -647,6 +647,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
 		{Method: "run.start", Params: validEvent, Code: EventPublishFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = errors.New("simulated publish failure") }}},
 		{Method: "run.start", Params: validEvent, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
+		{Method: "run.start", Params: validEvent, Code: RunNeverCompletesCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.finiteService = true }}},
 
 		{Method: "run.stop", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runControl.errs["stop"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
@@ -919,6 +920,7 @@ type mutatingRuntimeProbeState struct {
 	nuke                *recordingRuntimeNukeOwners
 	testSetup           *mutatingProbeTestSetupStore
 	effects             int
+	finiteService       bool
 }
 
 func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRuntimeProbeState {
@@ -1073,6 +1075,12 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 	bundle := testSetupValidationBundle(t)
 	if s.method == "run.start" || s.method == "event.publish" {
 		bundle = runStartTestBundle("scan.requested")
+	}
+	if s.finiteService {
+		bundle.RootSchema.StageDeclarations.Entries[1].Final = false
+		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+			t.Fatalf("compile service probe: %v", err)
+		}
 	}
 	source := semanticview.Wrap(bundle)
 	capabilities := testOperatorCapabilities{

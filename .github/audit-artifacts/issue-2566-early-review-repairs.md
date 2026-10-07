@@ -390,3 +390,37 @@ closure claim. Core's earlier 22/22 receipt is not relabelled as this head.
 Lifecycle and all 13 named supplements remain due on the replacement head;
 composed A/E proof and hosted full remain merge obligations. The existing
 watchlist mappings above remain sufficient.
+
+## API And Data Fixture Integration Repairs
+
+Replacement lifecycle at `3bd1d380eb306740874f2a0e279f42dfe116a5b8` passes the
+previous transition guard, then stops red. The joined receipt is
+`lifecycle-20261007T114909.396823937`, plan
+`646ca3ebefa9ef09004121e5491d433f1abb4cdbee67e6d78e5c80d1da7e5687`:
+20 units pass, API and two conformance units contain actual failures, one
+additional conformance unit is cancelled, and 31 units do not start. Supplements
+remain unrun. Server2 was released immediately; the cancelled reporter/control
+unit is not diagnosed as a separate or inherited semantic failure.
+
+All actual failures are introduced by this branch. The same nine original
+test roots pass on the clean `af250de63` baseline (API 20.062s, conformance
+3.255s). This is execution evidence, not an inference from unchanged file names.
+
+| Failure family | Bounded repair and preserved assertion |
+| --- | --- |
+| `TestOpenRPCMutatingHTTPRuntimeProbes` lacks the new declared `RUN_NEVER_COMPLETES` case | Add a service-source case through the existing HTTP probe harness and the actual finite-start owner. Its ordinary typed source is recompiled after removing final membership; no injected substitute validator. Existing declared-error, authentication, result and zero-effect assertions remain. |
+| Six event-publish/runtime-context roots observe an extra root delivery | The shared API fixture's root close handler now listens only to its dedicated declared close input, not the business event. All original exact node/agent recipient counts, IDs, replay/idempotency, stored-completion and paused/existing-run assertions remain unchanged. |
+| Fieldless import-shape proof assumes the fixture has only one declaration | Match the fieldless shape by exact declaration identity, require its non-nil empty fields, and independently check the one-field close declaration. Require exactly the two known declarations; selected-store and public `fields: []` assertions remain. |
+| Dotted-collision hostile proof expects the old output block list | Restore that representation in the existing closed fixture owner while retaining the close pin and both connects. The original exact text-match, ambiguous-selector rejection and before/after no-mutation assertions are unchanged. No raw YAML reconstruction or new fixture owner. |
+
+The seven API roots pass `-race -count=3` (231.363s). Both conformance roots,
+including every SQLite/PostgreSQL hostile case and public fieldless readback,
+pass `-race -count=3` (44.906s). The original 417-file/553-site ledger and
+supplemental eight-file plan replay exactly and byte-idempotently; only the
+supplemental reviewed output hashes/edits change. Production execution,
+admission, assertion counts, budgets and timeouts are unchanged.
+
+Full local API/conformance unit reproduction and the complete guard sweep are
+separate obligations; focused green is not a lifecycle receipt. No replacement
+PR proof audit is posted while qualification is red. The gate, class boundary
+and existing watchlist mappings remain unchanged.
