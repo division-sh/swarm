@@ -656,10 +656,7 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 		if exactDeliveryBoundary {
 			return false, emitted, runtimepipelineobligation.Continue(), err
 		}
-		if consume {
-			return false, emitted, outcome, nil
-		}
-		return true, emitted, outcome, nil
+		return !consume, emitted, outcome, nil
 	}
 	if !handled {
 		return true, nil, runtimepipelineobligation.Continue(), nil

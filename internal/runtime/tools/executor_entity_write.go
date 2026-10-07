@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -77,14 +78,7 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		return nil, err
 	}
 	root, _, _ := strings.Cut(field.Path, ".")
-	writable := false
-	for _, allowed := range roleScopedWritableFields(source, actor, actorContract) {
-		if root == allowed {
-			writable = true
-			break
-		}
-	}
-	if !writable {
+	if !slices.Contains(roleScopedWritableFields(source, actor, actorContract), root) {
 		return nil, failures.New(failures.ClassAuthorizationDenied, "role_scoped_tool_forbidden", "tool-executor", "exec_save_entity_field.ownership", map[string]any{"action": "entity_write", "actor_id": strings.TrimSpace(actor.ID), "field": field.Path})
 	}
 	mutation, err := entityToolLiteralMutation(schema.Contract, field.Path, payload)
