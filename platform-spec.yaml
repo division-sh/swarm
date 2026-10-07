@@ -11255,6 +11255,21 @@ tool_model:
         digest. An index cannot hide corrupt evidence from admission, and refusal never rewrites that evidence.
         Provider transport acknowledgment, local capture commit and selected-store atomic publication remain
         separate boundaries; a local capture fixture alone does not establish supported end-to-end delivery.
+      session_incoming_sdk_projection: >
+        The concrete WhatsApp input adapter projects supported public SDK message, text-edit and revoke facts into
+        a defensive provider payload before private capture. Transport chat and sender facts determine conversation
+        and external-account references; protocol edit/revoke keys supply only the target message reference and
+        cannot replace the delivery ID or route from the sender's address perspective. Only current text is projected.
+        A complete stanza ID plus quoted-message presence supplies necessary reply evidence; a forward without that
+        evidence is not a reply, and quoted plaintext never becomes a current action or captured body.
+        Unsupported content, contradictory edit/group facts, incomplete replies, outgoing echoes, view-once content
+        and history/re-request variants refuse rather than inventing fields. Source IDs remain opaque, and documented
+        SDK device-address normalization never aliases phone and LID identities or imports display-name authority.
+        Stable publication provider-event identity contains the exact connection, account, conversation, SDK delivery
+        ID and message/edit/revoke kind already owned by capture; the existing publication owner derives UUIDs.
+        A mapped payload or fixture scope is not authenticated session admission, normalized-output authorization,
+        human identity, or publication success. Accepted trigger normalization and original-authority admission remain
+        separate mandatory consumers, and session execution remains unavailable until complete qualification.
       session_client_occurrence: >
         A WhatsApp connection occurrence owns one private SDK client and one connect attempt. SDK automatic,
         initial and login reconnect are disabled; a disconnected or retired client never reconnects or crosses into
