@@ -1,7 +1,7 @@
 name: clock-public-boundary
 stages:
-  pending: {initial: true}
-  done: {terminal: true}
+  pending: {}
+  done: {final: true}
 schedules:
   poll: {every: 250ms, emit: poll.tick}
 pins:

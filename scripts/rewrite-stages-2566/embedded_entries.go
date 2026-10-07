@@ -65,7 +65,11 @@ func embeddedEntryGoldens(root string, change change) ([]entryGolden, error) {
 	if len(change.Equivalence) == 0 || !strings.HasSuffix(change.File, ".go") {
 		return nil, nil
 	}
-	command := exec.Command("git", "show", reviewedEntrySourceRevision+":"+change.File)
+	revision := change.EntrySourceRevision
+	if revision == "" {
+		revision = reviewedEntrySourceRevision
+	}
+	command := exec.Command("git", "show", revision+":"+change.File)
 	command.Dir = root
 	body, err := command.Output()
 	if err != nil {

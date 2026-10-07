@@ -19,12 +19,13 @@ type plan struct {
 }
 
 type change struct {
-	File        string        `json:"file"`
-	BeforeHash  string        `json:"before_hash"`
-	AfterHash   string        `json:"after_hash"`
-	Edits       []edit        `json:"edits"`
-	Equivalence []equivalence `json:"equivalence"`
-	Review      string        `json:"review,omitempty"`
+	File                string        `json:"file"`
+	EntrySourceRevision string        `json:"entry_source_revision,omitempty"`
+	BeforeHash          string        `json:"before_hash"`
+	AfterHash           string        `json:"after_hash"`
+	Edits               []edit        `json:"edits"`
+	Equivalence         []equivalence `json:"equivalence"`
+	Review              string        `json:"review,omitempty"`
 }
 
 type edit struct {

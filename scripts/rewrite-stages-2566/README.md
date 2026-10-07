@@ -52,6 +52,15 @@ The corpus receipt and permanent entry tests are not runtime closure by
 themselves. Finite initiation, catalog consumers, timer applicability,
 construction/restart/fork and completion require the separate execution proofs.
 
+`incoming-fixtures.json` records the three cycle-1 merge-composition sources
+against 5ea6d33d6: workspace MCP, the finite clock fixture, and the opt-in
+generated Docker emission source. Apply/prove with the existing `-ledger`
+option. Their independently reviewed entry/final decisions are also included
+in `intent.json` and `entries.json`. Embedded sources added after the original
+census pin their own `entry_source_revision`; this is offline proof provenance,
+not a runtime fallback. The cheap incoming-source test reads the actual Docker
+source without taking its opt-in skip; real transport still needs the opt-in run.
+
 `finite-fixtures.json` is the supplemental plan for the release and generated
 finite-call fixtures whose roots previously had no final stage. It
 does not reinterpret the original entry/end equivalence decisions or mark
