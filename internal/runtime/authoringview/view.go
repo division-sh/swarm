@@ -522,16 +522,9 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			InputPins:  inputPinViews(source, flowID, source.FlowInputEventPins(flowID)),
 			OutputPins: outputPinViews(source, flowID, source.FlowOutputEventPins(flowID)),
 		}
-		if schema.Ingress != nil {
-			alias, present := bundle.FlowIngressAlias(flowID)
-			if !present {
-				return nil, fmt.Errorf("flow %q has no compiled ingress alias", flowID)
-			}
-			ingress := &StandingIngressView{Alias: alias}
-			for _, provider := range schema.Ingress.Providers {
-				ingress.Providers = append(ingress.Providers, standingIngressProviderView(provider))
-			}
-			item.Ingress = ingress
+		item.Ingress, err = standingIngressView(bundle, flowID, schema.Ingress)
+		if err != nil {
+			return nil, err
 		}
 		if primary, err := bundle.ResolveFlowPrimaryEntity(flowID); err == nil {
 			item.PrimaryEntity = primaryEntityView(primary, flow.Paths.EntitiesFile)
@@ -561,6 +554,21 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+func standingIngressView(bundle *runtimecontracts.WorkflowContractBundle, flowID string, declaration *runtimecontracts.ProjectFlowIngress) (*StandingIngressView, error) {
+	if declaration == nil {
+		return nil, nil
+	}
+	alias, present := bundle.FlowIngressAlias(flowID)
+	if !present {
+		return nil, fmt.Errorf("flow %q has no compiled ingress alias", flowID)
+	}
+	view := &StandingIngressView{Alias: alias}
+	for _, provider := range declaration.Providers {
+		view.Providers = append(view.Providers, standingIngressProviderView(provider))
+	}
+	return view, nil
 }
 
 func standingIngressProviderView(provider runtimecontracts.ProjectFlowIngressProvider) StandingIngressProviderView {

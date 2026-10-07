@@ -121,13 +121,14 @@ rows:
     corpus: {connector_imports: 2, trigger_event_imports: 1, alternate_token_spellings: 0}
 
   - id: schema.ingress
-    ruled: mechanical-ratified
+    ruled: issue-2438-A9-R14
     paths: "schema.ingress.*"
-    owners: [projectSchemaIngressValue, projectSchemaIngressAdmissionValue, providertriggers.CatalogSnapshot.CompileAdmission]
+    owners: [projectSchemaIngressValue, compileFlowIngressAliases, WorkflowContractBundle.FlowIngressAlias, projectSchemaIngressAdmissionValue, providertriggers.CatalogSnapshot.CompileAdmission]
     information:
-      fact: [ingress alias/provider/pack/event/delivery extraction and handoff event/flow]
-      choice: [acknowledge, authentication, payload, namespace]
-    spelling: {canonical: strict_mappings, distinct_overrides: [], retired_duplicates: []}
+      fact: [ingress provider/pack/event/delivery extraction and handoff event/flow]
+      choice: [alias_override, acknowledge, authentication, payload, namespace]
+      derived_projection: [rooted_alias_from_selected_root_name_and_declaration_path]
+    spelling: {canonical: strict_mappings_with_optional_exact_alias_override, distinct_overrides: [alias], retired_duplicates: []}
     corpus: {ingress_blocks: 0, handoffs: 0}
 
   - id: flow.identity_mode
@@ -137,7 +138,8 @@ rows:
     information:
       choice: [instance]
       derived_projection: [mode_from_instance_presence, entity]
-      annotation: [name]
+      fact: [name_when_consumed_by_default_ingress_alias]
+      annotation: [name_when_not_consumed_by_default_ingress_alias]
     spelling:
       canonical_candidate: omit_mode_and_entity_derive_shape_and_single_primary_entity
       retired_duplicates: [explicit_entity, mode_static, mode_template, mode_singleton]
