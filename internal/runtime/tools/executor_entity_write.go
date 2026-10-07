@@ -117,9 +117,13 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		}
 		return nil, failures.WrapDetail("write_failed", "tool-executor", "exec_save_entity_field.update", map[string]any{"entity_id": entityID, "field": fieldName}, err)
 	}
+	return e.committedEntityFieldToolResponse(ctx, actor, entityID, field.Path, result, err), nil
+}
+
+func (e *Executor) committedEntityFieldToolResponse(ctx context.Context, actor models.AgentConfig, entityID, fieldPath string, result runtimepipeline.EntityFieldMutationResult, err error) map[string]any {
 	response := map[string]any{
 		"entity_id": entityID,
-		"field":     field.Path,
+		"field":     fieldPath,
 		"revision":  result.Revision,
 	}
 	if err != nil {
@@ -133,13 +137,13 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 				Component: "tool-executor", Action: "entity_field_write_post_commit_failure",
 				AgentID: strings.TrimSpace(actor.ID), EntityID: entityID,
 				Detail: map[string]any{
-					"field": field.Path, "revision": result.Revision,
+					"field": fieldPath, "revision": result.Revision,
 					"post_commit_error": err.Error(),
 				},
 			})
 		}
 	}
-	return response, nil
+	return response
 }
 
 func entityToolMutationOwner(source semanticview.Source, actor models.AgentConfig, runID, entityID, flowID string, row map[string]any) (runtimeflowidentity.RunScopedFlowInstance, error) {

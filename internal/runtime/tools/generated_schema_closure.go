@@ -195,6 +195,10 @@ func validateGeneratedJSONSchemaNode(path string, schema map[string]any, errs *[
 			*errs = append(*errs, fmt.Errorf("%s.propertyNames must be a schema object", path))
 		}
 	}
+	validateGeneratedJSONSchemaOneOf(path, schema, errs)
+}
+
+func validateGeneratedJSONSchemaOneOf(path string, schema map[string]any, errs *[]error) {
 	if raw, declared := schema["oneOf"]; declared {
 		branches := schemaEnumValues(raw)
 		if len(branches) == 0 {
