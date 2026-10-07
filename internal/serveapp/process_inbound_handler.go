@@ -73,7 +73,7 @@ func parseProcessWebhookPath(path string) (string, string, bool) {
 	if len(parts) != 3 || parts[0] != "webhooks" {
 		return "", "", false
 	}
-	alias := strings.TrimSpace(parts[1])
+	alias := parts[1]
 	provider := strings.TrimSpace(parts[2])
 	return alias, provider, alias != "" && provider != ""
 }
