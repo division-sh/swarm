@@ -45,7 +45,7 @@ func TestChannelCallbackPublicationLockOrderBothStores(t *testing.T) {
 				}
 				f.bind(t, predecessor, now)
 				f.finish(t, predecessor.OperationID, now)
-				action := f.chooser(t, predecessor, activation, now)
+				action, _ := f.chooser(t, predecessor, activation, now)
 				if err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 					resolved, found, err := channeldelivery.ResolveActionFactTx(ctx, tx, action.ActionFact, f.postgres)
 					if err != nil {
@@ -149,7 +149,7 @@ func TestChannelActionMutationFencesAndReadOnlyPreviewsBothStores(t *testing.T) 
 				}
 				f.bind(t, op, now)
 				f.finish(t, op.OperationID, now)
-				action := f.chooser(t, op, activation, now)
+				action, _ := f.chooser(t, op, activation, now)
 				for _, lock := range []bool{false, true} {
 					observed := make(chan bool, 1)
 					ctx := context.WithValue(context.Background(), callbackOrderObservation{}, observed)
@@ -179,6 +179,90 @@ func TestChannelActionMutationFencesAndReadOnlyPreviewsBothStores(t *testing.T) 
 					default:
 						t.Fatal("guard did not reach its real native query")
 					}
+				}
+			})
+		}
+	}
+}
+
+func TestNeutralChannelMutationPrincipalFirstBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, path := range []string{"quoted_control", "inbox", "text_response"} {
+			t.Run(backend+"/"+path, func(t *testing.T) {
+				f := newCallbackLockFixture(t, backend)
+				now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+				op := f.prepare(t, domain.VerbConnect, now)
+				_, activation, err := f.selected.PublishConnectedChannelActivation(context.Background(), publishCallbackRequest(op, now))
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.bind(t, op, now)
+				f.finish(t, op.OperationID, now)
+				text := operatorchannel.InboundText{TextFact: operatorchannel.TextFact{
+					Interface: op.Interface, ExternalAccountRef: "account", ConversationRef: "callback-chat",
+					ConversationScope: operatorchannel.ConversationScopeDirect, Text: "Open inbox", MessageReference: `{"id":94}`,
+				}, Provider: "telegram", ProviderEventID: uuid.NewString(), PublicationID: uuid.NewString(), ProviderAuthorization: "verified-pack"}
+				if path == "quoted_control" {
+					action, label := f.chooser(t, op, activation, now)
+					text.Text, text.ReplyToReference = label, action.MessageReference
+				} else if path == "inbox" {
+					text.EntryReference = render.TextReplyInboxReference
+				}
+				var entry render.ResolvedInboxEntry
+				if err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+					if err := channeldelivery.InsertTextIntentTx(ctx, tx, text, now, f.postgres); err != nil {
+						return err
+					}
+					if path == "inbox" {
+						var found bool
+						entry, found, err = channeldelivery.ResolveCurrentInboxEntryTx(ctx, tx, text, f.postgres)
+						if err == nil && (!found || entry.Kind != render.InboxEntryTextReply) {
+							return fmt.Errorf("fixture does not reach neutral inbox authority")
+						}
+						return err
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				queries := &neutralQueryObservation{}
+				ctx := context.WithValue(context.Background(), neutralLockOrderObservation{}, queries)
+				if err := f.run(ctx, func(ctx context.Context, tx *sql.Tx) error {
+					switch path {
+					case "quoted_control":
+						action, found, err := channeldelivery.AdmitReplyActionTx(ctx, tx, text, f.postgres)
+						if err == nil && (!found || action.Fact.Kind != operatorchannel.ActionSourceReply || action.Fact.TextSource != text.TextFact) {
+							return fmt.Errorf("fixture did not transfer its exact reply control")
+						}
+						return err
+					case "inbox":
+						_, err := channeldelivery.PlanInboxResponseTx(ctx, tx, text, entry, "Inbox", f.postgres)
+						return err
+					default:
+						_, err := channeldelivery.PlanTextResponseTx(ctx, tx, text, "Inbox", "teaching", f.postgres)
+						return err
+					}
+				}); err != nil {
+					t.Fatal(err)
+				}
+				principal, mutation := false, false
+				queries.Lock()
+				defer queries.Unlock()
+				for _, query := range queries.queries {
+					if strings.Contains(query, "operator_principal_singleton") || strings.Contains(query, "SELECT principal_id FROM operator_principals") {
+						principal = true
+						continue
+					}
+					trimmed := strings.TrimSpace(query)
+					if strings.Contains(query, "FOR UPDATE") || strings.HasPrefix(trimmed, "INSERT ") || strings.HasPrefix(trimmed, "UPDATE ") || strings.HasPrefix(trimmed, "DELETE ") {
+						mutation = true
+						if !principal {
+							t.Fatalf("neutral mutation locked or wrote before principal fence: %s", query)
+						}
+					}
+				}
+				if !principal || !mutation {
+					t.Fatalf("native ordering proof did not reach both fences: principal=%t mutation=%t", principal, mutation)
 				}
 			})
 		}
@@ -278,6 +362,11 @@ func TestNativeInboxAttachmentPublicationLockOrderBothStores(t *testing.T) {
 
 type callbackLockRole struct{}
 type callbackOrderObservation struct{}
+type neutralLockOrderObservation struct{}
+type neutralQueryObservation struct {
+	sync.Mutex
+	queries []string
+}
 type callbackLockProbe struct {
 	driver                      driver.Driver
 	dsn                         string
@@ -302,6 +391,11 @@ type callbackLockConn struct {
 }
 
 func (c *callbackLockConn) before(ctx context.Context, query string) {
+	if observed, ok := ctx.Value(neutralLockOrderObservation{}).(*neutralQueryObservation); ok {
+		observed.Lock()
+		observed.queries = append(observed.queries, query)
+		observed.Unlock()
+	}
 	if observed, ok := ctx.Value(callbackOrderObservation{}).(chan bool); ok {
 		principal := strings.Contains(query, "operator_principal_singleton") || strings.Contains(query, "SELECT principal_id FROM operator_principals")
 		if principal || strings.Contains(query, "FROM channel_delivery_actions action") {
@@ -523,7 +617,7 @@ func (f callbackLockFixture) finish(t *testing.T, id string, now time.Time) {
 		}
 	}
 }
-func (f callbackLockFixture) chooser(t *testing.T, op domain.Operation, activation domain.ConnectedChannelActivation, now time.Time) operatorchannel.InboundAction {
+func (f callbackLockFixture) chooser(t *testing.T, op domain.Operation, activation domain.ConnectedChannelActivation, now time.Time) (operatorchannel.InboundAction, string) {
 	t.Helper()
 	audience := render.Audience{PrincipalID: f.principal, InterfaceKey: op.Interface.Key(), DeliveryEpoch: 1, ExternalAccountRef: "account", ConversationRef: "callback-chat", ConversationScope: operatorchannel.ConversationScopeDirect}
 	frozen, err := render.FreezeDraftChooser(uuid.NewString(), uuid.NewString(), []render.DraftChoice{{DraftID: uuid.NewString(), CardID: uuid.NewString(), Label: "First"}, {DraftID: uuid.NewString(), CardID: uuid.NewString(), Label: "Second"}}, audience)
@@ -579,11 +673,11 @@ func (f callbackLockFixture) chooser(t *testing.T, op domain.Operation, activati
 	if err != nil {
 		t.Fatal(err)
 	}
-	action := operatorchannel.InboundAction{ActionFact: operatorchannel.ActionFact{Interface: op.Interface, ExternalAccountRef: "account", ConversationRef: "callback-chat", ConversationScope: operatorchannel.ConversationScopeDirect, MessageReference: `{"id":91}`, InteractionRef: "callback-lock", Token: actions[0].Token}, Provider: "telegram", ProviderEventID: uuid.NewString(), PublicationID: uuid.NewString(), ProviderAuthorization: "verified-pack"}
+	action := operatorchannel.InboundAction{ActionFact: operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback, Interface: op.Interface, ExternalAccountRef: "account", ConversationRef: "callback-chat", ConversationScope: operatorchannel.ConversationScopeDirect, MessageReference: `{"id":91}`, InteractionRef: "callback-lock", Token: actions[0].Token}, Provider: "telegram", ProviderEventID: uuid.NewString(), PublicationID: uuid.NewString(), ProviderAuthorization: "verified-pack"}
 	if err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 		return channeldelivery.InsertActionIntentTx(ctx, tx, action, now, f.postgres)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return action
+	return action, actions[0].Label
 }
