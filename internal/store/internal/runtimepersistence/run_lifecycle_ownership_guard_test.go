@@ -196,7 +196,15 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 		if !ok {
 			continue
 		}
+		mockOracles := map[string]bool{}
 		if path == "internal/store/internal/backend/mutationprotocol/event_counts_test.go" && fn.Name.Name == "TestEventCountDeltasBatchOrderAndForeignReadRefusal" {
+			mockOracles[`UPDATE runs SET event_count = event_count \+`] = true
+		}
+		if path == "internal/store/internal/backend/runlifecycle/run_admission_test.go" && fn.Name.Name == "TestRunAdmissionCanonicalSourceRevisionReloads" {
+			mockOracles["UPDATE runs SET bundle_hash = $2 WHERE run_id = $1::uuid AND status IN ('running', 'paused')"] = true
+			mockOracles["UPDATE runs SET bundle_hash = ? WHERE run_id = ? AND status IN ('running', 'paused')"] = true
+		}
+		if len(mockOracles) != 0 {
 			ast.Inspect(fn, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
 				if !ok || len(call.Args) != 1 {
@@ -211,8 +219,11 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 					return true
 				}
 				literal, ok := call.Args[0].(*ast.BasicLit)
-				if ok && literal.Value == "`UPDATE runs SET event_count = event_count \\+`" {
-					approved[literal.Pos()] = true
+				if ok {
+					value, err := strconv.Unquote(literal.Value)
+					if err == nil && mockOracles[value] {
+						approved[literal.Pos()] = true
+					}
 				}
 				return true
 			})
