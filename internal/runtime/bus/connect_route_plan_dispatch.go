@@ -31,7 +31,7 @@ type closedPublicationPlanningKey struct{}
 type connectRoutePlanPreviewRoutes struct {
 	table          *RouteTable
 	inputProducers *runtimepinrouting.FlowInputProducerResolver
-	selected       map[string]runtimeflowidentity.Instance
+	selected       map[string][]runtimeflowidentity.Instance
 }
 
 func withConnectRoutePlanPreview(ctx context.Context) context.Context {

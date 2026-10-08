@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -217,5 +219,148 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("no-ancestor"), "start", "test", "", []byte(`{"parent_key":"left","leaf_key":"same"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	if _, _, _, err := owner.Materialize(withConnectRoutePlanPreview(context.Background()), event, leafPlan, map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"}, descriptors); err == nil {
 		t.Fatal("sole existing receiver bypassed the missing ancestor edge")
+	}
+}
+
+func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		dependentEvent string
+		competing      bool
+		targeted       bool
+		ambiguous      bool
+		wantRoutes     int
+	}{
+		{"independent leaves beside dependent edge", "start", false, false, false, 4},
+		{"nonmatching descendant with distinct parents", "other", true, false, false, 4},
+		{"target filtered descendant with distinct parents", "start", true, true, false, 1},
+		{"ambiguous required ancestor refuses before commit", "start", true, false, true, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyConnectionAncestorCandidates(t, test.dependentEvent, test.competing))
+			store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			root := installConnectionSourceConstructionForRun(t, eb, source, ".", busInternalTestRunID)
+			parent, err := flowidentity.KeyedChild(source, root, "parent", "stored-parent")
+			if err != nil {
+				t.Fatal(err)
+			}
+			middle, err := flowidentity.KeylessChild(source, parent, "parent/middle")
+			if err != nil {
+				t.Fatal(err)
+			}
+			leaf, err := flowidentity.KeyedChild(source, middle, "parent/middle/leaf", "stored-leaf")
+			if err != nil {
+				t.Fatal(err)
+			}
+			add := func(instance flowidentity.Instance, key string) {
+				t.Helper()
+				coordinate := testRunScopedFlowRoute(instance.Route())
+				if err := eb.RouteTable().AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: coordinate, Instance: instance}); err != nil {
+					t.Fatal(err)
+				}
+				store.installConstructionReceipt(coordinate, pipeline.FlowConstructionPublicationEvidence{Identity: instance})
+				store.flowInstances = append(store.flowInstances, ActiveFlowInstanceDescriptor{
+					Identity: instance, RunID: busInternalTestRunID, InstanceID: instance.InstanceID,
+					EntityID: instance.EntityID, FlowInstance: instance.InstancePath, FlowTemplate: instance.TemplateID,
+					AddressFields: map[string]string{"entity.id": key},
+				})
+			}
+			add(parent, "parent-key")
+			add(middle, "")
+			add(leaf, "leaf-key")
+			var workers []flowidentity.Instance
+			for _, key := range []string{"parent-key", "leaf-key"} {
+				worker, err := flowidentity.KeyedChild(source, root, "worker", key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				add(worker, key)
+				workers = append(workers, worker)
+			}
+			if test.competing {
+				other, err := flowidentity.KeyedChild(source, root, "parent", "other-parent")
+				if err != nil {
+					t.Fatal(err)
+				}
+				add(other, "leaf-key")
+			}
+			before := make(map[flowidentity.RunScopedFlowInstance]flowidentity.Instance)
+			for coordinate, instance := range eb.RouteTable().instanceOwners {
+				before[coordinate] = instance
+			}
+			envelope := events.EventEnvelope{}
+			if test.targeted {
+				envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{FlowID: "worker", FlowInstance: workers[0].InstancePath, EntityID: workers[0].EntityID})
+			}
+			event := eventtest.ExistingRunRootIngress(eventtest.UUID(test.name), "start", "test", "", []byte(`{"parent_key":"parent-key","leaf_key":"leaf-key"}`), 0, busInternalTestRunID, envelope, time.Now().UTC())
+			check, err := eb.CheckPublishRecipientPlan(context.Background(), event)
+			if test.ambiguous {
+				if err == nil || !strings.Contains(err.Error(), "selected competing ancestors of parent") {
+					t.Fatalf("required ancestor ambiguity was not refused: %+v %v", check, err)
+				}
+				if err := eb.Publish(context.Background(), event); err == nil || !strings.Contains(err.Error(), "selected competing ancestors of parent") {
+					t.Fatalf("ambiguous publication was not refused: %v", err)
+				}
+			} else if err != nil || check.TargetFailure != "" || len(check.DeliveryRoutes) != test.wantRoutes {
+				t.Fatalf("independent/dependent selections: %+v err=%v, want %d routes", check, err, test.wantRoutes)
+			}
+			if len(store.events) != 0 || len(store.routes) != 0 || len(store.activations) != 0 || !reflect.DeepEqual(before, eb.RouteTable().instanceOwners) {
+				t.Fatal("planning or rejected ambiguity mutated publication/construction state")
+			}
+		})
+	}
+}
+
+func TestA9ConnectionAncestorCandidatesDeduplicateOnlyExactOwners(t *testing.T) {
+	source := nestedConnectionConstructionSource(t)
+	root := flowidentity.Stored(source, ".", busInternalTestRunID, busInternalTestRunID, busInternalTestRunID, "")
+	parent, err := flowidentity.KeyedChild(source, root, "parent", "stored-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withConnectRoutePlanPreview(context.Background())
+	for range 2 {
+		if err := selectConnectionConstruction(ctx, parent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	preview := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
+	if len(preview.selected["parent"]) != 1 {
+		t.Fatal("same exact owner was registered twice")
+	}
+	otherRun := root
+	otherRun.InstancePath, otherRun.EntityID = eventtest.UUID("other-run"), eventtest.UUID("other-run")
+	other, err := flowidentity.KeyedChild(source, otherRun, "parent", "stored-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selectConnectionConstruction(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
+	actual, err := owner.selectedConstructionChild(ctx, busInternalTestRunID, root, "parent", nil, preview.selected)
+	if err != nil || actual != parent {
+		t.Fatalf("foreign structural parent changed exact selection: %+v %v", actual, err)
+	}
+	for _, test := range []struct {
+		name       string
+		candidates []flowidentity.Instance
+		want       flowidentity.Instance
+		refused    bool
+	}{
+		{"no constructed provider receiver", nil, flowidentity.Instance{}, false},
+		{"exact provider receiver", []flowidentity.Instance{parent}, parent, false},
+		{"ambiguous provider execution dependency", []flowidentity.Instance{parent, other}, flowidentity.Instance{}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := providerConstructionCandidate("parent", test.candidates)
+			if (err != nil) != test.refused || actual != test.want {
+				t.Fatalf("provider execution dependency lost uniqueness: %+v %v", actual, err)
+			}
+		})
 	}
 }

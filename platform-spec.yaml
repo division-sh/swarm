@@ -5917,6 +5917,10 @@ engine:
         independently. A missing keyed ancestor requires its own selected or creating connection; neither a causal
         sender nor the only existing receiver supplies that authority. Keyless intermediate descendants consume their
         actual canonical parent construction. Repeated key-field names at different levels are separate slots.
+        Independent terminal edges retain their own receiver selections even when they share a template or input.
+        A traversed compiled descendant dependency requires exactly one eligible selected ancestor under its exact
+        structural parent. Unmatched or target-filtered edges create no ancestor obligation; repeated selection of
+        the same exact owner is not ambiguity. Multiple eligible owners for a required dependency refuse before commit.
         A conflicting creation fails before mutating flow_instances, entity_state, routes, agents,
         timers, or auto_emit_on_create. Exact replay consumes the existing durable readiness plan idempotently so an
         interrupted creation can converge without repeating the creation-only event.

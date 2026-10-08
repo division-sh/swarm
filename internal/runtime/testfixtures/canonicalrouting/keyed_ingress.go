@@ -124,6 +124,40 @@ connect:
 	return root
 }
 
+// CopyConnectionAncestorCandidates combines independent terminal receivers
+// with an actual nested dependency; unrelated edges must not create ambiguity.
+func CopyConnectionAncestorCandidates(t testing.TB, dependentEvent string, competing bool) string {
+	t.Helper()
+	if dependentEvent != "start" && dependentEvent != "other" {
+		t.Fatalf("unsupported dependent event %q", dependentEvent)
+	}
+	root := CopyNestedKeyedConnectionSelection(t)
+	edges := `  - {event: start, from: ., to: worker, resolution: select-or-create, key_from: payload.parent_key}
+  - {event: start, from: ., to: worker, resolution: select-or-create, key_from: payload.leaf_key}
+  - {event: start, from: ., to: parent, resolution: select-or-create, key_from: payload.parent_key}
+`
+	if competing {
+		edges += "  - {event: start, from: ., to: parent, rename: alternate, resolution: select-or-create, key_from: payload.leaf_key}\n"
+		writeClosedVariantFile(t, root, "parent/schema.yaml", "name: parent\ninstance: id\npins: {inputs: [start, alternate]}\n")
+		writeClosedVariantFile(t, root, "parent/nodes.yaml", "receiver:\n  execution_type: system_node\n  event_handlers:\n    start:\n      guard: {check: payload.parent_key != ''}\n    alternate:\n      guard: {check: payload.leaf_key != ''}\n")
+	}
+	rename := ""
+	if dependentEvent == "other" {
+		rename = "rename: start, "
+	}
+	edges += "  - {event: " + dependentEvent + ", from: ., to: parent/middle/leaf, " + rename + "resolution: select-or-create, key_from: payload.leaf_key}\n"
+	for label, body := range map[string]string{
+		"schema.yaml":          "name: construction-candidates\npins: {inputs: [start, other]}\nconnect:\n" + edges,
+		"events.yaml":          "start:\n  parent_key: text\n  leaf_key: text\nother:\n  parent_key: text\n  leaf_key: text\n",
+		"worker/schema.yaml":   "name: worker\ninstance: id\npins: {inputs: [start]}\n",
+		"worker/entities.yaml": "worker_state:\n  id: text\n",
+		"worker/nodes.yaml":    "receiver:\n  execution_type: system_node\n  event_handlers:\n    start:\n      guard: {check: payload.leaf_key != ''}\n",
+	} {
+		writeClosedVariantFile(t, root, label, body)
+	}
+	return root
+}
+
 // CopyNestedKeyedRawIngress keeps the same tree but exercises authenticated
 // transport, state mutation and original construction evidence on both stores.
 func CopyNestedKeyedRawIngress(t testing.TB) string {

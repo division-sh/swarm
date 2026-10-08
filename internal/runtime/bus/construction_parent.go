@@ -27,7 +27,7 @@ func (o templateInstanceLifecycleOwner) constructionParent(ctx context.Context, 
 		return flowidentity.Instance{}, err
 	}
 	preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
-	var selected map[string]flowidentity.Instance
+	var selected map[string][]flowidentity.Instance
 	if preview != nil {
 		selected = preview.selected
 	}
@@ -38,7 +38,7 @@ func (o templateInstanceLifecycleOwner) constructionParent(ctx context.Context, 
 	return o.constructedDescendant(ctx, event.RunID(), owner, parentFlow, instances, selected)
 }
 
-func (o templateInstanceLifecycleOwner) connectionLexicalOwner(ctx context.Context, event events.Event, ownerFlow string, instances map[string]flowidentity.Instance, selected map[string]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o templateInstanceLifecycleOwner) connectionLexicalOwner(ctx context.Context, event events.Event, ownerFlow string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {
 	route := event.RoutingSource().Route()
 	if route.FlowInstance == "" {
 		root, err := o.constructionInstance(ctx, event.RunID(), semanticview.RootExecutionFlowID(o.source), event.RunID(), flowidentity.EntityID(event.RunID()), instances)
@@ -64,7 +64,7 @@ func (o templateInstanceLifecycleOwner) connectionLexicalOwner(ctx context.Conte
 	return flowidentity.Instance{}, fmt.Errorf("connection construction ancestry is cyclic")
 }
 
-func (o templateInstanceLifecycleOwner) constructedDescendant(ctx context.Context, runID string, owner flowidentity.Instance, targetFlow string, instances map[string]flowidentity.Instance, selected map[string]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o templateInstanceLifecycleOwner) constructedDescendant(ctx context.Context, runID string, owner flowidentity.Instance, targetFlow string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {
 	bundle, found := semanticview.Bundle(o.source)
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("construction selection requires its admitted tree")
@@ -90,7 +90,7 @@ func (o templateInstanceLifecycleOwner) constructedDescendant(ctx context.Contex
 	return owner, nil
 }
 
-func (o templateInstanceLifecycleOwner) selectedConstructionChild(ctx context.Context, runID string, parent flowidentity.Instance, flowID string, instances map[string]flowidentity.Instance, selected map[string]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o templateInstanceLifecycleOwner) selectedConstructionChild(ctx context.Context, runID string, parent flowidentity.Instance, flowID string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {
 	schema, found := o.source.FlowSchemaByID(flowID)
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("construction selection has an unknown flow %s", flowID)
@@ -109,8 +109,23 @@ func (o templateInstanceLifecycleOwner) selectedConstructionChild(ctx context.Co
 		}
 		return stored, nil
 	}
-	child, found := selected[flowID]
-	if !found || child.ParentRoute != (flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}) {
+	return selectedKeyedConstructionChild(parent, flowID, selected[flowID])
+}
+
+func selectedKeyedConstructionChild(parent flowidentity.Instance, flowID string, candidates []flowidentity.Instance) (flowidentity.Instance, error) {
+	// Only a traversed compiled dependency needs a unique structural ancestor.
+	parentRoute := flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
+	var child flowidentity.Instance
+	for _, candidate := range candidates {
+		if candidate.ParentRoute != parentRoute {
+			continue
+		}
+		if child != (flowidentity.Instance{}) && child != candidate {
+			return flowidentity.Instance{}, fmt.Errorf("connection construction selected competing ancestors of %s", flowID)
+		}
+		child = candidate
+	}
+	if child == (flowidentity.Instance{}) {
 		return flowidentity.Instance{}, fmt.Errorf("connection keyed ancestor %s requires its exact selected constructor edge", flowID)
 	}
 	return child, nil
@@ -177,11 +192,13 @@ func selectConnectionConstruction(ctx context.Context, instance flowidentity.Ins
 		return fmt.Errorf("connection construction selection requires publication planning")
 	}
 	if preview.selected == nil {
-		preview.selected = make(map[string]flowidentity.Instance)
+		preview.selected = make(map[string][]flowidentity.Instance)
 	}
-	if previous, found := preview.selected[instance.TemplateID]; found && previous != instance {
-		return fmt.Errorf("connection construction selected competing ancestors of %s", instance.TemplateID)
+	for _, previous := range preview.selected[instance.TemplateID] {
+		if previous == instance {
+			return nil
+		}
 	}
-	preview.selected[instance.TemplateID] = instance
+	preview.selected[instance.TemplateID] = append(preview.selected[instance.TemplateID], instance)
 	return nil
 }
