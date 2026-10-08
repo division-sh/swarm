@@ -698,6 +698,7 @@ func testContractFrontierTemplateSource(t testing.TB) semanticview.Source {
 				"review": &root.Children[0],
 			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":      &root,
 				"review": &root.Children[0],
 			},
 		},

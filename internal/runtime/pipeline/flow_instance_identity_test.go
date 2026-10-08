@@ -177,7 +177,8 @@ func TestWorkflowInstanceOwnedByFlowPreservesConstructedParent(t *testing.T) {
 			i.ParentFlowInstance, i.ParentEntityID = other.InstancePath, other.EntityID
 		}},
 		{name: "foreign_parent_flow", mutate: func(i *WorkflowInstance) { i.ParentFlowID = "outer/right/sink" }},
-		{name: "altered_parent_entity", mutate: func(i *WorkflowInstance) { i.ParentEntityID = parent.EntityID + "-altered" }},
+		{name: "missing_parent_entity", mutate: func(i *WorkflowInstance) { i.ParentEntityID = "" }},
+		{name: "stored_parent_entity", mutate: func(i *WorkflowInstance) { i.ParentEntityID = "33333333-3333-4333-8333-333333333333" }, valid: true},
 		{name: "reconstructed_absolute_path", mutate: func(i *WorkflowInstance) {
 			i.StorageRef = child.ScopeKey
 			i.EntityID = runtimeflowidentity.EntityID(i.StorageRef)

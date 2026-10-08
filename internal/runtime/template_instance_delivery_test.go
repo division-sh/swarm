@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -478,6 +479,11 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
+	producer := seedRuntimeTestKeylessSource(t, ctx, pg, pc, "producer")
+	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, pg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"99999999-9999-4999-8999-999999999940",
 		events.EventType("producer/deploy.done"),
@@ -487,7 +493,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		0,
 		templateInstanceDeliveryRunID,
 		events.EventEnvelope{},
-		eventtest.StaticFlowRoutingSource("producer", "producer", eventtest.UUID("template-connect-rollback-producer")),
+		eventtest.StaticFlowRoutingSource(producer.TemplateID, producer.InstancePath, producer.EntityID),
 		time.Now().UTC(),
 	)
 
@@ -509,10 +515,14 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	`, 0)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM entity_state
-	`, 0)
+	`, 2)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM routing_rules
 	`, 0)
+	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, pg)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("failed publication changed the prepared source tree or target storage: %v", err)
+	}
 }
 
 func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
