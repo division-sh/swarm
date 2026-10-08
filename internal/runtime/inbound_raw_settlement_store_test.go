@@ -304,15 +304,17 @@ func providerRawSettlementSemanticSource(t *testing.T, target runtimepkg.Inbound
 	if provider.explicit {
 		flow.Events = map[string]runtimecontracts.EventCatalogEntry{eventName: providertriggers.RawEventCatalogEntry()}
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
 	admittedFlow := &root.Children[0]
+	admittedFlow.Parent = &root
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics:   runtimecontracts.WorkflowSemanticView{Name: "provider_raw_settlement", Version: "1.0.0"},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: schema},
+		SourceArtifact: authorActivityTestSourceArtifact,
+		RootSchema:     &root.Schema,
+		FlowSchemas:    map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema, flowID: schema},
 		FlowTree: runtimecontracts.FlowTree{
 			Root:   &root,
-			ByID:   map[string]*runtimecontracts.FlowContractView{flowID: admittedFlow},
-			ByPath: map[string]*runtimecontracts.FlowContractView{flowID: admittedFlow},
+			ByID:   map[string]*runtimecontracts.FlowContractView{".": &root, flowID: admittedFlow},
+			ByPath: map[string]*runtimecontracts.FlowContractView{".": &root, flowID: admittedFlow},
 		},
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {

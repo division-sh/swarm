@@ -18,6 +18,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -931,7 +932,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 		rec := httptest.NewRecorder()
 		gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 			BundleHash: hash, FlowPath: "chat", RunID: "41000000-0000-0000-0000-000000000001",
-
+			ServiceID: flowidentity.StandingServiceID("chat"), Generation: 1, PublicationSequence: 1,
 			Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
 		}, nil)
 		response <- rec
