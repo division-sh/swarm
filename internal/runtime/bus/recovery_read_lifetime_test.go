@@ -193,6 +193,10 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					if dispatched.Load() != 0 || owner.ActiveCount() != 0 {
 						t.Errorf("post-stop dispatch=%d active=%d", dispatched.Load(), owner.ActiveCount())
 					}
+					wantReads := map[string]int32{"origin": 1, "standing": 2, "authorization": 3, "ingress": 1, "run_blocked": 2, "run_parked": 3}[phase]
+					if reads := probe.reads.Load(); reads != wantReads {
+						t.Errorf("metadata reads=%d, want %d with no successor read after stop", reads, wantReads)
+					}
 					if _, err := c.Acquire(id); err == nil {
 						t.Error("retired coordinator accepted new carrier")
 					}
