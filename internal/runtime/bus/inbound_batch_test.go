@@ -2,18 +2,27 @@ package bus
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
@@ -94,15 +103,14 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 }
 
 func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
-	expected := inboundBatchCurrentAuthorization()
+	source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
 	store := &InMemoryEventStore{}
 	bus, err := newScopedTestEventBus(store, EventBusOptions{
-		ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
+		ContractBundle: source, ProviderOutputVerifier: catalog,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	batch := inboundBatchPreflightBatch(expected)
 	plan, err := bus.PrepareInboundDeliveryBatch(context.Background(), batch)
 	if err != nil {
 		t.Fatalf("PrepareInboundDeliveryBatch: %v", err)
@@ -199,14 +207,11 @@ func TestPrepareInboundDeliveryBatchUsesLiveSourceOwnerAndSettlesConsumerlessRaw
 	target := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(ActiveTargetDescriptor{ID: "standing", FlowInstance: target.FlowInstance, EntityID: target.EntityID})
-	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource(t, true)})
+	source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", false)
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, ProviderOutputVerifier: catalog})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	batch := InboundDeliveryBatch{Provider: "telegram", Events: []InboundDeliveryEvent{{
-		Event: inboundRawSettlementEvent(inboundRawSettlementRoutingSource(t, entityID), events.RouteIdentity{}),
-		Kind:  runtimeprovideroutput.KindRaw,
-	}}}
 	plan, err := bus.PrepareInboundDeliveryBatch(testAuthorActivityContext(context.Background()), batch)
 	if err != nil {
 		t.Fatalf("PrepareInboundDeliveryBatch: %v", err)
@@ -246,18 +251,90 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 	if err != nil {
 		t.Fatalf("AdmitForPublish: %v", err)
 	}
-	prepared, command, err := bus.prepareClosedPublication(testAuthorActivityContext(context.Background()), eventBusCommitPublishPlan{
+	_, _, err = bus.prepareClosedPublication(testAuthorActivityContext(context.Background()), eventBusCommitPublishPlan{
 		bus: bus, event: admitted.Event(), admitted: admitted,
 	})
+	if err == nil || !strings.Contains(err.Error(), "provider declaration publication requires its authenticated admission owner") {
+		t.Fatalf("generic provider-looking publication refusal = %v", err)
+	}
+	if len(store.events) != 0 || len(store.routes) != 0 {
+		t.Fatal("refused generic publication mutated persistence")
+	}
+}
+
+func authenticatedTelegramBatchFixture(t testing.TB, flowID string, withText bool) (semanticview.Source, *providertriggers.CatalogSnapshot, InboundDeliveryBatch) {
+	t.Helper()
+	base := inboundRawSettlementSource(t, true)
+	catalog, batch := authenticatedTelegramBatchForSource(t, base, flowID, withText)
+	var authorizations []runtimeprovideroutput.Authorization
+	for _, output := range batch.Events {
+		if !output.Authorization.Empty() {
+			authorizations = append(authorizations, output.Authorization)
+		}
+	}
+	return providerOutputAuthorizedTestSource{Source: base, declaringFlow: flowID, generation: catalog.Generation(), authorizations: authorizations}, catalog, batch
+}
+
+func authenticatedTelegramBatchForSource(t testing.TB, source semanticview.Source, flowID string, withText bool) (*providertriggers.CatalogSnapshot, InboundDeliveryBatch) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(canonicalrouting.RepoRoot(t), "packs/provider-triggers/telegram/trigger.yaml"))
 	if err != nil {
-		t.Fatalf("prepareClosedPublication: %v", err)
+		t.Fatal(err)
 	}
-	if !prepared.providerRawSettlement.authorizes(prepared.Event, prepared.targetFailureInput, prepared.plan) &&
-		command.Commit.RouteSettlement.Reason() == events.NoDeliveryDeclaredConsumerNoPlan {
-		return
+	manifest, err := providertriggers.ParseManifest(raw)
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fatalf("generic provider-looking publication escaped fail-closed settlement: admission=%#v target_failure=%t reason=%q disposition=%#v dead_letter=%#v",
-		prepared.providerRawSettlement, prepared.targetFailure, command.Commit.RouteSettlement.Reason().Code(), command.Commit.Disposition, command.Commit.DeadLetter)
+	hash := sha256.Sum256(raw)
+	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
+		Manifest: manifest, Identity: providertriggers.PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + hex.EncodeToString(hash[:]), Provenance: "platform"}, Source: "committed Telegram pack fixture",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "fixture", Provider: "telegram", SigningSecret: "fixture-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"update_id":1}`)
+	if withText {
+		body = []byte(`{"update_id":1,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello"}}`)
+	}
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(1, 0).UTC()
+	admitted, err := plan.AdmitRequest(providertriggers.Request{Provider: "telegram", Target: providertriggers.Target{WebhookSecret: "fixture-secret"}, Body: body,
+		Payload: payload, Headers: http.Header{"X-Telegram-Bot-Api-Secret-Token": {"fixture-secret"}}, Received: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := authorActivityTestSourceArtifactFact
+	if bundle, found := semanticview.Bundle(source); found && bundle.SourceArtifact != nil {
+		fact, err = runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	delivery, admission, err := plan.ProjectPublication(admitted, fact.BundleHash(), flowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing, err := events.NewExternalIngressRoutingSource(flowID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := InboundDeliveryBatch{Provider: "telegram", Admission: admission}
+	for _, output := range delivery.Events {
+		payload, err := canonicaljson.Bytes(output.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID(t.Name()+":"+string(output.Name)), output.Name, "inbound-gateway", "", payload, 0, busInternalTestRunID, events.EventEnvelope{}, routing, at)
+		batch.Events = append(batch.Events, InboundDeliveryEvent{Event: event, Kind: runtimeprovideroutput.Kind(output.Kind), Authorization: output.Authorization})
+	}
+	return catalog, batch
 }
 
 func inboundRawSettlementSource(t testing.TB, admitted bool) semanticview.Source {

@@ -624,13 +624,11 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := eventBusTestRunContextForSource(t, db, semanticview.Wrap(bundle))
 	instanceRoute := runtimeflowidentity.DeriveRoute("account", "one")
+	accountConstruction := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "account", "one", eventBusTestRunID)
 	bundleHash := testSourceArtifactFact(source).BundleHash()
 	readinessOwner, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-		Identity: runtimeflowidentity.Instance{
-			TemplateID: "account", ScopeKey: "account", InstanceID: "one", InstancePath: instanceRoute.InstancePath,
-			EntityID: runtimeflowidentity.EntityID(instanceRoute.InstancePath), HasStoredPath: true,
-		},
-		RunID: eventBusTestRunID, BundleHash: bundleHash,
+		Identity: accountConstruction,
+		RunID:    eventBusTestRunID, BundleHash: bundleHash,
 		WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 	}).Normalized()
 	if err != nil {
@@ -655,10 +653,24 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 		t.Fatal("expected pipeline coordinator")
 	}
 	at := time.Now().UTC()
+	for _, flowID := range []string{".", "producer"} {
+		constructed := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", eventBusTestRunID)
+		seedComponentFlowConstruction(t, ctx, pg, source, runtimepipeline.WorkflowInstance{
+			InstanceID: constructed.InstanceID, StorageRef: constructed.InstancePath, EntityID: constructed.EntityID,
+			ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
+			WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at,
+		})
+		if err := eb.AddFlowInstanceRouteContextFixture(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
+			Identity: testRunScopedFlowRoute(constructed.Route()), Instance: constructed,
+		}); err != nil {
+			t.Fatalf("publish constructed source %s: %v", flowID, err)
+		}
+	}
 	constructionCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 	initialized, lifecycle, err := pc.PrepareInitialEntryLifecycle(constructionCtx, testRunScopedFlowRoute(instanceRoute), runtimepipeline.WorkflowInstance{
 		InstanceID: "one", StorageRef: instanceRoute.InstancePath, EntityID: runtimeflowidentity.EntityID(instanceRoute.InstancePath),
 		WorkflowName: "account", WorkflowVersion: source.WorkflowVersion(), EntityType: "account", InstanceKind: "template",
+		ParentFlowID: accountConstruction.ParentRoute.FlowID, ParentFlowInstance: accountConstruction.ParentRoute.FlowInstance, ParentEntityID: accountConstruction.ParentEntityID,
 		CurrentState: "pending", StageDefined: true, Fields: map[string]any{"account_id": "acct-agent"},
 		EnteredStageAt: at, CreatedAt: at, RuntimeReadiness: &readinessOwner,
 	}, at)
@@ -711,7 +723,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 	defer runtimebustest.Unsubscribe(eb, agentID)
 
-	producerSource := eventtest.StaticFlowRoutingSource("producer", "producer", eventtest.UUID("producer-entity"))
+	producerSource := eventtest.StaticFlowRoutingSource("producer", "producer", runtimeflowidentity.EntityID("producer"))
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType("producer/account.ready"), "producer", "", json.RawMessage(`{"account_id":"acct-agent"}`), 0, eventBusTestRunID, events.EventEnvelope{}, producerSource, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
 	if err != nil {
@@ -4614,14 +4626,18 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		Path:     "child",
 		Children: []runtimecontracts.FlowContractView{grandchild},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{child}}
+	root.Children[0].Parent = &root
+	root.Children[0].Children[0].Parent = &root.Children[0]
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &root.Schema,
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"child": child.Schema, "child/grandchild": grandchild.Schema,
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":                &root,
 				"child":            &root.Children[0],
 				"child/grandchild": &root.Children[0].Children[0],
 			},

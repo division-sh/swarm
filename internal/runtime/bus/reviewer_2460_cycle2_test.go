@@ -101,12 +101,12 @@ func TestReviewCycle2InboundFinalizationKeepsCommittedSiblings(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			store := &InMemoryEventStore{}
 			probe := &review2460PublicationProbe{failAt: failAt}
-			expected := inboundBatchCurrentAuthorization()
-			bus, err := newScopedTestEventBus(store, EventBusOptions{ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected}, TestLifecycleProbe: probe})
+			source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, ProviderOutputVerifier: catalog, TestLifecycleProbe: probe})
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan, err := bus.PrepareInboundDeliveryBatch(ctx, inboundBatchPreflightBatch(expected))
+			plan, err := bus.PrepareInboundDeliveryBatch(ctx, batch)
 			if err != nil {
 				t.Fatal(err)
 			}

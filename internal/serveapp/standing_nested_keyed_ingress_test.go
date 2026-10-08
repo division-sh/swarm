@@ -13,12 +13,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestA9NestedKeyedIngressConstructionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			root := a9NestedKeyedIngressSource(t)
+			root := canonicalrouting.CopyNestedKeyedRawIngress(t)
 			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 			file, err := credentials.NewFileStore(credentialPath)
@@ -141,39 +142,4 @@ func a9RequireNestedIngressSettlement(t *testing.T, endpoint, eventID string) op
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-}
-
-func a9NestedKeyedIngressSource(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	for label, body := range map[string]string{
-		"schema.yaml": `name: nested-shop
-stages: []
-pins: {inputs: [account.opened]}
-ingress:
-  providers:
-    - provider: partner
-      signing_secret: webhook_signing.partner
-      admission:
-        kind: raw
-        event: account.opened
-        payload: json
-        authentication: {kind: hmac_sha256, header: X-Signature, prefix: "sha256=", encoding: hex}
-        delivery_id: {source: json_path, json_path: "$.delivery_id"}
-connect:
-  - {event: account.opened, from: ., to: parent, resolution: select-or-create, key_from: payload.provider_event_id}
-  - {event: account.opened, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.provider}
-`,
-		"events.yaml":                      "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
-		"parent/schema.yaml":               "name: parent\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
-		"parent/entities.yaml":             "parent_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
-		"parent/nodes.yaml":                "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes: [{target_field: seen, value: entity.seen + 1}]\n",
-		"parent/middle/schema.yaml":        "name: middle\n",
-		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
-		"parent/middle/leaf/entities.yaml": "leaf_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
-		"parent/middle/leaf/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes: [{target_field: seen, value: entity.seen + 1}]\n",
-	} {
-		writeWorkflowValidationFixtureFile(t, filepath.Join(root, label), body)
-	}
-	return root
 }

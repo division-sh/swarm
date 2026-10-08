@@ -3,8 +3,6 @@ package bus
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,36 +11,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func nestedConnectionConstructionSource(t *testing.T) semanticview.Source {
 	t.Helper()
-	root := t.TempDir()
-	for label, body := range map[string]string{
-		"schema.yaml": `name: nested-construction
-pins: {inputs: [start]}
-connect:
-  - {event: start, from: ., to: parent, resolution: select-or-create, key_from: payload.parent_key}
-  - {event: start, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.leaf_key}
-`,
-		"events.yaml":                      "start:\n  parent_key: text\n  leaf_key: text\n",
-		"parent/schema.yaml":               "name: parent\ninstance: id\npins: {inputs: [start]}\n",
-		"parent/entities.yaml":             "parent_state:\n  id: text\n",
-		"parent/nodes.yaml":                "receiver:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      guard: {check: payload.parent_key != ''}\n",
-		"parent/middle/schema.yaml":        "name: middle\n",
-		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\npins: {inputs: [start]}\n",
-		"parent/middle/leaf/entities.yaml": "leaf_state:\n  id: text\n",
-		"parent/middle/leaf/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      guard: {check: payload.leaf_key != ''}\n",
-	} {
-		path := filepath.Join(root, label)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return loadConnectRoutePlanCanonicalSource(t, root)
+	return loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyNestedKeyedConnectionSelection(t))
 }
 
 func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *testing.T) {

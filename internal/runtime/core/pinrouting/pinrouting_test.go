@@ -182,13 +182,19 @@ func TestAdmitAgentExecutionRoutingSourceSeparatesFilesystemDeclarationFromRunti
 		},
 		AgentURIs: map[string]string{"phrase-bot": owner},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{{
+		Path: "telegram-ingress", Paths: runtimecontracts.FlowContractPaths{FlowPath: "telegram-ingress"}, Children: []runtimecontracts.FlowContractView{flow},
+	}}}
+	root.Children[0].Parent = &root
+	chat := &root.Children[0].Children[0]
+	chat.Parent = &root.Children[0]
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"telegram-ingress/telegram-chat": flow.Schema},
+		RootSchema:  &root.Schema,
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"telegram-ingress": root.Children[0].Schema, "telegram-ingress/telegram-chat": flow.Schema},
 		FlowTree: runtimecontracts.FlowTree{
 			Root:   &root,
-			ByID:   map[string]*runtimecontracts.FlowContractView{".": &root, "telegram-ingress/telegram-chat": &root.Children[0]},
-			ByPath: map[string]*runtimecontracts.FlowContractView{".": &root, "telegram-ingress/telegram-chat": &root.Children[0]},
+			ByID:   map[string]*runtimecontracts.FlowContractView{".": &root, "telegram-ingress": &root.Children[0], "telegram-ingress/telegram-chat": chat},
+			ByPath: map[string]*runtimecontracts.FlowContractView{".": &root, "telegram-ingress": &root.Children[0], "telegram-ingress/telegram-chat": chat},
 		},
 		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
 			owner: {Kind: "agent", FlowID: "telegram-ingress/telegram-chat", LocalID: "phrase-bot", Full: owner},
@@ -201,7 +207,15 @@ func TestAdmitAgentExecutionRoutingSourceSeparatesFilesystemDeclarationFromRunti
 		Identity: agentidentitytest.Declared(t, "phrase-bot", owner, "telegram-ingress/telegram-chat", "chat-1", "telegram-ingress/telegram-chat/chat-1"),
 		EntityID: "chat-entity",
 	}
-	constructed := flowidentity.Derive(source, actor.FlowID, actor.Identity.Route.InstanceID)
+	selectedRoot := flowidentity.Stored(source, ".", actor.Identity.RunID, actor.Identity.RunID, flowidentity.EntityID(actor.Identity.RunID), "")
+	ingress, err := flowidentity.KeylessChild(source, selectedRoot, "telegram-ingress")
+	if err != nil {
+		t.Fatal(err)
+	}
+	constructed, err := flowidentity.KeyedChild(source, ingress, actor.FlowID, actor.Identity.Route.InstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	constructed.EntityID = actor.EntityID
 	got, err := AdmitAgentExecutionRoutingSource(source, actor, "chat-entity", constructed)
 	if err != nil {
@@ -281,7 +295,8 @@ func TestAdmitAgentExecutionRoutingSourceUsesFilesystemDeclarationOwningFlow(t *
 				FlowPath: tc.instancePath,
 				Identity: agentidentitytest.Declared(t, "backend", plan.OwnerURI, "support", tc.instanceID, tc.instancePath),
 			}
-			constructed := flowidentity.Derive(source, actor.FlowID, actor.Identity.Route.InstanceID)
+			selectedRoot := flowidentity.Stored(source, ".", actor.Identity.RunID, actor.Identity.RunID, flowidentity.EntityID(actor.Identity.RunID), "")
+			constructed, err := flowidentity.KeyedChild(source, selectedRoot, actor.FlowID, actor.Identity.Route.InstanceID)
 			if tc.mode == runtimecontracts.FlowModeStatic {
 				constructed, err = flowidentity.StandingForGeneration(source, actor.FlowID, actor.Identity.RunID)
 				if err != nil {
@@ -289,6 +304,9 @@ func TestAdmitAgentExecutionRoutingSourceUsesFilesystemDeclarationOwningFlow(t *
 				}
 			} else if tc.entityID != "" {
 				constructed.EntityID = tc.entityID
+			}
+			if err != nil {
+				t.Fatal(err)
 			}
 			if tc.entityID != "" {
 				actor.EntityID = constructed.EntityID

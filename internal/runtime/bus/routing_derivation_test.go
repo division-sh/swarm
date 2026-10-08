@@ -700,7 +700,7 @@ func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBe
 	}
 	store.routes = map[string]runtimebus.FlowInstanceRouteRecord{"prior": prior}
 	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	_, err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: current, Instance: runtimeflowidentity.Derive(source, "producer", current.Route.InstanceID)})
+	_, err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: current, Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(source, "producer", current.Route.InstanceID, current.RunID)})
 	if err == nil || !strings.Contains(err.Error(), "semantic source does not match") {
 		t.Fatalf("StageFlowInstanceRouteContext error = %v, want foreign semantic-source rejection", err)
 	}
@@ -752,7 +752,9 @@ func TestEventBusFlowInstanceRouteRejectsUnknownCanonicalTemplateWithoutMutation
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	identity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("unknown", "inst-1"))
-	err = eb.AddFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)})
+	unknown := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "known", identity.Route.InstanceID, identity.RunID)
+	unknown.TemplateID, unknown.ScopeKey, unknown.InstancePath, unknown.EntityID = "unknown", "unknown", identity.Route.InstancePath, runtimeflowidentity.EntityID(identity.Route.InstancePath)
+	err = eb.AddFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: unknown})
 	if err == nil || !strings.Contains(err.Error(), "construction identity has an unknown or inconsistent authored owner") {
 		t.Fatalf("AddFlowInstanceRoute error = %v, want unknown canonical template", err)
 	}
@@ -1018,11 +1020,14 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 			},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{operating}}
+	root.Children[0].Parent = &root
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &root.Schema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":         &root,
 				"operating": &root.Children[0],
 			},
 		},
@@ -1164,13 +1169,25 @@ func routeMaterializationNodeSource(t testing.TB, flowID string, node runtimecon
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"materialized-node": node},
 	}
 	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
+	if flowID == "child/grandchild" {
+		root.Children = []runtimecontracts.FlowContractView{{Path: "child", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"}, Children: []runtimecontracts.FlowContractView{flow}}}
+		root.Children[0].Children[0].Parent = &root.Children[0]
+	}
+	root.Children[0].Parent = &root
+	byID := map[string]*runtimecontracts.FlowContractView{".": &root, root.Children[0].Path: &root.Children[0]}
+	flowSchemas := map[string]runtimecontracts.FlowSchemaDocument{root.Children[0].Path: root.Children[0].Schema}
+	if flowID == "child/grandchild" {
+		byID[flowID] = &root.Children[0].Children[0]
+		flowSchemas[flowID] = flow.Schema
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema:     &root.Schema,
 		SourceArtifact: sourceartifactfixture.Artifact(),
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
+			ByID: byID,
 		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: flow.Schema},
+		FlowSchemas: flowSchemas,
 	}
 	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, flowID))
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
@@ -1203,8 +1220,10 @@ func routeMaterializationConfigVarBundle(t testing.TB) *runtimecontracts.Workflo
 			},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{operating}}
+	root.Children[0].Parent = &root
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema:     &root.Schema,
 		SourceArtifact: sourceartifactfixture.Artifact(),
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
@@ -1215,6 +1234,7 @@ func routeMaterializationConfigVarBundle(t testing.TB) *runtimecontracts.Workflo
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":         &root,
 				"operating": &root.Children[0],
 			},
 		},
@@ -1291,7 +1311,7 @@ func TestRouteTableTemplateOutputConnectDoesNotCreateCrossFlowPubSubSubscriber(t
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	identity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "component-a"))
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}); err != nil {
+	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(source, identity.Route.ScopeKey, identity.Route.InstanceID, identity.RunID)}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 
@@ -1700,12 +1720,16 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 		Path:     "child",
 		Children: []runtimecontracts.FlowContractView{grandchild},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{child}}
+	root.Children[0].Parent = &root
+	root.Children[0].Children[0].Parent = &root.Children[0]
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema:     &root.Schema,
 		SourceArtifact: sourceartifactfixture.Artifact(),
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":                &root,
 				"child":            &root.Children[0],
 				"child/grandchild": &root.Children[0].Children[0],
 			},
@@ -1757,7 +1781,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
 	if committed, err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: second,
-		Instance: runtimeflowidentity.Derive(semanticview.Wrap(bundle), "child/grandchild", secondRoute.InstanceID),
+		Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(semanticview.Wrap(bundle), "child/grandchild", secondRoute.InstanceID, second.RunID),
 	}); err != nil || !committed.Acknowledged {
 		t.Fatalf("stage second nested template instance: committed=%+v err=%v", committed, err)
 	}
@@ -1776,7 +1800,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	store.stagedRoutes = nil
 	committed, err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: second,
-		Instance: runtimeflowidentity.Derive(semanticview.Wrap(bundle), "child/grandchild", secondRoute.InstanceID),
+		Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(semanticview.Wrap(bundle), "child/grandchild", secondRoute.InstanceID, second.RunID),
 	})
 	if err != nil || !committed.Acknowledged {
 		t.Fatalf("unrelated malformed sibling blocked exact nested replacement: committed=%+v err=%v", committed, err)

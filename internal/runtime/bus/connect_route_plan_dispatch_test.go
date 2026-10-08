@@ -62,7 +62,9 @@ func (s providerOutputAuthorizedTestSource) SemanticCapabilities() semanticview.
 	if flow == "" {
 		flow = "consumer"
 	}
-	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, map[string][]runtimeprovideroutput.Authorization{flow: s.authorizations})
+	capabilities := s.Source.SemanticCapabilities()
+	return capabilities.WithProviderTriggerEvents(s.Source, s.generation, map[string][]runtimeprovideroutput.Authorization{flow: s.authorizations}).
+		WithProviderIngressEvents(capabilities.ProviderIngressEvents())
 }
 
 func (s providerOutputAuthorizedTestSource) FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin {
@@ -720,7 +722,7 @@ func connectRoutePlanStaticProducerEvent(id string, eventType events.EventType, 
 	}
 	route := envelope.Source.Normalized()
 	if route.Empty() {
-		route = events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")}
+		route = events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")}
 	}
 	var (
 		source events.RoutingSource
@@ -735,6 +737,39 @@ func connectRoutePlanStaticProducerEvent(id string, eventType events.EventType, 
 		panic(err)
 	}
 	return eventtest.RunCreatingRootIngressWithRoutingSource(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, source, createdAt)
+}
+
+func installConnectionSourceConstruction(t testing.TB, eb *EventBus, source semanticview.Source, flowID string) {
+	installConnectionSourceConstructionForRun(t, eb, source, flowID, busInternalTestRunID)
+}
+
+func installConnectionSourceConstructionForRun(t testing.TB, eb *EventBus, source semanticview.Source, flowID, runID string) runtimeflowidentity.Instance {
+	t.Helper()
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("source fixture requires its admitted tree")
+	}
+	view, found := bundle.FlowViewByID(flowID)
+	if !found {
+		t.Fatalf("source fixture has no declaration %s", flowID)
+	}
+	var ancestors []string
+	for cursor := view; cursor != nil; cursor = cursor.Parent {
+		ancestors = append(ancestors, cursor.Paths.FlowPath)
+	}
+	var instance runtimeflowidentity.Instance
+	for index := len(ancestors) - 1; index >= 0; index-- {
+		declaringFlow := ancestors[index]
+		instance = ConstructedFlowInstanceIdentityFixture(source, declaringFlow, "", runID)
+		if err := instance.ValidateConstruction(source, runID); err != nil {
+			t.Fatalf("source construction %s: %v", declaringFlow, err)
+		}
+		owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: instance.Route()}
+		if err := eb.RouteTable().AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: instance}); err != nil {
+			t.Fatalf("install exact source construction %s: %v", declaringFlow, err)
+		}
+	}
+	return instance
 }
 
 func connectRoutePlanRootProducerEvent(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
@@ -2219,6 +2254,7 @@ func TestEventRouteSettlementDuplicateAndRecoveryPreserveOriginalFact(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
@@ -2283,6 +2319,7 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
 		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "alpha")),
 	}); err != nil {
@@ -2292,6 +2329,7 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	if err := eb.ResetInMemoryState(); err != nil {
 		t.Fatalf("ResetInMemoryState: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID: "beta", EntityID: betaEntityID, FlowInstance: "consumer/beta",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
@@ -2357,6 +2395,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
@@ -2424,6 +2463,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -2546,6 +2586,7 @@ func TestCompiledConnectEvaluationStaleSnapshotReevaluatesBeforeMutation(t *test
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -2582,6 +2623,7 @@ func TestCompiledConnectEvaluationStaleSnapshotFailureLeavesLifecycleUnchanged(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -2638,6 +2680,7 @@ func TestEventBusPublish_ConnectRoutePlanPreviewCreateFeedsLaterSelect(t *testin
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			installConnectionSourceConstruction(t, eb, semanticview.Wrap(bundle), "producer")
 			store.bus = eb
 			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 				events.EventType("producer/account.setup"), "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -2720,6 +2763,7 @@ func TestCommittedReplayReusesPersistedSyntheticInstanceSourceWithoutReminting(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -2825,6 +2869,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanCreateResolutionAdmit
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent("",
 		events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Time{})
@@ -2862,6 +2907,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -3043,6 +3089,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			installConnectionSourceConstruction(t, eb, source, "producer")
 			store.bus = eb
 			for _, instanceID := range []string{"authoritative", "conflicting"} {
 				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID))}); err != nil {
@@ -3147,6 +3194,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
@@ -3276,6 +3324,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			installConnectionSourceConstruction(t, eb, source, "producer")
 			store.bus = eb
 			for _, instanceID := range tc.addRoutes {
 				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID))}); err != nil {
@@ -3349,6 +3398,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
@@ -3483,6 +3533,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -3527,6 +3578,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	for _, instanceID := range []string{"one", "two"} {
 		if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID))}); err != nil {
@@ -3602,6 +3654,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -3701,11 +3754,18 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			installConnectionSourceConstruction(t, eb, source, "producer")
 			store.bus = eb
 			if tc.consumer == canonicalrouting.TemplateInstanceAgentConsumer {
 				identity, admission, entityID := connectRoutePlanLifecycleAgentRoute(t, source, tc.secondPin)
 				subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, entityID)
 			}
+			eb.RouteTable().mu.RLock()
+			originalOwners := make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance)
+			for owner, instance := range eb.RouteTable().instanceOwners {
+				originalOwners[owner] = instance
+			}
+			eb.RouteTable().mu.RUnlock()
 			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 				events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -3733,10 +3793,10 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 				t.Fatalf("persisted delivery routes = %#v, want none", store.routes[evt.ID()])
 			}
 			eb.RouteTable().mu.RLock()
-			materialized := len(eb.RouteTable().instanceOwners)
+			unchanged := reflect.DeepEqual(eb.RouteTable().instanceOwners, originalOwners)
 			eb.RouteTable().mu.RUnlock()
-			if materialized != 0 {
-				t.Fatalf("materialized route owners = %d, want none", materialized)
+			if !unchanged {
+				t.Fatal("rejected receiver-pin collision changed the installed source constructions")
 			}
 		})
 	}
@@ -3763,6 +3823,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	identity, _, _ := connectRoutePlanLifecycleAgentRoute(t, source, canonicalrouting.TemplateInstanceNoSecondPin)
 	evt := connectRoutePlanStaticProducerEvent(
@@ -3849,6 +3910,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			installConnectionSourceConstruction(t, eb, source, "producer")
 			store.bus = eb
 			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/deploy.done", "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -3922,6 +3984,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -3970,6 +4033,7 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"source_vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -4023,6 +4087,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
@@ -4064,6 +4129,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPreceden
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -4103,6 +4169,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
 	}
@@ -4173,6 +4240,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
@@ -4330,6 +4398,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			installConnectionSourceConstruction(t, eb, source, "producer")
 			for _, instanceID := range tc.addRoutes {
 				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", instanceID))}); err != nil {
 					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
@@ -4675,24 +4744,38 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 	}
 }
 
-func TestExternalIngressSelectedTargetScopeIncludesExactSourceEntity(t *testing.T) {
-	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyProviderRollback(t, true))
-	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
-	entityID := eventtest.UUID("provider-selected-source")
-	routingSource, err := events.NewExternalIngressRoutingSource("consumer", events.RoutingSourceAuthorityProviderAdmissionPlan)
+func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *testing.T) {
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting))
+	table, err := DeriveRouteTable(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if routingSource.Route().FlowInstance != "" {
-		t.Fatalf("external ingress unexpectedly has an instance path: %#v", routingSource.Route())
+	resolver := newConnectRoutePlanResolver(source, table, nil, nil, nil)
+	routingSource, err := events.NewExternalIngressRoutingSource("account", events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routingSource.Route() != (events.RouteIdentity{FlowID: "account"}) {
+		t.Fatalf("external ingress unexpectedly has a concrete sender: %#v", routingSource.Route())
 	}
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
-		uuid.NewString(), "inbound.telegram.text_message", "provider", "", json.RawMessage(`{"chat_id":"42"}`),
+		uuid.NewString(), "account.ready", "provider", "", json.RawMessage(`{"account_id":"42"}`),
 		0, uuid.NewString(), "", events.EventEnvelope{}, routingSource, time.Now().UTC(),
 	)
 	scope, ok := resolver.selectedTargetScope(context.Background(), evt)
-	if !ok || scope.sourceEntityID != entityID {
-		t.Fatalf("provider source owner omitted from selected scope: ok=%t scope=%#v", ok, scope)
+	if ok || len(scope.instancePaths) != 0 || scope.sourceEntityID != "" {
+		t.Fatalf("declaration without construction widened its lookup: ok=%t scope=%#v", ok, scope)
+	}
+	for _, test := range []struct{ runID, id string }{{evt.RunID(), "one"}, {evt.RunID(), "two"}, {uuid.NewString(), "foreign"}} {
+		instance := ConstructedFlowInstanceIdentityFixture(source, "account", test.id, test.runID)
+		owner := runtimeflowidentity.RunScopedFlowInstance{RunID: test.runID, Route: instance.Route()}
+		if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: instance}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope, ok = resolver.selectedTargetScope(context.Background(), evt)
+	if !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"account/one", "account/two"}) {
+		t.Fatalf("declaration candidate scope mixed concrete sender or foreign run: ok=%t scope=%#v", ok, scope)
 	}
 }
 
@@ -5228,6 +5311,7 @@ func connectRoutePlanTestBundle(t testing.TB, flows []connectRoutePlanTestFlow, 
 		byID[view.Paths.FlowPath] = view
 		byPath[view.Paths.FlowPath] = view
 		for childIndex := range view.Children {
+			view.Children[childIndex].Parent = view
 			indexView(&view.Children[childIndex])
 		}
 	}

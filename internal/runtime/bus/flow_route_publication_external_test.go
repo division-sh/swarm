@@ -31,7 +31,7 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("review", "inst-1"))
-	req := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}
+	req := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(source, identity.Route.ScopeKey, identity.Route.InstanceID, identity.RunID)}
 	binding := runtimeprocessbinding.Binding{
 		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "publication-test", ProcessBootID: uuid.NewString(),
 		GenerationGrantID: uuid.NewString(), BundleHash: owned.BundleHash(),
@@ -147,7 +147,7 @@ func TestFlowRoutePublicationFenceBeforePublish(t *testing.T) {
 	if err := eb.RetireCommittedFlowInstanceRoute(runtimepipeline.WorkflowEngineRouteRetirement{Identity: identity, ActivationAttemptID: attempt.ID()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}, attempt); err == nil {
+	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(source, identity.Route.ScopeKey, identity.Route.InstanceID, identity.RunID)}, attempt); err == nil {
 		t.Fatal("publication succeeded after attempt was fenced")
 	}
 	if eb.RouteTable().HasFlowInstanceRoute(identity) {
@@ -185,7 +185,7 @@ func TestCommittedFlowRouteRetirementCannotRemoveSuccessor(t *testing.T) {
 		return attempt
 	}
 	first := newAttempt()
-	firstHandle, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}, first)
+	firstHandle, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(source, identity.Route.ScopeKey, identity.Route.InstanceID, identity.RunID)}, first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestCommittedFlowRouteRetirementCannotRemoveSuccessor(t *testing.T) {
 		t.Fatal("committed predecessor route remained visible")
 	}
 	second := newAttempt()
-	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}, second); err != nil {
+	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(context.Background(), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(source, identity.Route.ScopeKey, identity.Route.InstanceID, identity.RunID)}, second); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstHandle.Retire(); err != nil {
@@ -240,7 +240,7 @@ func TestFlowRoutePublicationRejectsForeignSourceContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), foreign)
-	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimeflowidentity.Derive(source, identity.Route.ScopeKey, identity.Route.InstanceID)}, attempt); err == nil {
+	if _, err := eb.PublishPersistedFlowInstanceRouteForAttempt(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(source, identity.Route.ScopeKey, identity.Route.InstanceID, identity.RunID)}, attempt); err == nil {
 		t.Fatal("foreign source published an activation route")
 	}
 	if eb.RouteTable().HasFlowInstanceRoute(identity) {

@@ -1211,6 +1211,8 @@ func seedQueryEntitiesGuardInstance(t *testing.T, pc *PipelineCoordinator, ctx c
 		EntityType:      "validation_request",
 	})
 	instance.InitialFieldValues = cloneStringAnyMap(instance.Fields)
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = ".", runID, runtimeflowidentity.EntityID(runID)
 	if err := pc.workflowStore.create(ctx, instance); err != nil {
 		t.Fatalf("seed query_entities guard instance %s: %v", entityID, err)
 	}
