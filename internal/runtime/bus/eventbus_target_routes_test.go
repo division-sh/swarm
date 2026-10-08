@@ -1366,11 +1366,13 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 		},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{flow}}
+	root.Children[0].Parent = &root
 	base := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &root.Schema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
+			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, flowID: &root.Children[0]},
 		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: {}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: flow.Schema},
 	}
 	admitted := loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml":                        "name: target-route-test\nversion: 1.0.0\nplatform_version: '*'\n",
@@ -1380,6 +1382,7 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 	})
 	admitted.FlowTree = base.FlowTree
 	admitted.FlowSchemas = base.FlowSchemas
+	admitted.RootSchema = base.RootSchema
 	if err := runtimecontracts.CompileWorkflowSemantics(admitted); err != nil {
 		t.Fatalf("compile materialized target semantics: %v", err)
 	}
@@ -3703,11 +3706,14 @@ func routedNodeTemplateBundle(t testing.TB) *runtimecontracts.WorkflowContractBu
 			},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{operating}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{operating}}
+	root.Children[0].Parent = &root
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &root.Schema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":         &root,
 				"operating": &root.Children[0],
 			},
 		},
@@ -3744,11 +3750,14 @@ func routedCallbackTemplateBundle(t testing.TB) *runtimecontracts.WorkflowContra
 			},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{repoScaffold}}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{repoScaffold}}
+	root.Children[0].Parent = &root
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &root.Schema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":             &root,
 				"repo-scaffold": &root.Children[0],
 			},
 		},

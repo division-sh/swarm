@@ -429,6 +429,9 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/public_input_admission.go
       - internal/runtime/bus/template_instance_lifecycle.go
+      - internal/runtime/bus/construction_parent.go
+      - internal/runtime/bus/construction_parent_test.go
+      - internal/runtime/bus/a9_existing_selection_probe_test.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/routing_derivation_test.go
       - internal/runtime/bus/eventbus_delivery_projection_test.go
@@ -446,6 +449,12 @@ seam_families:
       template-observer route authority are not selected by nil-field ordering.
       #1994/#1949 retire the fan-in branch; portfolio streams and finite arrival
       joins consume ordinary instance selection, not pin-owned join semantics.
+      The construction-parent consumer uses the compiled lexical owner and
+      exact admitted construction ancestry. Its process-local preview carries
+      same-publication selections; it grants no independent connection,
+      binding-generation or persistence authority. The nested sibling proof
+      and retained existing-selection counterexample cover this consumer;
+      the latter remains an unresolved #2438 triage obligation, not closure.
       Dynamic instance intent consists only of opaque
       TemplateInstanceField, typed FlowInputInstanceSource, and exhaustive
       FlowInputResolutionMode. The source-type owner resolves actual payload

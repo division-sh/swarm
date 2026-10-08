@@ -5,13 +5,13 @@ import (
 	"reflect"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 // This isolates routing with existing selected owners. Gateway authentication and
@@ -42,33 +42,28 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 				if receiver != "" {
 					connections = []runtimecontracts.FlowConnect{{Event: eventName, From: origin, To: receiver}}
 				}
-				source := providerOutputAuthorizedTestSource{
-					Source:        semanticview.Wrap(connectRoutePlanTestBundle(t, flows, connections)),
-					declaringFlow: origin, generation: authorization.Generation(),
-					authorizations: []runtimeprovideroutput.Authorization{authorization},
-				}
-				runID := eventtest.UUID("provider-connection-run")
+				base := semanticviewtest.WithProviderIngress(semanticview.Wrap(connectRoutePlanTestBundle(t, flows, connections)), map[string][]string{origin: {"inbound.telegram"}})
+				catalog, batch := authenticatedTelegramBatchForSource(t, base, origin, true)
+				authorization := batch.Events[1].Authorization
+				source := providerOutputAuthorizedTestSource{Source: base, declaringFlow: origin, generation: catalog.Generation(), authorizations: []runtimeprovideroutput.Authorization{authorization}}
+				runID := batch.Events[1].Event.RunID()
 				store := newTargetRouteMemoryStore()
 				var owners []ActiveTargetDescriptor
 				for _, flow := range []string{".", "alpha", "first", "second"} {
-					instance := flow
-					if flow == "." {
-						instance = runID
-					}
-					owners = append(owners, ActiveTargetDescriptor{ID: flow, FlowInstance: instance, EntityID: eventtest.UUID(flow)})
+					instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
+					owners = append(owners, ActiveTargetDescriptor{ID: flow, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
 				}
 				store.setTargetOwners(owners...)
-				eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+				eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, ProviderOutputVerifier: catalog})
 				if err != nil {
 					t.Fatal(err)
 				}
-				routing, err := events.NewExternalIngressRoutingSource(origin, events.RoutingSourceAuthorityProviderAdmissionPlan)
-				if err != nil {
-					t.Fatal(err)
+				for _, flow := range []string{".", "alpha", "first", "second"} {
+					installConnectionSourceConstructionForRun(t, eb, source, flow, runID)
 				}
-				evt := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID(t.Name()), events.EventType(eventName), "gateway", "", []byte("{}"), 0, runID, events.EventEnvelope{}, routing, time.Now())
-				ctx := withProviderOutputAuthorization(context.Background(), authorization)
-				plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
+				evt := batch.Events[1].Event
+				ctx := testAuthorActivityContext(context.Background())
+				plan, err := eb.PrepareInboundDeliveryBatch(ctx, batch)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -88,7 +83,11 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 						if route.ConnectClaim.Empty() != (node.FlowPath() == origin) {
 							t.Fatalf("ordinary/compiled authority changed: %#v", route)
 						}
-						if target := route.Target.Route(); target.EntityID != eventtest.UUID(node.FlowPath()) {
+						path := node.FlowPath()
+						if path == "." {
+							path = runID
+						}
+						if target := route.Target.Route(); target.EntityID != runtimeflowidentity.EntityID(path) {
 							t.Fatalf("receiver reused source entity: %#v", target)
 						}
 					}
@@ -98,9 +97,27 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 						t.Fatalf("recipients=%v want=%v", got, want)
 					}
 				}
-				assertRoutes(plan.DeliveryRoutes)
-				if err := eb.Publish(ctx, evt); err != nil {
+				prepared := plan.PreparedPublications()
+				if len(prepared) != 2 || len(prepared[0].plan.DeliveryRoutes()) != 0 {
+					t.Fatalf("raw/normalized outputs changed: %+v", prepared)
+				}
+				assertRoutes(prepared[1].plan.DeliveryRoutes())
+				var committed []CommittedPublication
+				for _, command := range plan.CommitCommands() {
+					result, err := store.CommitPublication(ctx, command)
+					if err != nil {
+						t.Fatal(err)
+					}
+					committed = append(committed, result)
+				}
+				prepared, err = eb.ApplyInboundDeliveryCommit(ctx, plan, committed)
+				if err != nil {
 					t.Fatal(err)
+				}
+				for _, publication := range prepared {
+					if err := eb.DispatchPreparedPublish(ctx, publication); err != nil {
+						t.Fatal(err)
+					}
 				}
 				assertRoutes(store.routes[evt.ID()])
 			})

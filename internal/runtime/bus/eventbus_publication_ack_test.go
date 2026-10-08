@@ -285,7 +285,7 @@ func TestFlowActivationBusHelperPreservesAcknowledgedError(t *testing.T) {
 			bus.durable.ActiveFlows = &topologyOperationDescriptors{source: bus.semanticSource}
 			store := &flowActivationAcknowledgementProbeStore{acknowledged: acknowledged, fault: fault}
 			bus.store = store
-			identity := runtimeflowidentity.Derive(source, "workers", "alpha")
+			identity := ConstructedFlowInstanceIdentityFixture(source, "workers", "alpha", busInternalTestRunID)
 			readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 				Identity: identity, RunID: busInternalTestRunID, BundleHash: bus.sourceArtifactFact.BundleHash(),
 				WorkflowVersion: source.WorkflowVersion(), ExecutionMode: "live",

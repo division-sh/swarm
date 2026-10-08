@@ -92,6 +92,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	store.bus = eb
 
 	evt := finalFlowInstanceAuthoringAccountReadyEvent(uuid.NewString(), "acct-42")
+	installConnectionSourceConstructionForRun(t, eb, source, "producer", evt.RunID())
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -246,6 +247,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			evt := finalFlowInstanceAuthoringEvent(uuid.NewString(), tc.payload)
+			installConnectionSourceConstructionForRun(t, eb, source, "producer", evt.RunID())
 
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
@@ -277,7 +279,7 @@ func finalFlowInstanceAuthoringEvent(eventID string, payload json.RawMessage) ev
 	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
 		FlowID:       "producer",
 		FlowInstance: "producer",
-		EntityID:     eventtest.UUID("producer:" + eventID),
+		EntityID:     runtimeflowidentity.EntityID("producer"),
 	})
 	if err != nil {
 		panic(err)

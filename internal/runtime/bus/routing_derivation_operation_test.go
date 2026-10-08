@@ -115,6 +115,20 @@ func deriveFullRouteTopologyForTest(eb *EventBus, table *RouteTable, lister Acti
 	return eb.deriveFlowInstanceRouteTopologyFromDescriptors(context.Background(), table, runID, include, exclude, graph, inputProducers, false, descriptors)
 }
 
+func nestedTopologySink(t testing.TB, source semanticview.Source, side, revision string) runtimeflowidentity.Instance {
+	t.Helper()
+	outer := ConstructedFlowInstanceIdentityFixture(source, "outer", "", busInternalTestRunID)
+	parent, err := runtimeflowidentity.KeyedChild(source, outer, "outer/"+side, "case-"+side)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink, err := runtimeflowidentity.KeyedChild(source, parent, parent.TemplateID+"/sink", revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sink
+}
+
 func TestConstructedChildConnectTargetRequiresExactInstalledParent(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyLifecycleNestedTemplates(t), runtimecontracts.DefaultPlatformSpecFile(repo))
@@ -122,7 +136,7 @@ func TestConstructedChildConnectTargetRequiresExactInstalledParent(t *testing.T)
 		t.Fatal(err)
 	}
 	source := semanticview.Wrap(bundle)
-	parent := runtimeflowidentity.Derive(source, "outer/left/sink", "same-revision")
+	parent := nestedTopologySink(t, source, "left", "same-revision")
 	child, err := runtimeflowidentity.KeylessChild(source, parent, parent.TemplateID+"/final")
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +168,7 @@ func TestConstructedChildConnectTargetRequiresExactInstalledParent(t *testing.T)
 					t.Fatal(err)
 				}
 				if variant == "replacement" {
-					other := runtimeflowidentity.Derive(source, parent.TemplateID, "replacement-revision")
+					other := nestedTopologySink(t, source, "left", "replacement-revision")
 					replacement, err := runtimeflowidentity.KeylessChild(source, other, child.TemplateID)
 					if err != nil {
 						t.Fatal(err)
@@ -192,7 +206,7 @@ func TestRouteTopologyConstructionKeepsParentRelativeKeylessChild(t *testing.T) 
 	for _, side := range []string{"left", "right"} {
 		for _, path := range []string{"activation", "descriptor_preview"} {
 			t.Run(side+"/"+path, func(t *testing.T) {
-				parent := runtimeflowidentity.Derive(source, "outer/"+side+"/sink", "same-revision")
+				parent := nestedTopologySink(t, source, side, "same-revision")
 				child, err := runtimeflowidentity.KeylessChild(source, parent, parent.TemplateID+"/final")
 				if err != nil {
 					t.Fatal(err)
@@ -290,7 +304,7 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	plans := make([]runtimepipeline.FlowInstanceActivationPlan, 0, 3)
 	for _, id := range []string{"alpha", "beta", "gamma"} {
 		plans = append(plans, runtimepipeline.FlowInstanceActivationPlan{
-			Identity:  runtimeflowidentity.Derive(source, "workers", id),
+			Identity:  ConstructedFlowInstanceIdentityFixture(source, "workers", id, busInternalTestRunID),
 			Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
 		})
 	}
@@ -350,7 +364,7 @@ func TestRouteTopologyPublicationUsesTableCompilationButRereadsCurrentTopology(t
 	source.censuses.Store(0)
 	for _, id := range []string{"alpha", "beta", "gamma"} {
 		plan := runtimepipeline.FlowInstanceActivationPlan{
-			Identity:  runtimeflowidentity.Derive(source, "workers", id),
+			Identity:  ConstructedFlowInstanceIdentityFixture(source, "workers", id, busInternalTestRunID),
 			Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
 		}
 		sets, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan})
@@ -373,7 +387,7 @@ func TestRouteTopologyPublicationUsesTableCompilationButRereadsCurrentTopology(t
 	eb.routeTable = table
 	source.censuses.Store(0)
 	plan := runtimepipeline.FlowInstanceActivationPlan{
-		Identity:  runtimeflowidentity.Derive(source, "workers", "delta"),
+		Identity:  ConstructedFlowInstanceIdentityFixture(source, "workers", "delta", busInternalTestRunID),
 		Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
 	}
 	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan}); err != nil {
@@ -392,7 +406,7 @@ func TestRouteTopologyPublicationUsesTableCompilationButRereadsCurrentTopology(t
 }
 
 func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
-	source, _ := topologyOperationFixture(t)
+	source, eb := topologyOperationFixture(t)
 	live, err := DeriveRouteTable(source)
 	if err != nil {
 		t.Fatal(err)
@@ -402,9 +416,19 @@ func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 		t.Helper()
 		current := &connectRoutePlanPreviewRoutes{}
 		ctx := context.WithValue(context.Background(), connectRoutePlanPreviewRoutesKey{}, current)
+		constructed := ConstructedFlowInstanceIdentityFixture(source, "workers", id, busInternalTestRunID)
+		at := time.Unix(1700000000, 0).UTC()
 		decision := TemplateInstanceLifecycleDecision{
 			Action: templateInstanceLifecycleActionPreviewCreate, InstanceID: id, InstancePath: "workers/" + id,
-			Activation: &runtimepipeline.FlowInstanceActivationPlan{Identity: runtimeflowidentity.Derive(source, "workers", id)},
+			Activation: &runtimepipeline.FlowInstanceActivationPlan{
+				Identity: constructed,
+				Instance: runtimepipeline.WorkflowInstance{StorageRef: constructed.InstancePath, InstanceID: constructed.InstanceID},
+				Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+					Identity: constructed, RunID: busInternalTestRunID, ExecutionMode: "live",
+					BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
+				},
+				OccurredAt: at,
+			},
 		}
 		if err := resolver.installTemplateInstanceLifecyclePreview(ctx, busInternalTestRunID, decision); err != nil {
 			t.Fatal(err)
@@ -467,7 +491,7 @@ func TestRouteTopologyPublicationReadsOnlyCompiledObserverDependency(t *testing.
 	eb.routeTable = table
 	old := topologyOperationIdentity(t, "old")
 	newPlan := runtimepipeline.FlowInstanceActivationPlan{
-		Identity:  runtimeflowidentity.Derive(source, "workers", "new"),
+		Identity:  ConstructedFlowInstanceIdentityFixture(source, "workers", "new", busInternalTestRunID),
 		Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
 	}
 	selected := ActiveFlowInstanceDescriptor{
@@ -565,7 +589,7 @@ func TestRouteTopologyPublicationLoadsCompleteCompiledObserverContext(t *testing
 			lister := &topologyOperationDescriptors{source: source, rows: rows}
 			eb.durable.ActiveFlows = lister
 			plan := runtimepipeline.FlowInstanceActivationPlan{
-				Identity:  runtimeflowidentity.Derive(source, "producer", "new"),
+				Identity:  ConstructedFlowInstanceIdentityFixture(source, "producer", "new", busInternalTestRunID),
 				Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
 			}
 			got, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan})
@@ -756,7 +780,7 @@ func BenchmarkFlowInstanceActivationRouteTopology64(b *testing.B) {
 	}
 	eb.durable.ActiveFlows = lister
 	plans := []runtimepipeline.FlowInstanceActivationPlan{{
-		Identity:  runtimeflowidentity.Derive(source, "workers", "new"),
+		Identity:  ConstructedFlowInstanceIdentityFixture(source, "workers", "new", busInternalTestRunID),
 		Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
 	}}
 	b.ResetTimer()

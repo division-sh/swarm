@@ -230,6 +230,9 @@ func newCompiledAdapterFixture(t *testing.T, backend string, bundle *contracts.W
 		if schema, found := pc.SemanticSource().FlowSchemaByID(flow); found && !schema.Instance.Empty() {
 			instance.Fields[schema.Instance.Path()] = instance.InstanceID
 		}
+		if flow != "." {
+			instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = ".", runID, FlowInstanceEntityID(runID)
+		}
 		if err := store.upsert(ctx, instance); err != nil {
 			t.Fatal(err)
 		}

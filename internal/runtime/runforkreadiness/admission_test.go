@@ -13,6 +13,7 @@ import (
 	runtimecore "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -378,12 +379,18 @@ func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 		t.Fatal(err)
 	}
 	entered := time.Now().UTC()
+	selectedRoot := flowidentity.Stored(effective.Source(), ".", runID, runID, flowidentity.EntityID(runID), "")
+	constructed, err := flowidentity.KeyedChild(effective.Source(), selectedRoot, "consumer", "item")
+	if err != nil {
+		t.Fatal(err)
+	}
+	constructed.EntityID = entityID
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{EventID: "event-b", Revision: 7}, Entities: []runfork.RunForkEntityState{{
 		EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &entered, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 			FlowTemplate: "consumer", Mode: "template", StageDefined: graph.StageCount() != 0,
 			EntityType: "deployment", FlowInstance: "consumer/item",
-			FlowConfig: json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item"}`),
+			FlowConfig: selectedAgentHeaderConfig(t, constructed),
 		},
 	}}}
 	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})

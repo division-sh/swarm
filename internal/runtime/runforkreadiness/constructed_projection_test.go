@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -65,13 +66,20 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 			var first forkrecipient.Evidence
 			for _, key := range []string{"one", "two"} {
 				for _, branch := range []string{"child", "audit"} {
-					parent := flowidentity.Derive(source, "templ", key)
+					selectedRoot := flowidentity.Stored(source, ".", runID, runID, flowidentity.EntityID(runID), "")
+					parent, err := flowidentity.KeyedChild(source, selectedRoot, "templ", key)
+					if err != nil {
+						t.Fatal(err)
+					}
 					for _, flow := range []string{"templ/" + branch, "templ/" + branch + "/leaf"} {
 						child, err := flowidentity.KeylessChild(source, parent, flow)
 						if err != nil {
 							t.Fatal(err)
 						}
 						parent = child
+						if err := child.ValidateConstruction(source, runID); err != nil {
+							t.Fatalf("fixture construction %s: %v", child.InstancePath, err)
+						}
 						if len(source.FlowRequiredAgents(flow)) != 1 {
 							t.Fatal("fixture lost its declared/required duplicate")
 						}
@@ -97,6 +105,9 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 							row.Fields = map[string]any{"value": key}
 						}
 						plan.Entities = append(plan.Entities, row)
+						if _, err := AgentConstruction(source, plan, actor); err != nil {
+							t.Fatalf("fixture fixed header %s: %v", child.InstancePath, err)
+						}
 						if first.Path == "" {
 							first, err = forkrecipient.NewLocal(forkrecipient.Input{Recipient: events.MustAgentDeliveryRecipient(actor.AgentID()), Path: child.InstancePath, AgentPlan: actor, HandlerEvent: "work.ready"})
 							if err != nil {
@@ -107,6 +118,13 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 				}
 			}
 			planning.RecipientPlanEvents = []runfork.RunForkSelectedContractRecipientPlanEvent{{SourceEventID: "input", EventName: "work.ready", Recipients: []forkrecipient.Evidence{first}}}
+			for _, entity := range plan.Entities {
+				meta := entity.MaterializationMetadata
+				route := flowidentity.StoredRoute(flowidentity.ScopeKey(source, meta.FlowTemplate), flowidentity.LogicalInstanceID(meta.FlowInstance), meta.FlowInstance)
+				if _, _, _, err := runforkadmission.FixedConstructionForRoute(source, plan, route); err != nil {
+					t.Fatalf("fixture census route %+v: %v", route, err)
+				}
+			}
 			before, _ := json.Marshal(plan)
 			projection, err := Project(plan, source, planning, map[string]executionmode.Mode{"input": executionmode.Live}, templateAdmissionRequest(t).ModelOptions)
 			if err != nil {

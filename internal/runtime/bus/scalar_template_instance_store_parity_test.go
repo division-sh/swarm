@@ -195,12 +195,22 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				t.Fatal("account fixture lost its state contract")
 			}
 			at := time.Now().UTC()
+			for _, flowID := range []string{".", "producer"} {
+				constructed := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", runID)
+				seedComponentFlowConstruction(t, ctx, selected, source, runtimepipeline.WorkflowInstance{
+					InstanceID: constructed.InstanceID, StorageRef: constructed.InstancePath, EntityID: constructed.EntityID,
+					ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
+					WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at,
+				})
+			}
 			seedComponentFlowConstruction(t, ctx, selected, source, runtimepipeline.WorkflowInstance{
 				InstanceID: "one", StorageRef: "account/one", EntityID: entityID, WorkflowName: "account",
 				WorkflowVersion: source.WorkflowVersion(), InstanceKind: "template", EntityType: contract.EntityType,
+				ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: runtimeflowidentity.EntityID(runID),
 				Fields: fields, EnteredStageAt: at, CreatedAt: at,
 			})
 			selected.setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor{{
+				Identity:        runtimebus.ConstructedFlowInstanceIdentityFixture(source, "account", "one", runID),
 				RunID:           runID,
 				InstanceID:      "one",
 				EntityID:        entityID,
@@ -214,6 +224,14 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			for _, flowID := range []string{".", "producer"} {
+				constructed := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", runID)
+				if err := eventBus.AddFlowInstanceRouteContextFixture(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
+					Identity: testRunScopedFlowRouteForRun(runID, constructed.Route()), Instance: constructed,
+				}); err != nil {
+					t.Fatalf("publish constructed source %s: %v", flowID, err)
+				}
+			}
 			if err := eventBus.AddFlowInstanceRouteContextFixture(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
 				Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one")),
 			}); err != nil {
@@ -222,7 +240,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 
 			eventID := uuid.NewString()
 			eventTime := time.Now().UTC()
-			producerEntityID := uuid.NewString()
+			producerEntityID := runtimeflowidentity.EntityID("producer")
 			evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID,
 				events.EventType("producer/account.ready"),
