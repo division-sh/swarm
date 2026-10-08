@@ -45,6 +45,10 @@ func TestProspectiveJoinAdmissionPreservesConstructedParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	item, err := prepared.JoinAdmissionInstance(prepared.Candidate().Route)
+	descriptor, descriptorErr := prepared.PinRoutingDescriptor()
+	if descriptorErr != nil || descriptor.FlowID != constructed.TemplateID || descriptor.FlowInstance != constructed.InstancePath || descriptor.EntityID != constructed.EntityID {
+		t.Fatalf("prospective descriptor lost its exact declaring owner: %+v err=%v", descriptor, descriptorErr)
+	}
 	if err != nil || item == nil || item.ParentFlowID != constructed.ParentRoute.FlowID ||
 		item.ParentFlowInstance != constructed.ParentRoute.FlowInstance || item.ParentEntityID != constructed.ParentEntityID ||
 		item.InstanceID != constructed.InstanceID || item.StorageRef != constructed.InstancePath || item.Revision != 4 ||
