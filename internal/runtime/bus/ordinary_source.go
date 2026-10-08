@@ -41,25 +41,12 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 		return ordinaryPublicationSource{}, fmt.Errorf("provider declaring flow %q is not in the selected source", route.FlowID)
 	}
 	root := route.FlowID == semanticview.RootExecutionFlowID(p.source)
-	expected, err := p.providerExecutionIdentity(evt, route.FlowID, root)
+	expected, err := p.selectedProviderExecutionIdentity(evt, route.FlowID, root)
 	if err != nil {
 		return ordinaryPublicationSource{}, err
 	}
 	if expected.InstancePath == "" {
-		if p.context != nil {
-			if preview, _ := p.context.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil {
-				expected, err = providerConstructionCandidate(route.FlowID, preview.selected[route.FlowID])
-				if err != nil {
-					return ordinaryPublicationSource{}, err
-				}
-			}
-		}
-		if expected.InstancePath == "" {
-			return ordinaryPublicationSource{route: route, root: root, declarationOnly: true}, nil
-		}
-		if err := expected.ValidateConstruction(p.source, evt.RunID()); err != nil {
-			return ordinaryPublicationSource{}, err
-		}
+		return ordinaryPublicationSource{route: route, root: root, declarationOnly: true}, nil
 	}
 	owners := make(map[events.RouteIdentity]struct{})
 	for _, descriptor := range p.descriptors {
@@ -82,6 +69,22 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 		return ordinaryPublicationSource{route: owner, root: root}, nil
 	}
 	return ordinaryPublicationSource{}, fmt.Errorf("provider source ownership resolution failed")
+}
+
+func (p selectedRunTargetOwnerProjection) selectedProviderExecutionIdentity(event events.Event, flowID string, root bool) (runtimeflowidentity.Instance, error) {
+	expected, err := p.providerExecutionIdentity(event, flowID, root)
+	if err != nil || expected.InstancePath != "" || p.context == nil {
+		return expected, err
+	}
+	preview, _ := p.context.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
+	if preview == nil {
+		return expected, nil
+	}
+	expected, err = providerConstructionCandidate(flowID, preview.selected[flowID])
+	if err != nil || expected.InstancePath == "" {
+		return expected, err
+	}
+	return expected, expected.ValidateConstruction(p.source, event.RunID())
 }
 
 func providerConstructionCandidate(flowID string, candidates []runtimeflowidentity.Instance) (runtimeflowidentity.Instance, error) {
