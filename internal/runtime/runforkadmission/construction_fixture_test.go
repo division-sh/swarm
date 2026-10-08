@@ -14,9 +14,11 @@ import (
 // delivery paths are not construction evidence and cannot create this record.
 func withConstructedHeader(t testing.TB, plan runfork.RunForkPlan, source semanticview.Source, flowID, instanceID string) runfork.RunForkPlan {
 	t.Helper()
-	instance := flowidentity.Derive(source, flowID, instanceID)
-	instance.ParentRoute = flowidentity.ParentRoute{FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: plan.SourceRunID, EntityID: plan.SourceRunID}
-	instance.ParentEntityID = plan.SourceRunID
+	root := flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), plan.SourceRunID, plan.SourceRunID, flowidentity.EntityID(plan.SourceRunID), "")
+	instance, err := flowidentity.KeyedChild(source, root, flowID, instanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := instance.ValidateConstruction(source, plan.SourceRunID); err != nil {
 		t.Fatal(err)
 	}

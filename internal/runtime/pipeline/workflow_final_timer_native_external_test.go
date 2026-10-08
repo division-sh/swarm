@@ -9,6 +9,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -22,7 +23,8 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 		for _, final := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/final_%t", backend, final), func(t *testing.T) {
 				selected, closeStore, reopen := openTimerReplayNativeStore(t, backend)
-				runID, entityID := uuid.NewString(), uuid.NewString()
+				runID := uuid.NewString()
+				entityID := flowidentity.EntityID(runID)
 				ctx := testAuthorActivityContext(t, context.Background())
 				storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
 				ctx = withLiveGateExecution(correlation.WithRunID(ctx, runID))
@@ -36,8 +38,11 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 				}
 				// Deliberately supply a previously accepted timer at a final stage:
 				// runtime no-new-arm is independently proven, not waived by admission.
+				root := &contracts.FlowContractView{Path: ".", Paths: contracts.FlowContractPaths{FlowPath: "."}, Schema: contracts.FlowSchemaDocument{Name: "final-timer"}}
 				source := semanticview.Wrap(&contracts.WorkflowContractBundle{
-					Events: map[string]contracts.EventCatalogEntry{"timer.tick": {}},
+					RootSchema: &root.Schema,
+					FlowTree:   contracts.FlowTree{Root: root, ByID: map[string]*contracts.FlowContractView{".": root}, ByPath: map[string]*contracts.FlowContractView{".": root}},
+					Events:     map[string]contracts.EventCatalogEntry{"timer.tick": {}},
 					Semantics: contracts.WorkflowSemanticView{
 						Name: "final-timer", Version: "1.0.0",
 						StageTopologies: map[string]contracts.WorkflowStageTopology{".": contracts.BuildWorkflowStageTopology(".", "done", []string{"done"}, finals, nil, nil, nil)},

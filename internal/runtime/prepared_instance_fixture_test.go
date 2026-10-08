@@ -72,3 +72,36 @@ func seedRuntimeTestPreparedInstance(t testing.TB, ctx context.Context, selected
 	}
 	return committed
 }
+
+func seedRuntimeTestKeylessSource(t testing.TB, ctx context.Context, selected bus.FlowInstanceActivationCommitOwner, pc *pipeline.PipelineCoordinator, flowID string) flowidentity.Instance {
+	t.Helper()
+	source := pc.SemanticSource()
+	runID := correlation.RunIDFromContext(ctx)
+	var result flowidentity.Instance
+	for _, id := range []string{semanticview.RootExecutionFlowID(source), flowID} {
+		instance, err := flowidentity.StandingForGeneration(source, id, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		schema, found := source.FlowSchemaByID(id)
+		if !found || !schema.Instance.Empty() {
+			t.Fatal("source fixture requires its exact keyless declaration")
+		}
+		topology, found := semanticview.WorkflowStageTopology(source, id)
+		if !found {
+			t.Fatal("source fixture requires its compiled stage catalog")
+		}
+		initial, err := topology.InitialStoredStage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed := seedRuntimeTestPreparedInstance(t, ctx, selected, pc, pipeline.WorkflowInstance{
+			WorkflowName: id, WorkflowVersion: source.WorkflowVersion(), StorageRef: instance.InstancePath,
+			InstanceID: instance.InstanceID, EntityID: instance.EntityID,
+			ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,
+			CurrentState: initial.ID(), StageDefined: !initial.IsStatelessPosture(), Fields: map[string]any{}, EntityType: "test_entity",
+		})
+		result = committed.Plan.Identity
+	}
+	return result
+}

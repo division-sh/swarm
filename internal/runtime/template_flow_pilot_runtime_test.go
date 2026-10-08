@@ -76,6 +76,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
+	producer := seedRuntimeTestKeylessSource(t, ctx, pg, pc, "producer")
 
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"99999999-9999-4999-8999-999999999952",
@@ -86,9 +87,9 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		0,
 		templateInstanceDeliveryRunID,
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
-			FlowID: "producer", FlowInstance: "producer", EntityID: "88888888-8888-4888-8888-888888888888",
+			FlowID: producer.TemplateID, FlowInstance: producer.InstancePath, EntityID: producer.EntityID,
 		}),
-		eventtest.StaticFlowRoutingSource("producer", "producer", "88888888-8888-4888-8888-888888888888"),
+		eventtest.StaticFlowRoutingSource(producer.TemplateID, producer.InstancePath, producer.EntityID),
 		time.Now().UTC(),
 	)
 	preflight, err := bus.CheckPublishRecipientPlan(ctx, evt)
@@ -181,9 +182,23 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &templateFlowPilotMemoryStore{source: source, flowInstances: tc.flowInstances}
+			root := runtimeflowidentity.Stored(source, ".", templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, runtimeflowidentity.EntityID(templateInstanceDeliveryRunID), "")
+			producer, err := runtimeflowidentity.KeylessChild(source, root, "producer")
+			if err != nil {
+				t.Fatal(err)
+			}
+			store.constructions = []runtimeflowidentity.Instance{root, producer}
+			for _, descriptor := range tc.flowInstances {
+				instance, err := runtimeflowidentity.KeyedChild(source, root, descriptor.FlowTemplate, descriptor.InstanceID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				instance.EntityID = descriptor.EntityID
+				store.constructions = append(store.constructions, instance)
+			}
 			bus, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle: source,
-				Durable:        runtimebus.DurableDependencies{ActiveFlows: store},
+				Durable:        runtimebus.DurableDependencies{ActiveFlows: store, ConstructionPublications: store},
 				TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 					t.Fatal("fail-closed route must not plan a template instance")
 					return runtimepipeline.FlowInstanceActivationPlan{}, nil
@@ -201,9 +216,9 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 				0,
 				templateInstanceDeliveryRunID,
 				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
-					FlowID: "producer", FlowInstance: "producer", EntityID: "88888888-8888-4888-8888-888888888888",
+					FlowID: producer.TemplateID, FlowInstance: producer.InstancePath, EntityID: producer.EntityID,
 				}),
-				eventtest.StaticFlowRoutingSource("producer", "producer", "88888888-8888-4888-8888-888888888888"),
+				eventtest.StaticFlowRoutingSource(producer.TemplateID, producer.InstancePath, producer.EntityID),
 				time.Now().UTC(),
 			)
 			plan, err := bus.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
@@ -231,8 +246,21 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 type templateFlowPilotMemoryStore struct {
 	runtimebus.InMemoryEventStore
 	source         semanticview.Source
+	constructions  []runtimeflowidentity.Instance
 	flowInstances  []runtimebus.ActiveFlowInstanceDescriptor
 	deliveryRoutes map[string][]events.DeliveryRoute
+}
+
+func (s *templateFlowPilotMemoryStore) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entity string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, err
+	}
+	for _, instance := range s.constructions {
+		if owner.RunID == templateInstanceDeliveryRunID && owner.Route == instance.Route() && entity == instance.EntityID {
+			return runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance}, nil
+		}
+	}
+	return runtimepipeline.FlowConstructionPublicationEvidence{}, errors.New("absent exact template pilot fixture receipt")
 }
 
 func (s *templateFlowPilotMemoryStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {

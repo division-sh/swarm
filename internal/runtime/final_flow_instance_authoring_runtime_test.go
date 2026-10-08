@@ -138,6 +138,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		t.Fatal(err)
 	}
 	installExternalManagerTestGeneration(t, ctx, manager, grant)
+	producer := seedRuntimeTestKeylessSource(t, ctx, pg, pc, finalflowinstanceauthoring.ProducerFlowID)
 
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"99999999-9999-4999-8999-999999999955",
@@ -148,9 +149,9 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		0,
 		templateInstanceDeliveryRunID,
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
-			FlowID: finalflowinstanceauthoring.ProducerFlowID, FlowInstance: finalflowinstanceauthoring.ProducerFlowID, EntityID: "88888888-8888-4888-8888-888888888888",
+			FlowID: producer.TemplateID, FlowInstance: producer.InstancePath, EntityID: producer.EntityID,
 		}),
-		eventtest.StaticFlowRoutingSource(finalflowinstanceauthoring.ProducerFlowID, finalflowinstanceauthoring.ProducerFlowID, "88888888-8888-4888-8888-888888888888"), time.Now().UTC(),
+		eventtest.StaticFlowRoutingSource(producer.TemplateID, producer.InstancePath, producer.EntityID), time.Now().UTC(),
 	)
 	preflight, err := bus.CheckPublishRecipientPlan(ctx, evt)
 	if err != nil {
