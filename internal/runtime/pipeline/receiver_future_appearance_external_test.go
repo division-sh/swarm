@@ -48,13 +48,21 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					t.Fatal("missing admitted source")
 				}
 				commitKeylessConstructorComponent(t, ctx, selected, pc, source)
+				parent, err := runtimeflowidentity.StandingForGeneration(source, ".", runID)
+				if err != nil {
+					t.Fatal(err)
+				}
 				// A real live template supplies the subscriber, but its unrelated key
 				// must not become the receiver for this zero-match delivery.
 				unrelatedPath := "review/" + uuid.NewString()
 				unrelatedRoute := runtimeflowidentity.RouteForInstancePath(unrelatedPath)
 				unrelatedIdentity := testRunScopedWorkflowInstanceForRun(runID, unrelatedPath)
+				unrelatedConstructed, err := runtimeflowidentity.KeyedChild(source, parent, "review", unrelatedRoute.InstanceID)
+				if err != nil {
+					t.Fatal(err)
+				}
 				unrelatedReadiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: unrelatedRoute.InstanceID, InstancePath: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath), HasStoredPath: true},
+					Identity: unrelatedConstructed,
 					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
 				{
@@ -62,6 +70,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					construction58At := time.Now().UTC()
 					construction58Instance, construction58Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction58Ctx, unrelatedIdentity, runtimepipeline.WorkflowInstance{
 						InstanceID: unrelatedRoute.InstanceID, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
+						ParentFlowID: unrelatedConstructed.ParentRoute.FlowID, ParentFlowInstance: unrelatedConstructed.ParentRoute.FlowInstance, ParentEntityID: unrelatedConstructed.ParentEntityID,
 						WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
 						Fields: map[string]any{"receiver_id": unrelatedRoute.InstanceID, "account_id": "unrelated-key"}, RuntimeReadiness: &unrelatedReadiness,
 					}, construction58At)
@@ -99,11 +108,16 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				route := runtimeflowidentity.RouteForInstancePath(instancePath)
 				identity := testRunScopedWorkflowInstanceForRun(runID, instancePath)
 				entityID := runtimeflowidentity.EntityID(instancePath)
+				constructed, err := runtimeflowidentity.KeyedChild(source, parent, "review", route.InstanceID)
+				if err != nil {
+					t.Fatal(err)
+				}
 				readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: route.InstanceID, InstancePath: instancePath, EntityID: entityID, HasStoredPath: true},
+					Identity: constructed,
 					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
 				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, StorageRef: instancePath, EntityID: entityID,
+					ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
 					Fields: map[string]any{"receiver_id": receiverKey, "account_id": "stored-business-key", "owner": "appeared"}, RuntimeReadiness: &readiness}
 				// Composition activation establishes the receiver before handler execution.
