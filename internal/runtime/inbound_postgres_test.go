@@ -79,10 +79,19 @@ func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interfac
 	// The bounded gateway control uses a prepared component aggregate, not
 	// public standing construction or process attachment qualification. Its
 	// parent coordinate still comes from the canonical keyless identity owner.
+	// Constructor shape is fixture-local; header version belongs to the selected artifact.
+	fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("bounded component header requires its admitted source fact")
+	}
+	execution, err := runtimecontracts.SourceExecutionIdentity(fact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
 	command, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: path, StorageRef: path, EntityID: entityID, EntityType: "bounded_entity",
 		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
-		WorkflowName: boundedProviderFlowID, WorkflowVersion: source.WorkflowVersion(),
+		WorkflowName: boundedProviderFlowID, WorkflowVersion: execution.WorkflowVersion,
 		Slug: slug, Name: "Customer A", CurrentState: "active", StageDefined: true,
 		CreatedAt: now, EnteredStageAt: now, Fields: map[string]any{},
 	}, runtimepipeline.WorkflowLifecycleMutationPlan{}, now)
