@@ -86,3 +86,40 @@ func TestPublicationMetadataRejectsForeignAndUnqualifiedNames(t *testing.T) {
 		}
 	}
 }
+
+func TestNestedKeyedPublicationDeclarationRoundTrip(t *testing.T) {
+	seen := map[events.EventType]bool{}
+	for _, row := range []struct{ flow, instance string }{
+		{"outer/child", "outer/parent-one/child/key-one"},
+		{"outer/middle/child", "outer/parent-one/middle/child/key-one"},
+		{"outer/middle/child", "outer/parent-two/middle/child/key-one"},
+		{"outer/middle/child", "outer/parent-one/middle/child/key-two"},
+	} {
+		t.Run(row.instance, func(t *testing.T) {
+			// This is projection/readback proof, not constructor authorization.
+			source, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+				FlowID: row.flow, FlowInstance: row.instance, EntityID: "shape-only",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			name, err := AdmitPublicationIdentity(row.flow, row.flow+"/work.done", source)
+			if err != nil || string(name) != row.instance+"/work.done" || seen[name] {
+				t.Fatalf("nested publication changed or aliased its instance: %q %v", name, err)
+			}
+			seen[name] = true
+			declaration, err := PublicationDeclarationForSourceEvent(name, source)
+			if err != nil || declaration.Flow() != row.flow || declaration.Local() != "work.done" {
+				t.Fatalf("nested declaration round-trip = %+v %v", declaration, err)
+			}
+			for _, foreign := range []events.EventType{
+				"work.done", events.EventType(row.flow + "/work.done"),
+				events.EventType(row.instance + "/sibling/work.done"),
+			} {
+				if _, err := PublicationDeclarationForSourceEvent(foreign, source); err == nil {
+					t.Fatalf("foreign publication %q gained metadata", foreign)
+				}
+			}
+		})
+	}
+}

@@ -177,6 +177,10 @@ func TestA9StoredKeyedParentConstructsAndRestoresDescendantsBothStores(t *testin
 				t.Fatalf("stored-parent keyed descendant: %+v %v", committed, err)
 			}
 			plans := append(parent.ConstructionPlans(), leaf)
+			beforeRefusals, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, plan := range plans {
 				owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: plan.Identity.Route()}
 				evidence, err := ReadReceiverConstructionPublicationForTest(f.ctx, f.store, owner, plan.Identity.EntityID)
@@ -189,12 +193,33 @@ func TestA9StoredKeyedParentConstructsAndRestoresDescendantsBothStores(t *testin
 				if plan.Identity.ParentRoute.FlowID == "review" && plan.Identity.ParentEntityID != request.Instance.EntityID {
 					t.Fatalf("descendant substituted a parent hash: %+v", plan.Identity)
 				}
-				for _, foreign := range []struct{ run, entity string }{{uuid.NewString(), plan.Identity.EntityID}, {runID, uuid.NewString()}} {
-					owner.RunID = foreign.run
-					if receipt, err := ReadReceiverConstructionPublicationForTest(f.ctx, f.store, owner, foreign.entity); err == nil || receipt.Identity != (flowidentity.Instance{}) {
+				for _, foreign := range []struct{ run, path, entity string }{
+					{uuid.NewString(), plan.Identity.InstancePath, plan.Identity.EntityID},
+					{runID, plan.Identity.InstancePath, uuid.NewString()},
+					{runID, "other/instance", plan.Identity.EntityID},
+					{runID, plan.Identity.TemplateID, plan.Identity.EntityID},
+				} {
+					coordinate := flowidentity.RunScopedFlowInstance{RunID: foreign.run,
+						Route: flowidentity.StoredRoute(plan.Identity.ScopeKey, "", foreign.path)}
+					if receipt, err := ReadReceiverConstructionPublicationForTest(f.ctx, f.store, coordinate, foreign.entity); err == nil || receipt.Identity != (flowidentity.Instance{}) {
 						t.Fatalf("foreign native coordinate became parent evidence: %#v %v", receipt, err)
 					}
 				}
+				for _, mutate := range []func(*flowidentity.Instance){
+					func(i *flowidentity.Instance) { i.ParentRoute.FlowInstance = "other/parent" },
+					func(i *flowidentity.Instance) { i.ParentEntityID = uuid.NewString() },
+					func(i *flowidentity.Instance) { i.InstancePath = i.TemplateID },
+				} {
+					bad := evidence.Identity
+					mutate(&bad)
+					if err := bad.ValidateConstruction(child.ContractBundle, runID); err == nil {
+						t.Fatalf("unowned publication coordinate admitted: %+v", bad)
+					}
+				}
+			}
+			afterRefusals, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+			if err != nil || !reflect.DeepEqual(beforeRefusals, afterRefusals) {
+				t.Fatalf("refused construction observations mutated publication or result journals: %v", err)
 			}
 			before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
 			if err != nil {

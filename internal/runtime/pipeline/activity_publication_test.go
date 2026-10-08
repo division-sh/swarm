@@ -18,6 +18,8 @@ func TestActivityPublicationProjectsBeforeIdentityAndPreservesJournal(t *testing
 		{"template_local", "research", "research/ti-one", "work.done", "research/ti-one/work.done", true},
 		{"template_reference", "research", "research/ti-two", "research/work.done", "research/ti-two/work.done", true},
 		{"nested", "outer/research", "outer/research/ti-one", "outer/research/work.done", "outer/research/ti-one/work.done", true},
+		{"nested_keyed_parent", "outer/research", "outer/parent-one/research/ti-one", "outer/research/work.done", "outer/parent-one/research/ti-one/work.done", true},
+		{"keyed_keyless_keyed", "outer/middle/research", "outer/parent-one/middle/research/ti-one", "work.done", "outer/parent-one/middle/research/ti-one/work.done", true},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			intent := testActivityIntent("https://example.test/source")

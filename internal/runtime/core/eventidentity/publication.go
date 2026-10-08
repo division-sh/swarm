@@ -60,9 +60,11 @@ func ProjectPublication(d PublicationDeclaration, scope PublicationScope, source
 		// descendant's keyed parent. Rendering cannot re-derive its path.
 		return sourceInstance + "/" + d.local, nil
 	case PublicationTemplate:
-		if d.flow == "." || sourceFlow != d.flow || !canonicalPublicationPath(sourceInstance) || !strings.HasPrefix(sourceInstance, d.flow+"/") {
+		if d.flow == "." || sourceFlow != d.flow || !canonicalPublicationPath(sourceInstance) {
 			return "", fmt.Errorf("template publication requires an exact instance of its declaration")
 		}
+		// Keyed ancestors interleave their discriminators with declaration
+		// segments. Construction admission, not rendering, proves ancestry.
 		return sourceInstance + "/" + d.local, nil
 	default:
 		return "", fmt.Errorf("publication requires a business execution scope")
