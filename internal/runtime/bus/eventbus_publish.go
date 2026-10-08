@@ -110,27 +110,20 @@ func runtimeIngressDispatchBypass(evt events.Event) bool {
 }
 
 func (eb *EventBus) dispatchQueueReason(ctx context.Context, evt events.Event) (string, error) {
-	readCtx, logicalCtx := ctx, ctx
-	if admission, owned := runtimeWorkAdmissionFromContext(ctx); owned {
+	readCtx := ctx
+	if _, owned := runtimeWorkAdmissionFromContext(ctx); owned {
 		// The accepted lease joins only these metadata reads. Neither a late
 		// result nor the SQL context grants uncancellable receiver execution.
 		readCtx = context.WithoutCancel(ctx)
-		logicalCtx = admission.context
 	}
-	stopped := func() error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return logicalCtx.Err()
-	}
-	if err := stopped(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	paused, err := eb.runtimeIngressDispatchPaused(readCtx, evt)
 	if err != nil {
 		return "", err
 	}
-	if err := stopped(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if paused {
@@ -140,7 +133,7 @@ func (eb *EventBus) dispatchQueueReason(ctx context.Context, evt events.Event) (
 	if err != nil {
 		return "", err
 	}
-	if err := stopped(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if blocked {
@@ -151,7 +144,7 @@ func (eb *EventBus) dispatchQueueReason(ctx context.Context, evt events.Event) (
 		if err != nil {
 			return "", err
 		}
-		if err := stopped(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return "", err
 		}
 		if parked {
