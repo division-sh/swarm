@@ -5904,6 +5904,20 @@ engine:
         A conflicting creation fails before mutating flow_instances, entity_state, routes, agents,
         timers, or auto_emit_on_create. Exact replay consumes the existing durable readiness plan idempotently so an
         interrupted creation can converge without repeating the creation-only event.
+      concurrent_selection: >
+        Receiver-key election is distinct from authenticated provider-delivery deduplication. Under select-or-create,
+        one immutable constructor wins and every distinct valid delivery retains its own receipt, events and once-only
+        work. Exact provider-delivery repeats share only their exact committed receipt; changed request content is a
+        hard conflict. A definite pre-COMMIT constructor conflict may reconcile only the exact eligible prepared
+        select-or-create coordinate after rollback and joined plan cleanup. The canonical constructor-receipt owner
+        reads the native header, immutable publication and current attachment identity together. The losing batch
+        re-plans against that winner, preserving its authenticated projection, event IDs, request fingerprint and
+        current binding/run/generation checks. Reconciliation is context-bound and requires new durable progress;
+        generic duplicate errors, cancellation, independent cleanup failures and uncertain acknowledgments do not
+        authorize replay. Explicit create conflicts, select absence, ambiguous keys and incomplete or foreign
+        construction stay errors. Private compiled delivery planning consumes committed constructor evidence without
+        waiting for a process route index, but cannot publish executable readiness or bypass attachment/recovery.
+        No binding-wide lock or lock held across handler/provider computation is introduced.
       process:
         - 1. Resolve the receiving input and canonical instance key from the compiled route plan
         - '2. Platform validates: the receiver exists and declares a valid scalar instance field'

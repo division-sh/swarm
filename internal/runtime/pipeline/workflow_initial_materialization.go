@@ -43,6 +43,7 @@ func ValidateFlowConstructionPublication(raw []byte, owner runtimeflowidentity.R
 }
 
 type FlowConstructionPublicationEvidence struct {
+	Identity      runtimeflowidentity.Instance
 	CreatingInput FlowConstructionInput
 	Fields        map[string]any
 }
@@ -58,7 +59,7 @@ func ProjectFlowConstructionPublication(raw []byte, owner runtimeflowidentity.Ru
 	if err != nil {
 		return FlowConstructionPublicationEvidence{}, err
 	}
-	evidence := FlowConstructionPublicationEvidence{CreatingInput: receipt.CreatingInput}
+	evidence := FlowConstructionPublicationEvidence{Identity: receipt.Readiness.Identity, CreatingInput: receipt.CreatingInput}
 	if receipt.Persisted.Fields == nil {
 		return evidence, nil
 	}

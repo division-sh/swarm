@@ -650,6 +650,7 @@ func (d ActiveFlowInstanceDescriptor) HasSemanticSource() bool {
 func (d ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor {
 	d = d.Normalized()
 	return ActiveTargetDescriptor{
+		FlowID:        d.FlowTemplate,
 		ID:            d.InstanceID,
 		EntityID:      d.EntityID,
 		FlowInstance:  d.FlowInstance,
@@ -679,6 +680,7 @@ type KeyedActiveFlowInstanceDescriptorLister interface {
 }
 
 type ActiveTargetDescriptor struct {
+	FlowID        string
 	Availability  runtimepipeline.DeliveryTargetAvailability
 	ID            string
 	EntityID      string
@@ -690,6 +692,7 @@ type ActiveTargetDescriptor struct {
 func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 	flowInstance := strings.Trim(strings.TrimSpace(d.FlowInstance), "/")
 	return ActiveTargetDescriptor{
+		FlowID:        d.FlowID,
 		Availability:  d.Availability,
 		ID:            strings.TrimSpace(d.ID),
 		EntityID:      strings.TrimSpace(d.EntityID),

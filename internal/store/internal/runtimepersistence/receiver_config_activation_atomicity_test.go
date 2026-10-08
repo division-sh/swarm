@@ -218,6 +218,13 @@ func (f receiverConfigActivationFixture) newRuntimeEventBus(t *testing.T, option
 
 func (f receiverConfigActivationFixture) request(key, instanceID, label string) pipeline.FlowInstanceActivationRequest {
 	req := sqliteFlowActivationRequest(f.bundle, "review", instanceID, "", "review/"+instanceID)
+	runID := correlation.RunIDFromContext(f.ctx)
+	parent := flowidentity.Stored(req.ContractBundle, ".", runID, runID, "", "")
+	instance, err := flowidentity.KeyedChild(req.ContractBundle, parent, "review", instanceID)
+	if err != nil {
+		panic(err)
+	}
+	req.Instance = instance
 	pins := semanticview.Wrap(f.bundle).FlowInputEventPins("review")
 	if len(pins) != 1 {
 		panic("receiver fixture requires one exact creating input")

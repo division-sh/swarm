@@ -379,6 +379,7 @@ func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepip
 		activationOwners[events.RouteIdentity{FlowID: normalized.Identity.TemplateID,
 			FlowInstance: normalized.Identity.InstancePath, EntityID: normalized.Identity.EntityID}] = struct{}{}
 		ordered.add(ActiveTargetDescriptor{
+			FlowID:        normalized.Identity.TemplateID,
 			ID:            normalized.Identity.InstanceID,
 			FlowInstance:  normalized.Identity.InstancePath,
 			EntityID:      normalized.Identity.EntityID,
@@ -469,7 +470,8 @@ func (p selectedRunTargetOwnerProjection) pinRoutingDescriptors() ([]runtimepinr
 			continue
 		}
 		out = append(out, runtimepinrouting.Descriptor{
-			ID: descriptor.ID, EntityID: descriptor.EntityID, FlowInstance: descriptor.FlowInstance,
+			FlowID: descriptor.FlowID,
+			ID:     descriptor.ID, EntityID: descriptor.EntityID, FlowInstance: descriptor.FlowInstance,
 			AddressFields: normalizeDescriptorAddressFields(descriptor.AddressFields),
 		})
 	}

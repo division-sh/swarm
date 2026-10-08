@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -31,40 +32,40 @@ func (o templateInstanceLifecycleOwner) constructionParent(ctx context.Context, 
 	if preview != nil {
 		selected = preview.selected
 	}
-	owner, err := o.connectionLexicalOwner(event, plan.Readback().FlowPath, instances, selected)
+	owner, err := o.connectionLexicalOwner(ctx, event, plan.Readback().FlowPath, instances, selected)
 	if err != nil {
 		return flowidentity.Instance{}, err
 	}
-	return o.constructedDescendant(owner, parentFlow, instances, selected)
+	return o.constructedDescendant(ctx, event.RunID(), owner, parentFlow, instances, selected)
 }
 
-func (o templateInstanceLifecycleOwner) connectionLexicalOwner(event events.Event, ownerFlow string, instances map[string]flowidentity.Instance, selected map[string]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o templateInstanceLifecycleOwner) connectionLexicalOwner(ctx context.Context, event events.Event, ownerFlow string, instances map[string]flowidentity.Instance, selected map[string]flowidentity.Instance) (flowidentity.Instance, error) {
 	route := event.RoutingSource().Route()
 	if route.FlowInstance == "" {
-		root, found := instances[event.RunID()]
-		if !found || root.TemplateID != semanticview.RootExecutionFlowID(o.source) || root.EntityID != flowidentity.EntityID(event.RunID()) {
-			return flowidentity.Instance{}, fmt.Errorf("declaration connection has no exact constructed run root")
+		root, err := o.constructionInstance(ctx, event.RunID(), semanticview.RootExecutionFlowID(o.source), event.RunID(), flowidentity.EntityID(event.RunID()), instances)
+		if err != nil {
+			return flowidentity.Instance{}, fmt.Errorf("declaration connection has no exact constructed run root: %w", err)
 		}
-		return o.constructedDescendant(root, ownerFlow, instances, selected)
+		return o.constructedDescendant(ctx, event.RunID(), root, ownerFlow, instances, selected)
 	}
-	owner, found := instances[route.FlowInstance]
-	if !found || owner.TemplateID != route.FlowID || route.EntityID != "" && owner.EntityID != route.EntityID {
-		return flowidentity.Instance{}, fmt.Errorf("connection source contradicts its constructed owner")
+	owner, err := o.constructionInstance(ctx, event.RunID(), route.FlowID, route.FlowInstance, route.EntityID, instances)
+	if err != nil {
+		return flowidentity.Instance{}, fmt.Errorf("connection source contradicts its constructed owner: %w", err)
 	}
-	for steps := 0; steps <= len(instances); steps++ {
+	for steps := 0; steps <= len(o.source.FlowScopes()); steps++ {
 		if owner.TemplateID == ownerFlow {
 			return owner, nil
 		}
-		parent, found := instances[owner.ParentRoute.FlowInstance]
-		if !found || parent.TemplateID != owner.ParentRoute.FlowID || parent.EntityID != owner.ParentEntityID {
-			return flowidentity.Instance{}, fmt.Errorf("connection has no exact lexical owner for %s", ownerFlow)
+		parent, err := o.constructionInstance(ctx, event.RunID(), owner.ParentRoute.FlowID, owner.ParentRoute.FlowInstance, owner.ParentEntityID, instances)
+		if err != nil {
+			return flowidentity.Instance{}, fmt.Errorf("connection has no exact lexical owner for %s: %w", ownerFlow, err)
 		}
 		owner = parent
 	}
 	return flowidentity.Instance{}, fmt.Errorf("connection construction ancestry is cyclic")
 }
 
-func (o templateInstanceLifecycleOwner) constructedDescendant(owner flowidentity.Instance, targetFlow string, instances map[string]flowidentity.Instance, selected map[string]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o templateInstanceLifecycleOwner) constructedDescendant(ctx context.Context, runID string, owner flowidentity.Instance, targetFlow string, instances map[string]flowidentity.Instance, selected map[string]flowidentity.Instance) (flowidentity.Instance, error) {
 	bundle, found := semanticview.Bundle(o.source)
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("construction selection requires its admitted tree")
@@ -82,7 +83,7 @@ func (o templateInstanceLifecycleOwner) constructedDescendant(owner flowidentity
 	}
 	for index := len(descendants) - 1; index >= 0; index-- {
 		var err error
-		owner, err = o.selectedConstructionChild(owner, descendants[index], instances, selected)
+		owner, err = o.selectedConstructionChild(ctx, runID, owner, descendants[index], instances, selected)
 		if err != nil {
 			return flowidentity.Instance{}, err
 		}
@@ -90,7 +91,7 @@ func (o templateInstanceLifecycleOwner) constructedDescendant(owner flowidentity
 	return owner, nil
 }
 
-func (o templateInstanceLifecycleOwner) selectedConstructionChild(parent flowidentity.Instance, flowID string, instances map[string]flowidentity.Instance, selected map[string]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o templateInstanceLifecycleOwner) selectedConstructionChild(ctx context.Context, runID string, parent flowidentity.Instance, flowID string, instances map[string]flowidentity.Instance, selected map[string]flowidentity.Instance) (flowidentity.Instance, error) {
 	schema, found := o.source.FlowSchemaByID(flowID)
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("construction selection has an unknown flow %s", flowID)
@@ -100,22 +101,58 @@ func (o templateInstanceLifecycleOwner) selectedConstructionChild(parent flowide
 		if err != nil {
 			return flowidentity.Instance{}, err
 		}
-		stored, found := instances[child.InstancePath]
-		if !found || stored != child {
-			return flowidentity.Instance{}, fmt.Errorf("connection keyless ancestor %s is not constructed", flowID)
+		stored, err := o.constructionInstance(ctx, runID, flowID, child.InstancePath, child.EntityID, instances)
+		if err != nil {
+			return flowidentity.Instance{}, fmt.Errorf("connection keyless ancestor %s is not constructed: %w", flowID, err)
+		}
+		if stored != child {
+			return flowidentity.Instance{}, fmt.Errorf("connection keyless ancestor %s contradicts its structural parent", flowID)
 		}
 		return stored, nil
 	}
 	child, found := selected[flowID]
-	if !found || child.ParentRoute != (flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}) || instances[child.InstancePath] != child {
+	if !found || child.ParentRoute != (flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}) {
 		return flowidentity.Instance{}, fmt.Errorf("connection keyed ancestor %s requires its exact selected constructor edge", flowID)
 	}
 	return child, nil
 }
 
+func (o templateInstanceLifecycleOwner) constructionInstance(ctx context.Context, runID, flowID, path, entityID string, instances map[string]flowidentity.Instance) (flowidentity.Instance, error) {
+	if instance, found := instances[path]; found {
+		if instance.TemplateID != flowID || entityID != "" && instance.EntityID != entityID {
+			return flowidentity.Instance{}, fmt.Errorf("construction selection contradicts its exact receiver")
+		}
+		return instance, nil
+	}
+	reader, ok := o.plan.(pipeline.FlowConstructionPublicationReader)
+	if !ok || entityID == "" {
+		return flowidentity.Instance{}, fmt.Errorf("construction selection requires its exact durable receipt")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(o.source, flowID), "", path))
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	evidence, err := reader.LoadFlowConstructionPublication(ctx, owner, entityID)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	instance := evidence.Identity
+	if instance.Route() != owner.Route || instance.EntityID != entityID || instance.TemplateID != flowID {
+		return flowidentity.Instance{}, fmt.Errorf("durable construction contradicts its selected receiver")
+	}
+	if err := instance.ValidateConstruction(o.source, runID); err != nil {
+		return flowidentity.Instance{}, err
+	}
+	instances[path] = instance
+	return instance, nil
+}
+
 func (o templateInstanceLifecycleOwner) constructionOwners(ctx context.Context, runID string) (map[string]flowidentity.Instance, error) {
 	owners := make(map[string]flowidentity.Instance)
-	tables := []*RouteTable{o.routeTable}
+	var tables []*RouteTable
+	if _, durable := o.plan.(pipeline.FlowConstructionPublicationReader); !durable {
+		tables = append(tables, o.routeTable)
+	}
 	if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
 		tables = append(tables, preview.table)
 	}

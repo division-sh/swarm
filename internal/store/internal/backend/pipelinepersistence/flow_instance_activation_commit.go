@@ -168,13 +168,13 @@ func commitFlowInstanceActivation(
 	}
 	if found {
 		if !equal {
-			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, runtimefailures.New(
+			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, &runtimepipeline.FlowInstanceActivationConflict{Owner: record.Identity, Cause: runtimefailures.New(
 				runtimefailures.ClassConflictingDuplicate,
 				"flow_instance_already_exists",
 				"flow-instance-activation",
 				"commit",
 				map[string]any{"flow_instance": record.Identity.Route.InstancePath},
-			)
+			)}
 		}
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, nil
 	}

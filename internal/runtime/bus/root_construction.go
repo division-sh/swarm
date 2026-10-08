@@ -56,6 +56,9 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 				return nil, err
 			}
 		}
+		if err := p.connectPlanner.installConstructionIdentityPreview(ctx, event.RunID(), identity, nil); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 	if p.connectPlanner.lifecycle.plan == nil {

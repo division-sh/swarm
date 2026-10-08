@@ -124,7 +124,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 	}
 }
 
-func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedparity.Backend, root string, extraEnv ...string) servedControlProofRuntime {
+func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedparity.Backend, root string) servedControlProofRuntime {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	var db *sql.DB
@@ -147,7 +147,23 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 		config = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
 	env := append(releaseProviderTriggerProcessEnv(), "PGPASSWORD="+os.Getenv("PGPASSWORD"), "ANTHROPIC_API_KEY=", "OPENAI_API_KEY=")
-	env = append(env, extraEnv...)
+	endpoint := startReleaseServeEndpoint(t, binary, backend, root, config, env)
+	observer, err := storetest.OpenReleaseProcessReadOnlyInspection(backendName, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Join the independent inspection before its server and original location.
+	t.Cleanup(func() {
+		if err := observer.Close(); err != nil {
+			t.Errorf("close release inspection: %v", err)
+		}
+	})
+	return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backendName, BundleHash: servedEventPublishFixtureBundleHash(t, root), ReceiverStateReader: requireReceiverProofStateReader(t, observer)}
+}
+
+// Public-boundary proofs receive no authority to inspect the server's store.
+func startReleaseServeEndpoint(t *testing.T, binary string, backend servedparity.Backend, root, config string, env []string) string {
+	t.Helper()
 	verify := exec.Command(binary, "verify", root, "--portable", "--config", config)
 	verify.Dir, verify.Env = repoRootForTest(), env
 	if output, err := verify.CombinedOutput(); err != nil {
@@ -180,17 +196,5 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 			t.Log(output.String())
 		}
 	})
-	endpoint := process.endpoint(t) + "/v1/rpc"
-	observer, err := storetest.OpenReleaseProcessReadOnlyInspection(backendName, location)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Cleanup order is intentional: join the inspection close before stopping
-	// its independently owned server and releasing the original store location.
-	t.Cleanup(func() {
-		if err := observer.Close(); err != nil {
-			t.Errorf("close release inspection: %v", err)
-		}
-	})
-	return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backendName, BundleHash: servedEventPublishFixtureBundleHash(t, root), ReceiverStateReader: requireReceiverProofStateReader(t, observer)}
+	return process.endpoint(t) + "/v1/rpc"
 }
