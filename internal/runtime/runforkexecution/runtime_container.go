@@ -437,6 +437,9 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		return nil, fmt.Errorf("selected-contract fork-local lifecycle manager was not materialized")
 	}
 	lifecycleManager = agentRuntime.manager
+	if err := pipeline.BindTurnCancellationDispatcher(lifecycleManager); err != nil {
+		return nil, err
+	}
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(lifecycleManager.FinalizeCommittedAgentReadiness))
 	continuationFailures := make(chan error, 1)
 	continuations, err := runtimedeliverycontinuation.NewSelected(

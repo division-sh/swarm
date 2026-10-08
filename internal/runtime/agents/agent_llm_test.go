@@ -31,10 +31,12 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -955,6 +957,25 @@ type directiveFactoryPublishBus struct {
 func (b *directiveFactoryPublishBus) Publish(_ context.Context, evt events.Event) error {
 	b.events = append(b.events, evt)
 	return nil
+}
+
+// Component evidence only: this fixture does not persist or execute a handler.
+func (b *directiveFactoryPublishBus) PublishEmit(ctx context.Context, evt events.Event, request pipeline.WorkflowPublicationStageRequest) (pipeline.WorkflowEmitResult, error) {
+	if err := request.ValidateEvent(evt); err != nil {
+		return pipeline.WorkflowEmitResult{}, err
+	}
+	receipt, err := pipelineobligation.StageReceiptEvidence(evt.ID(), engine.CommittedStage{
+		Instance: request.Instance, EntityID: request.EntityID,
+		Stage: "directive-component", StageDefined: true, Revision: 1, UpdatedAt: evt.CreatedAt(),
+	})
+	if err != nil {
+		return pipeline.WorkflowEmitResult{}, err
+	}
+	if err := b.Publish(ctx, evt); err != nil {
+		return pipeline.WorkflowEmitResult{}, err
+	}
+	return pipeline.WorkflowEmitResult{Accepted: true, FeedbackCommitted: true,
+		Feedback: pipeline.WorkflowEmitFeedback{Receipt: receipt, StageOrigin: pipeline.EmitStageAcceptance, Dispatch: pipeline.EmitDispatchQueued}}, nil
 }
 
 func (b *directiveFactoryPublishBus) PublishDirect(_ context.Context, evt events.Event, _ []string) error {

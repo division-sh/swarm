@@ -9,12 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -63,6 +66,7 @@ func (m WorkflowTimerMutation) Validate(runID string, route runtimeflowidentity.
 }
 
 type WorkflowLifecycleMutationPlan struct {
+	TurnTermination            *runtimeworkflowlifecycle.TurnTermination
 	StageEntry                 *timeridentity.StageEntryRef
 	Timers                     []WorkflowTimerMutation
 	Schedules                  []WorkflowScheduleMutation
@@ -74,7 +78,8 @@ func emptyCommittedWorkflowLifecycleMutation(committed CommittedWorkflowLifecycl
 	return len(committed.Wakeups) == 0 &&
 		len(committed.Cancellations) == 0 &&
 		len(committed.GenericScheduleActivations) == 0 &&
-		len(committed.GenericScheduleCancellations) == 0
+		len(committed.GenericScheduleCancellations) == 0 &&
+		len(committed.TurnCancellations) == 0 && len(committed.QueuedCancellations) == 0 && len(committed.QueuedDirectiveCancellations) == 0
 }
 
 type WorkflowScheduleMutationKind string
@@ -168,6 +173,15 @@ func (p WorkflowLifecycleMutationPlan) Validate(runID string, route runtimeflowi
 			return err
 		}
 	}
+	if p.TurnTermination != nil {
+		if err := p.TurnTermination.Validate(); err != nil {
+			return err
+		}
+		owner, cause := p.TurnTermination.Owner(), p.TurnTermination.Cause()
+		if owner.RunID != runID || owner.Route != route || cause.EntityID().String() != entityID {
+			return fmt.Errorf("turn termination disagrees with exact committing workflow scope")
+		}
+	}
 	seen := make(map[string]WorkflowTimerMutationKind, len(p.Timers))
 	for index, mutation := range p.Timers {
 		if err := mutation.Validate(runID, route, entityID); err != nil {
@@ -196,6 +210,12 @@ func (p WorkflowLifecycleMutationPlan) ValidateState(record WorkflowEngineStateR
 	if err := p.Validate(record.Identity.RunID, record.Identity.Route, record.EntityID); err != nil {
 		return err
 	}
+	if p.TurnTermination != nil {
+		transition, _ := p.TurnTermination.Cause().Transition()
+		if record.Transition.PreservesState() || transition.From() != record.ExpectedState || transition.To() != record.CurrentState {
+			return fmt.Errorf("turn termination requires its actual guarded stage write")
+		}
+	}
 	var bookkeeping map[string]any
 	if err := json.Unmarshal(record.Bookkeeping, &bookkeeping); err != nil {
 		return err
@@ -214,6 +234,9 @@ func (p WorkflowLifecycleMutationPlan) ValidateState(record WorkflowEngineStateR
 }
 
 type CommittedWorkflowLifecycleMutation struct {
+	TurnCancellations            []runtimeeffects.TurnCancellation
+	QueuedCancellations          []runtimedelivery.Snapshot
+	QueuedDirectiveCancellations []agentcontrol.DirectiveOperation
 	// Committed distinguishes an acknowledged empty mutation from refusal.
 	Committed                    bool
 	Wakeups                      []timeridentity.WorkflowTimerActivationRef
@@ -223,6 +246,30 @@ type CommittedWorkflowLifecycleMutation struct {
 }
 
 func (r CommittedWorkflowLifecycleMutation) Validate() error {
+	for _, op := range r.QueuedDirectiveCancellations {
+		if op.State != agentcontrol.DirectiveOperationCanceled || op.CancellationReason != runtimedelivery.CancellationTerminate || op.ExecutionOwnerID != "" || !op.ExecutionAdmittedAt.IsZero() || r.Committed && !op.Acknowledged {
+			return fmt.Errorf("queued directive cancellation requires exact unexecuted commit evidence")
+		}
+		if err := agentcontrol.ValidateDirectiveOperationEvidence(op); err != nil {
+			return err
+		}
+	}
+	for _, snapshot := range r.QueuedCancellations {
+		if snapshot.Status != runtimedelivery.StatusCanceled || snapshot.SubscriberClass != runtimedelivery.SubscriberAgent || snapshot.ReasonCode != "terminate" {
+			return fmt.Errorf("queued cancellation requires exact canceled-agent evidence")
+		}
+		if err := runtimedelivery.ValidateCanceledSnapshot(snapshot); err != nil {
+			return err
+		}
+	}
+	for _, intent := range r.TurnCancellations {
+		if err := intent.ValidateFacts(); err != nil {
+			return err
+		}
+		if r.Committed && !intent.Committed {
+			return fmt.Errorf("committed lifecycle lacks its turn cancellation acknowledgment")
+		}
+	}
 	seen := make(map[string]string, len(r.Wakeups)+len(r.Cancellations))
 	for _, item := range []struct {
 		name string
@@ -248,6 +295,20 @@ func (r CommittedWorkflowLifecycleMutation) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (r CommittedWorkflowLifecycleMutation) WithCommitAcknowledgment() CommittedWorkflowLifecycleMutation {
+	r.Committed = true
+	r.TurnCancellations = append([]runtimeeffects.TurnCancellation(nil), r.TurnCancellations...)
+	r.QueuedCancellations = append([]runtimedelivery.Snapshot(nil), r.QueuedCancellations...)
+	r.QueuedDirectiveCancellations = append([]agentcontrol.DirectiveOperation(nil), r.QueuedDirectiveCancellations...)
+	for i := range r.QueuedDirectiveCancellations {
+		r.QueuedDirectiveCancellations[i].Acknowledged = true
+	}
+	for i := range r.TurnCancellations {
+		r.TurnCancellations[i].Committed = true
+	}
+	return r
 }
 
 func (pc *PipelineCoordinator) prepareWorkflowLifecycleMutation(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance *WorkflowInstance, effects []runtimeworkflowlifecycle.Effect, reconcileGenerations bool) (PreparedWorkflowLifecycleMutation, error) {
@@ -425,6 +486,17 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 				return err
 			}
 			fromState, toState = transition.From(), transition.To()
+			if transition.TerminatesAgentTurns() {
+				if prepared.Commit.TurnTermination != nil {
+					return fmt.Errorf("one workflow mutation cannot carry multiple turn termination causes")
+				}
+				termination, err := runtimeworkflowlifecycle.NewTurnTermination(owner, effect)
+				if err != nil {
+					return err
+				}
+				prepared.Commit.TurnTermination = &termination
+				prepared.Commit.RequestCompletionCandidate = true
+			}
 			cause.Kind = workflowTimerCauseTransition
 			cause.TransitionID = transition.ID()
 			cause.FromState, cause.ToState = fromState, toState
@@ -819,13 +891,28 @@ func (pc *PipelineCoordinator) finalizeWorkflowLifecycleMutation(ctx context.Con
 	if err := committed.Validate(); err != nil {
 		return err
 	}
-	if len(committed.Wakeups)+len(committed.Cancellations)+len(committed.GenericScheduleActivations)+len(committed.GenericScheduleCancellations) == 0 {
+	if len(committed.QueuedDirectiveCancellations) > 0 && !committed.Committed {
+		return fmt.Errorf("queued directive cancellation requires an acknowledged lifecycle commit")
+	}
+	if len(committed.Wakeups)+len(committed.Cancellations)+len(committed.GenericScheduleActivations)+len(committed.GenericScheduleCancellations)+len(committed.TurnCancellations)+len(committed.QueuedCancellations) == 0 {
 		return nil
 	}
 	if pc == nil {
 		return fmt.Errorf("committed workflow lifecycle evidence requires the pipeline coordinator")
 	}
 	var result error
+	if len(committed.QueuedCancellations) > 0 {
+		if !committed.Committed {
+			return fmt.Errorf("queued cancellation requires an acknowledged lifecycle commit")
+		}
+		result = errors.Join(result, pc.dispatchCommittedQueuedCancellations(ctx, committed.QueuedCancellations))
+	}
+	if len(committed.TurnCancellations) > 0 {
+		if !committed.Committed {
+			return fmt.Errorf("turn cancellation requires an acknowledged lifecycle commit")
+		}
+		result = errors.Join(result, pc.dispatchCommittedTurnCancellations(ctx, committed.TurnCancellations))
+	}
 	if len(committed.GenericScheduleActivations)+len(committed.GenericScheduleCancellations) > 0 && pc.genericSchedules == nil {
 		result = errors.Join(result, fmt.Errorf("committed generic schedule evidence requires the lifecycle owner"))
 	} else {

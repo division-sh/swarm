@@ -68,10 +68,10 @@ func (o CompletionOrigin) Same(other CompletionOrigin) bool {
 	}
 }
 
-// NormalCompletionOriginFromContext selects the same closed work authority for
+// AgentCompletionOriginFromContext selects the same closed work authority for
 // session binding and completion admission. Durable authorization still fences
 // the exact claim or executing directive before provider launch.
-func NormalCompletionOriginFromContext(ctx context.Context, agentID, runID, adapter string) (CompletionOrigin, error) {
+func AgentCompletionOriginFromContext(ctx context.Context, agentID, runID, adapter string) (CompletionOrigin, error) {
 	claim, hasDelivery := runtimedelivery.ClaimFromContext(ctx)
 	directive, hasDirective := directiveCompletionOriginFromContext(ctx)
 	if hasDelivery == hasDirective {

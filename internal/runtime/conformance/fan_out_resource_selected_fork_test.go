@@ -411,6 +411,7 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 	var err error
 	switch selected := f.selected.(type) {
 	case *store.SQLiteRuntimeStore:
+		durable.EmitFeedback = selected
 		forkOwner := fork
 		if forkOwner == nil {
 			forkOwner = selected
@@ -428,6 +429,7 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 			selected, selected, selected, selected, selected,
 		)
 	case *store.PostgresStore:
+		durable.EmitFeedback = selected
 		forkOwner := fork
 		if forkOwner == nil {
 			forkOwner = selected

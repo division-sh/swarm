@@ -41,6 +41,12 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	for _, ddl := range []string{
+		`CREATE TABLE runtime_agent_turn_lifetimes (
+			turn_id TEXT PRIMARY KEY,
+			origin_kind TEXT NOT NULL,
+			origin_id TEXT NOT NULL,
+			cancel_reason TEXT
+		)`,
 		`CREATE TABLE run_fork_revision_heads (
 			run_id TEXT PRIMARY KEY,
 			last_revision INTEGER NOT NULL DEFAULT 0,

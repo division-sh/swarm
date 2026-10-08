@@ -79,7 +79,7 @@ func TestWorkspaceGatewayRefusalBeforeProviderTurnBothStores(t *testing.T) {
 				actor := models.AgentConfig{ExecutionMode: effects.ExecutionModeMock, LLMBackend: "mock", ResolvedLLMBackend: "mock", Mock: mockperformance.Performance{
 					Kind: mockperformance.KindPython, Module: "mocks/refusal.py", Source: source, Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(source)),
 				}}
-				fixture := newCompletionSettlementFixtureWithActor(t, selected, db, backend == "sqlite", agentmemory.Plan{Enabled: true}, actor)
+				fixture := newCompletionSettlementFixtureWithActor(t, selected, db, backend == "sqlite", agentmemory.Plan{Enabled: true}, "global", actor)
 				actor.ID, actor.Identity, actor.Role, actor.Type = fixture.agentID, fixture.authority.Normal.Identity, "worker", "managed"
 				actor.Model, actor.Memory, actor.FlowID, actor.FlowPath = "regular", fixture.authority.Target.Memory, "global", "global"
 				var requests, calls atomic.Int32

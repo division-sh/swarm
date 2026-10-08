@@ -103,6 +103,7 @@ type EventBus struct {
 // durable EventBus. EventStore is never inspected to discover these roles.
 type DurableDependencies struct {
 	ConstructionPublications runtimepipeline.FlowConstructionPublicationReader
+	EmitFeedback             runtimepipeline.WorkflowEmitFeedbackOwner
 	ScenarioSetup            ScenarioSetupCommitOwner
 	ReplyContext             runtimereplycontext.Store
 	RunLifecycle             runtimerunlifecycle.OperationOwner

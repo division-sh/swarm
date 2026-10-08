@@ -307,6 +307,7 @@ type conformanceDurableEventBusStore interface {
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
+	runtimepipeline.WorkflowEmitFeedbackOwner
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
@@ -326,7 +327,7 @@ func conformanceDurableEventBusDependencies(store conformanceDurableEventBusStor
 		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
 		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
 		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
-		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
+		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store, EmitFeedback: store,
 	}
 }
 

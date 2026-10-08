@@ -445,10 +445,10 @@ func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture
 		required = map[string]int{"flow.spawn_with_config": 1, "flow.spawned": 1, "worker-flow/ti-5c59b413ad4dd4f8d1321e7a/worker.ready": 1}
 		childPath, childState = "worker-flow/ti-5c59b413ad4dd4f8d1321e7a", "complete"
 	case "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate":
-		required = map[string]int{"flow.spawn_requested": 1, "flow.spawned": 1, "worker-flow/ti-bc9c6acffc914a7ed5a2793b/worker.ready": 1, "flow.finished": 1}
+		required = map[string]int{"flow.spawn_requested": 2, "flow.spawned": 1, "worker-flow/ti-bc9c6acffc914a7ed5a2793b/worker.ready": 1, "flow.finished": 1}
 		childPath, childState = "worker-flow/ti-bc9c6acffc914a7ed5a2793b", "complete"
-		if len(transcript.groups) != 3 || len(transcript.groups[1].steps) != 1 || transcript.groups[1].steps[0].ReceiptFailureClass != "platform.conflicting_duplicate" || len(transcript.groups[2].steps) != 1 || transcript.groups[2].steps[0].Event != "flow.finished" {
-			t.Fatal("duplicate creation proof lost its exact conflicting second root")
+		if len(transcript.groups) != 3 || len(transcript.groups[1].steps) != 1 || transcript.groups[1].steps[0].ReceiptOutcome != "success" || transcript.expected.Expected.RefusedPublication == nil || len(transcript.groups[2].steps) != 1 || transcript.groups[2].steps[0].Event != "flow.finished" {
+			t.Fatal("duplicate creation proof lost its successful second root and exact child refusal")
 		}
 		conflictEventID = transcript.groups[1].steps[0].eventID
 	case "tests/tier5-flow-lifecycle/test-create-flow-instance":
@@ -480,7 +480,7 @@ func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := validateCatalogCreationDeliveries(full, required, conflictEventID); err != nil {
+		if err := validateCatalogCreationDeliveries(full, required, conflictEventID, transcript.expected.Expected.RefusedPublication); err != nil {
 			t.Fatalf("%s expected-success delivery proof: %v", fixture.Name, err)
 		}
 	}

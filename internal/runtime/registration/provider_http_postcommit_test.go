@@ -25,9 +25,10 @@ type postCommitRegistrationStore struct {
 	staleAfterLaunch bool
 }
 
-func (s *postCommitRegistrationStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) error {
-	if err := s.Store.MarkExternalAttemptLaunched(ctx, attempt, at); err != nil {
-		return err
+func (s *postCommitRegistrationStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	launch, err := s.Store.MarkExternalAttemptLaunched(ctx, attempt, at)
+	if err != nil {
+		return launch, err
 	}
 	if s.cancel != nil {
 		s.cancel()
@@ -35,7 +36,7 @@ func (s *postCommitRegistrationStore) MarkExternalAttemptLaunched(ctx context.Co
 	if s.staleAfterLaunch {
 		s.stale = true
 	}
-	return runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, s.launchErr)
+	return launch, runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, s.launchErr)
 }
 
 func (s *postCommitRegistrationStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority runtimeeffects.Authority) (bool, error) {

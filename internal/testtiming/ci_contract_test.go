@@ -645,7 +645,7 @@ func validateServeappPolicyPartition(policy testplanning.Policy, dir, profileNam
 
 func TestServeappPolicyPartitionRejectsLostProof(t *testing.T) {
 	root := testTimingRepoRoot(t)
-	for _, id := range []string{"serveapp-2564-h1", "serveapp-2564-h2"} {
+	for _, id := range []string{"serveapp-2564-h1", "serveapp-2564-h2", "serveapp-other-late", "serveapp-delayed-commit-preservation"} {
 		for _, profileName := range []string{testplanning.ProfileLifecycle, testplanning.ProfileFull} {
 			for _, change := range []struct {
 				name string

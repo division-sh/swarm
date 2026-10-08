@@ -338,6 +338,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 			EventStore: selected,
 			EventBusDurable: runtimebus.DurableDependencies{
 				ConstructionPublications: workflow,
+				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
 				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
@@ -394,6 +395,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 			EventStore: selected,
 			EventBusDurable: runtimebus.DurableDependencies{
 				ConstructionPublications: workflow,
+				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
 				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
@@ -457,6 +459,7 @@ func sqliteManagerRoles(selected *private.SQLiteRuntimeStore) runtimemanager.Per
 func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipeline.WorkflowPersistence) (RunFork, error) {
 	durable := runtimebus.DurableDependencies{
 		ConstructionPublications: workflow,
+		EmitFeedback:             selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 		FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected,
@@ -477,6 +480,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipeline.WorkflowPersistence) (RunFork, error) {
 	durable := runtimebus.DurableDependencies{
 		ConstructionPublications: workflow,
+		EmitFeedback:             selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 		FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected,

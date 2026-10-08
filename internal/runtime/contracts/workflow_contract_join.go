@@ -80,6 +80,7 @@ var joinDeadlineFieldOptions = map[string]struct{}{
 }
 
 var joinOutcomeFieldOptions = map[string]struct{}{
+	"terminate":         {},
 	"data_accumulation": {},
 	"emit":              {},
 	"advances_to":       {},

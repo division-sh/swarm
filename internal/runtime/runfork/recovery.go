@@ -47,4 +47,7 @@ type SelectedForkRecoveryResult struct {
 	Disposition SelectedForkRecoveryDisposition
 	Effects     effects.RecoverySummary
 	Resume      *SelectedForkFiniteFeedResume
+	// Pending cancellations are settlement work, never executable replay.
+	PendingCancellations []effects.TurnExecutionResult
+	CanceledTurns        []effects.CanceledTurnCommit
 }

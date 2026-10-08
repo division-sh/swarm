@@ -10,6 +10,7 @@ import (
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 )
@@ -72,6 +73,7 @@ type AgentConfig struct {
 	Intent               runtimeagentintent.Resolved      `json:"intent"`
 	Prompt               runtimeagentintent.DerivedPrompt `json:"-"`
 	MaxTurnsPerTask      int                              `json:"max_turns_per_task,omitempty"`
+	TurnTimeout          *timeridentity.TurnTimeout       `json:"turn_timeout,omitempty"`
 	Subscriptions        []string                         `json:"subscriptions,omitempty"`
 	EmitEvents           []string                         `json:"emit_events,omitempty"`
 	Criteria             []string                         `json:"criteria,omitempty"`
@@ -89,6 +91,13 @@ type AgentConfig struct {
 }
 
 func (cfg AgentConfig) EffectiveEntityID() string { return strings.TrimSpace(cfg.EntityID) }
+
+func (cfg AgentConfig) ValidateTurnTimeout() error {
+	if cfg.TurnTimeout == nil {
+		return nil
+	}
+	return cfg.TurnTimeout.Validate()
+}
 
 func (cfg AgentConfig) ValidateIntentCarrier() error {
 	if err := cfg.ValidateIntentInputs(); err != nil {
@@ -201,6 +210,7 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	if cfg == nil {
 		return
 	}
+	cfg.TurnTimeout = timeridentity.CloneTurnTimeout(cfg.TurnTimeout)
 	cfg.ID = strings.TrimSpace(cfg.ID)
 	cfg.Identity = cfg.Identity.Normalize()
 	cfg.Type = strings.TrimSpace(cfg.Type)

@@ -142,6 +142,8 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.Description = strings.TrimSpace(out.Description)
 		case "_note":
 			continue
+		case "terminate":
+			continue
 		case "advances_to":
 			if field.Presence() == yamlsource.PresenceSequence || field.Presence() == yamlsource.PresenceEmptySequence {
 				return SystemNodeEventHandler{}, fmt.Errorf("DIALECT-ADV-LIST: advances_to at %s is list, must be string", field.Location())
@@ -194,6 +196,10 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 		if err != nil {
 			return SystemNodeEventHandler{}, err
 		}
+	}
+	out.Terminate, err = projectTransitionTerminate(fields, out.AdvancesTo)
+	if err != nil {
+		return SystemNodeEventHandler{}, err
 	}
 	if err := HandlerEmitSiteOwnershipError(out); err != nil {
 		return SystemNodeEventHandler{}, err

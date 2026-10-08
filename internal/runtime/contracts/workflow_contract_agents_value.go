@@ -3,8 +3,10 @@ package contracts
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -73,6 +75,8 @@ func projectAgentValue(key string, value yamlsource.Value) (AgentRegistryEntry, 
 				out.Memory, err = agentValueBool(field)
 			case "max_turns_per_task":
 				out.MaxTurnsPerTask, err = agentValueInteger(field)
+			case "turn_timeout":
+				out.TurnTimeout, err = projectAgentTurnTimeoutValue(field)
 			case "entity_writes":
 				out.EntityWrites, err = projectAgentWritesValue(field)
 			case "native_tools":
@@ -98,6 +102,32 @@ func projectAgentValue(key string, value yamlsource.Value) (AgentRegistryEntry, 
 		return AgentRegistryEntry{}, nodeValueError(value, err)
 	}
 	return out, nil
+}
+
+func projectAgentTurnTimeoutValue(value yamlsource.Value) (*timeridentity.TurnTimeout, error) {
+	fields, err := nodeValueFields(value, "turn_timeout", map[string]struct{}{"after": {}, "emit": {}})
+	if err != nil {
+		return nil, err
+	}
+	after, hasAfter := fields["after"]
+	emit, hasEmit := fields["emit"]
+	if !hasAfter || !hasEmit {
+		return nil, fmt.Errorf("turn_timeout requires after and emit")
+	}
+	text, err := agentValueText(after)
+	if err != nil {
+		return nil, fmt.Errorf("turn_timeout.after: %w", err)
+	}
+	duration, err := time.ParseDuration(text)
+	if err != nil {
+		return nil, fmt.Errorf("turn_timeout.after: %w", err)
+	}
+	event, err := agentValueText(emit)
+	if err != nil {
+		return nil, fmt.Errorf("turn_timeout.emit: %w", err)
+	}
+	out := &timeridentity.TurnTimeout{After: duration, Emit: event}
+	return out, out.Validate()
 }
 
 func validateAgentAuthoredSpelling(key, name, text string, memory bool, turns int) error {

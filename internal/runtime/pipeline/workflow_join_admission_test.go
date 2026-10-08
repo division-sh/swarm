@@ -126,14 +126,34 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 		name     string
 		receipts []events.JoinAdmissionReceipt
 		class    failures.Class
+		active   bool
+		inactive bool
 	}{
+		{name: "retained early refuses in active stage", receipts: early, class: failures.ClassEarlyArrival, active: true},
+		{name: "inactive authority is not an early refusal", receipts: early, active: true, inactive: true},
+		{name: "inactive sink is not a stale refusal", receipts: first, inactive: true},
 		{name: "retained early stays early", receipts: early, class: failures.ClassEarlyArrival},
 		{name: "retained bound becomes late", receipts: first, class: failures.ClassStaleArrival},
 		{name: "fresh terminal remains unavailable"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			route.Context.Joins = test.receipts
-			err := validateAdmittedReceiverAvailability(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "orders", event, terminal)
+			receiver := terminal
+			if test.active {
+				receiver = instance
+				receiver.Status = "active"
+			}
+			if test.inactive {
+				receiver.Status = "terminated"
+			}
+			err := validateAdmittedReceiverAvailability(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "orders", event, receiver)
+			if test.inactive {
+				envelope, typed := failures.EnvelopeFromError(err)
+				if err == nil || typed && (envelope.Class == failures.ClassEarlyArrival || envelope.Class == failures.ClassStaleArrival) {
+					t.Fatalf("inactive authority was admitted or reclassified as a join refusal: %v", err)
+				}
+				return
+			}
 			if test.class == "" {
 				var refusal *TerminalReceiverError
 				if !errors.As(err, &refusal) {

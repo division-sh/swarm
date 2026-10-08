@@ -9,10 +9,13 @@ import (
 	"time"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -27,17 +30,36 @@ type schemaQueryer interface {
 }
 
 type providerDrainDeliveryOwner interface {
+	ValidateSelectedProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeagentidentity.Identity, runtimedelivery.ExecutionAuthority) error
+	ValidateSelectedOriginExecutionTx(context.Context, *sql.Tx, runtimedelivery.Claim, string) error
+	ClaimedAgentFlowOriginsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]storedelivery.ClaimedFlowTurn, error)
+	ValidateUnstartedClaimOwnerTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeflowidentity.RunScopedFlowInstance, string) error
+	QueuedAgentFlowSnapshotsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimedelivery.Snapshot, error)
+	CancelQueuedAgentTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Snapshot) (runtimedelivery.Snapshot, error)
+	ProviderOriginPendingTx(context.Context, *sql.Tx, runtimedelivery.Claim) (bool, error)
 	ValidateProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim) error
 	RenewProviderOriginTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, time.Duration) error
 	SettleProviderOriginSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration) error
+	SettleProviderCanceledOriginTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.CancellationReason, time.Duration) (runtimedelivery.Snapshot, error)
+	SettleSelectedCanceledOriginRecoveryTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, string, runtimedelivery.CancellationReason, time.Duration) (runtimedelivery.Snapshot, error)
 	SettleProviderOriginFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
 	SettleProviderOriginRecoveryFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
 }
 
 type providerDrainDirectiveOwner interface {
+	PreparedDirectiveFlowOperationsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimeagentcontrol.DirectiveOperation, error)
+	CancelPreparedDirectiveTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveOperation, time.Time) (runtimeagentcontrol.DirectiveOperation, error)
+	ExecutingDirectiveFlowOriginsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimeagentcontrol.DirectiveOperation, error)
+	DirectiveTurnOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, bool) (runtimeagentcontrol.DirectiveOperation, error)
+	ProviderDirectiveOriginPendingTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, string, runtimeagentidentity.Identity) (bool, error)
 	ValidateProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, string, runtimeagentidentity.Identity) error
 	RenewProviderDirectiveOriginTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, time.Time, time.Duration) error
 	SettleProviderDirectiveOriginTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperationState, runtimefailures.Envelope, time.Time) error
+	SettleProviderCanceledDirectiveTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, runtimedelivery.CancellationReason, time.Time) (runtimeagentcontrol.DirectiveOperation, error)
+}
+
+type canceledTurnPublicationOwner interface {
+	CommitPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
 }
 
 type EffectPostgresOwner struct {
@@ -48,6 +70,7 @@ type EffectPostgresOwner struct {
 	llm            *storellm.LLMPostgresOwner
 	delivery       providerDrainDeliveryOwner
 	directives     providerDrainDirectiveOwner
+	publications   canceledTurnPublicationOwner
 }
 
 type EffectSQLiteOwner struct {
@@ -58,6 +81,23 @@ type EffectSQLiteOwner struct {
 	llm            *storellm.LLMSQLiteOwner
 	delivery       providerDrainDeliveryOwner
 	directives     providerDrainDirectiveOwner
+	publications   canceledTurnPublicationOwner
+}
+
+func (s *EffectPostgresOwner) BindCanceledTurnPublication(owner canceledTurnPublicationOwner) error {
+	if s == nil || owner == nil || s.publications != nil {
+		return errors.New("canceled-turn PostgreSQL publication owner must be bound exactly once")
+	}
+	s.publications = owner
+	return nil
+}
+
+func (s *EffectSQLiteOwner) BindCanceledTurnPublication(owner canceledTurnPublicationOwner) error {
+	if s == nil || owner == nil || s.publications != nil {
+		return errors.New("canceled-turn SQLite publication owner must be bound exactly once")
+	}
+	s.publications = owner
+	return nil
 }
 
 func (s *EffectPostgresOwner) BindProviderDrainDirectives(owner providerDrainDirectiveOwner) error {

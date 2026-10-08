@@ -101,7 +101,7 @@ func (s *retryingRegistrationEffectStore) AuthorizeExternalAttempt(_ context.Con
 	return attempt, nil
 }
 
-func (s *retryingRegistrationEffectStore) MarkExternalAttemptLaunched(_ context.Context, attempt runtimeeffects.Attempt, _ time.Time) error {
+func (s *retryingRegistrationEffectStore) MarkExternalAttemptLaunched(_ context.Context, attempt runtimeeffects.Attempt, _ time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.faultPending {
@@ -109,12 +109,12 @@ func (s *retryingRegistrationEffectStore) MarkExternalAttemptLaunched(_ context.
 		fault := errors.New("injected launch marker failure")
 		if s.mode == launchMarkerAckLoss {
 			s.states[attempt.AttemptID] = runtimeeffects.StateLaunched
-			return runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, fault)
+			return runtimeeffects.ExternalAttemptLaunch{Committed: true}, runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, fault)
 		}
-		return fault
+		return runtimeeffects.ExternalAttemptLaunch{}, fault
 	}
 	s.states[attempt.AttemptID] = runtimeeffects.StateLaunched
-	return nil
+	return runtimeeffects.ExternalAttemptLaunch{Committed: true}, nil
 }
 
 func (s *retryingRegistrationEffectStore) MarkExternalAttemptResponseObserved(_ context.Context, attempt runtimeeffects.Attempt, _ map[string]any, _ time.Time) error {

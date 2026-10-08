@@ -188,20 +188,20 @@ func (h *Harness) MarkExternalAttemptResponseObserved(_ context.Context, attempt
 	return nil
 }
 
-func (h *Harness) MarkExternalAttemptLaunched(_ context.Context, attempt runtimeeffects.Attempt, _ time.Time) error {
+func (h *Harness) MarkExternalAttemptLaunched(_ context.Context, attempt runtimeeffects.Attempt, _ time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.MarkErr != nil {
 		if h.MarkCommitThenErr && h.States[attempt.AttemptID] == runtimeeffects.StateAuthorized {
 			h.States[attempt.AttemptID] = runtimeeffects.StateLaunched
 		}
-		return h.MarkErr
+		return runtimeeffects.ExternalAttemptLaunch{Committed: h.MarkCommitThenErr}, h.MarkErr
 	}
 	if h.States[attempt.AttemptID] != runtimeeffects.StateAuthorized {
-		return fmt.Errorf("attempt %s is not authorized", attempt.AttemptID)
+		return runtimeeffects.ExternalAttemptLaunch{}, fmt.Errorf("attempt %s is not authorized", attempt.AttemptID)
 	}
 	h.States[attempt.AttemptID] = runtimeeffects.StateLaunched
-	return nil
+	return runtimeeffects.ExternalAttemptLaunch{Committed: true}, nil
 }
 
 func (h *Harness) HeartbeatCompletionAttempt(_ context.Context, attempt runtimeeffects.Attempt, _ time.Time, lease time.Duration) error {

@@ -77,7 +77,7 @@ func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*clia
 	}
 	var persistence serveRuntimePersistence
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { persistence = p })
-	retained := t.TempDir()
+	retained := ownedMockLifecycleRoot(t)
 	return opts, func() (*serveRuntimeTestProcess, issue2564ServedFixture) {
 		var process *serveRuntimeTestProcess
 		if mock {

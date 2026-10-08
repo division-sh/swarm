@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -488,6 +489,9 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 			if err := requireAttemptSessionGrant(ctx, tx, true, authority, req); err != nil {
 				return err
 			}
+			if err := prepareBusinessTurnTx(ctx, tx, true, authority, req); err != nil {
+				return err
+			}
 			var err error
 			authority.LeaseExpiresAt, err = externalEffectAttemptLeasePostgres(ctx, tx, authority)
 			if err != nil {
@@ -524,6 +528,11 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 			}
 			return insertCompletionBudgetReservationsPostgres(ctx, tx, attempt.AttemptID, reservations, req.Now.UTC())
 		})
+		if err == nil {
+			err = mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				return bindBusinessTurnAttemptTx(ctx, tx, true, attempt, req.Now)
+			})
+		}
 		return attempt, err
 	})
 	attempt, acknowledged := result.Value()
@@ -637,6 +646,9 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 			if err := requireAttemptSessionGrant(txctx, tx, false, authority, req); err != nil {
 				return err
 			}
+			if err := prepareBusinessTurnTx(txctx, tx, false, authority, req); err != nil {
+				return err
+			}
 			var err error
 			authority.LeaseExpiresAt, err = externalEffectAttemptLeaseSQLite(txctx, tx, authority)
 			if err != nil {
@@ -673,6 +685,11 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 			}
 			return insertCompletionBudgetReservationsSQLite(txctx, tx, attempt.AttemptID, reservations, req.Now.UTC())
 		})
+		if err == nil {
+			err = mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				return bindBusinessTurnAttemptTx(txctx, tx, false, attempt, req.Now)
+			})
+		}
 		return attempt, err
 	})
 	attempt, acknowledged := result.Value()
@@ -684,43 +701,11 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 }
 
 func (s *EffectPostgresOwner) validateProviderOrigin(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) error {
-	if authority.Kind != runtimeeffects.AuthorityNormalAgent || req.Kind != runtimeeffects.KindProviderTurn {
-		return nil
-	}
-	switch req.Origin.Kind {
-	case runtimeeffects.CompletionOriginDelivery:
-		if s.delivery == nil {
-			return fmt.Errorf("provider-drain PostgreSQL delivery owner is not bound")
-		}
-		return s.delivery.ValidateProviderOriginTx(ctx, tx, req.Origin.Delivery)
-	case runtimeeffects.CompletionOriginDirective:
-		if s.directives == nil {
-			return fmt.Errorf("provider-drain PostgreSQL directive owner is not bound")
-		}
-		return s.directives.ValidateProviderDirectiveOriginTx(ctx, tx, req.Origin.Directive, authority.Target.RunID, authority.Normal.Identity)
-	default:
-		return fmt.Errorf("normal provider origin kind %q is invalid", req.Origin.Kind)
-	}
+	return validateProviderWorkOrigin(ctx, tx, authority, req, s.delivery, s.directives)
 }
 
 func (s *EffectSQLiteOwner) validateProviderOrigin(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) error {
-	if authority.Kind != runtimeeffects.AuthorityNormalAgent || req.Kind != runtimeeffects.KindProviderTurn {
-		return nil
-	}
-	switch req.Origin.Kind {
-	case runtimeeffects.CompletionOriginDelivery:
-		if s.delivery == nil {
-			return fmt.Errorf("provider-drain SQLite delivery owner is not bound")
-		}
-		return s.delivery.ValidateProviderOriginTx(ctx, tx, req.Origin.Delivery)
-	case runtimeeffects.CompletionOriginDirective:
-		if s.directives == nil {
-			return fmt.Errorf("provider-drain SQLite directive owner is not bound")
-		}
-		return s.directives.ValidateProviderDirectiveOriginTx(ctx, tx, req.Origin.Directive, authority.Target.RunID, authority.Normal.Identity)
-	default:
-		return fmt.Errorf("normal provider origin kind %q is invalid", req.Origin.Kind)
-	}
+	return validateProviderWorkOrigin(ctx, tx, authority, req, s.delivery, s.directives)
 }
 
 func bindExternalEffectRunLineage(ctx context.Context, authority runtimeeffects.Authority, lineage map[string]string) (map[string]string, error) {
@@ -1702,6 +1687,7 @@ func externalEffectStartupAuthorityID(authority runtimeeffects.Authority) string
 
 func externalAuthorizedAttempt(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, attemptID string, ordinal int) runtimeeffects.Attempt {
 	return runtimeeffects.Attempt{
+		TurnTimeout: timeridentity.CloneTurnTimeout(req.TurnTimeout),
 		OperationID: req.OperationID, AttemptID: attemptID, Token: authority.Normal, Authority: authority,
 		Kind: req.Kind, Class: req.Class, Adapter: req.Adapter, Transport: req.Transport,
 		Ordinal: ordinal, AuthorizedAt: req.Now.UTC(), Origin: req.Origin,
@@ -1720,13 +1706,20 @@ func completionOriginValues(origin runtimeeffects.CompletionOrigin) []any {
 	return []any{string(origin.Kind), "", "", "", "", int64(0), "", "", origin.Directive.OperationID, origin.Directive.ExecutionOwnerID}
 }
 
-func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) error {
+func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
 	if err := s.requireCurrent(); err != nil {
-		return err
+		return runtimeeffects.ExternalAttemptLaunch{}, err
 	}
-	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.ExternalAttemptLaunch, error) {
+		var launch runtimeeffects.ExternalAttemptLaunch
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
+				return err
+			}
+			if err := s.validateProviderOrigin(txctx, tx, attempt.Authority, runtimeeffects.AuthorizeRequest{Kind: attempt.Kind, Origin: attempt.Origin}); err != nil {
+				return err
+			}
+			if err := requireExactLaunchAttempt(txctx, tx, true, attempt); err != nil {
 				return err
 			}
 			if err := requireLaunchSessionGrant(txctx, tx, true, attempt, now); err != nil {
@@ -1749,23 +1742,39 @@ func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, a
 			if err != nil {
 				return err
 			}
+			launch.Turn, err = launchBusinessTurnTx(txctx, tx, true, attempt, launchedAt)
+			if err != nil {
+				return err
+			}
 			if err := recordExternalEffectStory(txctx, mutation, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt); err != nil {
 				return err
 			}
 			return nil
 		})
-		return struct{}{}, err
+		return launch, err
 	})
-	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationLaunch, attempt)
+	launch, committed := result.Value()
+	if !committed {
+		return runtimeeffects.ExternalAttemptLaunch{}, result.Err()
+	}
+	launch.Committed = true
+	return launch, effectMutationError(true, result.Err(), runtimeeffects.MutationLaunch, attempt)
 }
 
-func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) error {
+func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
 	if err := s.requireCurrent(); err != nil {
-		return err
+		return runtimeeffects.ExternalAttemptLaunch{}, err
 	}
-	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite mark external attempt launched", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite mark external attempt launched", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.ExternalAttemptLaunch, error) {
+		var launch runtimeeffects.ExternalAttemptLaunch
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
+				return err
+			}
+			if err := s.validateProviderOrigin(txctx, tx, attempt.Authority, runtimeeffects.AuthorizeRequest{Kind: attempt.Kind, Origin: attempt.Origin}); err != nil {
+				return err
+			}
+			if err := requireExactLaunchAttempt(txctx, tx, false, attempt); err != nil {
 				return err
 			}
 			if err := requireLaunchSessionGrant(txctx, tx, false, attempt, now); err != nil {
@@ -1788,14 +1797,23 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, att
 			if err != nil {
 				return err
 			}
+			launch.Turn, err = launchBusinessTurnTx(txctx, tx, false, attempt, launchedAt)
+			if err != nil {
+				return err
+			}
 			if err := recordExternalEffectStory(txctx, mutation, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt); err != nil {
 				return err
 			}
 			return nil
 		})
-		return struct{}{}, err
+		return launch, err
 	})
-	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationLaunch, attempt)
+	launch, committed := result.Value()
+	if !committed {
+		return runtimeeffects.ExternalAttemptLaunch{}, result.Err()
+	}
+	launch.Committed = true
+	return launch, effectMutationError(true, result.Err(), runtimeeffects.MutationLaunch, attempt)
 }
 
 func loadExternalEffectLaunchTime(ctx context.Context, tx *sql.Tx, attemptID, operationID string, postgres bool) (time.Time, error) {
@@ -1828,7 +1846,7 @@ func (s *EffectPostgresOwner) HeartbeatCompletionAttempt(ctx context.Context, at
 				return err
 			}
 			var origin runtimeeffects.CompletionOrigin
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				origin, err = loadProviderAttemptOriginPostgres(txctx, tx, attempt)
 				if err != nil {
 					return err
@@ -1848,7 +1866,7 @@ func (s *EffectPostgresOwner) HeartbeatCompletionAttempt(ctx context.Context, at
 			if err := requireExternalAttemptTransition(res, err); err != nil {
 				return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
 			}
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				if err := s.renewProviderOriginTx(txctx, mutation, origin, now, lease); err != nil {
 					return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
 				}
@@ -1879,7 +1897,7 @@ func (s *EffectSQLiteOwner) HeartbeatCompletionAttempt(ctx context.Context, atte
 				return err
 			}
 			var origin runtimeeffects.CompletionOrigin
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				origin, err = loadProviderAttemptOriginSQLite(txctx, tx, attempt)
 				if err != nil {
 					return err
@@ -1899,7 +1917,7 @@ func (s *EffectSQLiteOwner) HeartbeatCompletionAttempt(ctx context.Context, atte
 			if err := requireExternalAttemptTransition(res, err); err != nil {
 				return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
 			}
-			if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if attempt.Authority.HasBusinessTurnOrigin() {
 				if err := s.renewProviderOriginTx(txctx, mutation, origin, now, lease); err != nil {
 					return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
 				}

@@ -183,6 +183,10 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 					if committed.DeliverySuccess == nil || !committed.DeliverySuccess.Same(claimed.Claim) {
 						t.Fatal("workflow engine mutation did not return the exact committed delivery claim")
 					}
+					wantStage, stageErr := runtimepipeline.CommittedWorkflowStage(record)
+					if stageErr != nil || committed.Stage != wantStage || committed.Stage.Stage != "done" || committed.Stage.Revision != 2 {
+						t.Fatalf("self-advance lost exact committed stage: %+v err=%v", committed.Stage, stageErr)
+					}
 					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 2, 1)
 					snapshot, err := selected.Snapshot(ctx, claimed.Claim.DeliveryID())
 					if err != nil {

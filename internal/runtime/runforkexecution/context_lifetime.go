@@ -18,6 +18,7 @@ type selectedForkContexts struct {
 	mu         sync.Mutex
 	retired    bool
 	recovered  bool
+	recovering bool
 	entries    map[*selectedContractOperation]*selectedForkContext
 	cleanupErr error
 	process    *worklifetime.Process

@@ -90,7 +90,7 @@ func TestSelectedForkRetainedDiscardPendingDeliveryTombstonesBothStores(t *testi
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
-			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
+			fixture := newSelectedProviderCompletionFixture(t, store, db, sqlite)
 			ctx := testAuthorActivityContext()
 			seedSelectedForkDiscardConstructionRows(t, ctx, db, fixture.forkRun)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
@@ -101,11 +101,13 @@ func TestSelectedForkRetainedDiscardPendingDeliveryTombstonesBothStores(t *testi
 			if err != nil {
 				t.Fatalf("claim retained execution: %v", err)
 			}
-			authority.Target = selectedAgentTurnTarget(fixture.forkRun)
+			admitSelectedProviderFixture(t, ctx, fixture, issued, authority)
+			authority.Target = selectedProviderTarget(fixture)
 			completionCtx := runtimeeffects.WithLogicalOperationIdentity(
 				runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(store)),
 				"selected:discard-both-stores",
 			)
+			completionCtx = selectedProviderClaimContext(t, completionCtx, fixture, authority)
 			completionCtx = managedSelectedExecutionStoreTestContext(t, completionCtx, authority)
 			completionCtx = withManagedCompletionTestSurface(t, completionCtx, authority, "openai_compatible")
 			handle, err := beginManagedCompletionForTest(t, completionCtx, "openai_compatible", []byte("discard-preservation"))
@@ -128,7 +130,9 @@ func TestSelectedForkRetainedDiscardPendingDeliveryTombstonesBothStores(t *testi
 
 			eventID, deliveryID := seedSelectedForkDiscardPendingDelivery(t, ctx, store, db, fixture.forkRun)
 			before := selectedForkDiscardDurableCounts(t, ctx, db, fixture.forkRun, eventID, deliveryID)
-			if before.Runs != 1 || before.Events != 1 || before.Deliveries != 1 || before.Headers != 1 || before.Readiness != 1 || before.Construction != 1 || before.Executions != 1 || before.Bindings != 1 || before.Attempts != 1 {
+			// Include the real provider receiver and the independent pending
+			// receiver; discard must remove both exact construction sets.
+			if before.Runs != 1 || before.Events != 1 || before.Deliveries != 1 || before.Headers != 2 || before.Readiness != 2 || before.Construction != 2 || before.Executions != 1 || before.Bindings != 1 || before.Attempts != 1 {
 				t.Fatalf("retained pending-delivery fixture incomplete: %#v", before)
 			}
 			var beforeRevision int64

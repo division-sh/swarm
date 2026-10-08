@@ -151,6 +151,9 @@ func (endpoint AuthoredEventEndpoint) ProducerDescription() string {
 	case EventEndpointNodeGenerated:
 		return fmt.Sprintf("node %s generated producer", endpoint.NodeID)
 	case EventEndpointAgent:
+		if endpoint.Site == "turn_timeout.emit" {
+			return fmt.Sprintf("agent %s turn_timeout.emit", endpoint.AgentID)
+		}
 		return fmt.Sprintf("agent %s emit_events", endpoint.AgentID)
 	case EventEndpointRequiredAgentRole:
 		return fmt.Sprintf("required agent role %s emits", endpoint.Role)

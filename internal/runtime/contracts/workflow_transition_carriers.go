@@ -20,6 +20,7 @@ const (
 type HandlerAdvanceCarrier struct {
 	Kind       HandlerAdvanceCarrierKind
 	AdvancesTo string
+	Terminate  bool
 	Rule       HandlerRuleEntry
 	RuleIndex  int
 	RuleID     string
@@ -33,12 +34,12 @@ func (c HandlerAdvanceCarrier) Source() string {
 
 // HandlerAdvanceCarriers returns the complete authored advances_to carrier set for a handler.
 func HandlerAdvanceCarriers(handler SystemNodeEventHandler) []HandlerAdvanceCarrier {
-	return handlerAdvanceCarriers(handler.AdvancesTo, handler.OnComplete, handler.Rules, handler.Accumulate, handler.Join)
+	return handlerAdvanceCarriers(handler.AdvancesTo, handler.Terminate, handler.OnComplete, handler.Rules, handler.Accumulate, handler.Join)
 }
 
 // HandlerTransitionAdvanceCarriers returns the complete authored advances_to carrier set for a semantic transition.
 func HandlerTransitionAdvanceCarriers(transition HandlerTransitionSemantic) []HandlerAdvanceCarrier {
-	return handlerAdvanceCarriers(transition.AdvancesTo, transition.OnComplete, transition.Rules, transition.Accumulate, transition.Join)
+	return handlerAdvanceCarriers(transition.AdvancesTo, transition.Terminate, transition.OnComplete, transition.Rules, transition.Accumulate, transition.Join)
 }
 
 // HandlerAdvanceTargets returns the carrier targets without source metadata.
@@ -55,6 +56,7 @@ func HandlerAdvanceTargets(handler SystemNodeEventHandler) []string {
 
 func handlerAdvanceCarriers(
 	advancesTo string,
+	terminate bool,
 	onComplete []HandlerRuleEntry,
 	rules []HandlerRuleEntry,
 	accumulate *AccumulateSpec,
@@ -65,6 +67,7 @@ func handlerAdvanceCarriers(
 		out = append(out, HandlerAdvanceCarrier{
 			Kind:       HandlerAdvanceCarrierHandler,
 			AdvancesTo: target,
+			Terminate:  terminate,
 			RuleIndex:  -1,
 		})
 	}
@@ -78,6 +81,7 @@ func handlerAdvanceCarriers(
 			out = append(out, HandlerAdvanceCarrier{
 				Kind:       kind,
 				AdvancesTo: target,
+				Terminate:  rule.Terminate,
 				Rule:       rule,
 				RuleIndex:  idx,
 				RuleID:     strings.TrimSpace(rule.ID),

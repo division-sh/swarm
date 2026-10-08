@@ -39,7 +39,7 @@ func TestNormalCompletionOriginAdmission(t *testing.T) {
 		{"node", deliverylifecycle.WithClaim(context.Background(), claim(runID, "agent", deliverylifecycle.SubscriberNode)), "", "completion_origin_delivery_claim_mismatch"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			origin, err := NormalCompletionOriginFromContext(tc.ctx, "agent", runID, "test")
+			origin, err := AgentCompletionOriginFromContext(tc.ctx, "agent", runID, "test")
 			if tc.code != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.code) {
 					t.Fatalf("origin=%+v error=%v, want %s", origin, err, tc.code)

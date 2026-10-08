@@ -102,7 +102,7 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 		ID:            agentID,
-		Identity:      agentidentitytest.Declared(t, agentID, plan.OwnerURI, flowPath, "chat-1", instancePath),
+		Identity:      agentidentitytest.DeclaredForRun(t, toolTestRunID, agentID, plan.OwnerURI, flowPath, "chat-1", instancePath),
 		Role:          agentID,
 		FlowID:        flowID,
 		FlowPath:      instancePath,
@@ -118,7 +118,7 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 	if _, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_telegram_reply_requested", map[string]any{
 		"chat_id": "42", "text": "hello",
 	}); err != nil {
-		t.Fatalf("handleEmitTool: %v", err)
+		t.Fatalf("handleEmitTool: %v; cause=%v", err, errors.Unwrap(err))
 	}
 	if bus.count != 1 {
 		t.Fatalf("publish count = %d, want one", bus.count)
@@ -183,13 +183,17 @@ type emitRoutePlanStore struct {
 	scopes       map[string]runtimepipelineobligation.CommittedScope
 	active       []string
 	targetOwners []runtimebus.ActiveTargetDescriptor
+	stages       map[string]runtimepipeline.WorkflowPublicationStageEvidence
+	feedback     map[string]runtimepipeline.WorkflowEmitFeedback
 }
 
 func newEmitRoutePlanStore() *emitRoutePlanStore {
 	return &emitRoutePlanStore{
-		events: map[string]events.Event{},
-		routes: map[string][]events.DeliveryRoute{},
-		scopes: map[string]runtimepipelineobligation.CommittedScope{},
+		events:   map[string]events.Event{},
+		routes:   map[string][]events.DeliveryRoute{},
+		scopes:   map[string]runtimepipelineobligation.CommittedScope{},
+		stages:   map[string]runtimepipeline.WorkflowPublicationStageEvidence{},
+		feedback: map[string]runtimepipeline.WorkflowEmitFeedback{},
 	}
 }
 
@@ -222,7 +226,7 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 		ExecutionPosture:   executionposture.Live,
 		SourceArtifactFact: sourceFact,
 		ContractBundle:     source,
-		Durable:            runtimebus.DurableDependencies{TargetOwners: store},
+		Durable:            runtimebus.DurableDependencies{TargetOwners: store, EmitFeedback: store},
 		WorkOwner:          owner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
@@ -232,7 +236,21 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 }
 
 func (s *emitRoutePlanStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	return runtimebustest.CommitPublish(ctx, command, s.beginPublish, s.finalizePublish)
+	result, err := runtimebustest.CommitPublish(ctx, command, s.beginPublish, s.finalizePublish)
+	if err == nil && result.Acknowledged && command.StageFeedback != nil {
+		id := command.Commit.Event.ID()
+		evidence, found := s.stages[id]
+		if !found {
+			captured, captureErr := componentEmitFeedback(command.Commit.Event.Event(), *command.StageFeedback)
+			if captureErr != nil {
+				return result, captureErr
+			}
+			evidence.Acceptance = captured.Feedback.Receipt
+			s.stages[id] = evidence
+		}
+		result.AcceptedStage = &evidence.Acceptance
+	}
+	return result, err
 }
 
 func (s *emitRoutePlanStore) beginPublish(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
@@ -1204,7 +1222,7 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 
 	out, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cycle_ping", map[string]any{})
 	if err != nil {
-		t.Fatalf("handleEmitTool: %v", err)
+		t.Fatalf("handleEmitTool: %v; cause=%v", err, errors.Unwrap(err))
 	}
 	eventID := emitToolResultString(t, out, "event_id")
 	persisted := store.events[eventID]
@@ -1322,7 +1340,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 		"",
 		nil,
 		0,
-		eventtest.UUID("emit-connected-output-run"),
+		actor.Identity.RunID,
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC()))
@@ -1381,6 +1399,7 @@ func TestHandleEmitTool_RootReceiverConnectRemainsTargetlessBeforePreflight(t *t
 		EmitEvents:    []string{"producer/deploy.done"},
 	}
 	probe := &emitPreflightCaptureBus{EventBus: eb}
+	actor.Identity.RunID = runID
 	exec := NewExecutorWithOptions(probe, ExecutorOptions{
 		WorkflowSource: source,
 		EmitRegistry:   emitRegistry,

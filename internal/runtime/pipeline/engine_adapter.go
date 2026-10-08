@@ -360,6 +360,19 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	}
 	result.Committed = true
 	resultErr = commitErr
+	expectedStage, stageErr := CommittedWorkflowStage(command.State)
+	if stageErr == nil {
+		stageErr = committed.Stage.Validate()
+	}
+	if stageErr == nil && committed.Stage != expectedStage {
+		stageErr = fmt.Errorf("committed workflow stage differs from exact mutation result")
+	}
+	if stageErr != nil {
+		resultErr = errors.Join(resultErr, stageErr)
+	} else {
+		stage := committed.Stage
+		result.Stage = &stage
+	}
 	// Retain the whole declared follow-up before any acknowledged cleanup hook.
 	emissions, requests, publicationErr := committedEnginePublicationIntents(command.Publications, committed.Publications, mutation.ActivityIntents)
 	result.EmitIntents, result.ActivityRequestIntents = emissions, requests

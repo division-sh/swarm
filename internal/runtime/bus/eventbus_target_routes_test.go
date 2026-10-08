@@ -292,6 +292,7 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 			result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, ReadinessAttemptOrdinal: 1})
 		}
 		s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
+		result = result.WithCommitAcknowledgment()
 		return result, result.Validate()
 	}
 	s.events[event.ID()] = event
@@ -325,6 +326,7 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 		}
 	}
 	s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
+	result = result.WithCommitAcknowledgment()
 	return result, result.Validate()
 }
 
@@ -3601,7 +3603,7 @@ func (rejectingDeliveryRouteStore) CommitPublication(_ context.Context, command 
 	if len(command.Commit.DeliveryRoutes) > 0 {
 		return CommittedPublication{}, errors.New("typed delivery route persistence is unavailable")
 	}
-	return CommittedPublication{AppendOutcome: EventAppendInserted}, nil
+	return (CommittedPublication{AppendOutcome: EventAppendInserted}).WithCommitAcknowledgment(), nil
 }
 
 func (rejectingDeliveryRouteStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

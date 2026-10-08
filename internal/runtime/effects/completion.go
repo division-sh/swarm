@@ -262,6 +262,7 @@ type CompletionSettlementResult struct {
 	EntityID      string
 	Origin        CompletionOrigin
 	OriginSettled bool
+	Cancellation  *TurnCancellation
 	Finalization  *ProviderDrainFinalization
 	continuation  *Attempt
 }

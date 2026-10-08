@@ -82,6 +82,38 @@ func (t UsageTarget) Valid() bool {
 	}
 }
 
+func (a Authority) HasBusinessTurnOrigin() bool {
+	return a.Kind == AuthorityNormalAgent || a.Kind == AuthoritySelectedContractFork && a.Target.Kind == UsageTargetAgentTurn
+}
+
+// BusinessTurnCoordinates projects the constructed instance without rewriting the
+// actor's root declaration or the immutable usage target. It grants no execution.
+func (a Authority) BusinessTurnCoordinates() (scope, instance, path string, err error) {
+	if !a.Valid() || a.Target.Kind != UsageTargetAgentTurn || !a.Target.Valid() {
+		return "", "", "", fmt.Errorf("business turn requires exact admitted agent authority")
+	}
+	switch a.Kind {
+	case AuthorityNormalAgent:
+		if same, err := agentidentity.Equal(a.Normal.Identity, a.Target.AgentIdentity); err != nil || !same {
+			return "", "", "", fmt.Errorf("business turn actor contradicts its lifecycle owner")
+		}
+	case AuthoritySelectedContractFork:
+		if a.SelectedFork.ForkRunID != a.Target.RunID {
+			return "", "", "", fmt.Errorf("business turn actor contradicts its selected run")
+		}
+	default:
+		return "", "", "", fmt.Errorf("authority kind %q does not own a business turn", a.Kind)
+	}
+	scope, instance, path, err = a.Target.AgentIdentity.ExecutionCoordinates()
+	if err != nil {
+		return "", "", "", err
+	}
+	if a.Target.AgentIdentity.Route.Presence == agentidentity.RouteRoot {
+		scope = "."
+	}
+	return scope, instance, path, nil
+}
+
 func ProviderTurnTargetMatchesCapabilitySurface(target UsageTarget, surface managedcapabilities.Surface) bool {
 	sameActor, err := agentidentity.Equal(target.AgentIdentity, surface.ActorIdentity)
 	return err == nil && sameActor &&
@@ -723,6 +755,9 @@ func completionAuthorityFromContext(ctx context.Context) (Authority, bool) {
 	}
 	owner := fmt.Sprintf("agent:%s:%d:%d", token.AgentID, token.RuntimeEpoch, token.Generation)
 	authority := NormalAgentAuthority(token, owner, time.Now().UTC().Add(5*time.Minute))
+	// Session binding precedes physical turn allocation. Retain the exact
+	// lifecycle actor for origin validation, without inventing a usage target.
+	authority.Target = UsageTarget{RunID: token.Identity.RunID, AgentID: token.AgentID, AgentIdentity: token.Identity, FlowInstance: token.Identity.FlowInstance()}
 	if mode, found := ExecutionModeFromContext(ctx); found {
 		authority.ExecutionMode = mode
 	}

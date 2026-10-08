@@ -38,9 +38,10 @@ func (p *toolLaunchCommitProbe) AuthorizeExternalAttempt(ctx context.Context, au
 	return attempt, err
 }
 
-func (p *toolLaunchCommitProbe) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) error {
-	if err := p.Harness.MarkExternalAttemptLaunched(ctx, attempt, at); err != nil {
-		return err
+func (p *toolLaunchCommitProbe) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	launch, launchErr := p.Harness.MarkExternalAttemptLaunched(ctx, attempt, at)
+	if launchErr != nil {
+		return launch, launchErr
 	}
 	if p.cancel != nil {
 		p.cancel()
@@ -50,9 +51,9 @@ func (p *toolLaunchCommitProbe) MarkExternalAttemptLaunched(ctx context.Context,
 	}
 	err := runtimeeffects.NewPostCommitMutationError(p.phase, attempt, p.fault)
 	if p.joined {
-		return errors.Join(err, context.Canceled)
+		return launch, errors.Join(err, context.Canceled)
 	}
-	return err
+	return launch, err
 }
 
 func toolLaunchCommitContext(harness *effecttest.Harness, identity string, phase runtimeeffects.MutationPhase, cancelAfterCommit, foreign, expired bool, joined ...bool) context.Context {

@@ -478,7 +478,7 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 			return result, nil
 		}
 		previous = ClaimReclaimable
-	case StatusDelivered, StatusDeadLetter:
+	case StatusDelivered, StatusDeadLetter, StatusCanceled:
 		result.Disposition = ClaimTerminal
 		result.Snapshot = snapshotAt(record, now)
 		return result, nil
@@ -936,7 +936,7 @@ func continuationDisposition(record deliveryRecord, now time.Time) ClaimDisposit
 			return ClaimBusy
 		}
 		return ClaimReclaimable
-	case StatusDelivered, StatusDeadLetter:
+	case StatusDelivered, StatusDeadLetter, StatusCanceled:
 		return ClaimTerminal
 	default:
 		return ClaimInvariantInvalid
@@ -1256,7 +1256,7 @@ func (a *Adapter) SettleSuccess(ctx context.Context, attempt *mutationprotocol.A
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
 		return a.settle(ctx, tx, attempt, claim, Settlement{
 			Disposition: "success", SideEffects: sideEffects, Duration: duration, RuleSelection: handlerselection.Resolved(selection),
-		})
+		}, "")
 	})
 }
 
@@ -1268,14 +1268,26 @@ func (a *Adapter) ValidateCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cl
 	return err
 }
 
+func (a *Adapter) providerOriginPendingTx(ctx context.Context, tx *sql.Tx, claim Claim) (bool, error) {
+	disposition, err := a.providerOriginRecoveryDisposition(ctx, tx, claim)
+	if err != nil {
+		return false, err
+	}
+	return disposition != providerOriginRecoveryAlreadyTerminal, nil
+}
+
 func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql.Tx, claim Claim) (providerOriginRecoveryDisposition, error) {
+	return a.readProviderOriginRecoveryDisposition(ctx, tx, claim, true)
+}
+
+func (a *Adapter) readProviderOriginRecoveryDisposition(ctx context.Context, tx *sql.Tx, claim Claim, lock bool) (providerOriginRecoveryDisposition, error) {
 	if tx == nil {
 		return 0, fmt.Errorf("provider origin recovery transaction is required")
 	}
 	if claim.Validate() != nil {
 		return 0, fmt.Errorf("provider origin recovery requires an exact claim")
 	}
-	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), true)
+	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), lock)
 	if err != nil {
 		return 0, err
 	}
@@ -1430,11 +1442,23 @@ func (a *Adapter) SettleFailure(ctx context.Context, attempt *mutationprotocol.A
 		return Snapshot{}, fmt.Errorf("terminal delivery failure requires a reason code")
 	}
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
-		return a.settle(ctx, tx, attempt, claim, settlement)
+		return a.settle(ctx, tx, attempt, claim, settlement, "")
 	})
 }
 
-func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, settlement Settlement) (Snapshot, error) {
+func (a *Adapter) SettleCanceled(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, reason CancellationReason, duration time.Duration) (Snapshot, error) {
+	if _, err := ParseCancellationReason(string(reason)); err != nil {
+		return Snapshot{}, err
+	}
+	if claim.SubscriberClass() != SubscriberAgent {
+		return Snapshot{}, fmt.Errorf("authored turn cancellation requires an agent delivery")
+	}
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
+		return a.settle(ctx, tx, attempt, claim, Settlement{Duration: duration, RuleSelection: handlerselection.NotReached()}, reason)
+	})
+}
+
+func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, settlement Settlement, cancellation CancellationReason) (Snapshot, error) {
 	if tx == nil {
 		return Snapshot{}, fmt.Errorf("delivery settlement transaction is required")
 	}
@@ -1450,6 +1474,27 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, attempt *mutationproto
 	record, now, err := a.requireCurrentClaim(ctx, tx, claim)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	return a.settleExactClaim(ctx, tx, attempt, claim, settlement, cancellation, record, now)
+}
+
+func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, settlement Settlement, cancellation CancellationReason, record deliveryRecord, now time.Time) (Snapshot, error) {
+	var err error
+	if cancellation == "" && record.SubscriberClass == SubscriberAgent {
+		query := `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=$1::uuid FOR UPDATE`
+		if a.dialect == DialectSQLite {
+			query = `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=?`
+		}
+		var reason sql.NullString
+		if err := tx.QueryRowContext(ctx, query, claim.DeliveryID()).Scan(&reason); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Snapshot{}, err
+		}
+		if reason.Valid {
+			if _, err := ParseCancellationReason(reason.String); err != nil {
+				return Snapshot{}, err
+			}
+			return Snapshot{}, fmt.Errorf("%w: authored cancellation requires canceled-origin settlement", ErrConflict)
+		}
 	}
 	status := StatusDelivered
 	transition := "delivered"
@@ -1485,6 +1530,9 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, attempt *mutationproto
 		transition = "dead_letter"
 		outcome = "dead_letter"
 	}
+	if cancellation != "" {
+		status, transition, outcome, reason = StatusCanceled, "canceled", "canceled", string(cancellation)
+	}
 	final, err := FinalSelection(status, settlement.RuleSelection)
 	if err != nil {
 		return Snapshot{}, err
@@ -1507,7 +1555,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, attempt *mutationproto
 		SET status = $1::text, retry_count = $2, next_eligible_at = $3,
 			reason_code = NULLIF($4, ''), failure = NULLIF($5, '')::jsonb,
 			current_attempt_version = NULL, current_attempt_open = NULL,
-			settled_at = CASE WHEN $1::text IN ('delivered', 'dead_letter') THEN $6::timestamptz ELSE NULL END,
+			settled_at = CASE WHEN $1::text IN ('delivered', 'dead_letter', 'canceled') THEN $6::timestamptz ELSE NULL END,
 			updated_at = $6::timestamptz
 		WHERE delivery_id = $7::uuid AND claim_version = $8 AND current_attempt_version = $8
 		  AND current_attempt_open = TRUE AND status = 'in_progress'`
@@ -1518,7 +1566,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, attempt *mutationproto
 			SET status = ?, retry_count = ?, next_eligible_at = ?,
 				reason_code = NULLIF(?, ''), failure = NULLIF(?, ''),
 				current_attempt_version = NULL, current_attempt_open = NULL,
-				settled_at = CASE WHEN ? IN ('delivered', 'dead_letter') THEN ? ELSE NULL END,
+				settled_at = CASE WHEN ? IN ('delivered', 'dead_letter', 'canceled') THEN ? ELSE NULL END,
 				updated_at = ?
 			WHERE delivery_id = ? AND claim_version = ? AND current_attempt_version = ?
 			  AND current_attempt_open = TRUE AND status = 'in_progress'`
@@ -1719,12 +1767,17 @@ func (a *Adapter) Outcomes(ctx context.Context, q queryer, deliveryID string) ([
 			return nil, fmt.Errorf("%w: delivery outcome claim version is invalid", ErrConflict)
 		}
 		switch item.Outcome {
-		case "delivered", "retry_scheduled", "dead_letter", "terminalized":
+		case "delivered", "retry_scheduled", "dead_letter", "terminalized", "canceled":
 		default:
 			return nil, fmt.Errorf("%w: delivery outcome %q is invalid", ErrConflict, item.Outcome)
 		}
 		if item.Failure, err = decodeFailure(failureRaw); err != nil {
 			return nil, err
+		}
+		if item.Outcome == "canceled" {
+			if _, err := ParseCancellationReason(item.ReasonCode); err != nil || item.Failure != nil {
+				return nil, fmt.Errorf("%w: canceled outcome lacks exact authored reason or contains failure", ErrConflict)
+			}
 		}
 		if err := json.Unmarshal(sideEffectsRaw, &item.SideEffects); err != nil {
 			return nil, fmt.Errorf("decode delivery outcome side effects: %w", err)
@@ -1801,6 +1854,8 @@ func (a *Adapter) SummarizeRun(ctx context.Context, q queryer, runID string) (Ru
 			summary.Delivered += count
 		case StatusDeadLetter:
 			summary.DeadLetter += count
+		case StatusCanceled:
+			summary.Canceled += count
 		}
 		if parsed, ok, err := parseNullableTime(next); err != nil {
 			return RunSummary{}, err
@@ -2245,14 +2300,14 @@ func (a *Adapter) LifecycleSnapshotPageForAgent(ctx context.Context, q queryer, 
 	statusSelected := map[Status]bool{}
 	for _, status := range page.Statuses {
 		switch status {
-		case StatusPending, StatusInProgress, StatusDelivered, StatusFailed, StatusDeadLetter:
+		case StatusPending, StatusInProgress, StatusDelivered, StatusFailed, StatusDeadLetter, StatusCanceled:
 			statusSelected[status] = true
 		default:
 			return SnapshotPage{}, fmt.Errorf("delivery lifecycle page status %q is invalid", status)
 		}
 	}
 	selectAllStatuses := len(statusSelected) == 0
-	for _, status := range []Status{StatusPending, StatusInProgress, StatusDelivered, StatusFailed, StatusDeadLetter} {
+	for _, status := range []Status{StatusPending, StatusInProgress, StatusDelivered, StatusFailed, StatusDeadLetter, StatusCanceled} {
 		if selectAllStatuses {
 			statusSelected[status] = true
 		}
@@ -2274,14 +2329,14 @@ func (a *Adapter) LifecycleSnapshotPageForAgent(ctx context.Context, q queryer, 
 		  AND ($9::text = '' OR d.run_id = NULLIF($9::text, '')::uuid)
 		  AND (($10 AND d.status = 'pending') OR ($11 AND d.status = 'in_progress') OR
 		       ($12 AND d.status = 'delivered') OR ($13 AND d.status = 'failed') OR
-		       ($14 AND d.status = 'dead_letter'))
-		  AND ($15::timestamptz IS NULL OR d.created_at < $15 OR (d.created_at = $15 AND d.delivery_id < $16::uuid))
+		       ($14 AND d.status = 'dead_letter') OR ($15 AND d.status = 'canceled'))
+		  AND ($16::timestamptz IS NULL OR d.created_at < $16 OR (d.created_at = $16 AND d.delivery_id < $17::uuid))
 		ORDER BY d.created_at DESC, d.delivery_id DESC
-		LIMIT $17`, identityPredicate)
+		LIMIT $18`, identityPredicate)
 	args := append(identityArgs,
 		runID,
 		statusSelected[StatusPending], statusSelected[StatusInProgress], statusSelected[StatusDelivered],
-		statusSelected[StatusFailed], statusSelected[StatusDeadLetter],
+		statusSelected[StatusFailed], statusSelected[StatusDeadLetter], statusSelected[StatusCanceled],
 		cursorAt, cursorID, page.Limit+1,
 	)
 	if a.dialect == DialectSQLite {
@@ -2292,14 +2347,14 @@ func (a *Adapter) LifecycleSnapshotPageForAgent(ctx context.Context, q queryer, 
 			  AND (? = '' OR d.run_id = ?)
 			  AND ((? AND d.status = 'pending') OR (? AND d.status = 'in_progress') OR
 			       (? AND d.status = 'delivered') OR (? AND d.status = 'failed') OR
-			       (? AND d.status = 'dead_letter'))
+		       (? AND d.status = 'dead_letter') OR (? AND d.status = 'canceled'))
 			  AND (? IS NULL OR d.created_at < ? OR (d.created_at = ? AND d.delivery_id < ?))
 			ORDER BY d.created_at DESC, d.delivery_id DESC
 			LIMIT ?`, identityPredicate)
 		args = append(identityArgs,
 			runID, runID,
 			statusSelected[StatusPending], statusSelected[StatusInProgress], statusSelected[StatusDelivered],
-			statusSelected[StatusFailed], statusSelected[StatusDeadLetter],
+			statusSelected[StatusFailed], statusSelected[StatusDeadLetter], statusSelected[StatusCanceled],
 			cursorAt, cursorAt, cursorAt, cursorID, page.Limit+1,
 		)
 	}
@@ -2602,7 +2657,7 @@ func (a *Adapter) terminalizeDeliveries(ctx context.Context, tx *sql.Tx, attempt
 		if err != nil {
 			return nil, err
 		}
-		if record.Status == StatusDelivered || record.Status == StatusDeadLetter {
+		if record.Status.Terminal() {
 			continue
 		}
 		version := record.ClaimVersion + 1
@@ -2721,7 +2776,7 @@ func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, att
 	return declareOutcomeDeadLetterEffects(ctx, tx, attempt, deliveryID, version)
 }
 
-func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
+func (a *Adapter) requireExactClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
 	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), true)
 	if err != nil {
 		return deliveryRecord{}, time.Time{}, err
@@ -2735,6 +2790,14 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 		record.SubscriberClass != claim.SubscriberClass() || record.SubscriberID != claim.SubscriberID() ||
 		record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
 		return deliveryRecord{}, time.Time{}, fmt.Errorf("%w: delivery claim is stale", ErrConflict)
+	}
+	return record, now, nil
+}
+
+func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
+	record, now, err := a.requireExactClaim(ctx, tx, claim)
+	if err != nil {
+		return deliveryRecord{}, time.Time{}, err
 	}
 	current, err := a.selectedExecutionCurrent(ctx, tx, record.Authority)
 	if err != nil {
@@ -3125,6 +3188,13 @@ func validateRecordShape(record deliveryRecord) error {
 	case StatusDeadLetter:
 		if !record.NextEligibleAt.IsZero() || !claimClear || record.SettledAt.IsZero() || strings.TrimSpace(record.ReasonCode) == "" || record.Failure == nil {
 			return conflict("has invalid dead-letter shape")
+		}
+	case StatusCanceled:
+		if !claimClear {
+			return conflict("has an open canceled claim")
+		}
+		if err := ValidateCanceledSnapshot(record.Snapshot); err != nil {
+			return conflict(err.Error())
 		}
 	default:
 		return conflict("has unknown lifecycle state")
