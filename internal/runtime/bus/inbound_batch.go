@@ -33,15 +33,16 @@ type InboundDeliveryEvent struct {
 // PrepareInboundEvidence uses the same pinned payload owner before the closed
 // inbound mutation, so rejection cannot call runtime diagnostics under SQL locks.
 func (eb *EventBus) PrepareInboundEvidence(ctx context.Context, event events.Event) (events.Event, error) {
+	var absent events.Event
 	if eb == nil {
-		return events.Event{}, fmt.Errorf("inbound evidence requires the event bus")
+		return absent, fmt.Errorf("inbound evidence requires the event bus")
 	}
 	_, admitted, err := eb.admitPublicationEventFacts(ctx, event)
 	if err != nil {
-		return events.Event{}, err
+		return absent, err
 	}
 	if err := events.ValidateNamedEvent(admitted, events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord); err != nil {
-		return events.Event{}, err
+		return absent, err
 	}
 	return admitted.Event(), nil
 }

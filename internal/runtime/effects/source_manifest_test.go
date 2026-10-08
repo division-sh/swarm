@@ -35,6 +35,8 @@ const (
 // launch/write primitive makes this test fail until ownership is reclassified.
 // The selected-context Close/Done entries are sync.Once.Do settlement, not HTTP.
 var sourcePrimitiveOwners = map[string]primitiveOwner{
+	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:1":             ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:2":             ownerBuildTest,
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                                  ownerRuntimeDependency,
 	"internal/runtime/channelactivation/owner.go:Release:http_do:1":                                                                       ownerRuntimeDependency,
 	"internal/runtime/channelactivation/presentation.go:Acquire:http_do:1":                                                                ownerRuntimeDependency, // sync.Once request release, not HTTP.

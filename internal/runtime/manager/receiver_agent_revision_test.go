@@ -5,13 +5,16 @@ import (
 	"testing"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestAgentRevisionPreservesOpaqueNumberKinds(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	instance := runtimeflowidentity.Stored(source, "review", "review/inst-1", "inst-1", runtimepipeline.FlowInstanceEntityID("review/inst-1"), "")
+	parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), managerIdentityTestRunID, managerIdentityTestRunID, managerIdentityTestRunID, "")
+	instance, err := runtimeflowidentity.KeyedChild(source, parent, "review", "inst-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	materialization, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, instance)
 	if err != nil {
 		t.Fatal(err)

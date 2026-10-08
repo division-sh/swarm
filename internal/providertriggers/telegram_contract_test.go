@@ -530,7 +530,6 @@ func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 		{
 			Event: "inbound.telegram", Kind: "raw",
 			Fields: []packs.TriggerEventFieldDescriptor{
-				{Name: "entity_id", Type: "text", Required: true},
 				{Name: "event_type", Type: "text", Required: true},
 				{Name: "headers", Type: "json", Required: true},
 				{Name: "payload", Type: "json", Required: true},

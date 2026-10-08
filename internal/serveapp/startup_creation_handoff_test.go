@@ -242,9 +242,13 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				// Seed the exact causal precondition without dispatching the connect
 				// edge: this proof interrupts construction before its finalizer.
 				storetest.InsertCanonicalEventRecord(t, activationCtx, db, dialect, trigger)
+				worker, err := flowidentity.KeyedChild(loaded.source, rootPlan.Identity, "worker", "startup-worker")
+				if err != nil {
+					t.Fatal(err)
+				}
 				activation, err := candidate.runtime.Manager.PrepareFlowInstanceActivation(activationCtx, pipeline.FlowInstanceActivationRequest{
 					ContractBundle: loaded.source,
-					Instance:       flowidentity.Instance{TemplateID: "worker", ScopeKey: "worker", InstanceID: "startup-worker", InstancePath: "worker/startup-worker", EntityID: uuid.NewString(), HasStoredPath: true},
+					Instance:       worker,
 					TriggerEvent:   trigger, OccurredAt: trigger.CreatedAt(),
 					ConstructorInput: "worker.requested", ResolvedKey: "startup-worker",
 				})

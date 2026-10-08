@@ -26,7 +26,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	instanceID := "ti-account-42"
 	flowInstance := finalflowinstanceauthoring.TemplateFlowID + "/" + instanceID
 	entityID := FlowInstanceEntityID(flowInstance)
-	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := workflowStore.create(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowInstance,
 		EntityID:        entityID,

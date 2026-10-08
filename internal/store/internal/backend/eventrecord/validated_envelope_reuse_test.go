@@ -406,8 +406,8 @@ func TestValidatedEnvelopeReuseHostileParity(t *testing.T) {
 		{"external_authority", func(r *Record) { r.RoutingSourceAuthority = "invalid" }, "event record routing source"},
 		{"external_instance", func(r *Record) {
 			r.SourceRoute = []byte(`{"flow_id":"ingress","flow_instance":"ingress/one","entity_id":"33333333-3333-4333-8333-333333333333"}`)
-		}, "external ingress routing source forbids flow_instance"},
-		{"source_null", func(r *Record) { r.SourceRoute = []byte(`null`) }, "external ingress routing source requires"},
+		}, "external ingress declaration forbids concrete instance and entity coordinates"},
+		{"source_null", func(r *Record) { r.SourceRoute = []byte(`null`) }, "flow path is required"},
 		{"persistent_identity", func(r *Record) { r.EventID = "not-a-uuid" }, "decode event record not-a-uuid"},
 		{"source_normalization_equality", func(r *Record) {
 			r.SourceRoute = bytes.Replace(r.SourceRoute, []byte(`"ingress"`), []byte(`" ingress "`), 1)

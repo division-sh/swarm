@@ -202,7 +202,23 @@ func executionScopeConstruction(t *testing.T, source semanticview.Source, actor 
 		t.Fatal("fixture has no construction schema")
 	}
 	if !schema.Instance.Empty() {
-		return flowidentity.Derive(source, actor.FlowID, actor.Identity.Route.InstanceID)
+		bundle, found := semanticview.Bundle(source)
+		if !found {
+			t.Fatal("fixture requires its admitted flow tree")
+		}
+		view, found := bundle.FlowViewByID(actor.FlowID)
+		if !found || view.Parent == nil {
+			t.Fatal("fixture requires its exact parent declaration")
+		}
+		parent, err := flowidentity.StandingForGeneration(source, view.Parent.Paths.FlowPath, actor.Identity.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		child, err := flowidentity.KeyedChild(source, parent, actor.FlowID, actor.Identity.Route.InstanceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return child
 	}
 	instance, err := flowidentity.StandingForGeneration(source, actor.FlowID, actor.Identity.RunID)
 	if err != nil {

@@ -183,7 +183,7 @@ func TestExecutionFrameContentHashBindsCanonicalSemanticFacts(t *testing.T) {
 
 func TestExecutionFrameConsumesAdmittedProviderTriggerEventFactsWithoutNormalization(t *testing.T) {
 	seed, _, surface := testExecutionFrameInputs(t)
-	route := events.RouteIdentity{FlowID: "telegram-ingress", EntityID: "00000000-0000-4000-8000-000000000003"}
+	route := events.RouteIdentity{FlowID: "telegram-ingress"}
 	routingSource, err := events.NewExternalIngressRoutingSource(route.FlowID, events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestExecutionFrameConsumesAdmittedProviderTriggerEventFactsWithoutNormaliza
 	if got.RoutingSource.Kind != routingSource.Kind().StorageCode() || got.RoutingSource.Authority != routingSource.Authority().StorageCode() {
 		t.Fatalf("provider routing-source projection = %#v, want kind=%q authority=%q", got.RoutingSource, routingSource.Kind().StorageCode(), routingSource.Authority().StorageCode())
 	}
-	if got.RoutingSource.Route.FlowID != route.FlowID || got.RoutingSource.Route.EntityID != route.EntityID || string(got.Payload) != `{"message":"hello","provider_update_id":"42"}` {
+	if got.RoutingSource.Route.FlowID != route.FlowID || got.RoutingSource.Route.EntityID != "" || got.RoutingSource.Route.FlowInstance != "" || string(got.Payload) != `{"message":"hello","provider_update_id":"42"}` {
 		t.Fatalf("provider trigger facts were normalized or inferred: %#v", got)
 	}
 }

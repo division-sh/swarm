@@ -94,11 +94,11 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 
 			instance := artifactActionResultWorkflowInstance()
 			instance.WorkflowVersion = source.WorkflowVersion()
-			seedRuntimeTestPreparedInstance(t, ctx, pg, pc, instance)
+			constructed := seedRuntimeTestPreparedInstance(t, ctx, pg, pc, instance)
 			if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 				RunID: templateInstanceDeliveryRunID,
 				Route: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"),
-			}, Instance: runtimeflowidentity.Derive(source, "repo-scaffold", "inst-1")}); err != nil {
+			}, Instance: constructed.Plan.Identity}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
 

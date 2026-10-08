@@ -9,14 +9,41 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 )
 
 // This native component fixture carries prepared instance data, not proof of
 // public constructor eligibility or installed runtime attachment.
-func seedRuntimeTestPreparedInstance(t testing.TB, ctx context.Context, selected bus.FlowInstanceActivationCommitOwner, pc *pipeline.PipelineCoordinator, instance pipeline.WorkflowInstance) {
+func seedRuntimeTestPreparedInstance(t testing.TB, ctx context.Context, selected bus.FlowInstanceActivationCommitOwner, pc *pipeline.PipelineCoordinator, instance pipeline.WorkflowInstance) pipeline.CommittedFlowInstanceActivation {
 	t.Helper()
 	ctx = testLiveExecutionContext(ctx)
+	source := pc.SemanticSource()
+	runID := correlation.RunIDFromContext(ctx)
+	if instance.WorkflowName != semanticview.RootExecutionFlowID(source) && instance.ParentFlowID == "" && instance.ParentFlowInstance == "" && instance.ParentEntityID == "" {
+		bundle, found := semanticview.Bundle(source)
+		if !found {
+			t.Fatal("component fixture requires its admitted flow tree")
+		}
+		view, found := bundle.FlowViewByID(instance.WorkflowName)
+		if !found || view.Parent == nil {
+			t.Fatal("component fixture requires its exact child declaration")
+		}
+		parent, err := flowidentity.StandingForGeneration(source, view.Parent.Paths.FlowPath, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var constructed flowidentity.Instance
+		if view.Schema.Instance.Empty() {
+			constructed, err = flowidentity.KeylessChild(source, parent, instance.WorkflowName)
+		} else {
+			constructed, err = flowidentity.KeyedChild(source, parent, instance.WorkflowName, instance.InstanceID)
+		}
+		if err != nil || constructed.InstancePath != instance.StorageRef {
+			t.Fatalf("component fixture constructor path: constructed=%+v err=%v", constructed, err)
+		}
+		instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = constructed.ParentRoute.FlowID, constructed.ParentRoute.FlowInstance, constructed.ParentEntityID
+	}
 	at := instance.CreatedAt
 	if at.IsZero() {
 		at = time.Now().UTC()
@@ -43,4 +70,5 @@ func seedRuntimeTestPreparedInstance(t testing.TB, ctx context.Context, selected
 			t.Fatalf("dispatch component initial lifecycle: %v", err)
 		}
 	}
+	return committed
 }

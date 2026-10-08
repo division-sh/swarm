@@ -405,7 +405,7 @@ func TestPipelineCompiledJoinTransitionEvidenceOnBothStores(t *testing.T) {
 				if outcome == "deferred complete" {
 					members = []any{}
 				}
-				instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+				instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 					InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1", CurrentState: "awaiting",
 					EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": members}, EntityType: "test_entity",
 				})

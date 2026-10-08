@@ -49,6 +49,43 @@ func constructorUnitIdentity(t *testing.T, source semanticview.Source, runID, fl
 	return child
 }
 
+func materializedWorkflowInstanceForSource(t testing.TB, source semanticview.Source, ctx context.Context, instance WorkflowInstance) WorkflowInstance {
+	t.Helper()
+	instance = materializedWorkflowInstanceForTest(instance)
+	runID := correlation.RunIDFromContext(ctx)
+	if instance.WorkflowName == semanticview.RootExecutionFlowID(source) {
+		if instance.StorageRef != runID || instance.EntityID != flowidentity.EntityID(runID) {
+			t.Fatal("root component fixture requires its exact run coordinate")
+		}
+		return instance
+	}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("component fixture requires its admitted flow tree")
+	}
+	view, found := bundle.FlowViewByID(instance.WorkflowName)
+	if !found || view.Parent == nil {
+		t.Fatal("component fixture requires its exact child declaration")
+	}
+	parent, err := flowidentity.StandingForGeneration(source, view.Parent.Paths.FlowPath, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var constructed flowidentity.Instance
+	if view.Schema.Instance.Empty() {
+		constructed, err = flowidentity.KeylessChild(source, parent, instance.WorkflowName)
+	} else {
+		constructed, err = flowidentity.KeyedChild(source, parent, instance.WorkflowName, instance.InstanceID)
+	}
+	if err != nil || constructed.InstancePath != instance.StorageRef {
+		t.Fatalf("component fixture constructor path: constructed=%+v err=%v", constructed, err)
+	}
+	instance.ParentFlowID = constructed.ParentRoute.FlowID
+	instance.ParentFlowInstance = constructed.ParentRoute.FlowInstance
+	instance.ParentEntityID = constructed.ParentEntityID
+	return instance
+}
+
 func seedConstructorUnitInstance(t *testing.T, pc *PipelineCoordinator, ctx context.Context, flowID string) WorkflowInstance {
 	t.Helper()
 	source := pc.SemanticSource()

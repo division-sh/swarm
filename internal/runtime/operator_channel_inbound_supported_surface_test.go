@@ -37,16 +37,16 @@ func TestInboundGatewaySignedTelegramOperatorChannelClaimSelectedStoreParity(t *
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		selected := storetest.AdmitPostgresRuntimeStore(t, db)
+		runID, entityID := boundedInboundTestCoordinates()
 		runOperatorChannelInboundSupportedSurface(t, selected, db, false,
-			"73000000-0000-0000-0000-000000000001",
-			"73000000-0000-0000-0000-000000000002",
+			runID, entityID,
 			boundedProviderFlowID)
 	})
 	t.Run("sqlite", func(t *testing.T) {
 		selected := storetest.StartSQLiteRuntimeStore(t)
+		runID, entityID := boundedInboundTestCoordinates()
 		runOperatorChannelInboundSupportedSurface(t, selected, storetest.DatabaseForTest(selected), true,
-			"74000000-0000-0000-0000-000000000001",
-			"74000000-0000-0000-0000-000000000002",
+			runID, entityID,
 			boundedProviderFlowID)
 	})
 }

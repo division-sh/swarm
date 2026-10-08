@@ -792,7 +792,7 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 	if entityID == "" {
 		t.Fatal("activity boring source event requires entity id")
 	}
-	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+	instance := materializedWorkflowInstanceForSource(t, fixture.pc.SemanticSource(), ctx, WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      "research/" + entityID,
 		EntityID:        entityID,

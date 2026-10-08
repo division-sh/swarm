@@ -198,6 +198,7 @@ func TestResolveStandingTargetDeclarationsRejectsDuplicateExactInputIdentity(t *
 	schema := bundle.FlowSchemas["coordinator"]
 	schema.Pins.Inputs.EventPins = append(schema.Pins.Inputs.EventPins, schema.Pins.Inputs.EventPins[0])
 	bundle.FlowSchemas["coordinator"] = schema
+	bundle.FlowTree.ByID["coordinator"].Schema = schema
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "declared more than once") {
 		t.Fatalf("duplicate exact input compile error = %v, want fail-closed", err)
 	}
@@ -363,7 +364,7 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 		t.Fatal(err)
 	}
 	target := StandingTarget{
-		BundleHash: hash, ServiceID: "service-1", FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
+		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1,
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
@@ -419,7 +420,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 		t.Fatal(err)
 	}
 	target := StandingTarget{
-		BundleHash: hash, ServiceID: "service-suspended", FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
+		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1,
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
@@ -448,7 +449,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandingPins(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "lead.observed")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "41000000-0000-0000-0000-000000000001"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{BundleHash: runtimeTestBundleHash, FlowPath: "coordinator", RunID: "41000000-0000-0000-0000-000000000001"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
