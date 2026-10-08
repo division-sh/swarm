@@ -1851,7 +1851,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "46ba5593a68be29fe5e447c646d38a25802a2a729285caf74a2c1e96717e4faa"
+    "body_sha256": "968faaa641b423fa43e17f505d3b2593733432baa2f205d78caff7f937bae313"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -2793,7 +2793,7 @@
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.mutateStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "79d7759207da35cb159e23ae5fe776f8586bf3bc75189e59dab6854590dbcb80"
+    "body_sha256": "721f34edf98413502485db2b8b574cbbea2a9be4a18e2f85ed5347c0a3d81cf3"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.publishActiveService",
@@ -3033,7 +3033,7 @@
     "owner": "internal/serveapp/main.go::reconcileServeRuntimeStandingTargets",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "ec1517a2abfe85a08b318f1a9cbdec12a543a25936b9ebcaf50acb67fd3d7208"
+    "body_sha256": "e3684a77b3b18723bac71b4cdd9ef9e16e776e73a8ef953813ffb1202b2925bf"
   },
   {
     "owner": "internal/serveapp/main.go::reconcileServeStandingServices",
