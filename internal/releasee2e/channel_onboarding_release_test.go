@@ -81,7 +81,7 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 			"channel", "connect", "telegram", "--yes", "--api-server", process.apiBase, "--api-token-file", tokenFile)
 		challenge := waitReleaseChannelChallenge(t, command)
 		callbackURL, signingSecret := waitReleaseChannelRegistration(t, provider, command)
-		publishReleaseTelegramClaim(t, callbackURL, publicListen, signingSecret, challenge)
+		publishReleaseTelegramClaim(t, callbackURL, publicListen, signingSecret, challenge, 1)
 		output := waitReleaseChannelCommand(t, command)
 		assertReleaseChannelOutputSecretSafe(t, output, releaseChannelCredential, signingSecret)
 		if !strings.Contains(output, "READY") {
@@ -153,7 +153,7 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 		resumed := startReleaseChannelCommand(t, binaryPath, root, env, releaseChannelCredential, configPath, resumeArgs...)
 		challenge := waitReleaseChannelChallenge(t, resumed)
 		callbackURL, signingSecret := waitReleaseChannelRegistrationAfter(t, provider, resumed, beforeRegistrations)
-		publishReleaseTelegramClaim(t, callbackURL, publicListen, signingSecret, challenge)
+		publishReleaseTelegramClaim(t, callbackURL, publicListen, signingSecret, challenge, 2)
 		output := waitReleaseChannelCommand(t, resumed)
 		if !strings.Contains(output, "READY") {
 			t.Fatalf("release printed resume command lacks READY:\n%s", output)
@@ -281,7 +281,7 @@ func waitReleaseChannelValue(t *testing.T, command *releaseChannelCommand, label
 	return ""
 }
 
-func publishReleaseTelegramClaim(t *testing.T, callbackURL, publicListen, signingSecret, challenge string) {
+func publishReleaseTelegramClaim(t *testing.T, callbackURL, publicListen, signingSecret, challenge string, updateID int) {
 	t.Helper()
 	callback, err := url.Parse(callbackURL)
 	if err != nil {
@@ -290,7 +290,7 @@ func publishReleaseTelegramClaim(t *testing.T, callbackURL, publicListen, signin
 	callback.Scheme = "http"
 	callback.Host = publicListen
 	body, err := json.Marshal(map[string]any{
-		"update_id": time.Now().UnixNano(),
+		"update_id": updateID,
 		"message": map[string]any{
 			"message_id": 1,
 			"from":       map[string]any{"id": 7001, "username": "release_operator"},
