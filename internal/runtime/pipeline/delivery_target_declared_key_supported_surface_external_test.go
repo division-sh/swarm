@@ -73,6 +73,10 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						t.Fatal("declared-key execution context is missing bundle source fact")
 					}
 					bundleHash := sourceFact.BundleHash()
+					parent, err := runtimeflowidentity.StandingForGeneration(source, ".", runID)
+					if err != nil {
+						t.Fatal(err)
+					}
 					instances := []runtimepipeline.WorkflowInstance{
 						{
 							InstanceID: exactRoute.InstanceID, StorageRef: exactPath, EntityID: exactEntityID,
@@ -88,12 +92,15 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						},
 					}
 					materialize := func(instance runtimepipeline.WorkflowInstance) {
+						constructed, err := runtimeflowidentity.KeyedChild(source, parent, "review", instance.InstanceID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						constructed.EntityID = instance.EntityID
+						instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = constructed.ParentRoute.FlowID, constructed.ParentRoute.FlowInstance, constructed.ParentEntityID
 						readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-							Identity: runtimeflowidentity.Instance{
-								TemplateID: "review", ScopeKey: "review", InstanceID: instance.InstanceID,
-								InstancePath: instance.StorageRef, EntityID: instance.EntityID, HasStoredPath: true,
-							},
-							RunID: runID, BundleHash: bundleHash,
+							Identity: constructed,
+							RunID:    runID, BundleHash: bundleHash,
 							WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 						}
 						instance.RuntimeReadiness = &readiness
