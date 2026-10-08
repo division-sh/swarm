@@ -316,7 +316,13 @@ func t22GuardEvidence(unexpected Transition) {
 func (unexpected Transition) ValidateHandlerSelection(handler contracts.SystemNodeEventHandler) error { return nil }
 func t22RetiredHandlerSelection(unexpected Transition) { _ = unexpected.ValidateHandlerSelection }
 `)
-	overlay[path] = raw
+	needle = "func (t Transition) validateAdvanceCarrier(handler contracts.SystemNodeEventHandler) error {\n\tedge := t.compiled.Edge()"
+	if strings.Count(string(raw), needle) != 1 {
+		t.Fatal("advance carrier owner changed; update the explicit hostile insertion")
+	}
+	overlay[path] = []byte(strings.Replace(string(raw), needle, needle+"\n_ = contracts.HandlerAdvanceCarriers\n_ = edge.AdvanceCarrier", 1))
+	want["internal/runtime/workflowlifecycle.Transition.validateAdvanceCarrier::call internal/runtime/contracts.HandlerAdvanceCarriers"] = 2
+	want["internal/runtime/workflowlifecycle.Transition.validateAdvanceCarrier::carrier fields"] = 6
 	want["internal/runtime/workflowlifecycle.t22GuardEvidence::call internal/runtime/workflowlifecycle.Transition.ValidateHandlerEvidence"] = 1
 	want["internal/runtime/workflowlifecycle.t22GuardEvidence::call internal/runtime/workflowlifecycle.Transition.HandlerOrigin"] = 1
 	want["internal/runtime/workflowlifecycle.Transition.ValidateHandlerSelection::retired declaration"] = 1
@@ -551,8 +557,8 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/contracts.deriveWorkflowStageTopologies::call internal/runtime/contracts.BuildWorkflowStageTopology":                 1,
 		"internal/runtime/contracts.populateWorkflowSemantics::topology inventory":                                                             2,
 		"internal/runtime/contracts.topologyEdgeSortKey::carrier fields":                                                                       16,
-		"internal/runtime/workflowlifecycle.Transition.ValidateHandlerEvidence::call internal/runtime/contracts.HandlerAdvanceCarriers":        1,
-		"internal/runtime/workflowlifecycle.Transition.ValidateHandlerEvidence::carrier fields":                                                5,
+		"internal/runtime/workflowlifecycle.Transition.validateAdvanceCarrier::call internal/runtime/contracts.HandlerAdvanceCarriers":         1,
+		"internal/runtime/workflowlifecycle.Transition.validateAdvanceCarrier::carrier fields":                                                 5,
 		"internal/runtime/contracts.topologyReachable::carrier fields":                                                                         2,
 		// Read-only source wrappers; no transition legality or selection.
 		"internal/runtime/semanticview.WorkflowStageTopology::call internal/runtime/contracts.WorkflowContractBundle.WorkflowStageTopology":                      1,
