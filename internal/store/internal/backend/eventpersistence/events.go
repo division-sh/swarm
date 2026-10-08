@@ -83,7 +83,7 @@ func (s *EventPostgresOwner) ensureEventPayloadAdmission(ctx context.Context, ad
 	return restored, nil
 }
 
-func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement, syncCounters bool) (runtimebus.EventAppendOutcome, error) {
+func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -94,7 +94,7 @@ func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, a
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		return withEventStoreRetry(ctx, tx, func() error {
 			var writeErr error
-			outcome, writeErr = s.appendEventSpec(ctx, tx, attempt, admitted, settlement, syncCounters)
+			outcome, writeErr = s.appendEventSpec(ctx, tx, attempt, admitted, settlement)
 			return writeErr
 		})
 	})
@@ -108,7 +108,7 @@ func (s *EventPostgresOwner) AppendAdmittedEventTxOutcome(ctx context.Context, a
 	if admitted.Event().AdmissionClass() == events.EventAdmissionInheritedFanOut {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("inherited fan-out origin requires named chunk publication")
 	}
-	return s.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement, true)
+	return s.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
 }
 
 func (s *EventPostgresOwner) EventExists(ctx context.Context, eventID string) (bool, error) {
@@ -187,7 +187,7 @@ func (s *EventPostgresOwner) ListEventDeliveryRoutes(ctx context.Context, eventI
 	return events.NormalizeDeliveryRoutes(out), nil
 }
 
-func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement, syncCounters bool) (runtimebus.EventAppendOutcome, error) {
+func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
 	admitted, err := s.ensureEventPayloadAdmission(ctx, admitted)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -267,11 +267,6 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, at
 			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append event: event_id=%s was not inserted", wantIdentity.EventID)
 		}
 		return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
-	}
-	if syncCounters && admitted.RunDisposition() != events.AdmittedRunless {
-		if err := s.RunLifecyclePostgresOwner.SyncCountersTx(ctx, attempt, wantIdentity.RunID); err != nil {
-			return runtimebus.EventAppendOutcomeUnknown, err
-		}
 	}
 	if err := storeactivityjournal.RecordPersistedEvent(ctx, attempt, s, admitted, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err

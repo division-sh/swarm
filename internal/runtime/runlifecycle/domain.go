@@ -890,5 +890,4 @@ type OperationOwner interface {
 	MarkTerminalRun(context.Context, TerminalRequest) (Snapshot, MutationDisposition, error)
 	ForkRunSource(context.Context, ForkSourceRequest) (Snapshot, MutationDisposition, error)
 	ReviseRunSource(context.Context, SourceRevisionRequest) (MutationDisposition, error)
-	SyncRunCounters(context.Context, string) error
 }

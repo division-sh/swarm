@@ -381,17 +381,6 @@ func ReviseRunSource(
 	return runner.ReviseRunSource(ctx, request)
 }
 
-func SyncRunCounters(
-	ctx context.Context,
-	runner RunFixtureStore,
-	runID string,
-) error {
-	if runner == nil {
-		return fmt.Errorf("semantic fixture counter synchronization requires mutation owner")
-	}
-	return runner.SyncRunCounters(ctx, strings.TrimSpace(runID))
-}
-
 func ExecuteRunCompletionCandidate(
 	ctx context.Context,
 	store runtimerunlifecycle.CandidateStore,

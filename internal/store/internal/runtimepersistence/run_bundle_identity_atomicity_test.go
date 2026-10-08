@@ -22,7 +22,7 @@ func TestRunLifecycleInsertForkRejectsMissingPersistedBundleBeforeMutation(t *te
 	missingHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 
 	err := runSelectedFixtureMutation(testAuthorActivityContext(), pg, "missing bundle fork", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return pg.runForkPostgresOwner.InsertRunForkRunTx(txctx, attempt, forkRunID, uuid.NewString(), runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: uuid.NewString()}, 0, time.Now().UTC(),
+		return pg.runForkPostgresOwner.InsertRunForkRunTx(txctx, attempt, forkRunID, uuid.NewString(), runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: uuid.NewString()}, time.Now().UTC(),
 			mustStoreTestSourceArtifactFact(missingHash))
 	})
 	if !errors.Is(err, storerunlifecycle.ErrSourceArtifactUnavailable) {

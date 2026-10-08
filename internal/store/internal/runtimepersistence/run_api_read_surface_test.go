@@ -39,24 +39,23 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 			RunID: newer, State: "running", BundleHash: bundleA,
 			OriginKind:     string(runtimerunlifecycle.OriginEvent),
 			TriggerEventID: newerEvent, TriggerEventType: "scan.requested",
-			EntityCount: 3, EventCount: 2, StartedAt: now,
+			StartedAt: now,
 		},
 		{
 			RunID: middle, State: "completed", BundleHash: bundleB,
 			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
 			ForkedFromRunID: newer, ForkedFromPointKind: "event", ForkedFromRevision: 1, ForkedFromEventID: newerEvent,
-			EntityCount: 5, EventCount: 1,
 			StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-30 * time.Minute),
 		},
 		{
 			RunID: older, State: "failed", BundleHash: bundleA,
 			OriginKind:     string(runtimerunlifecycle.OriginEvent),
 			TriggerEventID: olderEvent, TriggerEventType: "scan.failed",
-			EntityCount: 1, EventCount: 1, Failure: &failedRunFailure,
+			Failure:   &failedRunFailure,
 			StartedAt: now.Add(-2 * time.Hour), EndedAt: now.Add(-90 * time.Minute),
 		},
 	} {
-		runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, snapshot)
+		RequireCorruptRunSnapshotForTest(t, ctx, pg, snapshot)
 	}
 	for _, fixture := range []struct {
 		id        string

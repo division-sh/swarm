@@ -31,25 +31,22 @@ type runForkDeliveryEventReplayAdapter struct {
 	deliveries     *storedelivery.Adapter
 	loadSource     func(context.Context, *sql.Tx, string, string) (events.Event, error)
 	commitScope    func(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope, time.Time) error
-	syncCounters   func(context.Context, *mutationprotocol.Attempt, string) error
 }
 
 func (s *RunForkPostgresOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
 	return runForkDeliveryEventReplayAdapter{
 		postgres:       true,
 		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: postgresDeliveryAdapter,
-		loadSource:   loadRunForkReplaySourceEvent,
-		commitScope:  s.PipelinePostgresOwner.CommitScopeAtTx,
-		syncCounters: s.RunLifecyclePostgresOwner.SyncCountersTx,
+		loadSource:  loadRunForkReplaySourceEvent,
+		commitScope: s.PipelinePostgresOwner.CommitScopeAtTx,
 	}
 }
 
 func (s *RunForkSQLiteOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
 	return runForkDeliveryEventReplayAdapter{
 		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: sqliteDeliveryAdapter,
-		loadSource:   loadSQLiteRunForkReplaySourceEvent,
-		commitScope:  s.PipelineSQLiteOwner.CommitScopeAtTx,
-		syncCounters: s.RunLifecycleSQLiteOwner.SyncCountersTx,
+		loadSource:  loadSQLiteRunForkReplaySourceEvent,
+		commitScope: s.PipelineSQLiteOwner.CommitScopeAtTx,
 	}
 }
 
@@ -74,7 +71,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires at least one owner-authorized delivery")
 	}
 
-	if store.requireCurrent == nil || store.events == nil || store.deliveries == nil || store.loadSource == nil || store.commitScope == nil || store.syncCounters == nil {
+	if store.requireCurrent == nil || store.events == nil || store.deliveries == nil || store.loadSource == nil || store.commitScope == nil {
 		return result, fmt.Errorf("run fork delivery/event replay adapters are required")
 	}
 	if err := store.requireCurrent(); err != nil {
@@ -214,9 +211,6 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 		if inserted {
 			result.ReplayedDeliveryCount++
 		}
-	}
-	if err := store.syncCounters(ctx, attempt, lineage.ForkRunID); err != nil {
-		return result, err
 	}
 	return result, nil
 }

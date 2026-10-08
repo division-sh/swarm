@@ -45,18 +45,6 @@ func (s *RunLifecycleSQLiteOwner) RequirePresentTx(ctx context.Context, tx *sql.
 	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequirePresent(ctx, runID)
 }
 
-func (s *RunLifecyclePostgresOwner) SyncCountersTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string) error {
-	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).SyncCounters(ctx, runID)
-	})
-}
-
-func (s *RunLifecycleSQLiteOwner) SyncCountersTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string) error {
-	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).SyncCounters(ctx, runID)
-	})
-}
-
 func (s *RunLifecyclePostgresOwner) CreateRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
 	var disposition runtimerunlifecycle.MutationDisposition
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
@@ -349,20 +337,6 @@ func (s *RunLifecycleSQLiteOwner) ReviseRunSource(ctx context.Context, request r
 	})
 }
 
-func (s *RunLifecyclePostgresOwner) SyncRunCounters(ctx context.Context, runID string) error {
-	_, err := runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (struct{}, error) {
-		return struct{}{}, mutation.SyncCounters(ctx, runID)
-	})
-	return err
-}
-
-func (s *RunLifecycleSQLiteOwner) SyncRunCounters(ctx context.Context, runID string) error {
-	_, err := runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (struct{}, error) {
-		return struct{}{}, mutation.SyncCounters(ctx, runID)
-	})
-	return err
-}
-
 func (m postgresRunLifecycleMutation) RequirePresent(ctx context.Context, runID string) error {
 	if m.tx == nil {
 		return errors.New("PostgreSQL run lifecycle mutation requires transaction")
@@ -653,7 +627,6 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 	attempt *mutationprotocol.Attempt,
 	forkRunID, sourceRunID string,
 	point runfork.RunForkPoint,
-	entityCount int,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
 ) error {
@@ -674,11 +647,11 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			entity_count, event_count, started_at, bundle_hash
+			event_count, started_at, bundle_hash
 		)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, $8, 0, $9, $10)
+		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9)
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
-			entityCount, startedAt.UTC(), bundleHash); err != nil {
+			startedAt.UTC(), bundleHash); err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}
 		scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
@@ -701,7 +674,6 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 	attempt *mutationprotocol.Attempt,
 	forkRunID, sourceRunID string,
 	point runfork.RunForkPoint,
-	entityCount int,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
 ) error {
@@ -722,11 +694,11 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			entity_count, event_count, started_at, bundle_hash
+			event_count, started_at, bundle_hash
 		)
-		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, 0, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?)
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
-			entityCount, startedAt.UTC(), bundleHash); err != nil {
+			startedAt.UTC(), bundleHash); err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}
 		scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
@@ -1031,44 +1003,6 @@ func (m sqliteRunLifecycleMutation) ReviseSource(
 		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
-}
-
-func (m postgresRunLifecycleMutation) SyncCounters(ctx context.Context, runID string) error {
-	if m.tx == nil {
-		return errors.New("PostgreSQL run lifecycle counter synchronization requires transaction")
-	}
-	if _, err := m.tx.ExecContext(ctx, `
-		UPDATE runs
-		SET event_count = (
-				SELECT COUNT(*)::integer FROM events WHERE run_id = $1::uuid
-			),
-			entity_count = (
-				SELECT COUNT(DISTINCT entity_id)::integer FROM entity_state WHERE run_id = $1::uuid
-			)
-		WHERE run_id = $1::uuid
-	`, strings.TrimSpace(runID)); err != nil {
-		return fmt.Errorf("synchronize PostgreSQL run lifecycle counters: %w", err)
-	}
-	return nil
-}
-
-func (m sqliteRunLifecycleMutation) SyncCounters(ctx context.Context, runID string) error {
-	if m.tx == nil {
-		return errors.New("SQLite run lifecycle counter synchronization requires transaction")
-	}
-	if _, err := m.tx.ExecContext(ctx, `
-		UPDATE runs
-		SET event_count = (
-				SELECT COUNT(*) FROM events WHERE run_id = ?
-			),
-			entity_count = (
-				SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = ?
-			)
-		WHERE run_id = ?
-	`, strings.TrimSpace(runID), strings.TrimSpace(runID), strings.TrimSpace(runID)); err != nil {
-		return fmt.Errorf("synchronize SQLite run lifecycle counters: %w", err)
-	}
-	return nil
 }
 
 func deleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string, postgres bool) error {

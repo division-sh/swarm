@@ -159,7 +159,7 @@ SELECT
 		  AND ssg.generation = r.origin_generation
 	),
 	COALESCE(entity_summary.entity_count, 0),
-	COALESCE(NULLIF(r.event_count, 0), summary.event_count, 0),
+	r.event_count,
 	r.started_at,
 	r.ended_at,
 	COALESCE(r.continued_as_run_id::text, ''),
@@ -167,11 +167,6 @@ SELECT
 	COALESCE(rc.reason, '')
 FROM runs r
 	LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
-LEFT JOIN LATERAL (
-	SELECT COUNT(*)::integer AS event_count
-	FROM events e
-	WHERE e.run_id = r.run_id
-) summary ON TRUE
 LEFT JOIN LATERAL (
 	SELECT COUNT(DISTINCT es.entity_id)::integer AS entity_count
 	FROM entity_state es

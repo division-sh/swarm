@@ -61,7 +61,7 @@ type runForkSelectedContractMaterializationPort struct {
 	loadSnapshot        runForkLifecycleSnapshotLoader
 	requireProfile      func(context.Context, *sql.Tx, string, scenarioexecution.Profile, bool) error
 	durableData         *storedurabledata.Owner
-	insertRun           func(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, int, time.Time, runtimecorrelation.SourceArtifactFact) error
+	insertRun           func(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact) error
 	ensureProfile       func(context.Context, *sql.Tx, string, scenarioexecution.Profile, time.Time) error
 	materializeEntity   func(context.Context, *sql.Tx, *mutationprotocol.Attempt, activeRunSourceOwnerFunc, string, contracts.BundleIdentity, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time) error
 	materializeBarriers runForkFanOutBarrierOwner
@@ -261,7 +261,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return fmt.Errorf("resolve selected-contract fork author activity scope: %w", err)
 		}
 		txctx = runtimeauthoractivity.WithScope(txctx, forkScope)
-		if err := port.insertRun(txctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, len(plan.Entities), now, identity.SourceArtifactFact); err != nil {
+		if err := port.insertRun(txctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, now, identity.SourceArtifactFact); err != nil {
 			return fmt.Errorf("insert selected-contract fork run: %w", err)
 		}
 		pins, err := storedurabledata.MaterializeForkPinsTx(port.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
