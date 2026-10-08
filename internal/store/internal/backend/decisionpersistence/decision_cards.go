@@ -1101,7 +1101,7 @@ func (fn decisionRunSourceOwner) RequireActiveRunSource(ctx context.Context, run
 	return fn(ctx, runID)
 }
 
-func supersedeDecisionCardsForRun(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
+func supersedeDecisionCardsForRun(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, lifecycle lifecycleWriter, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	runID = strings.TrimSpace(runID)
 	reason = strings.TrimSpace(reason)
 	now = decisioncard.CanonicalTimestamp(now)
@@ -1114,7 +1114,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, attempt *mutationprotocol
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
-	if err := supersedeRunGateActivations(ctx, attempt, tx, runID, reason, now, includeCommitted, postgres); err != nil {
+	if err := supersedeRunGateActivations(ctx, attempt, tx, lifecycle, runID, reason, now, includeCommitted, postgres); err != nil {
 		return err
 	}
 	cardFilter := `c.status = 'pending'`
@@ -1189,13 +1189,13 @@ func supersedeDecisionCardsForRun(ctx context.Context, attempt *mutationprotocol
 
 func (s *DecisionPostgresOwner) SupersedeRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, reason string, now time.Time, includeCommitted bool) error {
 	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return supersedeDecisionCardsForRun(txctx, attempt, tx, runID, reason, now, includeCommitted, true)
+		return supersedeDecisionCardsForRun(txctx, attempt, tx, s.candidateRequests, runID, reason, now, includeCommitted, true)
 	})
 }
 
 func (s *DecisionSQLiteOwner) SupersedeRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, reason string, now time.Time, includeCommitted bool) error {
 	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return supersedeDecisionCardsForRun(txctx, attempt, tx, runID, reason, now, includeCommitted, false)
+		return supersedeDecisionCardsForRun(txctx, attempt, tx, s.candidateRequests, runID, reason, now, includeCommitted, false)
 	})
 }
 
@@ -1219,7 +1219,7 @@ func (s *DecisionSQLiteOwner) ExpireDecisionCardInputDrafts(ctx context.Context,
 	return count, result.Err()
 }
 
-func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
+func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, lifecycle lifecycleWriter, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	mutationCtx := runtimecorrelation.WithRunID(ctx, runID)
 	query := `SELECT entity_id, instance_path, flow_template, revision, accumulator FROM flow_instances WHERE run_id = ? ORDER BY entity_id`
 	if postgres {
@@ -1291,12 +1291,7 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 	if len(updates) == 0 {
 		return nil
 	}
-	var fact runtimecorrelation.SourceArtifactFact
-	if postgres {
-		fact, err = storerunstate.RequirePostgresActiveSourceTx(mutationCtx, tx, runID)
-	} else {
-		fact, err = storerunstate.RequireSQLiteActiveSourceTx(mutationCtx, tx, runID)
-	}
+	fact, err := lifecycle.RequireActiveSourceTx(mutationCtx, tx, runID)
 	if err != nil {
 		return err
 	}
@@ -1336,7 +1331,7 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 				mutationCtx,
 				attempt,
 				decisionRunSourceOwner(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
-					return storerunstate.RequirePostgresActiveSourceTx(ctx, tx, runID)
+					return lifecycle.RequireActiveSourceTx(ctx, tx, runID)
 				}),
 				item.entityID,
 				before,
@@ -1349,7 +1344,7 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 			mutationCtx,
 			attempt,
 			decisionRunSourceOwner(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
-				return storerunstate.RequireSQLiteActiveSourceTx(ctx, tx, runID)
+				return lifecycle.RequireActiveSourceTx(ctx, tx, runID)
 			}),
 			item.entityID,
 			before,

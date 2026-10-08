@@ -9,6 +9,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -20,6 +21,10 @@ type unusedCandidateWriter struct{}
 
 func (unusedCandidateWriter) WriteCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time) (runtimerunlifecycle.CandidateRequestResult, error) {
 	panic("candidate writer must not run before decision schema admission")
+}
+
+func (unusedCandidateWriter) RequireActiveSourceTx(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error) {
+	panic("source admission must not run before decision schema admission")
 }
 
 func TestDecisionMutationGuardPrecedesTransactionBothStores(t *testing.T) {
