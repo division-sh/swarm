@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -14,6 +15,8 @@ import (
 func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			probe := lifecycletest.New(t)
+			configureOwnedMockLifecycleProbe(t, probe)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleNestedCascade(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "left.work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "tree-seed"})
 			runID := seed.RunID
@@ -50,7 +53,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				t.Fatalf("one constructor did not create the complete initial tree: got=%v want=%v", gotStages, wantStages)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
-			beforeRedundantSeed := repeatedStaticRunSnapshot(t, rt.DB, runID)
+			beforeRedundantSeed := settledStaticRunSnapshot(t, rt, probe, seed)
 			refusal := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{"event_name": "right.work.requested", "run_id": runID, "payload": map[string]any{"seed": true}, "idempotency_key": "redundant-tree-seed"})
 			details, ok := refusal.Data["details"].(map[string]any)
 			if !ok || refusal.Data["code"] != "EVENT_NOT_DECLARED" || details["reason"] != "declared_event_has_no_selected_run_recipient" {
