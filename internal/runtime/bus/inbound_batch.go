@@ -110,45 +110,56 @@ func (eb *EventBus) ReconcileInboundConstruction(ctx context.Context, plan Inbou
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	for index, command := range plan.commands {
+	prepared, activation, found := plan.proposedConstruction(owner)
+	if !found {
+		return fmt.Errorf("rolled-back construction is absent from the exact inbound plan")
+	}
+	if !eb.inboundConstructionMayReuse(prepared, activation) {
+		return fmt.Errorf("rolled-back construction is not select-or-create")
+	}
+	return eb.validateElectedConstruction(ctx, owner, activation)
+}
+
+func (p InboundDeliveryPlan) proposedConstruction(owner runtimeflowidentity.RunScopedFlowInstance) (PreparedPublish, pipeline.FlowInstanceActivationPlan, bool) {
+	for index, command := range p.commands {
 		for _, activation := range command.Activations {
-			if activation.Readiness.RunID != owner.RunID || activation.Identity.Route() != owner.Route {
-				continue
+			if activation.Readiness.RunID == owner.RunID && activation.Identity.Route() == owner.Route {
+				return p.prepared[index], activation, true
 			}
-			if !eb.inboundConstructionMayReuse(plan.prepared[index], activation) {
-				return fmt.Errorf("rolled-back construction is not select-or-create")
-			}
-			reader, ok := eb.templateInstancePlanner.(pipeline.FlowConstructionPublicationReader)
-			if !ok {
-				return fmt.Errorf("construction reconciliation requires its durable receipt owner")
-			}
-			winner, err := reader.LoadFlowConstructionPublication(ctx, owner, activation.Identity.EntityID)
-			if err != nil {
-				return err
-			}
-			if winner.Identity != activation.Identity {
-				return fmt.Errorf("elected construction contradicts its proposed structural owner")
-			}
-			if err := winner.Identity.ValidateConstruction(eb.semanticSource, owner.RunID); err != nil {
-				return err
-			}
-			schema, found := eb.semanticSource.FlowSchemaByID(winner.Identity.TemplateID)
-			if !found || schema.Instance.Empty() {
-				return fmt.Errorf("construction reconciliation requires its declared receiver key")
-			}
-			key := schema.Instance.Path()
-			actual, err := runtimepinrouting.DescriptorAddressFields(winner.Fields)
-			if err != nil {
-				return err
-			}
-			proposed, err := runtimepinrouting.DescriptorAddressFields(activation.Instance.Fields)
-			if err != nil || actual["entity."+key] == "" || actual["entity."+key] != proposed["entity."+key] {
-				return errors.Join(err, fmt.Errorf("elected construction contradicts its selected key"))
-			}
-			return nil
 		}
 	}
-	return fmt.Errorf("rolled-back construction is absent from the exact inbound plan")
+	return PreparedPublish{}, pipeline.FlowInstanceActivationPlan{}, false
+}
+
+func (eb *EventBus) validateElectedConstruction(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, activation pipeline.FlowInstanceActivationPlan) error {
+	reader, ok := eb.templateInstancePlanner.(pipeline.FlowConstructionPublicationReader)
+	if !ok {
+		return fmt.Errorf("construction reconciliation requires its durable receipt owner")
+	}
+	winner, err := reader.LoadFlowConstructionPublication(ctx, owner, activation.Identity.EntityID)
+	if err != nil {
+		return err
+	}
+	if winner.Identity != activation.Identity {
+		return fmt.Errorf("elected construction contradicts its proposed structural owner")
+	}
+	if err := winner.Identity.ValidateConstruction(eb.semanticSource, owner.RunID); err != nil {
+		return err
+	}
+	schema, found := eb.semanticSource.FlowSchemaByID(winner.Identity.TemplateID)
+	if !found || schema.Instance.Empty() {
+		return fmt.Errorf("construction reconciliation requires its declared receiver key")
+	}
+	key := schema.Instance.Path()
+	actual, err := runtimepinrouting.DescriptorAddressFields(winner.Fields)
+	if err != nil {
+		return err
+	}
+	proposed, err := runtimepinrouting.DescriptorAddressFields(activation.Instance.Fields)
+	if err != nil || actual["entity."+key] == "" || actual["entity."+key] != proposed["entity."+key] {
+		return errors.Join(err, fmt.Errorf("elected construction contradicts its selected key"))
+	}
+	return nil
 }
 
 func (eb *EventBus) inboundConstructionMayReuse(prepared PreparedPublish, activation pipeline.FlowInstanceActivationPlan) bool {
