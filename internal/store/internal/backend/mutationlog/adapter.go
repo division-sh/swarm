@@ -48,6 +48,9 @@ func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle
 	if err != nil {
 		return err
 	}
+	if err := attempt.RequireActiveRunSourceAdmission(ctx, runID, runFact); err != nil {
+		return err
+	}
 	contextFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("mutation log bundle source fact is required")
@@ -140,6 +143,9 @@ func insertSQLiteAt(ctx context.Context, attempt *mutationprotocol.Attempt, runL
 	}
 	runFact, err := runLifecycle.RequireActiveRunSource(ctx, runID)
 	if err != nil {
+		return err
+	}
+	if err := attempt.RequireActiveRunSourceAdmission(ctx, runID, runFact); err != nil {
 		return err
 	}
 	contextFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)

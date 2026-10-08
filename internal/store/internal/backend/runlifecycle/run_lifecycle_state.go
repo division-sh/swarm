@@ -458,6 +458,9 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 	} else if rows != 1 {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL terminal run lifecycle lost locked transition")
 	}
+	if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, request.RunID); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
 	snapshot, err := loadPostgresRunLifecycleSnapshot(ctx, tx, request.RunID, false)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
@@ -546,6 +549,9 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 	} else if rows != 1 {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite terminal run lifecycle lost locked transition")
 	}
+	if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, request.RunID); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
 	snapshot, err := loadSQLiteRunLifecycleSnapshot(ctx, tx, request.RunID)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
@@ -619,36 +625,36 @@ func sameRunLifecycleFailure(left, right *runtimefailures.Envelope) bool {
 
 type TerminalRunMutation = terminalRunMutation
 
-func withTerminalAttemptSQL(ctx context.Context, attempt *mutationprotocol.Attempt, write func(*sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+func withTerminalAttemptSQL(ctx context.Context, attempt *mutationprotocol.Attempt, write func(context.Context, *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	var snapshot runtimerunlifecycle.Snapshot
 	var disposition runtimerunlifecycle.MutationDisposition
-	err := attempt.WithSQL(ctx, func(_ context.Context, tx *sql.Tx) (err error) {
-		snapshot, disposition, err = write(tx)
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		snapshot, disposition, err = write(ctx, tx)
 		return err
 	})
 	return snapshot, disposition, err
 }
 
 func (s *RunLifecyclePostgresOwner) CompleteRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 		return s.completeRunTx(ctx, tx, attempt, runID, endedAt)
 	})
 }
 
 func (s *RunLifecycleSQLiteOwner) CompleteRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 		return s.completeRunTx(ctx, tx, attempt, runID, endedAt)
 	})
 }
 
 func (s *RunLifecyclePostgresOwner) MarkRunTerminalStateTx(ctx context.Context, attempt *mutationprotocol.Attempt, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 		return s.markRunTerminalStateTx(ctx, tx, attempt, request)
 	})
 }
 
 func (s *RunLifecycleSQLiteOwner) MarkRunTerminalStateTx(ctx context.Context, attempt *mutationprotocol.Attempt, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 		return s.markRunTerminalStateTx(ctx, tx, attempt, request)
 	})
 }
