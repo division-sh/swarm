@@ -69,7 +69,7 @@ func mutationRefusalFindings(t *testing.T, overlay map[string][]byte) []string {
 					name = owner.FullName()
 					signature := owner.Type().(*types.Signature)
 					allowed = signature.Recv() == nil && ((pkg.PkgPath == base+"apiv1" && owner.Name() == "decisionCardAPIError") ||
-						(pkg.PkgPath == base+"store/internal/backend/decisionpersistence" && owner.Name() == "requireActiveDecisionCardRun"))
+						(pkg.PkgPath == base+"store/internal/backend/decisionpersistence" && owner.Name() == "requireActiveDecisionCardRunTx"))
 				}
 				ast.Inspect(decl, func(n ast.Node) bool {
 					id, ok := n.(*ast.Ident)

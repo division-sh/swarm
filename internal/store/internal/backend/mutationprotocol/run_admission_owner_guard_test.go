@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -74,11 +75,13 @@ func admissionOwnerCalls(path string, file *ast.File) map[string]int {
 func TestActiveRunAdmissionHasClosedOwners(t *testing.T) {
 	const mutationPath = "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go"
 	const statePath = "internal/store/internal/backend/runlifecycle/run_lifecycle_state.go"
+	const leafPath = "internal/store/internal/backend/runlifecycle/sourceadmission/source.go"
 	expected := map[string]int{}
+	for _, method := range []string{"CacheActiveRunSource", "CachedActiveRunSource"} {
+		expected[leafPath+":loadTx:"+method] = 1
+	}
+	expected[leafPath+":requireActiveNonlockingTx:CachedActiveRunSource"] = 1
 	for _, dialect := range []string{"postgres", "sqlite"} {
-		for _, method := range []string{"CacheActiveRunSource", "CachedActiveRunSource"} {
-			expected[mutationPath+":"+dialect+"RunLifecycleMutation.loadSource:"+method] = 1
-		}
 		for _, method := range []string{"Create", "TransitionActive", "ReviseSource"} {
 			expected[mutationPath+":"+dialect+"RunLifecycleMutation."+method+":InvalidateActiveRunSource"] = 1
 		}
@@ -140,5 +143,82 @@ var escaped = admission.CacheActiveRunSource
 	}
 	if calls := admissionOwnerCalls("other.go", file); calls["other.go:unqualified-admission-import"] != 1 {
 		t.Fatalf("unqualified admission import escaped: %v", calls)
+	}
+}
+
+func runAdmissionDelegates(file *ast.File, owners map[string]string) error {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		name := admissionFunctionName(fn)
+		owner, tracked := owners[name]
+		if !tracked {
+			continue
+		}
+		calls, raw := 0, false
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if receiver, ok := selector.X.(*ast.Ident); ok && receiver.Name == "sourceadmission" && selector.Sel.Name == owner {
+				calls++
+			}
+			raw = raw || selector.Sel.Name == "QueryRowContext" || selector.Sel.Name == "Scan"
+			return true
+		})
+		if calls != 1 || raw {
+			return fmt.Errorf("%s must delegate once to %s without interpreting run rows", name, owner)
+		}
+		delete(owners, name)
+	}
+	if len(owners) != 0 {
+		return fmt.Errorf("missing source-admission delegates: %v", owners)
+	}
+	return nil
+}
+
+func TestRunAdmissionLifecycleAndNestedGuardsHaveOneInterpreter(t *testing.T) {
+	for path, owners := range map[string]map[string]string{
+		"runlifecycle/run_lifecycle_mutation.go": {
+			"postgresRunLifecycleMutation.loadSource":            "LoadPostgresTx",
+			"sqliteRunLifecycleMutation.loadSource":              "LoadSQLiteTx",
+			"postgresRunLifecycleMutation.requireSourceArtifact": "RequireArtifact",
+			"sqliteRunLifecycleMutation.requireSourceArtifact":   "RequireArtifact",
+		},
+		"runstate/active_guard.go": {
+			"RequirePostgresActiveTx": "LoadPostgresTx", "RequireSQLiteActiveTx": "LoadSQLiteTx",
+			"RequirePostgresActiveQuery": "RequirePostgresActiveQuery", "RequireSQLiteActiveQuery": "RequireSQLiteActiveQuery",
+			"RequirePostgresActiveNonlockingTx": "RequirePostgresActiveNonlockingTx",
+			"RequireSQLiteActiveNonlockingTx":   "RequireSQLiteActiveNonlockingTx",
+		},
+	} {
+		raw, err := os.ReadFile(filepath.Join("..", path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, raw, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := runAdmissionDelegates(file, owners); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRunAdmissionDelegateGuardRejectsCompetingInterpreter(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "guard.go", `package guard
+func RequireActive(ctx, tx, runID any) {
+ sourceadmission.LoadPostgresTx(ctx, tx, runID, true, false)
+ tx.QueryRowContext(ctx, "SELECT status, bundle_hash FROM runs").Scan(&state, &source)
+}`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runAdmissionDelegates(file, map[string]string{"RequireActive": "LoadPostgresTx"}); err == nil {
+		t.Fatal("competing interpreter next to canonical wrapper escaped guard")
 	}
 }

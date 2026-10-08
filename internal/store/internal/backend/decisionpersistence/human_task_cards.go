@@ -87,7 +87,7 @@ func (s *DecisionPostgresOwner) CreateHumanTaskCard(ctx context.Context, card de
 func (s *DecisionPostgresOwner) CreateHumanTaskCardOutcome(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) (decisioncard.HumanTaskCreationResult, error) {
 	result := postgresDecisionMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (string, error) {
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
+			if err := requireActiveDecisionRunTx(txctx, tx, card.RunID, true); err != nil {
 				return err
 			}
 			return insertHumanTaskCardWithStory(txctx, attempt, tx, card, continuation, true)
@@ -106,7 +106,7 @@ func (s *DecisionSQLiteOwner) CreateHumanTaskCard(ctx context.Context, card deci
 func (s *DecisionSQLiteOwner) CreateHumanTaskCardOutcome(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) (decisioncard.HumanTaskCreationResult, error) {
 	result := sqliteDecisionMutation(ctx, s, "sqlite create human-task card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (string, error) {
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
+			if err := requireActiveDecisionRunTx(txctx, tx, card.RunID, false); err != nil {
 				return err
 			}
 			return insertHumanTaskCardWithStory(txctx, attempt, tx, card, continuation, false)
@@ -244,7 +244,7 @@ func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID s
 	if at.IsZero() {
 		return decisioncard.HumanTaskContinuation{}, false, fmt.Errorf("human-task outcome completion requires an authoritative timestamp")
 	}
-	if err := requireActiveDecisionCardRun(ctx, tx, cardID, postgres); err != nil {
+	if err := requireActiveDecisionCardRunTx(ctx, tx, cardID, postgres); err != nil {
 		return decisioncard.HumanTaskContinuation{}, false, err
 	}
 	card, err := loadDecisionCard(ctx, tx, cardID, postgres, true)

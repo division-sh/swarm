@@ -26,7 +26,7 @@ var _ decisioncard.ProposedEffectStore = (*DecisionSQLiteOwner)(nil)
 func (s *DecisionPostgresOwner) CreateProposedEffectCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
 	return writePostgresDecision(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
+			if err := requireActiveDecisionRunTx(txctx, tx, card.RunID, true); err != nil {
 				return err
 			}
 			return insertProposedEffectCardWithStory(txctx, attempt, tx, card, continuation, true)
@@ -37,7 +37,7 @@ func (s *DecisionPostgresOwner) CreateProposedEffectCard(ctx context.Context, ca
 func (s *DecisionSQLiteOwner) CreateProposedEffectCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
 	return writeSQLiteDecision(ctx, s, "sqlite create proposed-effect card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
+			if err := requireActiveDecisionRunTx(txctx, tx, card.RunID, false); err != nil {
 				return err
 			}
 			return insertProposedEffectCardWithStory(txctx, attempt, tx, card, continuation, false)
@@ -376,7 +376,7 @@ func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeE
 	if at.IsZero() {
 		return decisioncard.ProposedEffectContinuation{}, false, fmt.Errorf("proposed-effect route completion requires an authoritative timestamp")
 	}
-	if err := requireActiveDecisionCardRun(ctx, tx, cardID, postgres); err != nil {
+	if err := requireActiveDecisionCardRunTx(ctx, tx, cardID, postgres); err != nil {
 		return decisioncard.ProposedEffectContinuation{}, false, err
 	}
 	card, err := loadDecisionCard(ctx, tx, cardID, postgres, true)
@@ -482,7 +482,7 @@ func supersedeProposedEffectsForLoopGenerations(ctx context.Context, story runti
 	if runID == "" || entityID == "" || reason == "" || at.IsZero() {
 		return false, fmt.Errorf("loop-generation proposed-effect supersession identity is incomplete")
 	}
-	if err := requireActiveDecisionRun(ctx, tx, runID, postgres); err != nil {
+	if err := requireActiveDecisionRunTx(ctx, tx, runID, postgres); err != nil {
 		return false, err
 	}
 	query := `SELECT p.card_id FROM proposed_effect_continuations p JOIN decision_cards c ON c.card_id = p.card_id
