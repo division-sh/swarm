@@ -277,7 +277,7 @@ func issue2564M25AssertReceipt(t *testing.T, selected gateRecoveryStoreCase, run
 func issue2564M25Bundle(t *testing.T, serverURL, success string) *contracts.WorkflowContractBundle {
 	t.Helper()
 	return loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":   "name: issue2564-m25\nstages: {pending: {initial: true}}\n",
+		"schema.yaml":   "name: issue2564-m25\nstages: {pending: {}}\n",
 		"entities.yaml": "test_entity:\n  local: {type: integer, initial: 0}\n  folded: {type: integer, initial: 0}\n  received: {type: integer, initial: 0}\n  title: text\n",
 		"events.yaml":   "source.requested: {url: text}\n",
 		"nodes.yaml": fmt.Sprintf(`scanner:

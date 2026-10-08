@@ -183,7 +183,7 @@ func VerifyIssue2564H2BaselineMechanismsForTest(t *testing.T, factory WorkflowTi
 		for _, mechanism := range []string{"H2a_timer_CAS_stranding", "H2b_timer_carrier_revert", "H2c_handler_stale_stage_entry"} {
 			t.Run(backend+"/"+mechanism, func(t *testing.T) {
 				bundle := loadWorkflowTempBundle(t, map[string]string{
-					"schema.yaml":   "name: h2-mechanism-equivalent\nstages:\n  s1:\n    initial: true\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\n  s2:\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\n  closed: {terminal: true}\n",
+					"schema.yaml":   "name: h2-mechanism-equivalent\nstages:\n  s1:\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\n  s2:\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\n  closed: {final: true}\n",
 					"entities.yaml": "hub:\n  count: integer\n  c1: integer\n  c2: integer\n",
 					"events.yaml":   "hub.bump: {n: integer}\n",
 					"nodes.yaml": `hub-node:

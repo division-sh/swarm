@@ -167,6 +167,10 @@ func TestRewrite2566NoFinalRootCensusIsExplicitlyClassified(t *testing.T) {
 			"examples/routing/template-select-existing", "examples/routing/template-select-or-create",
 		},
 		"standing/startup/provider/component sources, not finite run.start": {
+			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1",
+			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2",
+			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3",
+			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/m33",
 			"internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/nested",
 			"internal/cliapp/archetypes/zero-agent-automation", "internal/releasee2e/testdata/channel_onboarding_release",
 			"internal/releasee2e/testdata/full_lifecycle/standing_telegram", "internal/releasee2e/testdata/node_identity_activity",

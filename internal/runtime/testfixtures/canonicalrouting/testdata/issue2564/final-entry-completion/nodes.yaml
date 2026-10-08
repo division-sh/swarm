@@ -1,0 +1,6 @@
+root-close:
+  execution_type: system_node
+  subscribes_to: [overlap.root_closed]
+  event_handlers:
+    overlap.root_closed:
+      advances_to: done

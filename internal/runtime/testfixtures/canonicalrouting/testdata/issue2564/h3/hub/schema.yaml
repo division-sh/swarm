@@ -1,8 +1,8 @@
 name: hub
 instance: hub_id
 stages:
-  idle: {initial: true}
+  idle: {}
   working: {}
-  closed: {terminal: true}
+  closed: {final: true}
 pins:
   inputs: [hub.start, hub.begin, hub.close]
