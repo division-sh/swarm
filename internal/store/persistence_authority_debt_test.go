@@ -28,6 +28,7 @@ import (
 const debtBaselinePath = "internal/store/testdata/persistence_authority_debt_baseline.tsv"
 const debtRefreshEnv = "SWARM_REFRESH_PERSISTENCE_AUTHORITY_DEBT"
 const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5"
+const debtHeadSharingCollectorFrom = "b42ea974646e7b666459091174645baa501d91da16871813568db23858def7b7"
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"
@@ -228,7 +229,12 @@ func debtCollectorDigest(root string) (string, error) {
 	// Include the whole census implementation and the ratchet/scope policy.
 	// Hostile tests and generated debt rows do not define the permission model.
 	hash := sha256.New()
-	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go"} {
+	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_head_census_test.go"} {
+		if path == "internal/store/persistence_authority_head_census_test.go" {
+			if _, err := os.Stat(filepath.Join(root, path)); os.IsNotExist(err) {
+				continue // The trusted predecessor predates in-process sharing.
+			}
+		}
 		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, path), nil, parser.AllErrors)
 		if err != nil {
 			return "", err
@@ -455,7 +461,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	baseFindings := debtLoadPersistenceAuthorityFindings(t, baseRoot)
 	baseFindings = append(baseFindings, debtSelectedBoundaryFindings(t, baseRoot)...)
 	baseActual := authorityDebtSites(baseFindings)
-	headFindings := debtLoadPersistenceAuthorityFindings(t, root)
+	headFindings := debtLoadHeadCensus(t, root)
 	headFindings = append(headFindings, debtSelectedBoundaryFindings(t, root)...)
 	actual := authorityDebtSites(headFindings)
 	baseBytes, baseErr := os.ReadFile(filepath.Join(baseRoot, debtBaselinePath))
@@ -584,6 +590,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == debtG01CollectorFrom && trusted.Collector == debtG01CollectorFrom &&
 		current == debtG01CollectorTo && head.Collector == debtG01CollectorTo &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil
+	}
+	if base == debtHeadSharingCollectorFrom && trusted.Collector == debtHeadSharingCollectorFrom &&
+		current == debtHeadSharingCollectorTo && head.Collector == debtHeadSharingCollectorTo &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil
 	}

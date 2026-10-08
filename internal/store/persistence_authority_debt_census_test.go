@@ -41,34 +41,8 @@ func debtLoadPersistenceAuthorityFindings(t *testing.T, root string) []authority
 	var findings []authorityFinding
 	scan := debtNewAuthorityTypeScan()
 	{
-		context := build.Default
-		context.GOOS, context.GOARCH, context.CgoEnabled = "linux", "amd64", true
-		context.BuildTags = nil
-		context.ToolTags = []string{"amd64.v1"}
-		dirs := map[string]bool{}
-		for path := range sources {
-			matches, err := context.MatchFile(filepath.Dir(path), filepath.Base(path))
-			if err != nil {
-				t.Fatalf("select owned authority source %s: %v", path, err)
-			}
-			if matches {
-				activeFiles[path] = true
-				dir, err := filepath.Rel(root, filepath.Dir(path))
-				if err != nil {
-					t.Fatal(err)
-				}
-				dirs["./"+filepath.ToSlash(dir)] = true
-			}
-		}
 		var patterns []string
-		for dir := range dirs {
-			patterns = append(patterns, dir)
-		}
-		sort.Strings(patterns)
-		if len(patterns) == 0 {
-			t.Fatal("authority census matched no packages")
-		}
-		patterns = append(patterns, "database/sql", "context")
+		activeFiles, patterns = debtAuthorityPackagePatterns(t, root, sources)
 		cfg := &packages.Config{
 			Dir: root, Env: debtCensusEnvironment(), Fset: fset,
 			BuildFlags: []string{"-trimpath"},
@@ -175,6 +149,38 @@ func debtLoadPersistenceAuthorityFindings(t *testing.T, root string) []authority
 	}
 	sort.Slice(findings, func(i, j int) bool { return debtAuthorityFindingLess(findings[i], findings[j]) })
 	return findings
+}
+
+func debtAuthorityPackagePatterns(t *testing.T, root string, sources map[string]string) (map[string]bool, []string) {
+	t.Helper()
+	context := build.Default
+	context.GOOS, context.GOARCH, context.CgoEnabled = "linux", "amd64", true
+	context.BuildTags = nil
+	context.ToolTags = []string{"amd64.v1"}
+	active, dirs := map[string]bool{}, map[string]bool{}
+	for path := range sources {
+		matches, err := context.MatchFile(filepath.Dir(path), filepath.Base(path))
+		if err != nil {
+			t.Fatalf("select owned authority source %s: %v", path, err)
+		}
+		if matches {
+			active[path] = true
+			dir, err := filepath.Rel(root, filepath.Dir(path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dirs["./"+filepath.ToSlash(dir)] = true
+		}
+	}
+	var patterns []string
+	for dir := range dirs {
+		patterns = append(patterns, dir)
+	}
+	sort.Strings(patterns)
+	if len(patterns) == 0 {
+		t.Fatal("authority census matched no packages")
+	}
+	return active, append(patterns, "database/sql", "context")
 }
 
 func debtCensusEnvironment() []string {

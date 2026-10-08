@@ -2,10 +2,10 @@ package store_test
 
 import "testing"
 
-// Each family consumes one fresh, complete checkout census. There is no cached
-// source, filtered inventory or repeated type-load per assertion family.
+// All families and the ratchet share one complete census of identical live
+// inputs within this process; changed source or context requires a fresh scan.
 func TestNativeFixtureFamiliesDoNotReceiveRawAuthority(t *testing.T) {
-	findings := debtLoadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+	findings := debtLoadHeadCensus(t, persistenceAuthorityRepoRoot(t))
 	for _, family := range []struct {
 		name   string
 		verify func(*testing.T, []authorityFinding)
