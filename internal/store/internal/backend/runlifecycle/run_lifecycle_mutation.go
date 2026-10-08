@@ -12,7 +12,9 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
 type postgresRunLifecycleMutation struct {
@@ -407,152 +409,20 @@ func (m sqliteRunLifecycleMutation) RequireActiveSource(ctx context.Context, run
 	return m.loadSource(ctx, runID, true)
 }
 
-func (m postgresRunLifecycleMutation) loadSource(
-	ctx context.Context,
-	runID string,
-	requireActive bool,
-) (runtimecorrelation.SourceArtifactFact, error) {
-	if m.tx == nil {
-		return runtimecorrelation.SourceArtifactFact{}, errors.New("PostgreSQL run lifecycle mutation requires transaction")
-	}
-	runID = strings.TrimSpace(runID)
-	if requireActive && !m.readOnly {
-		fact, cached, err := mutationprotocol.CachedActiveRunSource(ctx, m.tx, runID)
-		if err != nil {
-			return runtimecorrelation.SourceArtifactFact{}, err
-		}
-		if cached {
-			// runs has no artifact FK; even an admitted run can lose its artifact.
-			if err := m.requireSourceArtifact(ctx, fact); err != nil {
-				return runtimecorrelation.SourceArtifactFact{}, err
-			}
-			return fact, nil
-		}
-	}
-	var state, bundleHash string
-	query := `
-		SELECT status, bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`
-	if !m.readOnly {
-		query += ` FOR UPDATE`
-	}
-	err := m.tx.QueryRowContext(ctx, query, runID).Scan(&state, &bundleHash)
-	if errors.Is(err, sql.ErrNoRows) {
-		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
-	}
-	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("load PostgreSQL run lifecycle source: %w", err)
-	}
-	parsed, err := runtimerunlifecycle.ParseState(state)
-	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, err
-	}
-	if requireActive && !parsed.Active() {
-		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
-	}
-	fact, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
-	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("decode PostgreSQL run lifecycle source: %w", err)
-	}
-	if err := m.requireSourceArtifact(ctx, fact); err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, err
-	}
-	if requireActive && !m.readOnly {
-		if err := mutationprotocol.CacheActiveRunSource(ctx, m.tx, runID, fact); err != nil {
-			return runtimecorrelation.SourceArtifactFact{}, err
-		}
-	}
-	return fact, nil
+func (m postgresRunLifecycleMutation) loadSource(ctx context.Context, runID string, requireActive bool) (runtimecorrelation.SourceArtifactFact, error) {
+	return sourceadmission.LoadPostgresTx(ctx, m.tx, runID, requireActive, m.readOnly)
 }
 
-func (m sqliteRunLifecycleMutation) loadSource(
-	ctx context.Context,
-	runID string,
-	requireActive bool,
-) (runtimecorrelation.SourceArtifactFact, error) {
-	if m.tx == nil {
-		return runtimecorrelation.SourceArtifactFact{}, errors.New("SQLite run lifecycle mutation requires transaction")
-	}
-	runID = strings.TrimSpace(runID)
-	if requireActive && !m.readOnly {
-		fact, cached, err := mutationprotocol.CachedActiveRunSource(ctx, m.tx, runID)
-		if err != nil {
-			return runtimecorrelation.SourceArtifactFact{}, err
-		}
-		if cached {
-			// runs has no artifact FK; even an admitted run can lose its artifact.
-			if err := m.requireSourceArtifact(ctx, fact); err != nil {
-				return runtimecorrelation.SourceArtifactFact{}, err
-			}
-			return fact, nil
-		}
-	}
-	var state, bundleHash string
-	err := m.tx.QueryRowContext(ctx, `
-		SELECT status, bundle_hash
-		FROM runs
-		WHERE run_id = ?
-	`, runID).Scan(&state, &bundleHash)
-	if errors.Is(err, sql.ErrNoRows) {
-		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
-	}
-	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("load SQLite run lifecycle source: %w", err)
-	}
-	parsed, err := runtimerunlifecycle.ParseState(state)
-	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, err
-	}
-	if requireActive && !parsed.Active() {
-		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
-	}
-	fact, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
-	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("decode SQLite run lifecycle source: %w", err)
-	}
-	if err := m.requireSourceArtifact(ctx, fact); err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, err
-	}
-	if requireActive && !m.readOnly {
-		if err := mutationprotocol.CacheActiveRunSource(ctx, m.tx, runID, fact); err != nil {
-			return runtimecorrelation.SourceArtifactFact{}, err
-		}
-	}
-	return fact, nil
+func (m sqliteRunLifecycleMutation) loadSource(ctx context.Context, runID string, requireActive bool) (runtimecorrelation.SourceArtifactFact, error) {
+	return sourceadmission.LoadSQLiteTx(ctx, m.tx, runID, requireActive, m.readOnly)
 }
 
 func (m postgresRunLifecycleMutation) requireSourceArtifact(ctx context.Context, fact runtimecorrelation.SourceArtifactFact) error {
-	var exists bool
-	if err := m.tx.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)
-	`, fact.BundleHash()).Scan(&exists); err != nil {
-		return fmt.Errorf("validate PostgreSQL run source artifact: %w", err)
-	}
-	if !exists {
-		return &runtimerunlifecycle.SourceArtifactUnavailableError{
-			BundleHash: fact.BundleHash(),
-			Cause:      "missing_source_artifact",
-		}
-	}
-	return nil
+	return sourceadmission.RequireArtifact(ctx, m.tx, privateactivity.DialectPostgres, fact)
 }
 
 func (m sqliteRunLifecycleMutation) requireSourceArtifact(ctx context.Context, fact runtimecorrelation.SourceArtifactFact) error {
-	var exists bool
-	if err := m.tx.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = ?)
-	`, fact.BundleHash()).Scan(&exists); err != nil {
-		return fmt.Errorf("validate SQLite run source artifact: %w", err)
-	}
-	if !exists {
-		return &runtimerunlifecycle.SourceArtifactUnavailableError{
-			BundleHash: fact.BundleHash(),
-			Cause:      "missing_source_artifact",
-		}
-	}
-	return nil
+	return sourceadmission.RequireArtifact(ctx, m.tx, privateactivity.DialectSQLite, fact)
 }
 
 func (m postgresRunLifecycleMutation) Create(

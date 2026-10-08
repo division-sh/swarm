@@ -197,7 +197,10 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 			continue
 		}
 		mockOracles := map[string]bool{}
-		if path == "internal/store/internal/backend/mutationprotocol/event_counts_test.go" && fn.Name.Name == "TestEventCountDeltasBatchOrderAndForeignReadRefusal" {
+		if path == "internal/store/internal/backend/mutationprotocol/event_counts_test.go" &&
+			(fn.Name.Name == "TestEventCountDeltasBatchOrderAndForeignReadRefusal" ||
+				fn.Name.Name == "TestEventCountDeltasPhysicalIdentityAndOrder" ||
+				fn.Name.Name == "TestEventCountDeltasUnrecognizedIdentityPreservesSQLValidation") {
 			mockOracles[`UPDATE runs SET event_count = event_count \+`] = true
 		}
 		if path == "internal/store/internal/backend/runlifecycle/run_admission_test.go" && fn.Name.Name == "TestRunAdmissionCanonicalSourceRevisionReloads" {
