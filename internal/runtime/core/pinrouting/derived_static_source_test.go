@@ -101,7 +101,7 @@ func TestDerivedStaticSourceValidatesBeforeNormalization(t *testing.T) {
 			i.ParentRoute.EntityID = flowidentity.EntityID("orders/two")
 			i.ParentEntityID = i.ParentRoute.EntityID
 		}},
-		{"foreign parent entity", func(i *flowidentity.Instance) { i.ParentRoute.EntityID = "foreign"; i.ParentEntityID = "foreign" }},
+		{"contradictory parent entity", func(i *flowidentity.Instance) { i.ParentRoute.EntityID = "foreign" }},
 		{"foreign declaration", func(i *flowidentity.Instance) { i.TemplateID = "orders" }},
 		{"foreign entity", func(i *flowidentity.Instance) { i.EntityID = "foreign" }},
 		{"unstored", func(i *flowidentity.Instance) { i.HasStoredPath = false }},

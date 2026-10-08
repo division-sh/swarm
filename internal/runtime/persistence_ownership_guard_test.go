@@ -1,7 +1,9 @@
 package runtime
 
 import (
+	"bytes"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -79,12 +81,12 @@ func TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape(t *testing.T) 
 func TestEventBusDurableDependenciesAreExplicit(t *testing.T) {
 	root := persistenceOwnershipRepoRoot(t)
 	source := readOwnershipSource(t, root, "internal/runtime/bus/eventbus.go")
-	assertOwnershipSourceContains(t, source,
-		"type DurableDependencies struct",
-		"FlowRouteTopology     FlowInstanceRouteTopologyPersistence",
-		"RunLifecycle          runtimerunlifecycle.OperationOwner",
-		"DeliveryLifecycle     runtimedelivery.Store",
-	)
+	assertOwnershipStructFields(t, root, "internal/runtime/bus/eventbus.go", "DurableDependencies", map[string]string{
+		"ConstructionPublications": "runtimepipeline.FlowConstructionPublicationReader",
+		"FlowRouteTopology":        "FlowInstanceRouteTopologyPersistence",
+		"RunLifecycle":             "runtimerunlifecycle.OperationOwner",
+		"DeliveryLifecycle":        "runtimedelivery.Store",
+	})
 	assertOwnershipSourceExcludes(t, source,
 		"RuntimeMutations",
 		"RuntimeMutationRunner",
@@ -103,16 +105,46 @@ func TestEventBusConstructorsDoNotClassifyStoreCapabilities(t *testing.T) {
 
 func TestEventBusRoutePersistenceDependenciesAreExplicit(t *testing.T) {
 	root := persistenceOwnershipRepoRoot(t)
-	source := readOwnershipSource(t, root, "internal/runtime/bus/eventbus.go")
-	assertOwnershipSourceContains(t, source,
-		"FlowRoutes            FlowInstanceRoutePersistence",
-		"FlowRouteRecords      FlowInstanceRouteRecordReader",
-		"FlowRouteSets         FlowInstanceRouteSetPersistence",
-		"FlowRouteTopology     FlowInstanceRouteTopologyPersistence",
-		"FlowRouteRollback     FlowInstanceRouteRollbackPersistence",
-		"ActiveAgents          ActiveAgentDescriptorLister",
-		"ActiveFlows           ActiveFlowInstanceDescriptorLister",
-	)
+	assertOwnershipStructFields(t, root, "internal/runtime/bus/eventbus.go", "DurableDependencies", map[string]string{
+		"FlowRoutes":        "FlowInstanceRoutePersistence",
+		"FlowRouteRecords":  "FlowInstanceRouteRecordReader",
+		"FlowRouteSets":     "FlowInstanceRouteSetPersistence",
+		"FlowRouteTopology": "FlowInstanceRouteTopologyPersistence",
+		"FlowRouteRollback": "FlowInstanceRouteRollbackPersistence",
+		"ActiveAgents":      "ActiveAgentDescriptorLister",
+		"ActiveFlows":       "ActiveFlowInstanceDescriptorLister",
+	})
+}
+
+func assertOwnershipStructFields(t *testing.T, root, path, owner string, required map[string]string) {
+	t.Helper()
+	file := parseOwnershipFile(t, filepath.Join(root, filepath.FromSlash(path)))
+	fields := make(map[string]string)
+	ast.Inspect(file, func(node ast.Node) bool {
+		spec, ok := node.(*ast.TypeSpec)
+		if !ok || spec.Name.Name != owner {
+			return true
+		}
+		structure, ok := spec.Type.(*ast.StructType)
+		if !ok {
+			t.Fatalf("ownership declaration %s is not a struct", owner)
+		}
+		for _, field := range structure.Fields.List {
+			var text bytes.Buffer
+			if err := format.Node(&text, token.NewFileSet(), field.Type); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range field.Names {
+				fields[name.Name] = text.String()
+			}
+		}
+		return false
+	})
+	for name, want := range required {
+		if got := fields[name]; got != want {
+			t.Fatalf("ownership field %s.%s = %q, want %q", owner, name, got, want)
+		}
+	}
 }
 
 func TestWorkflowMutationExecutorDoesNotEscapeOpaquePersistence(t *testing.T) {

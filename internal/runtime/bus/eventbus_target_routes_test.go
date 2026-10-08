@@ -2668,6 +2668,7 @@ func TestEventBusRootInputDoesNotDeliverToUnconnectedPrivateChild(t *testing.T) 
 			if explicitTarget {
 				envelope = events.EnvelopeForTargetRoute(envelope, target)
 			}
+			installConnectionSourceConstruction(t, eb, eb.semanticSource, ".")
 			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "thing.created", "", "", []byte("{}"), 0, busInternalTestRunID, "", envelope, time.Now().UTC())
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err == nil && (len(plan.DeliveryRoutes) != 0 || len(plan.RoutedRecipients) != 0) {
@@ -2890,6 +2891,7 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 			}
 			runID, eventID := uuid.NewString(), uuid.NewString()
 			store.setTargetOwnerRoutes(target, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runtimeflowidentity.EntityID(runID)})
+			installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
 			evt := eventtest.OperatorInjectedWithRoutingSource(eventID, "thing.created", "operator", "", []byte("{}"), 0, runID, nil, envelope, eventtest.RootRoutingSource(runID), time.Now().UTC())
 			plan, err := eb.CheckAPIEventPublishRecipientPlan(context.Background(), evt, &endpoint)
 			if err == nil && (len(plan.DeliveryRoutes) != 0 || len(plan.RoutedRecipients) != 0) {
@@ -3072,6 +3074,7 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("item.received"))
+	installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
 	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("item.received"),
@@ -3505,6 +3508,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 		workflowRuntimeIdentity,
 		"",
 	)
+	installConnectionSourceConstructionForRun(t, eb, source, ".", runID)
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		eventID,
 		events.EventType("thing.created"),
@@ -3548,8 +3552,10 @@ func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testi
 	store := rejectingDeliveryRouteStore{owners: []ActiveTargetDescriptor{{
 		ID: "rejecting-store-owner", FlowInstance: runID, EntityID: owner.EntityID,
 	}}}
+	source := semanticview.Wrap(routedTopLevelProjectNodeBundle(t))
+	store.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: ConstructedFlowInstanceIdentityFixture(source, ".", runID, runID)}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(routedTopLevelProjectNodeBundle(t)),
+		ContractBundle: source,
 		Durable:        DurableTestDependencyProjection(store),
 	})
 	if err != nil {
@@ -3563,7 +3569,18 @@ func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testi
 }
 
 type rejectingDeliveryRouteStore struct {
-	owners []ActiveTargetDescriptor
+	owners       []ActiveTargetDescriptor
+	construction runtimepipeline.FlowConstructionPublicationEvidence
+}
+
+func (s rejectingDeliveryRouteStore) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entity string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, err
+	}
+	if s.construction.Identity.Route() != owner.Route || owner.RunID != s.construction.Identity.InstancePath || entity != s.construction.Identity.EntityID {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, errors.New("absent rejecting-store root receipt")
+	}
+	return s.construction, nil
 }
 
 func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
