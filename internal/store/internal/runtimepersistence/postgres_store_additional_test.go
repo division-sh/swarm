@@ -31,7 +31,6 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -210,7 +209,8 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 		endedAt     time.Time
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), event_count, entity_count, ended_at
+		SELECT COALESCE(status, ''), event_count,
+		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id), ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&status, &eventCount, &entityCount, &endedAt); err != nil {
@@ -252,21 +252,16 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite stale run/event overcount", snap.EntityCount)
 	}
 
-	if err := runSelectedFixtureMutation(ctx, pg, "sync test run counters", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return pg.runLifecyclePostgresOwner.SyncCountersTx(txctx, attempt, runID)
-	}); err != nil {
-		t.Fatalf("SyncCounts: %v", err)
-	}
 	var eventCount, entityCount int
 	if err := db.QueryRowContext(ctx, `
-		SELECT event_count, entity_count
+		SELECT event_count, (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&eventCount, &entityCount); err != nil {
-		t.Fatalf("load synced counters: %v", err)
+		t.Fatalf("load incremental/derived counters: %v", err)
 	}
 	if eventCount != 4 || entityCount != 1 {
-		t.Fatalf("synced counters event_count=%d entity_count=%d, want 4/1 from complete event graphs/entity_state", eventCount, entityCount)
+		t.Fatalf("incremental/derived counters event_count=%d entity_count=%d, want 4/1 from complete event graphs/entity_state", eventCount, entityCount)
 	}
 }
 
@@ -284,7 +279,7 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	var baselineEventCount, baselineEntityCount int
 	if err := db.QueryRowContext(ctx, `
-		SELECT event_count, entity_count
+		SELECT event_count, (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&baselineEventCount, &baselineEntityCount); err != nil {
@@ -315,7 +310,8 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 		endedAt     sql.NullTime
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), event_count, entity_count, ended_at
+		SELECT COALESCE(status, ''), event_count,
+		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id), ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&status, &eventCount, &entityCount, &endedAt); err != nil {
@@ -410,7 +406,8 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 		endedAt     sql.NullTime
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), event_count, entity_count, ended_at
+		SELECT COALESCE(status, ''), event_count,
+		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id), ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&status, &eventCount, &entityCount, &endedAt); err != nil {

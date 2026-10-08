@@ -318,9 +318,6 @@ func (s *EventSQLiteOwner) finalizeInboundPublicationTx(ctx context.Context, tx 
 	if affected, _ := res.RowsAffected(); affected != 1 {
 		return runtimeinbound.Record{}, fmt.Errorf("prepared sqlite inbound publication %s was not finalized", request.PublicationID)
 	}
-	if err := s.RunLifecycleSQLiteOwner.SyncCountersTx(ctx, attempt, request.ResolvedRunID); err != nil {
-		return runtimeinbound.Record{}, fmt.Errorf("synchronize sqlite inbound publication event count: %w", err)
-	}
 	record, found, err := loadSQLiteInboundPublicationTx(ctx, tx, request.Provider, request.EntityID, request.ProviderEventID)
 	if err != nil {
 		return runtimeinbound.Record{}, err

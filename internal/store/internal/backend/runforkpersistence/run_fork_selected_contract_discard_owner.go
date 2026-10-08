@@ -24,7 +24,7 @@ type runForkSelectedContractDiscardPort struct {
 	guard          func(context.Context, *sql.Tx, string) error
 	terminalize    func(context.Context, *mutationprotocol.Attempt, string, string) error
 	markTerminal   func(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.TerminalRequest) error
-	deleteEvents   func(context.Context, *sql.Tx, string) error
+	deleteEvents   func(context.Context, *sql.Tx, string) (int64, error)
 	deleteRun      func(context.Context, *mutationprotocol.Attempt, string) error
 	now            func() time.Time
 }
@@ -88,8 +88,14 @@ func discardMaterializedSelectedContractExecutionFork(ctx context.Context, forkR
 			if err := deleteSelectedContractForkState(txctx, tx, forkRunID, preserveCompletionEvidence); err != nil {
 				return err
 			}
-			if err := port.deleteEvents(txctx, tx, forkRunID); err != nil {
+			deleted, err := port.deleteEvents(txctx, tx, forkRunID)
+			if err != nil {
 				return err
+			}
+			if preserveCompletionEvidence {
+				if err := attempt.AddEventCountDelta(forkRunID, -deleted); err != nil {
+					return err
+				}
 			}
 			if _, err := tx.ExecContext(txctx, `DELETE FROM entity_state WHERE run_id = $1`, forkRunID); err != nil {
 				return fmt.Errorf("delete selected-contract fork entity state: %w", err)
@@ -183,7 +189,7 @@ func postgresRunForkSelectedContractDiscardPort(s *RunForkPostgresOwner) runFork
 			_, _, err := s.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, attempt, req)
 			return err
 		},
-		deleteEvents: func(ctx context.Context, tx *sql.Tx, runID string) error {
+		deleteEvents: func(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
 			return eventrecordpostgres.DeleteSelectedForkRunEvents(ctx, tx, runID)
 		},
 		deleteRun: s.RunLifecyclePostgresOwner.DeleteMaterializedForkRunTx,
@@ -212,7 +218,7 @@ func sqliteRunForkSelectedContractDiscardPort(s *RunForkSQLiteOwner) runForkSele
 			_, _, err := s.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, attempt, req)
 			return err
 		},
-		deleteEvents: func(ctx context.Context, tx *sql.Tx, runID string) error {
+		deleteEvents: func(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
 			return eventrecordsqlite.DeleteSelectedForkRunEvents(ctx, tx, runID)
 		},
 		deleteRun: s.RunLifecycleSQLiteOwner.DeleteMaterializedForkRunTx,

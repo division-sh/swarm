@@ -286,7 +286,7 @@ SELECT
 		  AND ssg.generation = r.origin_generation
 	),
 	COALESCE((SELECT COUNT(DISTINCT es.entity_id) FROM entity_state es WHERE es.run_id = r.run_id), 0),
-	COALESCE(NULLIF(r.event_count, 0), (SELECT COUNT(*) FROM events e WHERE e.run_id = r.run_id), 0),
+	r.event_count,
 	r.started_at,
 	r.ended_at,
 	COALESCE(r.continued_as_run_id, ''),

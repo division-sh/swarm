@@ -18830,7 +18830,15 @@ platform_tables:
         infer origin from event history. Standing origins are additionally validated against the exact
         standing_service_generations relation. Fork-materialized runs link back to their parent through the origin-owned
         forked_from_run_id, forked_from_point_kind, and positive forked_from_revision coordinates. Event forks also
-        retain forked_from_event_id; deployment-revision forks have no event ID and never invent one.'
+        retain forked_from_event_id; deployment-revision forks have no event ID and never invent one.
+        event_count is the exact nonnegative projection of physical events rows linked by run_id, including durable
+        rejection events; zero means no such rows, never an unknown count. The private selected-store run-lifecycle
+        counter owner applies actual inserted, copied, and deleted row deltas with atomic database updates in the
+        same native transaction as the event work, never by reading and overwriting an old total or recounting events.
+        Exact duplicates, runless events, and outcomes without event rows contribute zero. Transaction-visible
+        lifecycle, history, and result snapshots preserve the exact count, and rollback discards both event work and
+        counter changes. Public entity_count remains derived from distinct entity_state.entity_id values for the run
+        and is not stored on runs.'
       ddl: |-
         CREATE TABLE runs (
             run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -18848,8 +18856,7 @@ platform_tables:
             forked_from_revision BIGINT CHECK (forked_from_revision > 0),
             forked_from_event_id UUID,
             continued_as_run_id UUID REFERENCES runs(run_id),
-            entity_count      INTEGER NOT NULL DEFAULT 0,
-            event_count       INTEGER NOT NULL DEFAULT 0,
+            event_count       INTEGER NOT NULL DEFAULT 0 CHECK (event_count >= 0),
             failure           JSONB,
             started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             ended_at          TIMESTAMPTZ,

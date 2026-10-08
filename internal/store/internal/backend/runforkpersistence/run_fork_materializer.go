@@ -164,7 +164,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 				return fmt.Errorf("resolve fork author activity scope: %w", err)
 			}
 			ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
-			if err := s.InsertRunForkRunTx(ctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, len(plan.Entities), now, identity.SourceArtifactFact); err != nil {
+			if err := s.InsertRunForkRunTx(ctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, now, identity.SourceArtifactFact); err != nil {
 				return fmt.Errorf("insert fork run: %w", err)
 			}
 			pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
@@ -333,7 +333,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 				return fmt.Errorf("resolve fork author activity scope: %w", err)
 			}
 			txctx = runtimeauthoractivity.WithScope(txctx, forkScope)
-			if err := s.InsertRunForkRunTx(txctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, len(plan.Entities), now, identity.SourceArtifactFact); err != nil {
+			if err := s.InsertRunForkRunTx(txctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, now, identity.SourceArtifactFact); err != nil {
 				return fmt.Errorf("insert fork run: %w", err)
 			}
 			pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
