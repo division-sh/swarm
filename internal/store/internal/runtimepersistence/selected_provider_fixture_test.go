@@ -35,8 +35,8 @@ func newSelectedProviderCompletionFixture(t *testing.T, store selectedCompletion
 func newSelectedProviderCompletionFixtureWithProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process startupownership.ProcessCapability) selectedCompletionFixture {
 	t.Helper()
 	root := t.TempDir()
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: grant-receiver-root\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "name: global\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: grant-receiver-root\nstages:\n  active: {}\n  done: {final: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "name: global\nstages:\n  active: {}\n  done: {final: true}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/entities.yaml"), "receiver: {}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "events.yaml"), "test.grant_receiver:\n")
 	compiled, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
