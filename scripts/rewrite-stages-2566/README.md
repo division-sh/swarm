@@ -38,6 +38,15 @@ this guard. Later intentional entry
 changes must update the affected golden explicitly; this does not freeze other
 fixture bytes or require maintaining the historical rewrite hashes forever.
 
+Parameterized source builders need actual branch execution as well as literal
+goldens. `TestEntityToolFixtureInitialStageBranches` calls the real
+`loadWave1EntityToolBundleWithInitialStage` for `queued` and `marginal_review`,
+checking compiled entry, declaration order and final `closed` in both cases.
+The unchanged `TestEntityTools_BracketListTypeRefsAcrossConsumers` exercises
+the latter branch's persisted search and one-row assertion. The source's
+`intent.json` review records these proofs; they are not additional independent
+literal decisions in the 566 count.
+
 The original preparation was independently reviewed before the grammar cut.
 Post-rebase capture preserves those decisions instead of deriving intent from
 the new parser. To refresh exact integration edits after a reviewed repair:

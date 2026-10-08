@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -2882,13 +2883,21 @@ func loadWave1EntityToolBundleWithInitialStage(t *testing.T, actor models.AgentC
 	if strings.TrimSpace(typesYAML) != "" {
 		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "types.yaml"), typesYAML)
 	}
-	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf(`name: %s
+	schemaYAML := fmt.Sprintf(`name: %s
 instance: fixture_key
 stages:
   queued: {}
   marginal_review: {}
   closed: {final: true}
-`, flowID))
+`, flowID)
+	switch initial {
+	case "queued":
+	case "marginal_review":
+		schemaYAML = strings.Replace(schemaYAML, "  queued: {}\n  marginal_review: {}\n", "  marginal_review: {}\n  queued: {}\n", 1)
+	default:
+		t.Fatalf("unsupported entity-tool fixture initial stage %q; want queued or marginal_review", initial)
+	}
+	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schemaYAML)
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), entityToolKeyedFixtureYAML(entitiesYAML))
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor)+"  entity_writes:\n    "+entityType+": {save: all}\n")
 
@@ -2900,6 +2909,34 @@ stages:
 		t.Fatalf("FlowPrimaryEntityContract(%q) = (%q, ok=%v), want %q", flowID, got, ok, entityType)
 	}
 	return bundle
+}
+
+func TestEntityToolFixtureInitialStageBranches(t *testing.T) {
+	actor := models.AgentConfig{ID: "validator", Role: "validator", Tools: []string{"get_entity", "save_entity_field"}}
+	for _, tc := range []struct {
+		entry string
+		order []string
+	}{
+		{"queued", []string{"queued", "marginal_review", "closed"}},
+		{"marginal_review", []string{"marginal_review", "queued", "closed"}},
+	} {
+		t.Run(tc.entry, func(t *testing.T) {
+			bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "validation_case", "", "validation_case:\n  status: text\n", tc.entry)
+			graph, ok := bundle.WorkflowStageTopology("validation")
+			if !ok {
+				t.Fatal("missing compiled validation stage catalog")
+			}
+			if entry := bundle.FlowInitialStage("validation"); entry != tc.entry || graph.InitialStage != tc.entry {
+				t.Fatalf("requested entry %q, compiled entry %q (graph %q)", tc.entry, entry, graph.InitialStage)
+			}
+			if order := graph.StageIDs(); !reflect.DeepEqual(order, tc.order) {
+				t.Fatalf("compiled declaration order = %v, want %v", order, tc.order)
+			}
+			if finals := graph.FinalStageIDs(); !reflect.DeepEqual(finals, []string{"closed"}) {
+				t.Fatalf("compiled final stages = %v, want [closed]", finals)
+			}
+		})
+	}
 }
 
 func loadRoleScopedEntityToolBundle(t *testing.T, actor models.AgentConfig) *runtimecontracts.WorkflowContractBundle {
