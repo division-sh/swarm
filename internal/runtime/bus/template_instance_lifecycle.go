@@ -146,33 +146,9 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 	if err != nil {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err
 	}
-	owners, err := o.constructionOwners(ctx, evt.RunID())
+	matches, err := o.matchingConstructions(ctx, evt, plan, keyMaterial, descriptors, parent)
 	if err != nil {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err
-	}
-	var matches []runtimeflowidentity.Instance
-	parentRoute := runtimeflowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
-	for _, descriptor := range descriptors {
-		if !runtimepinrouting.ConnectInstanceKeyDescriptorMatches(keyMaterial, descriptor) {
-			continue
-		}
-		flowID := descriptor.FlowID
-		if known, found := owners[descriptor.FlowInstance]; found {
-			flowID = known.TemplateID
-		}
-		if flowID != "" && flowID != plan.ReceiverEndpoint().Readback().FlowID {
-			continue
-		}
-		instance, err := o.constructionInstance(ctx, evt.RunID(), plan.ReceiverEndpoint().Readback().FlowID, descriptor.FlowInstance, descriptor.EntityID, owners)
-		if err != nil {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("receiver descriptor contradicts its stored construction: %w", err)
-		}
-		if err := instance.ValidateConstruction(o.source, evt.RunID()); err != nil {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err
-		}
-		if instance.TemplateID == plan.ReceiverEndpoint().Readback().FlowID && instance.ParentRoute == parentRoute {
-			matches = append(matches, instance)
-		}
 	}
 	if len(matches) > 1 {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetAmbiguous}, TemplateInstanceLifecycleDecision{}, true, nil
@@ -210,6 +186,39 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 	decision.Action = templateInstanceLifecycleActionPreviewCreate
 	route := plan.ReceiverRoute(req.Instance.InstancePath, req.Instance.EntityID)
 	return templateInstanceLifecycleMaterialization(plan, []events.RouteIdentity{route}), decision, true, nil
+}
+
+func (o templateInstanceLifecycleOwner) matchingConstructions(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, keys []runtimecontracts.TemplateInstanceKeyValue, descriptors []runtimepinrouting.Descriptor, parent runtimeflowidentity.Instance) ([]runtimeflowidentity.Instance, error) {
+	owners, err := o.constructionOwners(ctx, evt.RunID())
+	if err != nil {
+		return nil, err
+	}
+	parentRoute := runtimeflowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
+	flowID := plan.ReceiverEndpoint().Readback().FlowID
+	var matches []runtimeflowidentity.Instance
+	for _, descriptor := range descriptors {
+		if !runtimepinrouting.ConnectInstanceKeyDescriptorMatches(keys, descriptor) {
+			continue
+		}
+		declaringFlow := descriptor.FlowID
+		if known, found := owners[descriptor.FlowInstance]; found {
+			declaringFlow = known.TemplateID
+		}
+		if declaringFlow != "" && declaringFlow != flowID {
+			continue
+		}
+		instance, err := o.constructionInstance(ctx, evt.RunID(), flowID, descriptor.FlowInstance, descriptor.EntityID, owners)
+		if err != nil {
+			return nil, fmt.Errorf("receiver descriptor contradicts its stored construction: %w", err)
+		}
+		if err := instance.ValidateConstruction(o.source, evt.RunID()); err != nil {
+			return nil, err
+		}
+		if instance.TemplateID == flowID && instance.ParentRoute == parentRoute {
+			matches = append(matches, instance)
+		}
+	}
+	return matches, nil
 }
 
 func instanceKeyMaterialForTemplateLifecycle(evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) (runtimepinrouting.ConnectRoutePlanInstanceKeyMaterial, runtimepinrouting.ConnectRoutePlanFailure) {
