@@ -83,7 +83,7 @@ func TestSchemaAdmissionFieldPresenceMatrix(t *testing.T) {
 		{"import.trigger.provider", "imports:\n  provider_trigger_events:\n    - event: inbound.telegram.text_message\n      %s\n", "provider", "telegram", "", "", "S"},
 		{"import.trigger.event", "imports:\n  provider_trigger_events:\n    - provider: telegram\n      %s\n", "event", "inbound.telegram.text_message", "", "", "S"},
 		{"ingress", root, "ingress", "x", "{alias: hooks, providers: [{provider: partner}]}", "", "MP"},
-		{"ingress.alias", ingress, "alias", "hooks", "", "", "S"},
+		{"ingress.alias", ingress, "alias", "hooks", "", "", "MS"},
 		{"ingress.providers", ingress, "providers", "x", "", "[{provider: partner}]", "Q"},
 		{"provider.provider", provider, "provider", "partner", "", "", "S"},
 		{"provider.signing_secret", provider, "signing_secret", "TOKEN", "", "", "MS"},
