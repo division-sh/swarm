@@ -23,10 +23,12 @@ import (
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
@@ -82,7 +84,7 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 }
 
 func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *testing.T) {
-	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
@@ -93,10 +95,16 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	eventsStore := &processIngressEventStore{}
 	persistence.store = eventsStore
 	bundleHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	const runID = "41000000-0000-0000-0000-000000000001"
+	owner, err := runtimeflowidentity.StandingForGeneration(source, ".", runID)
+	if err != nil {
+		t.Fatalf("construct transport fixture owner: %v", err)
+	}
+	eventsStore.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: owner}
 	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
 		ContractBundle:         source,
-		Durable:                runtimebus.DurableDependencies{ActiveFlows: processIngressNoFlowDescriptors{}, TargetOwners: processIngressTargetOwners{{RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-ingress", EntityID: "41000000-0000-0000-0000-000000000002"}}},
+		Durable:                runtimebus.DurableDependencies{ActiveFlows: processIngressNoFlowDescriptors{}, TargetOwners: processIngressTargetOwners{{RunID: runID, FlowInstance: owner.InstancePath, EntityID: owner.EntityID}}, ConstructionPublications: eventsStore},
 		SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(bundleHash),
 		ProviderOutputVerifier: catalog,
 		WorkOwner:              workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
@@ -130,8 +138,8 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 	target := runtimepkg.StandingTarget{
-		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-ingress",
-		Alias: "chat", Provider: "telegram", RunID: "41000000-0000-0000-0000-000000000001",
+		BundleHash: bundleHash, ServiceID: runtimeflowidentity.StandingServiceID("."), FlowPath: ".",
+		Alias: "chat", Provider: "telegram", RunID: runID,
 		Generation: 1, PublicationSequence: 1,
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: admission,
 	}
@@ -220,7 +228,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
-			Selector: "ingress:telegram-ingress:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
+			Selector: "ingress:.:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
 			FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
 			Generation: target.Generation, PublicationSequence: target.PublicationSequence,
 			AdmissionPlanGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
@@ -304,7 +312,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 }
 
 func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T) {
-	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
@@ -350,8 +358,8 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	}
 	t.Cleanup(func() { _ = bus.ResetInMemoryState() })
 	target := runtimepkg.StandingTarget{
-		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001",
-		FlowPath: "telegram-ingress", Alias: "chat", Provider: "telegram_raw",
+		BundleHash: bundleHash, ServiceID: runtimeflowidentity.StandingServiceID("."),
+		FlowPath: ".", Alias: "chat", Provider: "telegram_raw",
 		RunID: "41000000-0000-0000-0000-000000000001",
 
 		Generation: 1, PublicationSequence: 1, AdmissionPlan: admission,
@@ -383,7 +391,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"telegram", plan, "42", nil,
 		map[string]string{"telegram_bot_token": "bot"},
-		"ingress:telegram-ingress:telegram_raw",
+		"ingress:.:telegram_raw",
 	)
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlanWithRegistration: %v", err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,7 +15,9 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -56,21 +59,25 @@ func TestStandingIngressAliasGrammarMatchesProcessWebhookRouter(t *testing.T) {
 }
 
 func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
-	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+	contractsRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
 	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
 	catalog := testProviderTriggerCatalog(t)
 	source := processIngressTransportSource(t, bundle, catalog)
-	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore, processIngressCredentialStore) {
+	makeContext := func(hash, alias, runID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore, processIngressCredentialStore) {
+		owner, err := runtimeflowidentity.StandingForGeneration(source, ".", runID)
+		if err != nil {
+			t.Fatalf("construct transport fixture owner: %v", err)
+		}
 		persistence := &processIngressProofStore{}
-		eventsStore := &processIngressEventStore{}
+		eventsStore := &processIngressEventStore{construction: runtimepipeline.FlowConstructionPublicationEvidence{Identity: owner}}
 		persistence.store = eventsStore
 		workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 		bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
 			ContractBundle:         source,
-			Durable:                runtimebus.DurableDependencies{ActiveFlows: processIngressNoFlowDescriptors{}, TargetOwners: processIngressTargetOwners{{RunID: runID, FlowInstance: "telegram-ingress", EntityID: entityID}}},
+			Durable:                runtimebus.DurableDependencies{ActiveFlows: processIngressNoFlowDescriptors{}, TargetOwners: processIngressTargetOwners{{RunID: runID, FlowInstance: owner.InstancePath, EntityID: owner.EntityID}}, ConstructionPublications: eventsStore},
 			SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(hash),
 			ProviderOutputVerifier: catalog,
 			WorkOwner:              workOwner,
@@ -100,7 +107,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
 			PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			StandingTargets: []runtimepkg.StandingTarget{{
-				BundleHash: hash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-ingress", Alias: alias, Provider: "telegram",
+				BundleHash: hash, ServiceID: runtimeflowidentity.StandingServiceID("."), FlowPath: ".", Alias: alias, Provider: "telegram",
 				RunID:      runID,
 				Generation: 1, PublicationSequence: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
@@ -109,8 +116,8 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	}
 	hashA := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	hashB := "bundle-v2:sha256:" + strings.Repeat("b", 64)
-	contextA, persistenceA, eventsA, _ := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
-	contextB, persistenceB, eventsB, credentialsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
+	contextA, persistenceA, eventsA, _ := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001")
+	contextB, persistenceB, eventsB, credentialsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001")
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, contextA, contextB)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -206,6 +213,54 @@ func TestProcessIngressTargetOwnersRespectSelectedScope(t *testing.T) {
 	}
 	if _, err := owners.ListSelectedRunTargetOwnersForScope(context.Background(), "run-a", nil, ""); err == nil {
 		t.Fatal("empty scope was accepted")
+	}
+}
+
+func TestProcessIngressConstructionObservationRequiresExactOwner(t *testing.T) {
+	root := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const runID = "41000000-0000-0000-0000-000000000001"
+	identity, err := runtimeflowidentity.StandingForGeneration(semanticview.Wrap(bundle), ".", runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, identity.Route())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &processIngressEventStore{construction: runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity}}
+	for _, tc := range []struct {
+		name   string
+		owner  runtimeflowidentity.RunScopedFlowInstance
+		entity string
+		valid  bool
+	}{
+		{name: "exact", owner: owner, entity: identity.EntityID, valid: true},
+		{name: "foreign run", owner: runtimeflowidentity.RunScopedFlowInstance{RunID: "42000000-0000-0000-0000-000000000001", Route: owner.Route}, entity: identity.EntityID},
+		{name: "foreign route", owner: runtimeflowidentity.RunScopedFlowInstance{RunID: runID}, entity: identity.EntityID},
+		{name: "foreign entity", owner: owner, entity: "42000000-0000-0000-0000-000000000002"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proof, err := store.LoadFlowConstructionPublication(t.Context(), tc.owner, tc.entity)
+			if tc.valid {
+				if err != nil || proof.Identity != identity {
+					t.Fatalf("exact fixture observation = %+v, %v", proof, err)
+				}
+			} else if err == nil || proof.Identity != (runtimeflowidentity.Instance{}) {
+				t.Fatalf("foreign fixture owner accepted: %+v, %v", proof, err)
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := store.LoadFlowConstructionPublication(ctx, owner, identity.EntityID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("fixture observer lost cancellation: %v", err)
+	}
+	if _, err := (&processIngressEventStore{}).LoadFlowConstructionPublication(t.Context(), runtimeflowidentity.RunScopedFlowInstance{}, ""); err == nil {
+		t.Fatal("empty fixture observation authorized an empty owner")
 	}
 }
 
