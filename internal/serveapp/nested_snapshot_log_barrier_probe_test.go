@@ -136,7 +136,7 @@ func TestNestedSnapshotLateAcceptedLogCounterexample(t *testing.T) {
 					t.Fatalf("expected exactly the held diagnostic to change the original oracle: before=%#v after=%#v", before, after)
 				}
 				var eventType string
-				if err := rt.DB.QueryRow(`SELECT event_type FROM events WHERE event_id=$1`, logID).Scan(&eventType); err != nil || eventType != "platform.runtime_log" {
+				if err := rt.DB.QueryRow(`SELECT event_name FROM events WHERE event_id=$1`, logID).Scan(&eventType); err != nil || eventType != "platform.runtime_log" {
 					t.Fatalf("held log %s is not its exact diagnostic event: %s %v", logID, eventType, err)
 				}
 				for _, prior := range before["receipts"] {
