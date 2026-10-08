@@ -760,8 +760,11 @@ func (c *Coordinator) dispatchResultWakeLocked(err error, deferred bool, wakeVer
 func (c *Coordinator) schedule(ctx context.Context, item runtimedelivery.ContinuationItem) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.retired || ctx.Err() != nil {
+	if c.retired {
 		return errCoordinatorRetired
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if c.workerFailure != nil {
 		return c.workerFailure
