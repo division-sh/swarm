@@ -17,9 +17,27 @@ import (
 )
 
 func TestA9NestedKeyedIngressConstructionBothStores(t *testing.T) {
+	a9NestedKeyedIngressConstruction(t, false)
+}
+
+func TestA9NestedDeclarationLocalIngressConstructionBothStores(t *testing.T) {
+	a9NestedKeyedIngressConstruction(t, true)
+}
+
+func a9NestedKeyedIngressConstruction(t *testing.T, declarationLocal bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			root := canonicalrouting.CopyNestedKeyedRawIngress(t)
+			var root string
+			alias, flow := "nested-shop", "."
+			prefix, eager := "", 1
+			if declarationLocal {
+				root = canonicalrouting.CopyNestedDeclarationLocalRawIngress(t)
+				alias, flow = "nested-shop.branch", "branch"
+				prefix, eager = "branch/", 2
+			} else {
+				root = canonicalrouting.CopyNestedKeyedRawIngress(t)
+			}
 			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 			file, err := credentials.NewFileStore(credentialPath)
@@ -39,15 +57,15 @@ func TestA9NestedKeyedIngressConstructionBothStores(t *testing.T) {
 			})
 			rt := servedTestProcessRuntime(t, process)
 			statuses, err := rt.Pipeline.ListStandingServiceStatuses(t.Context())
-			if err != nil || len(statuses) != 1 {
+			if err != nil || len(statuses) != 1 || statuses[0].FlowPath != flow {
 				t.Fatalf("binding status=%+v err=%v", statuses, err)
 			}
 			runID := statuses[0].RunID
 			instances, err := rt.Pipeline.ListWorkflowInstances(t.Context(), runID)
-			if err != nil || len(instances) != 1 {
+			if err != nil || len(instances) != eager {
 				t.Fatalf("keyless root must not manufacture keyed descendants: %+v err=%v", instances, err)
 			}
-			endpoint := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + "/webhooks/nested-shop/partner"
+			endpoint := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + "/webhooks/" + alias + "/partner"
 			var leaves []operatorread.OperatorEventDelivery
 			for _, deliveryID := range []string{"left", "right"} {
 				body := `{"delivery_id":"` + deliveryID + `"}`
@@ -68,12 +86,18 @@ func TestA9NestedKeyedIngressConstructionBothStores(t *testing.T) {
 					if entity.Fields["seen"] != float64(1) {
 						t.Fatalf("constructor delivery not exactly once: %+v", entity)
 					}
-					if delivery.Target.FlowID == "parent/middle/leaf" {
+					if delivery.Target.FlowID == prefix+"parent/middle/leaf" {
 						if entity.Fields["id"] != "partner" {
 							t.Fatalf("leaf key borrowed parent slot: %+v", entity)
 						}
-						leaves = append(leaves, delivery)
-					} else if delivery.Target.FlowID != "parent" || entity.Fields["id"] != deliveryID {
+						duplicateLeaf := false
+						for _, leaf := range leaves {
+							duplicateLeaf = duplicateLeaf || leaf.Target.EntityID == delivery.Target.EntityID
+						}
+						if !duplicateLeaf {
+							leaves = append(leaves, delivery)
+						}
+					} else if delivery.Target.FlowID != prefix+"parent" || entity.Fields["id"] != deliveryID {
 						t.Fatalf("parent key borrowed another edge: %+v", entity)
 					}
 				}
@@ -93,7 +117,7 @@ func TestA9NestedKeyedIngressConstructionBothStores(t *testing.T) {
 				}
 			}
 			instances, err = rt.Pipeline.ListWorkflowInstances(t.Context(), runID)
-			if err != nil || len(instances) != 7 {
+			if err != nil || len(instances) != eager+6 {
 				t.Fatalf("expected root + two exact parent/middle/leaf trees: %+v err=%v", instances, err)
 			}
 			byEntity := make(map[string]pipeline.WorkflowInstance, len(instances))
@@ -101,7 +125,7 @@ func TestA9NestedKeyedIngressConstructionBothStores(t *testing.T) {
 				byEntity[instance.EntityID] = instance
 			}
 			for _, instance := range instances {
-				if instance.WorkflowName == "." {
+				if instance.WorkflowName == "." || declarationLocal && instance.WorkflowName == "branch" {
 					continue
 				}
 				parent, found := byEntity[instance.ParentEntityID]
@@ -116,12 +140,15 @@ func TestA9NestedKeyedIngressConstructionBothStores(t *testing.T) {
 				if err != nil || initial.CreatingInput.EventID == "" {
 					t.Fatalf("nested immutable creating evidence absent: %+v err=%v", initial, err)
 				}
-				if instance.WorkflowName == "parent/middle" {
+				if instance.WorkflowName == prefix+"parent/middle" {
 					if initial.CreatingInput.Input != "" {
 						t.Fatalf("eager keyless intermediate gained an argument input: %+v", initial)
 					}
-				} else if initial.CreatingInput.Input != "account.opened" || initial.Fields["id"] != instance.Fields["id"] || initial.Fields["seen"] != int64(0) {
-					t.Fatalf("nested immutable constructor fields were replaced by current state: %+v current=%+v", initial, instance.Fields)
+				} else {
+					input := "account.opened"
+					if initial.CreatingInput.Input != input || initial.Fields["id"] != instance.Fields["id"] || initial.Fields["seen"] != int64(0) {
+						t.Fatalf("nested immutable constructor fields were replaced by current state: %+v current=%+v", initial, instance.Fields)
+					}
 				}
 			}
 		})
@@ -130,11 +157,20 @@ func TestA9NestedKeyedIngressConstructionBothStores(t *testing.T) {
 
 func a9RequireNestedIngressSettlement(t *testing.T, endpoint, eventID string) operatorread.OperatorEventFull {
 	t.Helper()
+	return a9RequireIngressDeliveries(t, endpoint, eventID, 2)
+}
+
+func a9RequireIngressDeliveries(t *testing.T, endpoint, eventID string, count int) operatorread.OperatorEventFull {
+	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		var event operatorread.OperatorEventFull
 		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
-		if len(event.Deliveries) == 2 && event.Deliveries[0].Terminal && event.Deliveries[1].Terminal && event.Deliveries[0].Status == "delivered" && event.Deliveries[1].Status == "delivered" {
+		settled := len(event.Deliveries) == count && len(event.DeadLetters) == 0
+		for _, delivery := range event.Deliveries {
+			settled = settled && delivery.Terminal && delivery.Status == "delivered"
+		}
+		if settled {
 			return event
 		}
 		if time.Now().After(deadline) {

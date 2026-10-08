@@ -757,7 +757,7 @@ func sourceFlowInstanceEventKey(name events.EventType, source events.RoutingSour
 	if eventType == "" || flowInstance == "" {
 		return ""
 	}
-	staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
+	staticScope := source.Route().FlowID
 	if staticScope == "" {
 		return ""
 	}

@@ -81,14 +81,13 @@ func prepareRootConstructorArguments(ctx context.Context, request pipeline.FlowI
 		return request, false, nil
 	}
 	request.ConstructorInput = input
-	constructor, err := pipeline.CompileFlowConstructor(request.ContractBundle, request.Instance.TemplateID, input)
-	if err != nil {
-		return request, false, err
-	}
 	event := request.TriggerEvent
 	if admission, authenticated := authenticatedProviderPublicationForEvent(ctx, event); authenticated && admission.kind == provideroutput.KindRaw &&
-		!constructor.Eligible() && !pinrouting.ClassifyRoutingSourceOutputConsumer(request.ContractBundle, string(event.Type()), event.RoutingSource()).HasRuntimeConsumer() {
+		!pinrouting.ClassifyRoutingSourceOutputConsumer(request.ContractBundle, string(event.Type()), event.RoutingSource()).HasRuntimeConsumer() {
 		return request, true, nil
+	}
+	if _, err := pipeline.CompileFlowConstructor(request.ContractBundle, request.Instance.TemplateID, input); err != nil {
+		return request, false, err
 	}
 	var payload map[string]any
 	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
