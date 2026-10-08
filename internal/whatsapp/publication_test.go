@@ -28,9 +28,9 @@ func capturePublicationFixture(t *testing.T, event capturedEvent) runtimeinbound
 	if err != nil {
 		t.Fatal(err)
 	}
-	entity := uuid.NewString()
+	entity := event.Scope.EntityID
 	publicationID, markerID := runtimeinbound.DeterministicIDs("whatsapp", entity, identity)
-	return runtimeinbound.Request{PublicationID: publicationID, MarkerEventID: markerID, Provider: "whatsapp",
+	request := runtimeinbound.Request{PublicationID: publicationID, MarkerEventID: markerID, Provider: "whatsapp",
 		EntityID: entity, ProviderEventID: identity, RequestFingerprint: fingerprint,
 		RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion, StableServiceID: uuid.NewString(),
 		FlowPath: "fixture", InstanceID: "fixture", TargetAlias: "whatsapp", TargetFlowInstance: "fixture",
@@ -38,6 +38,11 @@ func capturePublicationFixture(t *testing.T, event capturedEvent) runtimeinbound
 		AcknowledgementMode:       runtimeinbound.AcknowledgementDurableBeforeDispatch,
 		OriginalReceivedAt:        time.Date(2026, 10, 7, 12, 0, 0, 123456000, time.UTC),
 		OriginalTransportMetadata: []byte(`{"transport":"managed_session","fixture":true}`)}
+	request, err = withCaptureProvenance(event, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
 }
 
 // This double exercises only the private retirement boundary. It does not prove
@@ -159,9 +164,11 @@ func TestWhatsAppCaptureRetirementRequiresDurableExactReadback(t *testing.T) {
 				t.Fatal(err)
 			}
 			reader := publishedCaptureFixture(request)
-			if err := store.retirePublished(ctx, event, reader); !errors.Is(err, errCapturePublicationPending) || reader.calls != 0 {
+			reader.found = false
+			if err := store.retirePublished(ctx, event, reader); !errors.Is(err, errCapturePublicationPending) || reader.calls != 1 {
 				t.Fatal("unstaged capture consumed an unrelated receipt", err)
 			}
+			reader.found = true
 			if err := store.stagePublication(ctx, event, request); err != nil {
 				t.Fatal(err)
 			}
@@ -296,7 +303,8 @@ func TestWhatsAppCapturePublicationStageWriteFailureCannotRetire(t *testing.T) {
 		t.Fatal("failed staging reported success")
 	}
 	reader := publishedCaptureFixture(request)
-	if err := store.retirePublished(ctx, event, reader); !errors.Is(err, errCapturePublicationPending) || reader.calls != 0 {
+	reader.found = false
+	if err := store.retirePublished(ctx, event, reader); !errors.Is(err, errCapturePublicationPending) || reader.calls != 1 {
 		t.Fatal("partial staging retired capture", err)
 	}
 	rows, err := store.readPendingRows(ctx, db)
@@ -309,6 +317,7 @@ func TestWhatsAppCapturePublicationStageWriteFailureCannotRetire(t *testing.T) {
 	if err := store.stagePublication(ctx, event, request); err != nil {
 		t.Fatal(err)
 	}
+	reader.found = true
 	if err := store.retirePublished(ctx, event, reader); err != nil {
 		t.Fatal(err)
 	}

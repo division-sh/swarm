@@ -31,6 +31,7 @@ func captureFixture(t *testing.T) capturedEvent {
 	}
 	return capturedEvent{
 		Scope: captureScope{
+			EntityID: uuid.NewString(),
 			Session: operatorchannel.SessionAccountAdmission{
 				Provider: "whatsapp", ConnectionID: uuid.NewString(), AccountRef: "synthetic_account",
 				AdmissionID: uuid.NewString(), Revision: 1,
