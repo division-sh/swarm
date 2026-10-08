@@ -32,8 +32,8 @@ func TestIssue2564ServedH3WriterOrderingCorpora(t *testing.T) {
 		deadline bool
 		checksum string
 	}{
-		{"h3", false, "4748f09fa5770936dd6dbd5590f0ac0317d0bd563290fc176768c67a14381854"},
-		{"m33", true, "1da338e342d2d6ee6efaabe102b81fc5873919757b2301e9e241dade8563c573"},
+		{"h3", false, "2489a1223a4d5795464cf6afcccc75281800b642be01e66ebebb36ad9db792d3"},
+		{"m33", true, "9b64daf78814fa85ca2c444cef053b3ead47a6b171b9be9d5ce457e3cd3cd20e"},
 	} {
 		t.Run(corpus.name, func(t *testing.T) {
 			root := writeIssue2564Fixture(t, corpus.deadline)

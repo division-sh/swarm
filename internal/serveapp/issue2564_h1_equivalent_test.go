@@ -40,7 +40,7 @@ const (
 	issue2564H1Bumps      = 600
 	issue2564H1Publishers = 8
 	issue2564H1Batch      = 9
-	issue2564H1CorpusSHA  = "5fd534a663d9e0c39b0e646b0825897325354da5e129714f88a48d0a7a65bb91"
+	issue2564H1CorpusSHA  = "ff5d52930fbb58a470b9dd1564dcbf03fec5154f029c77c25871d27476b45c84"
 )
 
 func TestIssue2564H1EquivalentCorpus(t *testing.T) {

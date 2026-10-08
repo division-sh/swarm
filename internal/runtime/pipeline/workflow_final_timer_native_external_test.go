@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -107,6 +108,17 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 					runRows, err := selected.ListWorkflowTimerActivations(ctx, runID, "", false)
 					if err != nil || len(runRows) != want {
 						t.Fatalf("generation=%d final=%t: run-wide schedules=%+v want=%d: %v", generation, final, runRows, want, err)
+					}
+					if generation != 0 && !final {
+						// Replacement joins prior wakeups asynchronously; observe their
+						// settlement before asserting that none remain draining.
+						for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+							_, draining := pipeline.WorkflowTimerScheduledCountsForTest(scheduler)
+							if draining == 0 {
+								break
+							}
+							runtime.Gosched()
+						}
 					}
 					if active, draining := pipeline.WorkflowTimerScheduledCountsForTest(scheduler); active != want || draining != 0 {
 						t.Fatalf("generation=%d final=%t: wakeups active=%d draining=%d want=%d", generation, final, active, draining, want)
