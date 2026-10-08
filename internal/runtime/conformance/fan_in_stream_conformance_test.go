@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -46,6 +50,13 @@ func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *t
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(t.Context(), conformanceSourceArtifactFact(t, source)), runID)
 			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, source)
+			if err := runtime.manager.ActivateFlowInstance(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
+				ContractBundle: source,
+				Instance:       runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, ""),
+				OccurredAt:     time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("construct fan-in stream root and keyless ingress: %v", err)
+			}
 			load := func(period string) runtimepipeline.WorkflowInstance {
 				instances, err := runtime.pipeline.ListWorkflowInstances(ctx, runID)
 				var matches []runtimepipeline.WorkflowInstance
