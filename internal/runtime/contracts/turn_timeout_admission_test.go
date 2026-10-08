@@ -77,7 +77,7 @@ func TestIssue2269TurnTimeoutEventBindingDiskAndRetained(t *testing.T) {
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: timeout-bound\nstages:\n  waiting: {initial: true}\n  done: {terminal: true}\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: timeout-bound\nstages:\n  waiting: {}\n  done: {final: true}\n")
 			writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: investigate}\n  turn_timeout: {after: 10m, emit: investigation.aborted}\n")
 			writeFixtureFile(t, filepath.Join(root, "events.yaml"), row.events)
 			artifact, err := sourceartifact.AdmitDirectory(root)
