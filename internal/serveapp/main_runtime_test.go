@@ -674,7 +674,6 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 	pinnedHash := pinnedArtifact.BundleHash()
 	otherHash := otherArtifact.BundleHash()
 	otherRunID := uuid.NewString()
-	standingOtherRunID := uuid.NewString()
 
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: uuid.NewString(), Artifact: pinnedArtifact,
@@ -683,17 +682,30 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 		RunID: otherRunID, State: storerunlifecycle.StatePaused,
 		Artifact: otherArtifact,
 	})
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID: standingOtherRunID, State: storerunlifecycle.StatePaused,
-		Artifact: otherArtifact,
+	standingSource := mustServeTestPersistedSourceArtifactFact(otherHash)
+	standingCtx := runStatusAuthorActivityContext(standingSource)
+	standing, err := pg.ReconcileStandingService(standingCtx, runtimepipeline.StandingServiceCandidate{
+		BindingEnabled: true,
+		ServiceID:      runtimeflowidentity.StandingServiceID("bundle-admission-proof"),
+		FlowPath:       "bundle-admission-proof",
+		Source:         standingSource,
 	})
-	seedServeBundleAdmissionCurrentStandingRun(t, ctx, db, standingOtherRunID, otherHash)
+	if err != nil {
+		t.Fatalf("reconcile current standing bundle admission run: %v", err)
+	}
+	standingOtherRunID := standing.RunID
+	if _, err := pg.TransitionActiveRun(standingCtx, storerunlifecycle.ActiveTransitionRequest{
+		RunID: standingOtherRunID,
+		State: storerunlifecycle.StatePaused,
+	}); err != nil {
+		t.Fatalf("pause current standing bundle admission run: %v", err)
+	}
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: uuid.NewString(), State: storerunlifecycle.StateCancelled,
 		Artifact: otherArtifact,
 	})
 
-	err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, []string{pinnedHash})
+	err = runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, []string{pinnedHash})
 	if err == nil {
 		t.Fatal("enforceServePinnedBundleAdmissionForHashes error = nil, want pinned bundle_hash conflict")
 	}
@@ -714,21 +726,6 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 
 	if err := runbundle.AdmitPinnedSources(ctx, pg, pinnedHash, nil); err != nil {
 		t.Fatalf("unpinned admission = %v, want no pinned-context constraint", err)
-	}
-}
-
-func seedServeBundleAdmissionCurrentStandingRun(t *testing.T, ctx context.Context, db *sql.DB, runID, bundleHash string) {
-	t.Helper()
-	serviceID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO standing_services (
-			service_id, flow_path, declaration_present, binding_enabled,
-			operator_override, effective_state, current_bundle_hash,
-			revision_sequence, current_generation, current_run_id, publication_state,
-			publication_sequence, created_at, updated_at
-		) VALUES ($1::uuid, $2, TRUE, TRUE, 'none', 'active', $3, 1, 1, $4::uuid, 'pending', 0, NOW(), NOW())
-	`, serviceID, "bundle-admission-proof", bundleHash, runID); err != nil {
-		t.Fatalf("seed current standing bundle admission run: %v", err)
 	}
 }
 
