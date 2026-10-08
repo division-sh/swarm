@@ -40,6 +40,18 @@ func (p *recoveryReadProbe) LoadRunOrigin(ctx context.Context, _ string) (runlif
 	return p.origin, p.read(ctx, "origin")
 }
 
+func (p *recoveryReadProbe) QueueableIngressPaused(ctx context.Context) (bool, error) {
+	return false, p.read(ctx, "ingress")
+}
+
+func (p *recoveryReadProbe) QueueableRunDispatchBlocked(ctx context.Context, _ string) (bool, error) {
+	return p.phase == "run_parked", p.read(ctx, "run_blocked")
+}
+
+func (p *recoveryReadProbe) QueueableRunDispatchParked(ctx context.Context, _ string) (bool, error) {
+	return false, p.read(ctx, "run_parked")
+}
+
 func (p *recoveryReadProbe) StandingRunRestartDisposition(ctx context.Context, runID string) (runlifecycle.StandingRestartDisposition, error) {
 	if err := p.read(ctx, "standing"); err != nil {
 		return runlifecycle.StandingRestartDisposition{}, err
@@ -71,7 +83,7 @@ func (s recoveryReadScan) ScanDeliveryContinuations(context.Context, runtimedeli
 }
 
 func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
-	for _, phase := range []string{"origin", "standing", "authorization"} {
+	for _, phase := range []string{"origin", "standing", "authorization", "ingress", "run_blocked", "run_parked"} {
 		for _, stop := range []string{"retire", "parent_cancel"} {
 			for _, failure := range []string{"none", "independent", "joined"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", phase, stop, failure), func(t *testing.T) {
@@ -96,6 +108,10 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 						probe.failure = errors.Join(context.Canceled, independent)
 					}
 					eb.durable.RunOrigins, eb.durable.StandingRestarts = probe, probe
+					if phase == "ingress" || phase == "run_blocked" || phase == "run_parked" {
+						eb.SetRuntimeIngressDispatchGate(probe)
+						eb.SetRunDispatchGate(probe)
+					}
 					if phase == "authorization" {
 						eb.SetStandingRunWorkOwner(probe)
 					}
@@ -156,7 +172,7 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					if phase == "authorization" && !errors.Is(readCtx.Err(), context.Canceled) {
 						t.Error("standing authorization lost its original retirement cancellation")
 					} else if phase != "authorization" && readCtx.Done() != nil {
-						t.Error("admitted origin read still receives retirement cancellation")
+						t.Error("admitted metadata read still receives retirement cancellation")
 					}
 					close(probe.release)
 					select {
