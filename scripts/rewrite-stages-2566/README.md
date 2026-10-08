@@ -38,7 +38,7 @@ this guard. Later intentional entry
 changes must update the affected golden explicitly; this does not freeze other
 fixture bytes or require maintaining the historical rewrite hashes forever.
 
-Parameterized source builders need actual branch execution as well as literal
+Parameterized source generators need actual branch execution as well as literal
 goldens. `TestEntityToolFixtureInitialStageBranches` calls the real
 `loadWave1EntityToolBundleWithInitialStage` for `queued` and `marginal_review`,
 checking compiled entry, declaration order and final `closed` in both cases.

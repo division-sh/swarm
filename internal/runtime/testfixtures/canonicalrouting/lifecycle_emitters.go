@@ -528,7 +528,7 @@ pins:
 				{"schema.yaml", "    - loop.close\n", "    - loop.close\n    - ordinary.finish\n"},
 				{"schema.yaml", "    - ordinary.repeated\n", "    - ordinary.repeated\n    - ordinary.finish\n"},
 				{"schema.yaml", "    to: ordinary\n", "    to: ordinary\n  - event: ordinary.finish\n    from: .\n    to: ordinary\n"},
-				{"ordinary/schema.yaml", "  observed: {terminal: true}\n", "  observed: {}\n  done: {terminal: true}\n"},
+				{"ordinary/schema.yaml", "  observed: {final: true}\n", "  observed: {}\n  done: {final: true}\n"},
 				{"ordinary/schema.yaml", "    - ordinary.repeated\n", "    - ordinary.repeated\n    - ordinary.finish\n"},
 				{"ordinary/nodes.yaml", "  subscribes_to: [ordinary.repeated]\n", "  subscribes_to: [ordinary.repeated, ordinary.finish]\n"},
 			} {

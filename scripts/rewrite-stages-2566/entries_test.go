@@ -78,6 +78,13 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 			{Flow: ".", Entry: "active", Order: []string{"active", "done"}, Finals: []string{"done"}},
 			{Flow: "work", Entry: "waiting", Order: []string{"waiting", "timed", "done"}, Finals: []string{"done"}},
 		}},
+		{"loop-observer-finish", func(t testing.TB) string {
+			return canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmitsUntilObserverFinish)
+		}, []entryGolden{
+			{Flow: ".", Entry: "waiting", Order: []string{"waiting", "drafting", "review", "escaped", "done"}, Finals: []string{"escaped", "done"}},
+			{Flow: "ordinary", Entry: "waiting", Order: []string{"waiting", "observed", "done"}, Finals: []string{"done"}},
+			{Flow: "sink", Entry: "waiting", Order: []string{"waiting", "done"}, Finals: []string{"done"}},
+		}},
 		{"numeric-scenario-overlay", func(t testing.TB) string {
 			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 			canonicalrouting.InstallNovelNumericScenarioLifecycle(t, root)

@@ -7433,7 +7433,7 @@
     {
       "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
       "before_hash": "35c2c8b3639e5399954532fc57ce2ab55f73ad22dc2189fea368c410dbd6384a",
-      "after_hash": "9bd21a94d7b648b25dfc6873d8157787d7ce97b6c530afb93dfc8b573f1e0b95",
+      "after_hash": "ed455aec87d810c7d311f6dbf355805d64afcd06d9b160f6094822cc691dcb57",
       "edits": [
         {
           "offset": 425,
@@ -7499,6 +7499,11 @@
           "offset": 19017,
           "before": "\t\twriteClosedVariantFile(t, root, \"ordinary/schema.yaml\", \"name: ordinary\\nstages:\\n  waiting: {initial: true}\\n  observed: {terminal: true}\\npins:\\n  inputs:\\n    - ordinary.repeated\\n\")\n",
           "after": "\t\twriteClosedVariantFile(t, root, \"ordinary/schema.yaml\", \"name: ordinary\\nstages:\\n  waiting: {}\\n  observed: {final: true}\\npins:\\n  inputs:\\n    - ordinary.repeated\\n\")\n"
+        },
+        {
+          "offset": 20290,
+          "before": "\t\t\t\t{\"ordinary/schema.yaml\", \"  observed: {terminal: true}\\n\", \"  observed: {}\\n  done: {terminal: true}\\n\"},\n",
+          "after": "\t\t\t\t{\"ordinary/schema.yaml\", \"  observed: {final: true}\\n\", \"  observed: {}\\n  done: {final: true}\\n\"},\n"
         },
         {
           "offset": 21735,

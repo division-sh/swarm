@@ -41,7 +41,7 @@ import (
 // Deterministic old-head H2a/H2b/H2c mechanism witnesses remain separate proofs.
 const issue2564H2ChildEnv = "SWARM_TEST_ISSUE2564_H2_CHILD"
 
-const issue2564H2CorpusSHA = "14927d4bad9d6c7242a0f8112fe18d7d4fb25562d8f9147178320bd627518a54"
+const issue2564H2CorpusSHA = "b2478deb0285c6f87f47dcef94fce2d3b79558eaa797bba26d26d7ca13d98ff6"
 
 func TestIssue2564H2EquivalentCorpus(t *testing.T) {
 	root := issue2564H2Source(t)
